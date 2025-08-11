@@ -1,0 +1,36 @@
+{
+  "navigationFallback": {
+    "rewrite": "index.html"
+  },
+  "auth": {
+    "identityProviders": {
+      "customOpenIdConnectProviders": {
+        "b2c": {
+          "registration": {
+            "clientIdSettingName": "AADB2C_PROVIDER_CLIENT_ID",
+            "clientCredential": {
+              "clientSecretSettingName": "AADB2C_PROVIDER_CLIENT_SECRET"
+            },
+            "openIdConnectConfiguration": "https://YOUR_B2C_DOMAIN.b2clogin.com/YOUR_B2C_TENANT_ID/v2.0/.well-known/openid-configuration?p=B2C_1_signupsignin"
+          },
+          "login": {
+            "name": "Azure AD B2C",
+            "scopes": [
+              "openid",
+              "profile",
+              "email"
+            ]
+          }
+        }
+      }
+    },
+    "routes": [
+      {
+        "route": "/api/*",
+        "allowedRoles": [
+          "authenticated"
+        ]
+      }
+    ]
+  }
+}
