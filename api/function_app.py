@@ -5,7 +5,7 @@ from openai import AzureOpenAI
 
 app = FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
-def _current_user(req: HttpRequest) -> dict | None:
+def _current_user(req: HttpRequest) -> Optional[dict]:
     hdr = req.headers.get("x-ms-client-principal")
     if not hdr: return None
     try:
@@ -37,3 +37,16 @@ def run_tool(req: HttpRequest) -> HttpResponse:
     usage = getattr(completion,"usage",None)
     usage_out = {"model": dep, "total_tokens": usage.total_tokens} if usage else None
     return HttpResponse(json.dumps({"result": text, "usage": usage_out}, ensure_ascii=False), mimetype="application/json")
+
+@app.route(route="ping", methods=["GET"])
+def ping(req: HttpRequest) -> HttpResponse:
+    return HttpResponse("ok", status_code=200)
+
+@app.route(route="diag", methods=["GET"])
+def diag(req: HttpRequest) -> HttpResponse:
+    import os, json
+    keys = ["AZURE_OPENAI_ENDPOINT","AZURE_OPENAI_API_VERSION","AZURE_OPENAI_DEPLOYMENT"]
+    data = {k: os.environ.get(k, "") for k in keys}
+    data["AZURE_OPENAI_API_KEY_SET"] = bool(os.environ.get("AZURE_OPENAI_API_KEY"))
+    return HttpResponse(json.dumps(data), mimetype="application/json")
+
