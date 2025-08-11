@@ -1,0 +1,22 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>BD Tools</title><style>body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:40px;max-width:900px}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+button{padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#f7f7f7;cursor:pointer}button:hover{background:#eee}select,textarea,input{width:100%;padding:8px;border:1px solid #ccc;border-radius:8px}
+.card{border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:12px 0}.muted{color:#6b7280;font-size:14px}pre{white-space:pre-wrap;word-wrap:break-word}</style></head>
+<body><header><h1>Business Development Tools</h1><div><button onclick="login()">Sign in</button><button onclick="logout()">Sign out</button></div></header>
+<div class="card"><label>Choose a tool</label><select id="tool"><option value="sales_qualify">Sales opportunity qualification</option></select>
+<div style="height:12px"></div><label>Paste opportunity notes</label><textarea id="userInput" rows="8" placeholder="Paste opportunity context here..."></textarea>
+<div style="height:12px"></div><label>Priority bias</label><select id="bias"><option value="balanced">Balanced</option><option value="speed">Speed first</option><option value="risk">Risk averse</option></select>
+<div style="height:12px"></div><button onclick="runTool()">Run tool</button></div>
+<div id="resultCard" class="card" style="display:none"><h3>Result</h3><pre id="result"></pre><div style="display:flex;gap:8px"><button onclick="copyText()">Copy</button><button onclick="downloadMd()">Download (.md)</button></div><p id="usage" class="muted"></p></div>
+<script>
+async function login(){ location.href='/.auth/login/aad?post_login_redirect_uri=/'; } async function logout(){ location.href='/.auth/logout'; }
+async function runTool(){ const body={ toolId:document.getElementById('tool').value, inputs:{ notes:document.getElementById('userInput').value, bias:document.getElementById('bias').value }};
+const res=await fetch('/api/run-tool',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+if(!res.ok){ const t=await res.text(); alert('Error running tool: '+t); return; } const data=await res.json();
+document.getElementById('result').textContent=data.result||JSON.stringify(data,null,2);
+document.getElementById('usage').textContent=data.usage?`Model: ${data.usage.model} · Tokens: ${data.usage.total_tokens}`:'';
+document.getElementById('resultCard').style.display='block'; }
+function copyText(){ const txt=document.getElementById('result').textContent; navigator.clipboard.writeText(txt); alert('Copied'); }
+function downloadMd(){ const blob=new Blob([document.getElementById('result').textContent],{type:'text/markdown'}); const a=document.createElement('a');
+a.href=URL.createObjectURL(blob); a.download='tool_output.md'; a.click(); URL.revokeObjectURL(a.href); }
+</script></body></html>
