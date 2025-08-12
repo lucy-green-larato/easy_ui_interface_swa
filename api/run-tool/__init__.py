@@ -11,7 +11,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         user_input = body.get("input", "")
 
         client = AzureOpenAI(
-            api_key=os.environ["AZURE_OPENAI_KEY"],
+            api_key=os.environ["AZURE_OPENAI_API_KEY"],
             api_version="2024-06-01",
             azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"]
         )
