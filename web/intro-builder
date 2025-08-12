@@ -1,31 +1,23 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SWA Sales Tools | Larato Best Practice</title>
-  <!-- Tailwind via CDN for speed; swap to compiled CSS later if desired -->
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>SWA Sales Tools | Intro Builder</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 text-gray-900">
-  <!-- Header / Nav -->
   <header class="border-b bg-white">
     <div class="mx-auto max-w-7xl px-4 py-4 flex items-center justify-between">
       <h1 class="text-xl font-semibold">SWA Sales Tools <span class="text-gray-400">|</span> Larato Best Practice</h1>
       <nav class="hidden md:flex gap-4 text-sm">
-        <a class="hover:underline" href="#">Lead Qualification</a>
-        <a class="hover:underline" href="#" aria-current="page">Intro Builder</a>
-        <a class="hover:underline" href="#">Email Gen</a>
-        <a class="hover:underline" href="#">Follow-up</a>
-        <a class="hover:underline" href="#">Competition</a>
-        <a class="hover:underline" href="#">Checklist</a>
+        <a class="hover:underline" href="index.html">Home</a>
       </nav>
     </div>
   </header>
 
-  <!-- Main two-column layout -->
   <main class="mx-auto max-w-7xl px-4 py-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <!-- Left: Inputs -->
+    <!-- Inputs -->
     <section aria-label="Inputs" class="bg-white rounded-2xl shadow p-5">
       <form id="toolForm" class="space-y-4">
         <div>
@@ -39,49 +31,51 @@
             <option>Procurement</option>
           </select>
         </div>
+
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label for="prospect" class="block text-sm font-medium">Prospect name</label>
-            <input id="prospect" name="prospect" class="mt-1 w-full rounded-xl border-gray-300" placeholder="Jane Smith" />
+            <input id="prospect" class="mt-1 w-full rounded-xl border-gray-300" placeholder="Jane Smith"/>
           </div>
           <div>
             <label for="company" class="block text-sm font-medium">Company</label>
-            <input id="company" name="company" class="mt-1 w-full rounded-xl border-gray-300" placeholder="ABC Tech" />
+            <input id="company" class="mt-1 w-full rounded-xl border-gray-300" placeholder="ABC Tech"/>
           </div>
         </div>
+
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label for="industry" class="block text-sm font-medium">Industry</label>
-            <input id="industry" name="industry" class="mt-1 w-full rounded-xl border-gray-300" placeholder="Managed Services" />
+            <input id="industry" class="mt-1 w-full rounded-xl border-gray-300" placeholder="Managed Services"/>
           </div>
           <div>
             <label for="competitors" class="block text-sm font-medium">Competitors (optional)</label>
-            <input id="competitors" name="competitors" class="mt-1 w-full rounded-xl border-gray-300" placeholder="Competitor X" />
+            <input id="competitors" class="mt-1 w-full rounded-xl border-gray-300" placeholder="Competitor X"/>
           </div>
         </div>
 
         <div>
           <label for="behaviour" class="block text-sm font-medium">Buyer behaviour (paste from Inside Track)</label>
-          <textarea id="behaviour" name="behaviour" rows="2" class="mt-1 w-full rounded-xl border-gray-300" placeholder="e.g., exploring cloud migration in 6 months; budget review in Q4"></textarea>
+          <textarea id="behaviour" rows="2" class="mt-1 w-full rounded-xl border-gray-300" placeholder="e.g., exploring cloud migration in 6 months; budget review in Q4"></textarea>
         </div>
         <div>
           <label for="drivers" class="block text-sm font-medium">Purchase drivers (paste from Inside Track)</label>
-          <textarea id="drivers" name="drivers" rows="2" class="mt-1 w-full rounded-xl border-gray-300" placeholder="e.g., cost reduction, compliance"></textarea>
+          <textarea id="drivers" rows="2" class="mt-1 w-full rounded-xl border-gray-300" placeholder="e.g., cost reduction, compliance"></textarea>
         </div>
         <div>
           <label for="leaders" class="block text-sm font-medium">Named leaders & contacts (paste from Inside Track)</label>
-          <textarea id="leaders" name="leaders" rows="2" class="mt-1 w-full rounded-xl border-gray-300" placeholder="e.g., CIO Jane Smith, Head of Ops John Patel"></textarea>
+          <textarea id="leaders" rows="2" class="mt-1 w-full rounded-xl border-gray-300" placeholder="e.g., CIO Jane Smith, Head of Ops John Patel"></textarea>
         </div>
 
         <div>
           <label for="value" class="block text-sm font-medium">Your value proposition (3 bullets)</label>
-          <textarea id="value" name="value" rows="3" class="mt-1 w-full rounded-xl border-gray-300" placeholder="• 24/7 local support
+          <textarea id="value" rows="3" class="mt-1 w-full rounded-xl border-gray-300" placeholder="• 24/7 local support
 • Compliance expertise
 • Rapid deployment"></textarea>
         </div>
         <div>
           <label for="cta" class="block text-sm font-medium">CTA / Next step</label>
-          <input id="cta" name="cta" class="mt-1 w-full rounded-xl border-gray-300" placeholder="20‑minute intro call next week" />
+          <input id="cta" class="mt-1 w-full rounded-xl border-gray-300" placeholder="20-minute intro call next week"/>
         </div>
 
         <div class="pt-2 flex items-center gap-3">
@@ -91,7 +85,7 @@
       </form>
     </section>
 
-    <!-- Right: Output -->
+    <!-- Output -->
     <section aria-label="Output" class="bg-white rounded-2xl shadow p-5 flex flex-col">
       <div class="flex-1 overflow-auto">
         <h2 class="text-lg font-semibold mb-2">Generated result</h2>
@@ -114,16 +108,16 @@
     <div class="mx-auto max-w-7xl px-4 py-4 text-sm text-gray-500 flex items-center justify-between">
       <span>© Larato</span>
       <div class="flex gap-4">
-        <a href="#" class="hover:underline">Privacy</a>
-        <a href="#" class="hover:underline">Help</a>
+        <a href="privacy.html" class="hover:underline">Privacy</a>
+        <a href="index.html" class="hover:underline">Home</a>
       </div>
     </div>
   </footer>
 
   <script>
-    // --- CONFIG ---
-    const USE_MOCK = true; // flip to false when wiring to your backend
-    const API_URL = "/api/generate"; // Azure Function/Backend endpoint
+    const TOOL = 'intro_builder';   // <-- this page's tool id
+    const USE_MOCK = true;          // works now without backend
+    const API_URL = "/api/generate";
 
     const form = document.getElementById('toolForm');
     const result = document.getElementById('result');
@@ -137,22 +131,22 @@
       result.textContent = '';
 
       const payload = {
-        tool: 'intro_builder', // duplicate this file per facility and change
+        tool: TOOL,
         role: form.role.value.trim(),
-        prospect: form.prospect.value.trim(),
-        company: form.company.value.trim(),
-        industry: form.industry.value.trim(),
-        competitors: form.competitors.value.trim(),
-        behaviour: form.behaviour.value.trim(),
-        drivers: form.drivers.value.trim(),
-        leaders: form.leaders.value.trim(),
-        value: form.value.value.trim(),
-        cta: form.cta.value.trim()
+        prospect: document.getElementById('prospect').value.trim(),
+        company: document.getElementById('company').value.trim(),
+        industry: document.getElementById('industry').value.trim(),
+        competitors: document.getElementById('competitors').value.trim(),
+        behaviour: document.getElementById('behaviour').value.trim(),
+        drivers: document.getElementById('drivers').value.trim(),
+        leaders: document.getElementById('leaders').value.trim(),
+        value: document.getElementById('value').value.trim(),
+        cta: document.getElementById('cta').value.trim()
       };
 
       try {
         const data = USE_MOCK ? await mockGenerate(payload) : await callApi(payload);
-        renderOutput(data, payload);
+        renderOutput(data);
         statusEl.textContent = 'Done';
       } catch (err) {
         console.error(err);
@@ -168,22 +162,28 @@
         body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error('API error');
-      return res.json(); // expect { content: string, insightsUsed: string[] }
+      return res.json();
     }
 
-    // Simple mock to let you test UX without a backend
     async function mockGenerate(p) {
       const used = pickInsights([p.behaviour, p.drivers, p.leaders]);
-      const opener = `Based on ${p.industry || 'the target industry'}, here’s a first introduction tailored to the ${p.role || 'buyer'} role at ${p.company || 'the prospect company'}.`;
-      const diff = p.competitors ? ` Differentiation vs ${p.competitors}: focus on the outcomes your value points deliver.` : '';
       const bullets = (p.value || '').split(/\n|•/).map(s => s.trim()).filter(Boolean).slice(0,3);
-      const bulletStr = bullets.map(b => `- ${b}`).join('\n');
-      const content = `${opener}\n\nCall opener:\n“${p.prospect ? p.prospect + ', ' : ''}we noticed ${p.behaviour || 'a relevant trigger'} — teams like yours use us for measurable impact in quarter one.”\n\nTalking points:\n${bulletStr || '- Add 2–3 value bullets'}\n${diff}\n\nNext step: ${p.cta || 'Suggest a 20‑minute intro call next week.'}`.trim();
+      const bulletStr = bullets.length ? bullets.map(b => `- ${b}`).join('\n') : '- Add 2–3 value bullets';
+      const content =
+`First Introduction for ${p.prospect || 'the contact'} at ${p.company || 'the prospect company'} (${p.role || 'role'}).
+
+Key talking points:
+${bulletStr}
+
+Behaviour: ${p.behaviour || '—'}
+Drivers: ${p.drivers || '—'}
+Competitors: ${p.competitors || '—'}
+
+Next step: ${p.cta || 'Suggest a 20-minute intro call next week.'}`;
       return { content, insightsUsed: used };
     }
 
     function pickInsights(fields) {
-      // extract up to 5 short bullets from pasted text blocks
       const arr = [];
       fields.forEach(f => {
         if (!f) return;
@@ -192,7 +192,7 @@
       return arr.slice(0,5);
     }
 
-    function renderOutput(data, payload) {
+    function renderOutput(data) {
       result.textContent = data.content || '';
       insights.innerHTML = '';
       (data.insightsUsed || []).forEach(item => {
@@ -202,11 +202,9 @@
       });
     }
 
-    // Copy & Download helpers
     document.getElementById('copyBtn').addEventListener('click', async () => {
       await navigator.clipboard.writeText(result.textContent || '');
     });
-
     document.getElementById('downloadBtn').addEventListener('click', () => {
       const blob = new Blob([result.textContent || ''], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
