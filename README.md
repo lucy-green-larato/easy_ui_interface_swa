@@ -1,1 +1,0 @@
-# SWA Starter — BD Tools (Python v2 Functions + Azure OpenAI)\n\nMinimal starter for Azure Static Web Apps with a Python v2 Function calling Azure OpenAI.\nSee staticwebapp.config.b2c.example.json for B2C auth template.\n
