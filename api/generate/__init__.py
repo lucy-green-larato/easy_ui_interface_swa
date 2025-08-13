@@ -1,13 +1,20 @@
-import os, json
+import os, json, logging
 import azure.functions as func
 from openai import AzureOpenAI
 
-AOAI_ENDPOINT    = os.environ["AZURE_OPENAI_ENDPOINT"]
-AOAI_DEPLOYMENT  = os.environ["AZURE_OPENAI_DEPLOYMENT"]
+# -------- Env (all MUST be set in SWA > Configuration) --------
+AOAI_ENDPOINT    = os.environ["AZURE_OPENAI_ENDPOINT"]      # e.g. https://<resource>.openai.azure.com
+AOAI_DEPLOYMENT  = os.environ["AZURE_OPENAI_DEPLOYMENT"]    # deployment name, e.g. gpt-4o-mini OR your "sales-tools"
 AOAI_API_KEY     = os.environ["AZURE_OPENAI_API_KEY"]
+AOAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-06-01")
 ALLOWED_ORIGIN   = os.environ.get("ALLOWED_ORIGIN", "*")
 
-client = AzureOpenAI(azure_endpoint=AOAI_ENDPOINT, api_key=AOAI_API_KEY)
+# -------- Azure OpenAI client (API version REQUIRED for Azure) --------
+client = AzureOpenAI(
+    azure_endpoint=AOAI_ENDPOINT,
+    api_key=AOAI_API_KEY,
+    api_version=AOAI_API_VERSION
+)
 
 SYSTEM_SHARED = (
     "You are a B2B technology sales specialist following Larato best practice. "
@@ -123,30 +130,44 @@ def extract_insights_used(p: dict) -> list:
             if s: out.append(s)
     return out[:5]
 
-def cors():
-    return {"Access-Control-Allow-Origin": ALLOWED_ORIGIN, "Access-Control-Allow-Methods":"POST, OPTIONS", "Access-Control-Allow-Headers":"Content-Type, Authorization"}
+def _cors():
+    return {
+        "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+    }
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
+    # CORS preflight
     if req.method == "OPTIONS":
-        return func.HttpResponse(status_code=200, headers=cors())
+        return func.HttpResponse(status_code=200, headers=_cors())
+
     try:
         payload = req.get_json()
     except ValueError:
-        return func.HttpResponse("Invalid JSON", status_code=400, headers=cors())
+        return func.HttpResponse("Invalid JSON", status_code=400, headers=_cors())
 
     tool = (payload.get("tool") or "").strip()
     if tool not in ALLOWED_TOOLS:
-        return func.HttpResponse("Unknown tool", status_code=400, headers=cors())
+        return func.HttpResponse("Unknown tool", status_code=400, headers=_cors())
 
     prompt = build_prompt(tool, payload)
     if prompt == "Unknown tool.":
-        return func.HttpResponse("Unknown tool", status_code=400, headers=cors())
+        return func.HttpResponse("Unknown tool", status_code=400, headers=_cors())
 
-    resp = client.chat.completions.create(
-        model=AOAI_DEPLOYMENT,
-        messages=[{"role":"system","content":SYSTEM_SHARED},{"role":"user","content":prompt}],
-        temperature=0.4
-    )
-    content = (resp.choices[0].message.content if resp and resp.choices else "").strip()
-    return func.HttpResponse(json.dumps({"content":content, "insightsUsed": extract_insights_used(payload)}),
-                             status_code=200, mimetype="application/json", headers=cors())
+    try:
+        resp = client.chat.completions.create(
+            model=AOAI_DEPLOYMENT,  # deployment name
+            messages=[
+                {"role": "system", "content": SYSTEM_SHARED},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.4
+        )
+        content = (resp.choices[0].message.content if resp and resp.choices else "").strip()
+        body = {"content": content, "insightsUsed": extract_insights_used(payload)}
+        return func.HttpResponse(json.dumps(body), status_code=200, mimetype="application/json", headers=_cors())
+    except Exception as e:
+        logging.exception("Azure OpenAI call failed")
+        err = {"error": f"{type(e).__name__}: {str(e)}"}
+        return func.HttpResponse(json.dumps(err), status_code=500, mimetype="application/json", headers=_cors())
