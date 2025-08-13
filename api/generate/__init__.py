@@ -2,11 +2,10 @@ import os, json
 import azure.functions as func
 from openai import AzureOpenAI
 
-# --- Env vars (set in Azure later) ---
-AOAI_ENDPOINT    = os.environ["AZURE_OPENAI_ENDPOINT"]     # e.g. https://<your>.openai.azure.com
-AOAI_DEPLOYMENT  = os.environ["AZURE_OPENAI_DEPLOYMENT"]   # e.g. gpt-4o-mini
-AOAI_API_KEY     = os.environ["AZURE_OPENAI_API_KEY"]      # key from Azure OpenAI
-ALLOWED_ORIGIN   = os.environ.get("ALLOWED_ORIGIN", "*")   # e.g. https://sales-tools.larato.co.uk
+AOAI_ENDPOINT    = os.environ["AZURE_OPENAI_ENDPOINT"]
+AOAI_DEPLOYMENT  = os.environ["AZURE_OPENAI_DEPLOYMENT"]
+AOAI_API_KEY     = os.environ["AZURE_OPENAI_API_KEY"]
+ALLOWED_ORIGIN   = os.environ.get("ALLOWED_ORIGIN", "*")
 
 client = AzureOpenAI(azure_endpoint=AOAI_ENDPOINT, api_key=AOAI_API_KEY)
 
@@ -16,15 +15,11 @@ SYSTEM_SHARED = (
     "Write concise, role-adapted outputs suitable for first-touch engagement."
 )
 
-ALLOWED_TOOLS = {
-    "lead_qualification", "intro_builder", "email_gen",
-    "follow_up", "competition", "checklist"
-}
+ALLOWED_TOOLS = {"lead_qualification","intro_builder","email_gen","follow_up","competition","checklist"}
 
 def build_prompt(tool: str, p: dict) -> str:
     if tool == "email_gen":
-        return f"""
-Write a first-touch email (75–140 words), personalised and evidence-based.
+        return f"""Write a first-touch email (75–140 words), personalised and evidence-based.
 
 Recipient: {p.get('prospect','')} ({p.get('role','')}) at {p.get('company','')} ({p.get('industry','')})
 Buyer behaviour: {p.get('behaviour','')}
@@ -40,12 +35,9 @@ Output:
 - Email body
 - One-sentence CTA
 - P.S. with proof metric if present
-List any material missing info at the end.
-""".strip()
-
+List any material missing info at the end."""
     if tool == "intro_builder":
-        return f"""
-Create a first call introduction openers + talking points.
+        return f"""Create a first call introduction openers + talking points.
 
 Role: {p.get('role','')}
 Prospect: {p.get('prospect','')} at {p.get('company','')} ({p.get('industry','')})
@@ -62,12 +54,9 @@ Output:
 - Role-aligned talking points (3 bullets)
 - Differentiation (vs competitor if provided)
 - Next step
-Missing info: list if material.
-""".strip()
-
+Missing info: list if material."""
     if tool == "lead_qualification":
-        return f"""
-Early-stage lead qualification.
+        return f"""Early-stage lead qualification.
 
 Role: {p.get('role','')}  Company: {p.get('company','')}  Industry: {p.get('industry','')}
 Behaviour: {p.get('behaviour','')}
@@ -81,12 +70,9 @@ Output:
 - Critical gaps to close
 - Immediate next steps (≤5)
 - Risks & mitigations (≤5)
-(No assumptions—flag missing info.)
-""".strip()
-
+(No assumptions—flag missing info.)"""
     if tool == "follow_up":
-        return f"""
-Follow-up plan for next 14 days.
+        return f"""Follow-up plan for next 14 days.
 
 Prospect/company: {p.get('role','')} @ {p.get('company','')}
 First touch summary: {p.get('first_touch','N/A')}
@@ -98,12 +84,9 @@ Output:
 - Follow-up email (≤120 words)
 - Voicemail script (≤45s)
 - Three objection talk tracks
-- One success metric and what to adjust
-""".strip()
-
+- One success metric and what to adjust"""
     if tool == "competition":
-        return f"""
-Competitive positioning.
+        return f"""Competitive positioning.
 
 Competitor: {p.get('competitors','')}
 Behaviour: {p.get('behaviour','')}
@@ -116,12 +99,9 @@ Output:
 - Role-specific messaging (strategic, commercial, technical)
 - Two proof points
 - Two ethical landmine questions
-- Risks and how to steer
-""".strip()
-
+- Risks and how to steer"""
     if tool == "checklist":
-        return f"""
-First-step engagement checklist.
+        return f"""First-step engagement checklist.
 
 Role: {p.get('role','')}
 Company/Industry: {p.get('company','')} / {p.get('industry','')}
@@ -131,59 +111,42 @@ Output:
 - Before (5–7 items)
 - During (5–7 items)
 - After (3–5 items)
-- Missing info to capture (checklist)
-""".strip()
-
+- Missing info to capture (checklist)"""
     return "Unknown tool."
 
 def extract_insights_used(p: dict) -> list:
     raw = " / ".join(filter(None, [p.get('behaviour',''), p.get('drivers',''), p.get('leaders','')]))
-    tokens = []
+    out = []
     for seg in raw.replace("•"," ").replace(";"," ").splitlines():
         for part in seg.replace("."," ").split("-"):
             s = part.strip()
-            if s:
-                tokens.append(s)
-    return tokens[:5]
+            if s: out.append(s)
+    return out[:5]
 
-def _cors_headers():
-    return {
-        "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization"
-    }
+def cors():
+    return {"Access-Control-Allow-Origin": ALLOWED_ORIGIN, "Access-Control-Allow-Methods":"POST, OPTIONS", "Access-Control-Allow-Headers":"Content-Type, Authorization"}
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
-    # CORS preflight
     if req.method == "OPTIONS":
-        return func.HttpResponse(status_code=200, headers=_cors_headers())
-
+        return func.HttpResponse(status_code=200, headers=cors())
     try:
         payload = req.get_json()
     except ValueError:
-        return func.HttpResponse("Invalid JSON", status_code=400, headers=_cors_headers())
+        return func.HttpResponse("Invalid JSON", status_code=400, headers=cors())
 
     tool = (payload.get("tool") or "").strip()
     if tool not in ALLOWED_TOOLS:
-        return func.HttpResponse("Unknown tool", status_code=400, headers=_cors_headers())
+        return func.HttpResponse("Unknown tool", status_code=400, headers=cors())
 
-    user_prompt = build_prompt(tool, payload)
-    if user_prompt == "Unknown tool.":
-        return func.HttpResponse("Unknown tool", status_code=400, headers=_cors_headers())
+    prompt = build_prompt(tool, payload)
+    if prompt == "Unknown tool.":
+        return func.HttpResponse("Unknown tool", status_code=400, headers=cors())
 
-    # Call Azure OpenAI
     resp = client.chat.completions.create(
         model=AOAI_DEPLOYMENT,
-        messages=[
-            {"role": "system", "content": SYSTEM_SHARED},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=0.4,
+        messages=[{"role":"system","content":SYSTEM_SHARED},{"role":"user","content":prompt}],
+        temperature=0.4
     )
     content = (resp.choices[0].message.content if resp and resp.choices else "").strip()
-
-    body = {
-        "content": content,
-        "insightsUsed": extract_insights_used(payload)
-    }
-    return func.HttpResponse(json.dumps(body), status_code=200, mimetype="application/json", headers=_cors_headers())
+    return func.HttpResponse(json.dumps({"content":content, "insightsUsed": extract_insights_used(payload)}),
+                             status_code=200, mimetype="application/json", headers=cors())
