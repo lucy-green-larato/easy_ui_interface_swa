@@ -116,7 +116,7 @@
 
   <script>
     const TOOL = 'intro_builder';   // <-- this page's tool id
-    const USE_MOCK = true;          // works now without backend
+    const USE_MOCK = false;          // works now without backend
     const API_URL = "/api/generate";
 
     const form = document.getElementById('toolForm');
@@ -131,7 +131,7 @@
       result.textContent = '';
 
       const payload = {
-        tool: TOOL,
+        tool: intro_builder,
         role: form.role.value.trim(),
         prospect: document.getElementById('prospect').value.trim(),
         company: document.getElementById('company').value.trim(),
