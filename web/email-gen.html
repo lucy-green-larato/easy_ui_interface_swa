@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SWA Sales Tools | Larato Best Practice</title>
-  <!-- Tailwind via CDN for speed; swap to compiled CSS later if desired -->
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 text-gray-900">
@@ -13,12 +12,12 @@
     <div class="mx-auto max-w-7xl px-4 py-4 flex items-center justify-between">
       <h1 class="text-xl font-semibold">SWA Sales Tools <span class="text-gray-400">|</span> Larato Best Practice</h1>
       <nav class="hidden md:flex gap-4 text-sm">
-        <a class="hover:underline" href="#">Lead Qualification</a>
-        <a class="hover:underline" href="#" aria-current="page">Intro Builder</a>
-        <a class="hover:underline" href="#">Email Gen</a>
-        <a class="hover:underline" href="#">Follow-up</a>
-        <a class="hover:underline" href="#">Competition</a>
-        <a class="hover:underline" href="#">Checklist</a>
+        <a class="hover:underline" href="lead-qualification.html">Lead Qualification</a>
+        <a class="hover:underline" href="intro-builder.html" aria-current="page">Intro Builder</a>
+        <a class="hover:underline" href="email-gen.html">Email Gen</a>
+        <a class="hover:underline" href="follow-up.html">Follow-up</a>
+        <a class="hover:underline" href="competition.html">Competition</a>
+        <a class="hover:underline" href="checklist.html">Checklist</a>
       </nav>
     </div>
   </header>
@@ -81,7 +80,7 @@
         </div>
         <div>
           <label for="cta" class="block text-sm font-medium">CTA / Next step</label>
-          <input id="cta" name="cta" class="mt-1 w-full rounded-xl border-gray-300" placeholder="20‑minute intro call next week" />
+          <input id="cta" name="cta" class="mt-1 w-full rounded-xl border-gray-300" placeholder="20-minute intro call next week" />
         </div>
 
         <div class="pt-2 flex items-center gap-3">
@@ -114,16 +113,17 @@
     <div class="mx-auto max-w-7xl px-4 py-4 text-sm text-gray-500 flex items-center justify-between">
       <span>© Larato</span>
       <div class="flex gap-4">
-        <a href="#" class="hover:underline">Privacy</a>
-        <a href="#" class="hover:underline">Help</a>
+        <a href="privacy.html" class="hover:underline">Privacy</a>
+        <a href="help.html" class="hover:underline">Help</a>
       </div>
     </div>
   </footer>
 
   <script>
     // --- CONFIG ---
-    const USE_MOCK = false; // flip to false when wiring to your backend
-    const API_URL = "/api/generate"; // Azure Function/Backend endpoint
+    const TOOL = 'intro_builder';   // <-- change per page ('email_gen', 'lead_qualification', etc.)
+    const USE_MOCK = false;         // set true to bypass API during testing
+    const API_URL = "/api/generate";
 
     const form = document.getElementById('toolForm');
     const result = document.getElementById('result');
@@ -137,26 +137,26 @@
       result.textContent = '';
 
       const payload = {
-        tool: 'email_gen', // duplicate this file per facility and change
+        tool: TOOL,
         role: form.role.value.trim(),
-        prospect: form.prospect.value.trim(),
-        company: form.company.value.trim(),
-        industry: form.industry.value.trim(),
-        competitors: form.competitors.value.trim(),
-        behaviour: form.behaviour.value.trim(),
-        drivers: form.drivers.value.trim(),
-        leaders: form.leaders.value.trim(),
-        value: form.value.value.trim(),
-        cta: form.cta.value.trim()
+        prospect: document.getElementById('prospect').value.trim(),
+        company: document.getElementById('company').value.trim(),
+        industry: document.getElementById('industry').value.trim(),
+        competitors: document.getElementById('competitors').value.trim(),
+        behaviour: document.getElementById('behaviour').value.trim(),
+        drivers: document.getElementById('drivers').value.trim(),
+        leaders: document.getElementById('leaders').value.trim(),
+        value: document.getElementById('value').value.trim(),
+        cta: document.getElementById('cta').value.trim()
       };
 
       try {
         const data = USE_MOCK ? await mockGenerate(payload) : await callApi(payload);
-        renderOutput(data, payload);
+        renderOutput(data);
         statusEl.textContent = 'Done';
       } catch (err) {
         console.error(err);
-        result.textContent = 'Something went wrong. Please try again or contact support.';
+        result.textContent = err?.message || 'Unknown error';
         statusEl.textContent = '';
       }
     });
@@ -167,8 +167,16 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error('API error');
-      return res.json(); // expect { content: string, insightsUsed: string[] }
+      const text = await res.text();
+      if (!res.ok) {
+        try {
+          const j = JSON.parse(text);
+          throw new Error(j.error || text || `HTTP ${res.status}`);
+        } catch {
+          throw new Error(text || `HTTP ${res.status}`);
+        }
+      }
+      return JSON.parse(text);
     }
 
     // Simple mock to let you test UX without a backend
@@ -178,12 +186,11 @@
       const diff = p.competitors ? ` Differentiation vs ${p.competitors}: focus on the outcomes your value points deliver.` : '';
       const bullets = (p.value || '').split(/\n|•/).map(s => s.trim()).filter(Boolean).slice(0,3);
       const bulletStr = bullets.map(b => `- ${b}`).join('\n');
-      const content = `${opener}\n\nCall opener:\n“${p.prospect ? p.prospect + ', ' : ''}we noticed ${p.behaviour || 'a relevant trigger'} — teams like yours use us for measurable impact in quarter one.”\n\nTalking points:\n${bulletStr || '- Add 2–3 value bullets'}\n${diff}\n\nNext step: ${p.cta || 'Suggest a 20‑minute intro call next week.'}`.trim();
+      const content = `${opener}\n\nCall opener:\n“${p.prospect ? p.prospect + ', ' : ''}we noticed ${p.behaviour || 'a relevant trigger'} — teams like yours use us for measurable impact in quarter one.”\n\nTalking points:\n${bulletStr || '- Add 2–3 value bullets'}\n${diff}\n\nNext step: ${p.cta || 'Suggest a 20-minute intro call next week.'}`.trim();
       return { content, insightsUsed: used };
     }
 
     function pickInsights(fields) {
-      // extract up to 5 short bullets from pasted text blocks
       const arr = [];
       fields.forEach(f => {
         if (!f) return;
@@ -192,7 +199,7 @@
       return arr.slice(0,5);
     }
 
-    function renderOutput(data, payload) {
+    function renderOutput(data) {
       result.textContent = data.content || '';
       insights.innerHTML = '';
       (data.insightsUsed || []).forEach(item => {
@@ -202,7 +209,6 @@
       });
     }
 
-    // Copy & Download helpers
     document.getElementById('copyBtn').addEventListener('click', async () => {
       await navigator.clipboard.writeText(result.textContent || '');
     });
