@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sales Tools | Larato Best Practice</title>
+  <title>SWA Sales Tools | Larato Best Practice</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 text-gray-900">
@@ -38,6 +38,7 @@
             <option>Procurement</option>
           </select>
         </div>
+
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label for="prospect" class="block text-sm font-medium">Prospect name</label>
@@ -48,6 +49,7 @@
             <input id="company" name="company" class="mt-1 w-full rounded-xl border-gray-300" placeholder="ABC Tech" />
           </div>
         </div>
+
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label for="industry" class="block text-sm font-medium">Industry</label>
@@ -121,15 +123,18 @@
 
   <script>
     // --- CONFIG ---
-    const TOOL = 'email_gen';   // <-- change per page ('email_gen', 'lead_qualification', etc.)
-    const USE_MOCK = false;         // set true to bypass API during testing
+    const TOOL = 'email_gen';     // <— set per page
+    const USE_MOCK = false;           // live calls
     const API_URL = "/api/generate";
 
+    // Elements
     const form = document.getElementById('toolForm');
     const result = document.getElementById('result');
     const insights = document.getElementById('insights');
     const statusEl = document.getElementById('status');
+    const generateBtn = document.getElementById('generateBtn');
 
+    // Submit handler (button hardening + auth redirect)
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       statusEl.textContent = 'Generating…';
@@ -150,17 +155,25 @@
         cta: document.getElementById('cta').value.trim()
       };
 
+      generateBtn.disabled = true;
       try {
         const data = USE_MOCK ? await mockGenerate(payload) : await callApi(payload);
         renderOutput(data);
         statusEl.textContent = 'Done';
       } catch (err) {
+        if (String(err).includes('401')) {
+          location.href='/.auth/login/aad?post_login_redirect_uri=' + encodeURIComponent(location.pathname);
+          return;
+        }
         console.error(err);
         result.textContent = err?.message || 'Unknown error';
         statusEl.textContent = '';
+      } finally {
+        generateBtn.disabled = false;
       }
     });
 
+    // Call API with readable errors
     async function callApi(payload) {
       const res = await fetch(API_URL, {
         method: 'POST',
@@ -179,7 +192,7 @@
       return JSON.parse(text);
     }
 
-    // Simple mock to let you test UX without a backend
+    // Mock (for testing only)
     async function mockGenerate(p) {
       const used = pickInsights([p.behaviour, p.drivers, p.leaders]);
       const opener = `Based on ${p.industry || 'the target industry'}, here’s a first introduction tailored to the ${p.role || 'buyer'} role at ${p.company || 'the prospect company'}.`;
@@ -209,10 +222,10 @@
       });
     }
 
+    // Copy & Download helpers
     document.getElementById('copyBtn').addEventListener('click', async () => {
       await navigator.clipboard.writeText(result.textContent || '');
     });
-
     document.getElementById('downloadBtn').addEventListener('click', () => {
       const blob = new Blob([result.textContent || ''], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
