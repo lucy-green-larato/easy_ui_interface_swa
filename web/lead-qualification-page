@@ -122,7 +122,7 @@
 
   <script>
     // --- CONFIG ---
-    const USE_MOCK = true; // flip to false when wiring to your backend
+    const USE_MOCK = false; // flip to false when wiring to your backend
     const API_URL = "/api/generate"; // Azure Function/Backend endpoint
 
     const form = document.getElementById('toolForm');
