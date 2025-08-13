@@ -1,6 +1,5 @@
 import os, json, logging
 import azure.functions as func
-from openai import AzureOpenAI
 
 SYSTEM_SHARED = (
     "You are a B2B technology sales specialist following Larato best practice. "
@@ -9,10 +8,10 @@ SYSTEM_SHARED = (
 )
 
 ALLOWED_TOOLS = {
-    "lead_qualification","intro_builder","email_gen","follow_up","competition","checklist"
+    "lead_qualification", "intro_builder", "email_gen",
+    "follow_up", "competition", "checklist"
 }
 
-# --------- CORS ----------
 def _cors_headers():
     return {
         "Access-Control-Allow-Origin": os.getenv("ALLOWED_ORIGIN", "*"),
@@ -20,37 +19,39 @@ def _cors_headers():
         "Access-Control-Allow-Headers": "Content-Type, Authorization"
     }
 
-# --------- Lazy client with validation (avoids module import crashes) ----------
+# Build the AOAI client lazily so import/setting errors become readable JSON
 _client = None
+_deployment = None
 def get_client():
-    """
-    Build the Azure OpenAI client only when first needed and validate required settings.
-    If anything is missing/misnamed, we raise a controlled error that is returned to the caller.
-    """
-    global _client
+    global _client, _deployment
     if _client is not None:
         return _client
 
-    endpoint    = os.getenv("AZURE_OPENAI_ENDPOINT")     # e.g. https://<resource>.openai.azure.com
-    deployment  = os.getenv("AZURE_OPENAI_DEPLOYMENT")   # model deployment name (exact)
+    # Try importing SDK here so ImportError becomes a clean 500 JSON error
+    try:
+        from openai import AzureOpenAI
+    except Exception as e:
+        raise RuntimeError(f"OpenAI SDK import failed: {type(e).__name__}: {e}. "
+                           f"Ensure 'openai' is in /api/requirements.txt and the API redeployed.")
+
+    endpoint    = os.getenv("AZURE_OPENAI_ENDPOINT")
+    deployment  = os.getenv("AZURE_OPENAI_DEPLOYMENT")
     api_key     = os.getenv("AZURE_OPENAI_API_KEY")
     api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-06-01")
 
-    missing = [name for name, val in [
+    missing = [k for k,v in [
         ("AZURE_OPENAI_ENDPOINT", endpoint),
         ("AZURE_OPENAI_DEPLOYMENT", deployment),
         ("AZURE_OPENAI_API_KEY", api_key),
-    ] if not val]
+    ] if not v]
     if missing:
-        raise RuntimeError(f"Missing required app settings: {', '.join(missing)}")
+        raise RuntimeError("Missing required app settings: " + ", ".join(missing))
 
-    # Save the deployment name on the client so we can read it in main()
     client = AzureOpenAI(azure_endpoint=endpoint, api_key=api_key, api_version=api_version)
-    client._larato_deployment = deployment  # store for later use
     _client = client
+    _deployment = deployment  # store the deployment name to use in chat call
     return _client
 
-# --------- Prompt builders ----------
 def build_prompt(tool: str, p: dict) -> str:
     if tool == "email_gen":
         return f"""Write a first-touch email (75–140 words), personalised and evidence-based.
@@ -157,39 +158,44 @@ def extract_insights_used(p: dict) -> list:
             if s: out.append(s)
     return out[:5]
 
-# --------- Function entry ----------
 def main(req: func.HttpRequest) -> func.HttpResponse:
-    # CORS preflight
     if req.method == "OPTIONS":
         return func.HttpResponse(status_code=200, headers=_cors_headers())
 
-    # Parse JSON
+    # Parse JSON safely
     try:
         payload = req.get_json()
     except ValueError:
-        return func.HttpResponse(json.dumps({"error":"Invalid JSON"}), status_code=400, mimetype="application/json", headers=_cors_headers())
+        return func.HttpResponse(json.dumps({"error":"Invalid JSON"}), status_code=400,
+                                 mimetype="application/json", headers=_cors_headers())
 
     tool = (payload.get("tool") or "").strip()
     if tool not in ALLOWED_TOOLS:
-        return func.HttpResponse(json.dumps({"error":"Unknown tool"}), status_code=400, mimetype="application/json", headers=_cors_headers())
+        return func.HttpResponse(json.dumps({"error":"Unknown tool"}), status_code=400,
+                                 mimetype="application/json", headers=_cors_headers())
 
     prompt = build_prompt(tool, payload)
     if prompt == "Unknown tool.":
-        return func.HttpResponse(json.dumps({"error":"Unknown tool"}), status_code=400, mimetype="application/json", headers=_cors_headers())
+        return func.HttpResponse(json.dumps({"error":"Unknown tool"}), status_code=400,
+                                 mimetype="application/json", headers=_cors_headers())
 
-    # Ensure client + settings are valid
+    # Ensure client and settings are valid
     try:
         client = get_client()
-        deployment = client._larato_deployment  # set in get_client()
+        deployment = _deployment
     except Exception as e:
         logging.exception("Configuration error")
-        return func.HttpResponse(json.dumps({"error": f"Configuration error: {str(e)}"}), status_code=500, mimetype="application/json", headers=_cors_headers())
+        return func.HttpResponse(json.dumps({"error": f"Configuration error: {e}"}), status_code=500,
+                                 mimetype="application/json", headers=_cors_headers())
 
-    # Call Azure OpenAI with explicit API version + deployment name
+    # Call Azure OpenAI
     try:
         resp = client.chat.completions.create(
             model=deployment,
-            messages=[{"role":"system","content":SYSTEM_SHARED},{"role":"user","content":prompt}],
+            messages=[
+                {"role":"system","content":SYSTEM_SHARED},
+                {"role":"user","content":prompt}
+            ],
             temperature=0.4
         )
         content = (resp.choices[0].message.content if resp and resp.choices else "").strip()
@@ -197,5 +203,5 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                                  status_code=200, mimetype="application/json", headers=_cors_headers())
     except Exception as e:
         logging.exception("Azure OpenAI call failed")
-        return func.HttpResponse(json.dumps({"error": f"{type(e).__name__}: {str(e)}"}),
-                                 status_code=500, mimetype="application/json", headers=_cors_headers())
+        return func.HttpResponse(json.dumps({"error": f"{type(e).__name__}: {e}"}), status_code=500,
+                                 mimetype="application/json", headers=_cors_headers())
