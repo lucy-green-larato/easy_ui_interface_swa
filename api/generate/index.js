@@ -1,7 +1,9 @@
-// /api/generate/index.js
+// Minimal generate function for Azure Functions (JavaScript)
+// Validates body, resolves pack+template, compiles {{vars}}, returns payload
+
 const { z } = require("zod");
 
-// ---- Minimal packs (add more as needed) ----
+// ---- Prompt packs (add more templates as you need) ----
 const packs = {
   uk_b2b_sales_core: {
     default: {
@@ -13,8 +15,8 @@ const packs = {
       "Opportunity qualification framework.\n\nCompany: {{company}}\nIndustry: {{industry}}\nWebsite: {{website}}\nSources: {{sources}}\n\nOutput:\n- Company profile (employees, revenue, segment, GTM approach, performance, decision-makers, events, estimated event ROI)\n- Pain points (growth, M&A, performance trends, alignment to our offering)\n- Budget and spend potential\n- Decision-making process\n- Competition and differentiation\n- Channel/adoption readiness\n- Prioritisation score (0–100 with rationale)\n- Missing info list",
   },
 
-  // Optional: keep larato_core templates here if you still use them
-  // larato_core: { ... }
+  // OPTIONAL: keep/port your larato_core pack here if you still use it
+  // larato_core: { default: {...}, email_gen: "...", ... }
 };
 
 // ---- Simple {{token}} replacement ----
@@ -26,7 +28,7 @@ function compileTemplate(tpl, vars) {
   });
 }
 
-// ---- Request body schema (validates the contract) ----
+// ---- Request body schema ----
 const BodySchema = z.object({
   pack: z.string().min(1),
   template: z.string().min(1),
@@ -41,28 +43,28 @@ const BodySchema = z.object({
       sources_raw: z.string().optional(),
       sources: z.array(z.string()).optional(),
     })
-    .passthrough(), // allow extra fields for other templates
+    .passthrough(), // allow extra fields for other templates (email_gen, etc.)
 });
 
 module.exports = async function (context, req) {
-  // --- Basic CORS (adjust origin as needed) ---
-  const corsHeaders = {
+  // --- Basic CORS (adjust origin if you need to lock it down) ---
+  const cors = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
 
-  // Handle preflight
+  // Preflight
   if (req.method === "OPTIONS") {
-    context.res = { status: 204, headers: corsHeaders };
+    context.res = { status: 204, headers: cors };
     return;
   }
 
-  // Enforce POST at runtime even if function.json allows GET
+  // Enforce POST even if function.json allows GET
   if (req.method !== "POST") {
     context.res = {
       status: 405,
-      headers: corsHeaders,
+      headers: cors,
       body: { error: "Method Not Allowed. Use POST." },
     };
     return;
@@ -73,7 +75,7 @@ module.exports = async function (context, req) {
     if (!parsed.success) {
       context.res = {
         status: 400,
-        headers: corsHeaders,
+        headers: cors,
         body: { error: "Invalid request body", details: parsed.error.flatten() },
       };
       return;
@@ -82,11 +84,7 @@ module.exports = async function (context, req) {
     const { pack, template, variables } = parsed.data;
     const packDef = packs[pack];
     if (!packDef) {
-      context.res = {
-        status: 400,
-        headers: corsHeaders,
-        body: { error: `Unknown pack '${pack}'` },
-      };
+      context.res = { status: 400, headers: cors, body: { error: `Unknown pack '${pack}'` } };
       return;
     }
     const sys = (packDef.default && packDef.default.system) || "";
@@ -94,7 +92,7 @@ module.exports = async function (context, req) {
     if (!temp) {
       context.res = {
         status: 400,
-        headers: corsHeaders,
+        headers: cors,
         body: { error: `Unknown template '${template}' in pack '${pack}'` },
       };
       return;
@@ -102,12 +100,12 @@ module.exports = async function (context, req) {
 
     const compiledPrompt = compileTemplate(temp, variables);
 
-    // TODO: Call your LLM/provider here instead of echoing the prompt
+    // TODO: call your LLM here instead of echoing the prompt
     // const llmResponse = await callModel({ system: sys, prompt: compiledPrompt, temperature: packDef.default?.temperature ?? 0.4 });
 
     context.res = {
       status: 200,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
+      headers: { "Content-Type": "application/json", ...cors },
       body: {
         system: sys,
         temperature: (packDef.default && packDef.default.temperature) || 0.4,
@@ -121,8 +119,8 @@ module.exports = async function (context, req) {
     context.log.error("generate error", err);
     context.res = {
       status: 500,
-      headers: corsHeaders,
-      body: { error: "Server error", detail: String(err && err.message || err) },
+      headers: cors,
+      body: { error: "Server error", detail: String(err?.message ?? err) },
     };
   }
 };
