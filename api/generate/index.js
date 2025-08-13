@@ -1,5 +1,4 @@
 module.exports = async function (context, req) {
-  // CORS
   const CORS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -20,7 +19,7 @@ module.exports = async function (context, req) {
     return;
   }
 
-  const payload = typeof req.body === "object" && req.body ? req.body : {};
+  const payload = (req.body && typeof req.body === "object") ? req.body : {};
   context.res = {
     status: 200,
     headers: { "Content-Type": "application/json", ...CORS },
