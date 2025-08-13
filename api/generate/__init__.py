@@ -8,20 +8,15 @@ CORS = {
 }
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
-    # CORS preflight
     if req.method == "OPTIONS":
         return func.HttpResponse(status_code=200, headers=CORS)
-
     if req.method == "GET":
         return func.HttpResponse(json.dumps({"ok": True, "message": "GENERATE_OK"}), status_code=200,
                                  mimetype="application/json", headers=CORS)
-
-    # POST echo
     try:
         payload = req.get_json()
     except ValueError:
         payload = {}
-
     return func.HttpResponse(
         json.dumps({"ok": True, "received_tool": payload.get("tool"), "echo": payload}),
         status_code=200, mimetype="application/json", headers=CORS
