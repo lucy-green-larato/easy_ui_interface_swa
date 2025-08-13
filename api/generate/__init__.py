@@ -97,3 +97,105 @@ Behaviour: {p.get('behaviour','')}
 Drivers: {p.get('drivers','')}
 Leaders & contacts: {p.get('leaders','')}
 Competitors: {p.get('competitors','')}
+
+Output:
+- Qualification summary (3–6 bullets)
+- Viability score (High/Medium/Low) with reasons
+- Critical gaps to close
+- Immediate next steps (≤5)
+- Risks & mitigations (≤5)
+(No assumptions—flag missing info.)"""
+    if tool == "follow_up":
+        return f"""Follow-up plan for next 14 days.
+
+Prospect/company: {p.get('role','')} @ {p.get('company','')}
+First touch summary: {p.get('first_touch','N/A')}
+Behaviour: {p.get('behaviour','')}
+Likely objections: {p.get('objections','N/A')}
+
+Output:
+- Cadence (day 2, day 5, day 10) with purpose
+- Follow-up email (≤120 words)
+- Voicemail script (≤45s)
+- Three objection talk tracks
+- One success metric and what to adjust"""
+    if tool == "competition":
+        return f"""Competitive positioning.
+
+Competitor: {p.get('competitors','')}
+Behaviour: {p.get('behaviour','')}
+Decision criteria: {p.get('criteria','N/A')}
+Value points:
+{p.get('value','')}
+
+Output:
+- Where we win / where they win (3 and 3)
+- Role-specific messaging (strategic, commercial, technical)
+- Two proof points
+- Two ethical landmine questions
+- Risks and how to steer"""
+    if tool == "checklist":
+        return f"""First-step engagement checklist.
+
+Role: {p.get('role','')}
+Company/Industry: {p.get('company','')} / {p.get('industry','')}
+Behaviour: {p.get('behaviour','')}
+
+Output:
+- Before (5–7 items)
+- During (5–7 items)
+- After (3–5 items)
+- Missing info to capture (checklist)"""
+    return "Unknown tool."
+
+def extract_insights_used(p: dict) -> list:
+    raw = " / ".join(filter(None, [p.get('behaviour',''), p.get('drivers',''), p.get('leaders','')]))
+    out = []
+    for seg in raw.replace("•"," ").replace(";"," ").splitlines():
+        for part in seg.replace("."," ").split("-"):
+            s = part.strip()
+            if s: out.append(s)
+    return out[:5]
+
+# --------- Function entry ----------
+def main(req: func.HttpRequest) -> func.HttpResponse:
+    # CORS preflight
+    if req.method == "OPTIONS":
+        return func.HttpResponse(status_code=200, headers=_cors_headers())
+
+    # Parse JSON
+    try:
+        payload = req.get_json()
+    except ValueError:
+        return func.HttpResponse(json.dumps({"error":"Invalid JSON"}), status_code=400, mimetype="application/json", headers=_cors_headers())
+
+    tool = (payload.get("tool") or "").strip()
+    if tool not in ALLOWED_TOOLS:
+        return func.HttpResponse(json.dumps({"error":"Unknown tool"}), status_code=400, mimetype="application/json", headers=_cors_headers())
+
+    prompt = build_prompt(tool, payload)
+    if prompt == "Unknown tool.":
+        return func.HttpResponse(json.dumps({"error":"Unknown tool"}), status_code=400, mimetype="application/json", headers=_cors_headers())
+
+    # Ensure client + settings are valid
+    try:
+        client = get_client()
+        deployment = client._larato_deployment  # set in get_client()
+    except Exception as e:
+        logging.exception("Configuration error")
+        return func.HttpResponse(json.dumps({"error": f"Configuration error: {str(e)}"}), status_code=500, mimetype="application/json", headers=_cors_headers())
+
+    # Call Azure OpenAI with explicit API version + deployment name
+    try:
+        resp = client.chat.completions.create(
+            model=deployment,
+            messages=[{"role":"system","content":SYSTEM_SHARED},{"role":"user","content":prompt}],
+            temperature=0.4
+        )
+        content = (resp.choices[0].message.content if resp and resp.choices else "").strip()
+        return func.HttpResponse(json.dumps({"content":content, "insightsUsed": extract_insights_used(payload)}),
+                                 status_code=200, mimetype="application/json", headers=_cors_headers())
+    except Exception as e:
+        logging.exception("Azure OpenAI call failed")
+        return func.HttpResponse(json.dumps({"error": f"{type(e).__name__}: {str(e)}"}),
+                                 status_code=500, mimetype="application/json", headers=_cors_headers())
