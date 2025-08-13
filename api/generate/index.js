@@ -1,3 +1,5 @@
+const https = require("https");
+
 module.exports = async function (context, req) {
   const CORS = {
     "Access-Control-Allow-Origin": process.env.ALLOWED_ORIGIN || "*",
@@ -56,40 +58,38 @@ Output:
 - Differentiation (vs competitor if provided)
 - Next step
 Missing info: list if material.`
-      // (add the rest when you’re ready)
+      // add other tools when ready
     };
 
     const user = (promptMap[tool] || (()=>"Unknown tool"))(p);
     if (user === "Unknown tool") throw new Error("Unknown tool");
 
     const endpoint   = process.env.AZURE_OPENAI_ENDPOINT;      // e.g. https://<resource>.openai.azure.com
-    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;    // deployment name (exact)
+    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;    // deployment name (case-sensitive)
     const apiKey     = process.env.AZURE_OPENAI_API_KEY;
     const apiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
     if (!endpoint || !deployment || !apiKey) throw new Error("Configuration error: missing AOAI env vars");
 
-    const url = `${endpoint.replace(/\/+$/,"")}/openai/deployments/${deployment}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
+    const url = new URL(`${endpoint.replace(/\/+$/,"")}/openai/deployments/${deployment}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`);
+    const body = JSON.stringify({
+      messages: [
+        { role: "system", content: system },
+        { role: "user",   content: user }
+      ],
+      temperature: 0.4
+    });
 
-    // Timeout safety (25s)
-    const ac = new AbortController();
-    const t = setTimeout(() => ac.abort(), 25000);
+    const { status, text } = await httpsPost(url, {
+      "Content-Type": "application/json",
+      "api-key": apiKey
+    }, body, 25000);
 
-    const aoai = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type":"application/json", "api-key": apiKey },
-      body: JSON.stringify({
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user }
-        ],
-        temperature: 0.4
-      }),
-      signal: ac.signal
-    }).finally(() => clearTimeout(t));
+    if (status < 200 || status >= 300) {
+      throw new Error(text || `AOAI HTTP ${status}`);
+    }
 
-    const text = await aoai.text();
-    if (!aoai.ok) throw new Error(text || `AOAI HTTP ${aoai.status}`);
-    const j = JSON.parse(text);
+    let j = {};
+    try { j = JSON.parse(text); } catch {}
     const content = j?.choices?.[0]?.message?.content?.trim() || "";
 
     // quick insights from pasted blocks
@@ -112,3 +112,25 @@ Missing info: list if material.`
     };
   }
 };
+
+/** Minimal HTTPS POST helper (no deps) */
+function httpsPost(url, headers, data, timeoutMs=25000) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      method: "POST",
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      port: 443,
+      headers
+    };
+    const req = https.request(options, (res) => {
+      let chunks = [];
+      res.on("data", (d) => chunks.push(d));
+      res.on("end", () => resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.on("error", reject);
+    req.setTimeout(timeoutMs, () => { req.destroy(new Error("Request timeout")); });
+    if (data) req.write(data);
+    req.end();
+  });
+}
