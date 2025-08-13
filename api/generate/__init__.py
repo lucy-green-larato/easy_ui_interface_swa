@@ -161,47 +161,13 @@ def extract_insights_used(p: dict) -> list:
 def main(req: func.HttpRequest) -> func.HttpResponse:
     if req.method == "OPTIONS":
         return func.HttpResponse(status_code=200, headers=_cors_headers())
-
-    # Parse JSON safely
     try:
         payload = req.get_json()
     except ValueError:
         return func.HttpResponse(json.dumps({"error":"Invalid JSON"}), status_code=400,
                                  mimetype="application/json", headers=_cors_headers())
-
-    tool = (payload.get("tool") or "").strip()
-    if tool not in ALLOWED_TOOLS:
-        return func.HttpResponse(json.dumps({"error":"Unknown tool"}), status_code=400,
-                                 mimetype="application/json", headers=_cors_headers())
-
-    prompt = build_prompt(tool, payload)
-    if prompt == "Unknown tool.":
-        return func.HttpResponse(json.dumps({"error":"Unknown tool"}), status_code=400,
-                                 mimetype="application/json", headers=_cors_headers())
-
-    # Ensure client and settings are valid
-    try:
-        client = get_client()
-        deployment = _deployment
-    except Exception as e:
-        logging.exception("Configuration error")
-        return func.HttpResponse(json.dumps({"error": f"Configuration error: {e}"}), status_code=500,
-                                 mimetype="application/json", headers=_cors_headers())
-
-    # Call Azure OpenAI
-    try:
-        resp = client.chat.completions.create(
-            model=deployment,
-            messages=[
-                {"role":"system","content":SYSTEM_SHARED},
-                {"role":"user","content":prompt}
-            ],
-            temperature=0.4
-        )
-        content = (resp.choices[0].message.content if resp and resp.choices else "").strip()
-        return func.HttpResponse(json.dumps({"content":content, "insightsUsed": extract_insights_used(payload)}),
-                                 status_code=200, mimetype="application/json", headers=_cors_headers())
-    except Exception as e:
-        logging.exception("Azure OpenAI call failed")
-        return func.HttpResponse(json.dumps({"error": f"{type(e).__name__}: {e}"}), status_code=500,
-                                 mimetype="application/json", headers=_cors_headers())
+    # Echo back to prove routing/JSON handling
+    return func.HttpResponse(
+        json.dumps({"ok": True, "received_tool": payload.get("tool")}),
+        status_code=200, mimetype="application/json", headers=_cors_headers()
+    )
