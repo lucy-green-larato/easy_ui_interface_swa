@@ -1,11 +1,3 @@
 {
-  "routes": [
-    { "route": "/lead-qualification.html", "allowedRoles": ["authenticated"] },
-    { "route": "/intro-builder.html", "allowedRoles": ["authenticated"] },
-    { "route": "/email-gen.html", "allowedRoles": ["authenticated"] },
-    { "route": "/follow-up.html", "allowedRoles": ["authenticated"] },
-    { "route": "/competition.html", "allowedRoles": ["authenticated"] },
-    { "route": "/checklist.html", "allowedRoles": ["authenticated"] }
-  ],
   "navigationFallback": { "rewrite": "/index.html" }
 }
