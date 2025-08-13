@@ -1,6 +1,7 @@
 {
   "routes": [
     { "route": "/api/*", "allowedRoles": ["authenticated"] },
+
     { "route": "/lead-qualification.html", "allowedRoles": ["authenticated"] },
     { "route": "/intro-builder.html", "allowedRoles": ["authenticated"] },
     { "route": "/email-gen.html", "allowedRoles": ["authenticated"] },
@@ -8,15 +9,5 @@
     { "route": "/competition.html", "allowedRoles": ["authenticated"] },
     { "route": "/checklist.html", "allowedRoles": ["authenticated"] }
   ],
-  "navigationFallback": {
-    "rewrite": "/index.html",
-    "exclude": [
-      "/api/*",
-      "/*.{css,js,png,jpg,jpeg,gif,ico,svg,webp,woff,woff2,ttf,otf}"
-    ]
-  },
-  "responseOverrides": {
-    "401": { "redirect": "/index.html", "statusCode": 302 },
-    "404": { "rewrite": "/index.html", "statusCode": 200 }
-  }
+  "navigationFallback": { "rewrite": "/index.html" }
 }
