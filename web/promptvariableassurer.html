@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Prompt Variable Assurer</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 24px; background:#f7f7fb; }
+    .wrap { max-width: 900px; margin: 0 auto; background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:24px; }
+    h1 { margin: 0 0 8px; font-size: 22px; }
+    p.help { color:#555; margin: 0 0 16px; }
+    label { display:block; margin:12px 0 6px; font-weight:600; font-size:14px; }
+    input, select, textarea { width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:12px; font-size:14px; background:#fff; }
+    textarea { height:110px; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    .btns { display:flex; gap:12px; margin-top:14px; }
+    button { padding:10px 14px; border:1px solid #d1d5db; border-radius:14px; background:#fff; cursor:pointer; }
+    pre { background:#f9fafb; border:1px solid #e5e7eb; border-radius:12px; padding:12px; overflow:auto; }
+    .err { background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px; border-radius:12px; }
+    .small { font-size:12px; color:#666; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Prompt Variable Assurer</h1>
+    <p class="help">This form guarantees the SWA front end sends <code>{ pack, template, variables }</code> to <code>/api/generate</code>.</p>
+
+    <div class="row">
+      <div>
+        <label for="pack">Pack</label>
+        <select id="pack"></select>
+      </div>
+      <div>
+        <label for="template">Template</label>
+        <select id="template"></select>
+      </div>
+    </div>
+
+    <label for="company">Company *</label>
+    <input id="company" placeholder="Acme Networks Ltd" />
+
+    <label for="industry">Industry *</label>
+    <input id="industry" placeholder="Managed Services / Cybersecurity" />
+
+    <label for="website">Website *</label>
+    <input id="website" placeholder="https://www.example.co.uk" />
+
+    <label for="sources">Sources (comma or newline separated)</label>
+    <textarea id="sources" placeholder="Annual report URL, LinkedIn page, Press release URL"></textarea>
+
+    <div id="errors" class="err" style="display:none;"></div>
+
+    <div class="btns">
+      <button id="preview">Preview Payload</button>
+      <button id="send">Send to /api/generate</button>
+    </div>
+
+    <h3 class="small" style="margin-top:16px;">Preview</h3>
+    <pre id="previewBox"></pre>
+
+    <h3 class="small" style="margin-top:16px;">API Response</h3>
+    <pre id="responseBox"></pre>
+
+    <p class="small">Tip: success returns JSON with <code>system</code>, <code>temperature</code>, <code>prompt</code>, <code>variables</code>, <code>pack</code>, <code>template</code>.</p>
+  </div>
+
+  <script>
+    // --- Packs + templates (extend as you like) ---
+    const PACKS = {
+      uk_b2b_sales_core: {
+        label: "UK B2B Sales Core",
+        templates: [{ key: "opportunity_qualification", label: "Opportunity Qualification" }]
+      },
+      larato_core: {
+        label: "Larato Core (legacy)",
+        templates: [
+          { key: "email_gen", label: "Email Generator" },
+          { key: "intro_builder", label: "Intro Builder" },
+          { key: "lead_qualification", label: "Lead Qualification" }
+        ]
+      }
+    };
+
+    const els = {
+      pack: document.getElementById("pack"),
+      template: document.getElementById("template"),
+      company: document.getElementById("company"),
+      industry: document.getElementById("industry"),
+      website: document.getElementById("website"),
+      sources: document.getElementById("sources"),
+      previewBtn: document.getElementById("preview"),
+      sendBtn: document.getElementById("send"),
+      previewBox: document.getElementById("previewBox"),
+      responseBox: document.getElementById("responseBox"),
+      errors: document.getElementById("errors")
+    };
+
+    // init pack dropdown
+    function initPacks() {
+      els.pack.innerHTML = Object.entries(PACKS).map(([k, v]) =>
+        `<option value="${k}">${v.label} (${k})</option>`
+      ).join("");
+      onPackChange();
+    }
+    function onPackChange() {
+      const key = els.pack.value;
+      const tpls = PACKS[key].templates;
+      els.template.innerHTML = tpls.map(t => `<option value="${t.key}">${t.label} (${t.key})</option>`).join("");
+    }
+    els.pack.addEventListener("change", onPackChange);
+
+    // basic validation
+    function validate() {
+      const errs = [];
+      const company = els.company.value.trim();
+      const industry = els.industry.value.trim();
+      const website = els.website.value.trim();
+
+      if (!company) errs.push("Company is required");
+      if (!industry) errs.push("Industry is required");
+      if (!website) errs.push("Website is required");
+      else {
+        try { new URL(website); } catch { errs.push("Website must be a valid URL (https://…)"); }
+      }
+      if (errs.length) {
+        els.errors.style.display = "block";
+        els.errors.innerHTML = errs.map(e => `<div>• ${e}</div>`).join("");
+        return null;
+      }
+      els.errors.style.display = "none";
+      els.errors.innerHTML = "";
+      return { company, industry, website, sources: els.sources.value };
+    }
+
+    function buildPayload() {
+      const v = validate();
+      if (!v) return null;
+      const sourcesArray = (v.sources || "")
+        .split(/\n|,/).map(s => s.trim()).filter(Boolean);
+
+      return {
+        pack: els.pack.value,
+        template: els.template.value,
+        variables: {
+          company: v.company,
+          industry: v.industry,
+          website: v.website,
+          sources_raw: v.sources || "",
+          sources: sourcesArray
+        }
+      };
+    }
+
+    els.previewBtn.addEventListener("click", () => {
+      const payload = buildPayload();
+      if (!payload) return;
+      els.previewBox.textContent = JSON.stringify(payload, null, 2);
+    });
+
+    els.sendBtn.addEventListener("click", async () => {
+      const payload = buildPayload();
+      if (!payload) return;
+      els.responseBox.textContent = "Sending…";
+      try {
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const txt = await res.text();
+        els.responseBox.textContent = txt;
+      } catch (e) {
+        els.responseBox.textContent = "Request failed: " + (e?.message || String(e));
+      }
+    });
+
+    initPacks();
+  </script>
+</body>
+</html>
