@@ -1,5 +1,5 @@
 // Minimal generate function for Azure Functions (JavaScript)
-// Validates body, resolves pack+template, compiles {{vars}}, returns payload
+// Validates body, resolves pack+template, compiles {{vars}} / {vars}, returns payload (+ optional GPT output)
 
 const fs = require("fs");
 const path = require("path");
@@ -14,7 +14,6 @@ function loadJsonPacks() {
       return JSON.parse(raw);
     }
   } catch (e) {
-    // Non-fatal: we fall back to inline packs
     console.warn("packs.json load failed:", e.message);
   }
   return null;
@@ -31,7 +30,7 @@ const inlinePacks = {
     // Flat style string template (supported)
     opportunity_qualification:
       "Opportunity qualification framework.\n\nCompany: {{company}}\nIndustry: {{industry}}\nWebsite: {{website}}\nSources: {{sources}}\n\nOutput:\n- Company profile (employees, revenue, segment, GTM approach, performance, decision-makers, events, estimated event ROI)\n- Pain points (growth, M&A, performance trends, alignment to our offering)\n- Budget and spend potential\n- Decision-making process\n- Competition and differentiation\n- Channel/adoption readiness\n- Prioritisation score (0–100 with rationale)\n- Missing info list",
-    // Template-style object (also supported)
+    // Object style template (supported)
     first_call_script: {
       system:
         "You are a UK B2B technology sales assistant. Write concise, credible, British-English first-call scripts.",
@@ -57,21 +56,40 @@ const inlinePacks = {
 // Prefer JSON packs; fallback to inline packs
 const packs = loadJsonPacks() || inlinePacks;
 
-// ---- Simple {{token}} replacement (also supports {token}) ----
+// ---- Simple {{token}} and {token} replacement ----
 function compileTemplate(tpl, vars) {
   if (typeof tpl !== "string") return "";
-  // support both {{ token }} and {token}
+  const rep = (key) => {
+    const v = vars[key];
+    if (Array.isArray(v)) return v.join(", ");
+    return v ?? "";
+  };
   return tpl
-    .replace(/{{\s*([\w.]+)\s*}}/g, (_, key) => {
-      const v = vars[key];
-      if (Array.isArray(v)) return v.join(", ");
-      return v ?? "";
-    })
-    .replace(/{\s*([\w.]+)\s*}/g, (_, key) => {
-      const v = vars[key];
-      if (Array.isArray(v)) return v.join(", ");
-      return v ?? "";
-    });
+    .replace(/{{\s*([\w.]+)\s*}}/g, (_, key) => rep(key))
+    .replace(/{\s*([\w.]+)\s*}/g, (_, key) => rep(key));
+}
+
+// ---- Determine required variables for a template ----
+function requiredVarsForTemplate(tplDef) {
+  if (tplDef && typeof tplDef === "object" && Array.isArray(tplDef.variables)) return tplDef.variables;
+  const src = typeof tplDef === "string" ? tplDef : String(tplDef?.prompt || "");
+  const names = new Set();
+  src.replace(/{{\s*([\w.]+)\s*}}/g, (_, k) => names.add(k));
+  src.replace(/{\s*([\w.]+)\s*}/g,   (_, k) => names.add(k));
+  return Array.from(names);
+}
+
+// ---- Extract assistant text from common GPT responses ----
+function extractText(res) {
+  if (!res) return "";
+  if (typeof res === "string") return res;
+  const fromChoices = res.choices?.[0]?.message?.content;
+  if (fromChoices) return String(fromChoices);
+  const fromOutput = res.output_text || res.output || res.text || res.message;
+  if (fromOutput) return String(fromOutput);
+  const nested = res.data?.choices?.[0]?.message?.content;
+  if (nested) return String(nested);
+  return "";
 }
 
 // ---- Request body schema (generic variables) ----
@@ -82,7 +100,7 @@ const BodySchema = z.object({
 });
 
 module.exports = async function (context, req) {
-  // --- Basic CORS (adjust origin if you want to lock it down) ---
+  // --- Basic CORS (lock down origin if needed) ---
   const cors = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -95,13 +113,9 @@ module.exports = async function (context, req) {
     return;
   }
 
-  // Enforce POST even if function.json allows GET
+  // Enforce POST
   if (req.method !== "POST") {
-    context.res = {
-      status: 405,
-      headers: cors,
-      body: { error: "Method Not Allowed. Use POST." },
-    };
+    context.res = { status: 405, headers: cors, body: { error: "Method Not Allowed. Use POST." } };
     return;
   }
 
@@ -113,7 +127,9 @@ module.exports = async function (context, req) {
   }
 
   try {
-    const parsed = BodySchema.safeParse(req.body);
+    // Handle string body defensively
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const parsed = BodySchema.safeParse(body);
     if (!parsed.success) {
       context.res = {
         status: 400,
@@ -155,8 +171,7 @@ module.exports = async function (context, req) {
     const defaultTemp = packDef.default?.temperature ?? 0.4;
 
     const tplSystem = typeof tplDef === "object" && tplDef.system != null ? String(tplDef.system) : null;
-    const tplTemp =
-      typeof tplDef === "object" && tplDef.temperature != null ? Number(tplDef.temperature) : null;
+    const tplTemp   = typeof tplDef === "object" && tplDef.temperature != null ? Number(tplDef.temperature) : null;
 
     const system = tplSystem ?? defaultSys;
     const temperature = tplTemp ?? defaultTemp;
@@ -171,10 +186,31 @@ module.exports = async function (context, req) {
       return;
     }
 
+    // Validate required variables (best-effort)
+    const required = requiredVarsForTemplate(tplDef);
+    const missing = required.filter(
+      (k) => !(k in variables) || variables[k] == null || String(variables[k]).trim() === ""
+    );
+    if (missing.length) {
+      context.res = { status: 400, headers: cors, body: { error: "Missing required variables", required, missing } };
+      return;
+    }
+
+    // Compile prompt
     const compiledPrompt = compileTemplate(templateString, variables);
 
-    // TODO: Call your LLM here and return its text instead of echoing the prompt
-    // const llmResponse = await callModel({ system, prompt: compiledPrompt, temperature });
+    // ---- Call your GPT wiring (optional hook) ----
+    // If you've defined a global `callModel({system, prompt, temperature, pack, template, variables})`,
+    // we'll use it. Otherwise, we return output as a fallback to the compiled prompt.
+    let llmText = "";
+    try {
+      if (typeof callModel === "function") {
+        const llmRes = await callModel({ system, prompt: compiledPrompt, temperature, pack, template, variables });
+        llmText = extractText(llmRes) || "";
+      }
+    } catch (e) {
+      context.log.warn("callModel failed: " + (e?.message || e));
+    }
 
     context.res = {
       status: 200,
@@ -182,10 +218,11 @@ module.exports = async function (context, req) {
       body: {
         system,
         temperature,
-        prompt: compiledPrompt,
+        prompt: compiledPrompt,   // useful for debugging / preview
         variables,
         pack,
         template,
+        output: llmText || compiledPrompt // UI reads this; falls back if model text missing
       },
     };
   } catch (err) {
