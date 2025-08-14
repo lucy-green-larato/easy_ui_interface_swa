@@ -11,7 +11,7 @@
   ],
   "responseOverrides": {
     "401": {
-      "redirect": "/.auth/login/aad?post_login_redirect_uri={url}",
+      "redirect": "https://sales-tools.larato.co.uk/.auth/login/aad?post_login_redirect_uri={url}",
       "statusCode": 302
     },
     "404": { "rewrite": "/index.html" }
