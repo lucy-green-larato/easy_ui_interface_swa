@@ -90,7 +90,7 @@
       const v = validate();
       if (!v) return null;
       const srcRaw = document.getElementById('sources').value || "";
-      const src = srcRaw.split(/\\n|,/).map(s => s.trim()).filter(Boolean);
+      const src = srcRaw.split(/\n|,/).map(s => s.trim()).filter(Boolean);
       return {
         pack: "uk_b2b_sales_core",
         template: "opportunity_qualification",
