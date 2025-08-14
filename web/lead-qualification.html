@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Lead Qualification • Inside Track Sales Tools</title>
+  <style>
+    :root { --bg:#f8fafc; --card:#fff; --text:#0f172a; --muted:#64748b; --brand:#1e40af; }
+    body { font-family: system-ui,"Segoe UI",Roboto,Arial,sans-serif; background:var(--bg); color:var(--text); margin:0 }
+    header, main { max-width: 960px; margin: 0 auto; padding: 24px }
+    .nav { display:flex; justify-content:space-between; align-items:center; gap:12px }
+    .btn { padding:10px 14px; border-radius:10px; border:1px solid #cbd5e1; background:#fff; cursor:pointer }
+    .btn:hover { background:#f1f5f9 }
+    .card { background:var(--card); border:1px solid #e2e8f0; border-radius:16px; padding:20px }
+    .muted { color:var(--muted); font-size: 14px }
+    label { display:block; margin:12px 0 6px; font-weight:600; font-size:14px }
+    input, textarea, select { width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:12px; font-size:14px }
+    textarea { height:120px }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <div>
+      <a href="/index.html" class="btn" aria-label="Back to menu">← Menu</a>
+    </div>
+    <div>
+      <button class="btn" onclick="logout()">Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <h1>Lead Qualification</h1>
+    <p class="muted">Fill in the details and submit to /api/generate using your selected pack/template.</p>
+
+    <!-- YOUR TOOL UI GOES HERE -->
+    <!-- Example minimal form that posts to /api/generate -->
+    <div class="card" id="tool">
+      <label>Company *</label>
+      <input id="company" placeholder="Acme Networks Ltd"/>
+
+      <label>Industry *</label>
+      <input id="industry" placeholder="Managed Services / Cybersecurity"/>
+
+      <label>Website *</label>
+      <input id="website" placeholder="https://www.example.co.uk"/>
+
+      <label>Sources (comma or newline separated)</label>
+      <textarea id="sources" placeholder="Annual report URL, LinkedIn page, Press release URL"></textarea>
+
+      <div style="margin-top:12px; display:flex; gap:12px;">
+        <button class="btn" onclick="preview()">Preview Payload</button>
+        <button class="btn" onclick="send()">Send to /api/generate</button>
+      </div>
+
+      <h3 class="muted" style="margin-top:16px">Preview</h3>
+      <pre id="previewBox"></pre>
+
+      <h3 class="muted" style="margin-top:16px">API Response</h3>
+      <pre id="responseBox"></pre>
+    </div>
+  </main>
+
+  <script>
+    (async () => {
+      try {
+        const r = await fetch("/.auth/me", { credentials: "include" });
+        if (r.status === 401) {
+          const here = encodeURIComponent(location.pathname + location.search + location.hash || "/");
+          location.href = "/.auth/login/aad?post_login_redirect_uri=" + here;
+        }
+      } catch {}
+    })();
+
+    // Keep auth simple: rely on SWA routes; allow manual logout
+    async function logout(){ location.href='/.auth/logout'; }
+
+    function validate() {
+      const errs = [];
+      const c = document.getElementById('company').value.trim();
+      const i = document.getElementById('industry').value.trim();
+      const w = document.getElementById('website').value.trim();
+      if (!c) errs.push("Company is required");
+      if (!i) errs.push("Industry is required");
+      try { new URL(w); } catch { errs.push("Website must be a valid URL (https://…)"); }
+      if (errs.length) { alert(errs.join("\\n")); return null; }
+      return { company:c, industry:i, website:w };
+    }
+
+    function buildPayload() {
+      const v = validate();
+      if (!v) return null;
+      const srcRaw = document.getElementById('sources').value || "";
+      const src = srcRaw.split(/\n|,/).map(s => s.trim()).filter(Boolean);
+      return {
+        pack: "uk_b2b_sales_core",
+        template: "opportunity_qualification",
+        variables: {
+          company: v.company,
+          industry: v.industry,
+          website: v.website,
+          sources_raw: srcRaw,
+          sources: src
+        }
+      };
+    }
+
+    function preview() {
+      const payload = buildPayload();
+      if (!payload) return;
+      document.getElementById('previewBox').textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function send() {
+      const payload = buildPayload();
+      if (!payload) return;
+      const box = document.getElementById('responseBox');
+      box.textContent = "Sending…";
+      try {
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        box.textContent = await res.text();
+      } catch (e) {
+        box.textContent = "Request failed: " + (e?.message || String(e));
+      }
+    }
+  </script>
+</body>
+</html>
