@@ -1,4 +1,21 @@
 {
-  "navigationFallback": { "rewrite": "/index.html" }
+  "navigationFallback": { "rewrite": "/index.html" },
+  "routes": [
+    { "route": "/lead-qualification.html", "allowedRoles": ["authenticated"] },
+    { "route": "/intro-builder.html", "allowedRoles": ["authenticated"] },
+    { "route": "/email-gen.html", "allowedRoles": ["authenticated"] },
+    { "route": "/follow-up.html", "allowedRoles": ["authenticated"] },
+    { "route": "/competition.html", "allowedRoles": ["authenticated"] },
+    { "route": "/checklist.html", "allowedRoles": ["authenticated"] },
+    { "route": "/promptvariableassurer.html", "allowedRoles": ["authenticated"] }
+  ],
+  "responseOverrides": {
+    "401": {
+      "redirect": "/.auth/login/aad?post_login_redirect_uri={url}",
+      "statusCode": 302
+    },
+    "404": {
+      "rewrite": "/index.html"
+    }
+  }
 }
-{ "routes": [{ "route": "/promptvariableassurer", "rewrite": "/promptvariableassurer.html" }] }
