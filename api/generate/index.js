@@ -9,8 +9,9 @@ if (!principalHeader) {
   context.res = { status: 401, body: { error: "Not authenticated" } };
   return;
 }
-// Optional: parse principal, check email/domain/roles
-// const principal = JSON.parse(Buffer.from(principalHeader, "base64").toString("utf8"));
+
+const principalHeader = req.headers["x-ms-client-principal"];
+if (!principalHeader) { context.res = { status: 401, body: { error: "Not authenticated" } }; return; }
 
 // ---- Prompt packs (add more templates as you need) ----
 const packs = {
