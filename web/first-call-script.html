@@ -114,6 +114,7 @@
     <h2 style="margin-top:24px; font-size:16px;">Generated script</h2>
     <div class="actions" style="margin-bottom:8px;">
       <button type="button" id="copyBtn" aria-label="Copy script" disabled>Copy</button>
+      <button type="button" id="downloadBtn" aria-label="Download script" disabled>Download .txt</button>
       <span id="copyStatus" class="meta" aria-live="polite"></span>
     </div>
     <textarea id="scriptOutput" readonly placeholder="Your script will appear here after Generate…"></textarea>
@@ -165,6 +166,11 @@
       el.classList.add("ok");
     }
 
+    function updateDownloadState(enabled) {
+      document.getElementById("copyBtn").disabled = !enabled;
+      document.getElementById("downloadBtn").disabled = !enabled;
+    }
+
     document.addEventListener("DOMContentLoaded", async () => {
       const user = await requireAuth();
       setUserBadge(user);
@@ -174,6 +180,7 @@
       const resultEl = document.getElementById("result");
       const submitBtn = document.getElementById("submitBtn");
       const copyBtn = document.getElementById("copyBtn");
+      const downloadBtn = document.getElementById("downloadBtn");
       const copyStatus = document.getElementById("copyStatus");
       const resetBtn = document.getElementById("resetBtn");
       const scriptOutput = document.getElementById("scriptOutput");
@@ -191,11 +198,11 @@
         scriptOutput.value = "";
         scriptHelp.textContent = "";
         copyStatus.textContent = "";
-        copyBtn.disabled = true;
+        updateDownloadState(false);
         renderPayloadPreview(collectVariables(form));
       });
 
-      // Copy button — attach ONCE
+      // Copy button — attach once
       copyBtn.addEventListener("click", async () => {
         try {
           await navigator.clipboard.writeText(scriptOutput.value || "");
@@ -206,6 +213,15 @@
         }
       });
 
+      // Download button
+      downloadBtn.addEventListener("click", () => {
+        const blob = new Blob([scriptOutput.value || ""], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = Object.assign(document.createElement("a"), { href: url, download: "first-call-script.txt" });
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+
       // Submit handler
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -214,6 +230,7 @@
         scriptHelp.textContent = "";
         statusEl.textContent = "Submitting…";
         submitBtn.disabled = true;
+        updateDownloadState(false);
 
         const variables = collectVariables(form);
         renderPayloadPreview(variables);
@@ -233,7 +250,6 @@
           if (!res.ok) {
             statusEl.textContent = "Error";
             statusEl.classList.add("err");
-            copyBtn.disabled = true;
           } else {
             statusEl.textContent = "OK";
             statusEl.classList.remove("err");
@@ -242,24 +258,21 @@
 
           resultEl.textContent = JSON.stringify(json, null, 2);
 
-          // Only show generated text if API returns it (e.g., json.output/text/message)
-          const generated =
-            (json && (json.output || json.text || json.message)) ? (json.output || json.text || json.message) : "";
-
-          if (typeof generated === "string" && generated.trim()) {
-            scriptOutput.value = generated.trim();
-            copyBtn.disabled = false;
+          // Display only model output (server returns output; preview is debug only)
+          const generated = (json && typeof json.output === "string" && json.output.trim()) ? json.output.trim() : "";
+          if (generated) {
+            scriptOutput.value = generated;
+            updateDownloadState(true);
           } else {
             scriptOutput.value = "";
-            copyBtn.disabled = true;
-            // Helpful hint: current backend echoes a preview only
-            scriptHelp.textContent = "No generated text yet — API currently returns a preview of the compiled prompt.";
+            scriptHelp.textContent = "No generated text yet — API returned no model output.";
+            updateDownloadState(false);
           }
         } catch (err) {
           statusEl.textContent = "Request failed";
           statusEl.classList.add("err");
           resultEl.textContent = String(err);
-          copyBtn.disabled = true;
+          updateDownloadState(false);
         } finally {
           submitBtn.disabled = false;
         }
