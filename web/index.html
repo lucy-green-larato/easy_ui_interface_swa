@@ -67,33 +67,39 @@
   </footer>
 
   <script>
-    async function login(){ 
-      const here = encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
-      location.href='/.auth/login/aad?post_login_redirect_uri=/' + here; 
-    }
-    async function logout(){ location.href='/.auth/logout'; }
-    (async function init(){
-      try {
-        const res = await fetch('/.auth/me', { credentials: 'include' });
-        if (!res.ok) throw new Error('auth check failed');
-        const data = await res.json();
-        const princ = (data && data.clientPrincipal) || null;
-        const welcome = document.getElementById('welcome');
-        const dash = document.getElementById('dashboard');
-        const name = document.getElementById('userName');
-        const authButtons = document.getElementById('authButtons');
-        if (princ) {
-          welcome.classList.add('hide');
-          dash.classList.remove('hide');
-          name.textContent = princ.userDetails ? `, ${princ.userDetails}` : '';
-          authButtons.innerHTML = '<button class="btn" onclick="logout()">Sign out</button>';
-        } else {
-          welcome.classList.remove('hide');
-          dash.classList.add('hide');
-          authButtons.innerHTML = '<button class="btn" onclick="login()">Sign in</button>';
-        }
-      } catch {}
-    })();
-  </script>
+  function buildReturnTarget() {
+    const target = window.location.pathname + window.location.search + window.location.hash;
+    return encodeURIComponent(target || "/");
+  }
+
+  async function login(){
+    location.href = "/.auth/login/aad?post_login_redirect_uri=" + buildReturnTarget();
+  }
+
+  async function logout(){ location.href='/.auth/logout'; }
+
+  (async function init(){
+    try {
+      const res = await fetch('/.auth/me', { credentials: 'include' });
+      if (!res.ok) throw new Error('auth check failed');
+      const data = await res.json();
+      const princ = (data && data.clientPrincipal) || null;
+      const welcome = document.getElementById('welcome');
+      const dash = document.getElementById('dashboard');
+      const name = document.getElementById('userName');
+      const authButtons = document.getElementById('authButtons');
+      if (princ) {
+        welcome.classList.add('hide');
+        dash.classList.remove('hide');
+        name.textContent = princ.userDetails ? `, ${princ.userDetails}` : '';
+        authButtons.innerHTML = '<button class="btn" onclick="logout()">Sign out</button>';
+      } else {
+        welcome.classList.remove('hide');
+        dash.classList.add('hide');
+        authButtons.innerHTML = '<button class="btn" onclick="login()">Sign in</button>';
+      }
+    } catch {}
+  })();
+</script>
 </body>
 </html>
