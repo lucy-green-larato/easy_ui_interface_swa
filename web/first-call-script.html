@@ -117,6 +117,7 @@
       <span id="copyStatus" class="meta" aria-live="polite"></span>
     </div>
     <textarea id="scriptOutput" readonly placeholder="Your script will appear here after Generate…"></textarea>
+    <p id="scriptHelp" class="meta"></p>
 
     <h2 style="margin-top:24px; font-size:16px;">API response</h2>
     <pre id="result" data-testid="api-result" aria-live="polite"></pre>
@@ -176,6 +177,7 @@
       const copyStatus = document.getElementById("copyStatus");
       const resetBtn = document.getElementById("resetBtn");
       const scriptOutput = document.getElementById("scriptOutput");
+      const scriptHelp = document.getElementById("scriptHelp");
 
       // live preview
       form.addEventListener("input", () => renderPayloadPreview(collectVariables(form)));
@@ -187,6 +189,7 @@
         resultEl.textContent = "";
         statusEl.textContent = "";
         scriptOutput.value = "";
+        scriptHelp.textContent = "";
         copyStatus.textContent = "";
         copyBtn.disabled = true;
         renderPayloadPreview(collectVariables(form));
@@ -208,6 +211,7 @@
         e.preventDefault();
         resultEl.textContent = "";
         scriptOutput.value = "";
+        scriptHelp.textContent = "";
         statusEl.textContent = "Submitting…";
         submitBtn.disabled = true;
 
@@ -238,11 +242,18 @@
 
           resultEl.textContent = JSON.stringify(json, null, 2);
 
-          if (json && typeof json.prompt === "string") {
-            scriptOutput.value = json.prompt.trim();
-            copyBtn.disabled = scriptOutput.value.length === 0;
+          // Only show generated text if API returns it (e.g., json.output/text/message)
+          const generated =
+            (json && (json.output || json.text || json.message)) ? (json.output || json.text || json.message) : "";
+
+          if (typeof generated === "string" && generated.trim()) {
+            scriptOutput.value = generated.trim();
+            copyBtn.disabled = false;
           } else {
+            scriptOutput.value = "";
             copyBtn.disabled = true;
+            // Helpful hint: current backend echoes a preview only
+            scriptHelp.textContent = "No generated text yet — API currently returns a preview of the compiled prompt.";
           }
         } catch (err) {
           statusEl.textContent = "Request failed";
