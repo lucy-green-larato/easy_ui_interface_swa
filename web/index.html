@@ -67,7 +67,10 @@
   </footer>
 
   <script>
-    async function login(){ location.href='/.auth/login/aad?post_login_redirect_uri=/'; }
+    async function login(){ 
+      const here = encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
+      location.href='/.auth/login/aad?post_login_redirect_uri=/' + here; 
+    }
     async function logout(){ location.href='/.auth/logout'; }
     (async function init(){
       try {
