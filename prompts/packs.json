@@ -1,24 +1,6 @@
 {
   "uk_b2b_sales_core": {
     "templates": {
-      "first_call_script": {
-        "system": "You are a UK B2B technology sales assistant. Write concise, credible, British-English first-call scripts.",
-        "temperature": 0.3,
-        "prompt": "Write a short, personalised first-call opening script for UK B2B tech outreach.\nKeep it human, plain English, no hype, avoid US spellings.\nSeller: {seller_name} ({seller_company})\nProspect: {prospect_name}, {prospect_role} at {prospect_company}\nContext: {context}\nValue proposition: {value_proposition}\nCall to action (optional): {call_to_action}\nTone: {tone}. Length: {length}.\nReturn only the script text.",
-        "variables": [
-          "seller_name",
-          "seller_company",
-          "prospect_name",
-          "prospect_role",
-          "prospect_company",
-          "context",
-          "value_proposition",
-          "tone",
-          "length",
-          "call_to_action"
-        ]
-      },
-
       "first_call_script_v2": {
         "system": "You are an expert UK B2B technology salesperson following the Larato method. You sell directly and via channel partners. You write British-English, plain, credible, and empathetic first-call scripts that create value for the buyer. Your scripts follow a 6-step structure and adapt to buyer adoption behaviour (Innovators, Early Adopters, Early Majority, Late Majority, Sceptics).",
         "temperature": 0.35,
@@ -42,6 +24,3 @@
     }
   }
 }
-
-
-     
