@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Lead Qualification • SWA Sales Tools</title>
+  <title>Lead Qualification • Inside Track Sales Tools</title>
   <style>
     :root { --bg:#f8fafc; --card:#fff; --text:#0f172a; --muted:#64748b; --brand:#1e40af; }
     body { font-family: system-ui,"Segoe UI",Roboto,Arial,sans-serif; background:var(--bg); color:var(--text); margin:0 }
