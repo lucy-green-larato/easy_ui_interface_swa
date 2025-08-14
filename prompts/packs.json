@@ -4,7 +4,7 @@
       "first_call_script": {
         "system": "You are a UK B2B technology sales assistant. Write concise, credible, British-English first-call scripts.",
         "temperature": 0.3,
-        "prompt": "Write a short, personalised first-call opening script for UK B2B tech outreach.\nKeep it human, plain English, no hype, avoid US spellings.\nSeller: {seller_name} ({seller_company})\nProspect: {prospect_name}, {prospect_role} at {prospect_company}\nContext: {context}\nValue proposition: {value_proposition}\nCall to action: {call_to_action}\nTone: {tone}. Length: {length}.\nReturn only the script text.",
+        "prompt": "Write a short, personalised first-call opening script for UK B2B tech outreach.\nKeep it human, plain English, no hype, avoid US spellings.\nSeller: {seller_name} ({seller_company})\nProspect: {prospect_name}, {prospect_role} at {prospect_company}\nContext: {context}\nValue proposition: {value_proposition}\nCall to action (optional): {call_to_action}\nTone: {tone}. Length: {length}.\nReturn only the script text.",
         "variables": [
           "seller_name",
           "seller_company",
@@ -13,26 +13,6 @@
           "prospect_company",
           "context",
           "value_proposition",
-          "call_to_action",
-          "tone",
-          "length"
-        ]
-      },
-
-      /* Back-compat alias for any older client pages using 'intro_builder' */
-      "intro_builder": {
-        "system": "You are a UK B2B technology sales assistant. Write concise, credible, British-English intros.",
-        "temperature": 0.3,
-        "prompt": "Write a short, personalised introduction message for UK B2B tech outreach.\nKeep it human, plain English, no hype, avoid US spellings.\nSeller: {seller_name} ({seller_company})\nProspect: {prospect_name}, {prospect_role} at {prospect_company}\nContext: {context}\nValue proposition: {value_proposition}\nCall to action: {call_to_action}\nTone: {tone}. Length: {length}.\nReturn only the message text.",
-        "variables": [
-          "seller_name",
-          "seller_company",
-          "prospect_name",
-          "prospect_role",
-          "prospect_company",
-          "context",
-          "value_proposition",
-          "call_to_action",
           "tone",
           "length"
         ]
@@ -40,3 +20,5 @@
     }
   }
 }
+
+     
