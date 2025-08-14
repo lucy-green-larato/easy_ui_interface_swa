@@ -61,6 +61,16 @@
   </main>
 
   <script>
+    (async () => {
+      try {
+        const r = await fetch("/.auth/me", { credentials: "include" });
+        if (r.status === 401) {
+          const here = encodeURIComponent(location.pathname + location.search + location.hash || "/");
+          location.href = "/.auth/login/aad?post_login_redirect_uri=" + here;
+        }
+      } catch {}
+    })();
+
     // Keep auth simple: rely on SWA routes; allow manual logout
     async function logout(){ location.href='/.auth/logout'; }
 
