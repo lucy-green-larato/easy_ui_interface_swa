@@ -1,67 +1,92 @@
 // Minimal generate function for Azure Functions (JavaScript)
 // Validates body, resolves pack+template, compiles {{vars}}, returns payload
 
+const fs = require("fs");
+const path = require("path");
 const { z } = require("zod");
 
-// Require Azure SWA auth
-const principalHeader = req.headers["x-ms-client-principal"];
-if (!principalHeader) {
-  context.res = { status: 401, body: { error: "Not authenticated" } };
-  return;
+// ---- Load packs from /prompts/packs.json if present ----
+function loadJsonPacks() {
+  try {
+    const jsonPath = path.resolve(__dirname, "..", "..", "prompts", "packs.json");
+    if (fs.existsSync(jsonPath)) {
+      const raw = fs.readFileSync(jsonPath, "utf8");
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    // Non-fatal: we fall back to inline packs
+    console.warn("packs.json load failed:", e.message);
+  }
+  return null;
 }
 
-const principalHeader = req.headers["x-ms-client-principal"];
-if (!principalHeader) { context.res = { status: 401, body: { error: "Not authenticated" } }; return; }
-
-// ---- Prompt packs (add more templates as you need) ----
-const packs = {
+// ---- Inline fallback (kept minimal) ----
+const inlinePacks = {
   uk_b2b_sales_core: {
     default: {
       system:
         "You are a top-performing B2B sales professional focused on the UK technology sector. Use only provided evidence. List missing info.",
       temperature: 0.4,
     },
+    // Flat style string template (supported)
     opportunity_qualification:
       "Opportunity qualification framework.\n\nCompany: {{company}}\nIndustry: {{industry}}\nWebsite: {{website}}\nSources: {{sources}}\n\nOutput:\n- Company profile (employees, revenue, segment, GTM approach, performance, decision-makers, events, estimated event ROI)\n- Pain points (growth, M&A, performance trends, alignment to our offering)\n- Budget and spend potential\n- Decision-making process\n- Competition and differentiation\n- Channel/adoption readiness\n- Prioritisation score (0–100 with rationale)\n- Missing info list",
+    // Template-style object (also supported)
+    first_call_script: {
+      system:
+        "You are a UK B2B technology sales assistant. Write concise, credible, British-English first-call scripts.",
+      temperature: 0.3,
+      prompt:
+        "Write a short, personalised first-call opening script for UK B2B tech outreach.\nKeep it human, plain English, no hype, avoid US spellings.\nSeller: {seller_name} ({seller_company})\nProspect: {prospect_name}, {prospect_role} at {prospect_company}\nContext: {context}\nValue proposition: {value_proposition}\nCall to action: {call_to_action}\nTone: {tone}. Length: {length}.\nReturn only the script text.",
+      variables: [
+        "seller_name",
+        "seller_company",
+        "prospect_name",
+        "prospect_role",
+        "prospect_company",
+        "context",
+        "value_proposition",
+        "call_to_action",
+        "tone",
+        "length",
+      ],
+    },
   },
-
-  // OPTIONAL: keep/port your larato_core pack here if you still use it
-  // larato_core: { default: {...}, email_gen: "...", ... }
 };
 
-// ---- Simple {{token}} replacement ----
+// Prefer JSON packs; fallback to inline packs
+const packs = loadJsonPacks() || inlinePacks;
+
+// ---- Simple {{token}} replacement (also supports {token}) ----
 function compileTemplate(tpl, vars) {
-  return tpl.replace(/{{\s*([\w.]+)\s*}}/g, (_, key) => {
-    const v = vars[key];
-    if (Array.isArray(v)) return v.join(", ");
-    return v ?? "";
-  });
+  if (typeof tpl !== "string") return "";
+  // support both {{ token }} and {token}
+  return tpl
+    .replace(/{{\s*([\w.]+)\s*}}/g, (_, key) => {
+      const v = vars[key];
+      if (Array.isArray(v)) return v.join(", ");
+      return v ?? "";
+    })
+    .replace(/{\s*([\w.]+)\s*}/g, (_, key) => {
+      const v = vars[key];
+      if (Array.isArray(v)) return v.join(", ");
+      return v ?? "";
+    });
 }
 
-// ---- Request body schema ----
+// ---- Request body schema (generic variables) ----
 const BodySchema = z.object({
   pack: z.string().min(1),
   template: z.string().min(1),
-  variables: z
-    .object({
-      company: z.string().min(1, "company is required"),
-      industry: z.string().min(1, "industry is required"),
-      website: z
-        .string()
-        .min(1, "website is required")
-        .url("website must be a valid URL (https://…)"),
-      sources_raw: z.string().optional(),
-      sources: z.array(z.string()).optional(),
-    })
-    .passthrough(), // allow extra fields for other templates (email_gen, etc.)
+  variables: z.record(z.any()).default({}),
 });
 
 module.exports = async function (context, req) {
-  // --- Basic CORS (adjust origin if you need to lock it down) ---
+  // --- Basic CORS (adjust origin if you want to lock it down) ---
   const cors = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-ms-client-principal",
   };
 
   // Preflight
@@ -70,67 +95,4 @@ module.exports = async function (context, req) {
     return;
   }
 
-  // Enforce POST even if function.json allows GET
-  if (req.method !== "POST") {
-    context.res = {
-      status: 405,
-      headers: cors,
-      body: { error: "Method Not Allowed. Use POST." },
-    };
-    return;
-  }
-
-  try {
-    const parsed = BodySchema.safeParse(req.body);
-    if (!parsed.success) {
-      context.res = {
-        status: 400,
-        headers: cors,
-        body: { error: "Invalid request body", details: parsed.error.flatten() },
-      };
-      return;
-    }
-
-    const { pack, template, variables } = parsed.data;
-    const packDef = packs[pack];
-    if (!packDef) {
-      context.res = { status: 400, headers: cors, body: { error: `Unknown pack '${pack}'` } };
-      return;
-    }
-    const sys = (packDef.default && packDef.default.system) || "";
-    const temp = packDef[template];
-    if (!temp) {
-      context.res = {
-        status: 400,
-        headers: cors,
-        body: { error: `Unknown template '${template}' in pack '${pack}'` },
-      };
-      return;
-    }
-
-    const compiledPrompt = compileTemplate(temp, variables);
-
-    // TODO: call your LLM here instead of echoing the prompt
-    // const llmResponse = await callModel({ system: sys, prompt: compiledPrompt, temperature: packDef.default?.temperature ?? 0.4 });
-
-    context.res = {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...cors },
-      body: {
-        system: sys,
-        temperature: (packDef.default && packDef.default.temperature) || 0.4,
-        prompt: compiledPrompt,
-        variables,
-        pack,
-        template,
-      },
-    };
-  } catch (err) {
-    context.log.error("generate error", err);
-    context.res = {
-      status: 500,
-      headers: cors,
-      body: { error: "Server error", detail: String(err?.message ?? err) },
-    };
-  }
-};
+  // Enforce POST even if function.json allows
