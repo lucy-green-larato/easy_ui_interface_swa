@@ -1,3 +1,4 @@
 {
   "navigationFallback": { "rewrite": "/index.html" }
 }
+{ "routes": [{ "route": "/promptvariableassurer", "rewrite": "/promptvariableassurer.html" }] }
