@@ -1,5 +1,5 @@
 // Minimal generate function for Azure Functions (JavaScript)
-// Validates body, resolves pack+template, compiles {{vars}} / {vars}, returns payload (+ optional GPT output)
+// Validates body, resolves pack+template, compiles {{vars}} / {vars}, returns payload (+ GPT output)
 
 const fs = require("fs");
 const path = require("path");
@@ -27,17 +27,15 @@ const inlinePacks = {
         "You are a top-performing B2B sales professional focused on the UK technology sector. Use only provided evidence. List missing info.",
       temperature: 0.4,
     },
-    // Flat style string template (supported)
     opportunity_qualification:
       "Opportunity qualification framework.\n\nCompany: {{company}}\nIndustry: {{industry}}\nWebsite: {{website}}\nSources: {{sources}}\n\nOutput:\n- Company profile (employees, revenue, segment, GTM approach, performance, decision-makers, events, estimated event ROI)\n- Pain points (growth, M&A, performance trends, alignment to our offering)\n- Budget and spend potential\n- Decision-making process\n- Competition and differentiation\n- Channel/adoption readiness\n- Prioritisation score (0–100 with rationale)\n- Missing info list",
-    // Object style template (supported)
     first_call_script: {
       system:
         "You are a UK B2B technology sales assistant. Write concise, credible, British-English first-call scripts.",
       temperature: 0.3,
       prompt:
         "Write a short, personalised first-call opening script for UK B2B tech outreach.\nKeep it human, plain English, no hype, avoid US spellings.\nSeller: {seller_name} ({seller_company})\nProspect: {prospect_name}, {prospect_role} at {prospect_company}\nContext: {context}\nValue proposition: {value_proposition}\nCall to action (optional): {call_to_action}\nTone: {tone}. Length: {length}.\nReturn only the script text.",
-      // NOTE: call_to_action removed from required variables (Fix A)
+      // NOTE: call_to_action intentionally NOT required
       variables: [
         "seller_name",
         "seller_company",
@@ -90,6 +88,57 @@ function extractText(res) {
   const nested = res.data?.choices?.[0]?.message?.content;
   if (nested) return String(nested);
   return "";
+}
+
+// ---- Built-in model caller: Azure OpenAI OR OpenAI (env-driven, no extra deps) ----
+async function callModel({ system, prompt, temperature }) {
+  // Azure OpenAI
+  const azEndpoint   = process.env.AZURE_OPENAI_ENDPOINT;        // e.g. https://myres.openai.azure.com
+  const azKey        = process.env.AZURE_OPENAI_API_KEY;
+  const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;      // your chat model deployment name
+  const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-02-15-preview";
+
+  if (azEndpoint && azKey && azDeployment) {
+    const url = `${azEndpoint.replace(/\/+$/, "")}/openai/deployments/${encodeURIComponent(azDeployment)}/chat/completions?api-version=${encodeURIComponent(azApiVersion)}`;
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "api-key": azKey },
+      body: JSON.stringify({
+        temperature,
+        messages: [
+          ...(system ? [{ role: "system", content: system }] : []),
+          { role: "user", content: prompt }
+        ]
+      })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.error?.message || r.statusText);
+    return data;
+  }
+
+  // OpenAI
+  const oaKey   = process.env.OPENAI_API_KEY;
+  const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  if (oaKey) {
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${oaKey}` },
+      body: JSON.stringify({
+        model: oaModel,
+        temperature,
+        messages: [
+          ...(system ? [{ role: "system", content: system }] : []),
+          { role: "user", content: prompt }
+        ]
+      })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.error?.message || r.statusText);
+    return data;
+  }
+
+  // No model configured
+  return null;
 }
 
 // ---- Request body schema (generic variables) ----
@@ -167,22 +216,18 @@ module.exports = async function (context, req) {
     }
 
     // Determine system/temperature/prompt (template overrides default when present)
-    const defaultSys = packDef.default?.system ?? "";
-    theTemp = packDef.default?.temperature ?? 0.4; // We'll define properly below to avoid accidental shadowing.
+    const defaultSys  = packDef.default?.system ?? "";
+    const defaultTemp = packDef.default?.temperature ?? 0.4;
 
     const tplSystem = typeof tplDef === "object" && tplDef.system != null ? String(tplDef.system) : null;
     const tplTemp   = typeof tplDef === "object" && tplDef.temperature != null ? Number(tplDef.temperature) : null;
 
-    const system = tplSystem ?? defaultSys;
-    const temperature = tplTemp ?? (packDef.default?.temperature ?? 0.4);
+    const system      = tplSystem ?? defaultSys;
+    const temperature = tplTemp ?? defaultTemp;
 
     const templateString = typeof tplDef === "string" ? tplDef : String(tplDef.prompt || "");
     if (!templateString) {
-      context.res = {
-        status: 400,
-        headers: cors,
-        body: { error: `Template '${template}' in pack '${pack}' has no prompt` },
-      };
+      context.res = { status: 400, headers: cors, body: { error: `Template '${template}' in pack '${pack}' has no prompt` } };
       return;
     }
 
@@ -200,15 +245,12 @@ module.exports = async function (context, req) {
     // Compile prompt
     const compiledPrompt = compileTemplate(templateString, variables);
 
-    // ---- Call your GPT wiring (optional hook) ----
-    // If you've defined a global `callModel({system, prompt, temperature, pack, template, variables})`,
-    // we'll use it. Otherwise, we return `output: ""` and include `preview` for debugging only.
+    // ---- Call GPT ----
     let llmText = "";
     try {
-      if (typeof callModel === "function") {
-        const llmRes = await callModel({ system, prompt: compiledPrompt, temperature, pack, template, variables });
-        llmText = extractText(llmRes) || "";
-      }
+      const llmRes = await callModel({ system, prompt: compiledPrompt, temperature });
+      llmText = extractText(llmRes) || "";
+      if (!llmText) context.log.warn("Model returned empty text");
     } catch (e) {
       context.log.warn("callModel failed: " + (e?.message || e));
     }
