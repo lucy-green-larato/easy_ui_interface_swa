@@ -36,7 +36,8 @@ const inlinePacks = {
         "You are a UK B2B technology sales assistant. Write concise, credible, British-English first-call scripts.",
       temperature: 0.3,
       prompt:
-        "Write a short, personalised first-call opening script for UK B2B tech outreach.\nKeep it human, plain English, no hype, avoid US spellings.\nSeller: {seller_name} ({seller_company})\nProspect: {prospect_name}, {prospect_role} at {prospect_company}\nContext: {context}\nValue proposition: {value_proposition}\nCall to action: {call_to_action}\nTone: {tone}. Length: {length}.\nReturn only the script text.",
+        "Write a short, personalised first-call opening script for UK B2B tech outreach.\nKeep it human, plain English, no hype, avoid US spellings.\nSeller: {seller_name} ({seller_company})\nProspect: {prospect_name}, {prospect_role} at {prospect_company}\nContext: {context}\nValue proposition: {value_proposition}\nCall to action (optional): {call_to_action}\nTone: {tone}. Length: {length}.\nReturn only the script text.",
+      // NOTE: call_to_action removed from required variables (Fix A)
       variables: [
         "seller_name",
         "seller_company",
@@ -45,7 +46,6 @@ const inlinePacks = {
         "prospect_company",
         "context",
         "value_proposition",
-        "call_to_action",
         "tone",
         "length",
       ],
@@ -168,13 +168,13 @@ module.exports = async function (context, req) {
 
     // Determine system/temperature/prompt (template overrides default when present)
     const defaultSys = packDef.default?.system ?? "";
-    const defaultTemp = packDef.default?.temperature ?? 0.4;
+    theTemp = packDef.default?.temperature ?? 0.4; // We'll define properly below to avoid accidental shadowing.
 
     const tplSystem = typeof tplDef === "object" && tplDef.system != null ? String(tplDef.system) : null;
     const tplTemp   = typeof tplDef === "object" && tplDef.temperature != null ? Number(tplDef.temperature) : null;
 
     const system = tplSystem ?? defaultSys;
-    const temperature = tplTemp ?? defaultTemp;
+    const temperature = tplTemp ?? (packDef.default?.temperature ?? 0.4);
 
     const templateString = typeof tplDef === "string" ? tplDef : String(tplDef.prompt || "");
     if (!templateString) {
@@ -186,8 +186,9 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // Validate required variables (best-effort)
-    const required = requiredVarsForTemplate(tplDef);
+    // Validate required variables (Fix A: make some optional even if present in template)
+    const OPTIONAL_VARS = new Set(["call_to_action"]);
+    const required = requiredVarsForTemplate(tplDef).filter((k) => !OPTIONAL_VARS.has(k));
     const missing = required.filter(
       (k) => !(k in variables) || variables[k] == null || String(variables[k]).trim() === ""
     );
@@ -201,7 +202,7 @@ module.exports = async function (context, req) {
 
     // ---- Call your GPT wiring (optional hook) ----
     // If you've defined a global `callModel({system, prompt, temperature, pack, template, variables})`,
-    // we'll use it. Otherwise, we return output as a fallback to the compiled prompt.
+    // we'll use it. Otherwise, we return `output: ""` and include `preview` for debugging only.
     let llmText = "";
     try {
       if (typeof callModel === "function") {
@@ -218,11 +219,11 @@ module.exports = async function (context, req) {
       body: {
         system,
         temperature,
-        prompt: compiledPrompt,   // useful for debugging / preview
+        preview: compiledPrompt,   // compiled prompt for debugging/inspection
         variables,
         pack,
         template,
-        output: llmText || compiledPrompt // UI reads this; falls back if model text missing
+        output: llmText || ""      // ONLY model text; never the compiled prompt
       },
     };
   } catch (err) {
