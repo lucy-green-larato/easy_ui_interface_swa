@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>First Call Script · Inside Track Tools</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; }
+    header { padding: 16px; border-bottom: 1px solid #eee; display:flex; align-items:center; gap:12px; }
+    header a { text-decoration: none; }
+    main { max-width: 960px; margin: 0 auto; padding: 16px; }
+    form { display: grid; gap: 12px; }
+    label { font-weight: 600; }
+    input, textarea, select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+    textarea { min-height: 100px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .actions { display: flex; gap: 12px; align-items: center; }
+    button { padding: 10px 14px; border-radius: 6px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+    button.primary { background: #111; color: #fff; border-color: #111; }
+    .meta { color: #666; font-size: 13px; }
+    pre { background: #f7f7f7; padding: 12px; border-radius: 6px; overflow: auto; }
+    details { border: 1px solid #eee; border-radius: 6px; padding: 8px 12px; }
+    .ok { color: #0a7f2e; }
+    .err { color: #b00020; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/" aria-label="Home">⬅︎ Home</a>
+    <h1 style="margin:0; font-size:18px;">First Call Script</h1>
+    <span id="userBadge" class="meta" style="margin-left:auto;"></span>
+  </header>
+
+  <main>
+    <p class="meta">Generate a concise, UK-style first call script for B2B technology outreach using the Larato 6-step structure.</p>
+
+    <form id="tool-form" data-testid="first-call-form" autocomplete="off">
+      <div class="row">
+        <div>
+          <label for="seller_name">Your name</label>
+          <input id="seller_name" name="seller_name" required placeholder="e.g., Lucy Green" />
+        </div>
+        <div>
+          <label for="seller_company">Your company</label>
+          <input id="seller_company" name="seller_company" required placeholder="e.g., Larato" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="prospect_name">Prospect name</label>
+          <input id="prospect_name" name="prospect_name" required placeholder="e.g., Alex Carter" />
+        </div>
+        <div>
+          <label for="prospect_role">Prospect role</label>
+          <input id="prospect_role" name="prospect_role" required placeholder="e.g., IT Director" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="prospect_company">Prospect company</label>
+          <input id="prospect_company" name="prospect_company" required placeholder="e.g., Acme PLC" />
+        </div>
+        <div>
+          <label for="tone">Tone</label>
+          <select id="tone" name="tone">
+            <option value="Professional">Professional</option>
+            <option value="Warm">Warm</option>
+            <option value="Challenger">Challenger</option>
+            <option value="Friendly">Friendly</option>
+            <option value="Technical">Technical</option>
+            <option value="Consultative">Consultative</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- NEW: Call type + Product/Service -->
+      <div class="row">
+        <div>
+          <label for="call_type">Call type</label>
+          <select id="call_type" name="call_type">
+            <option value="Direct">Direct</option>
+            <option value="Partner">Partner</option>
+          </select>
+        </div>
+        <div>
+          <label for="product">Product / service</label>
+          <select id="product" name="product">
+            <option>Mobile and fixed connectivity</option>
+            <option>Cybersecurity</option>
+            <option>Artificial Intelligence</option>
+            <option>Hardware and software</option>
+            <option>IT Solutions</option>
+            <option>Microsoft solutions</option>
+            <option>Telecommunications solutions</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- NEW: Buyer type -->
+      <div class="row">
+        <div>
+          <label for="buyer_type">Buyer type (paste exact label from Inside Track)</label>
+          <select id="buyer_type" name="buyer_type">
+            <option>Innovator</option>
+            <option>Early Adopter</option>
+            <option>Early Majority</option>
+            <option>Late Majority</option>
+            <option>Sceptic</option>
+          </select>
+        </div>
+        <div>
+          <label for="length">Approx length</label>
+          <select id="length" name="length">
+            <option value="~100 words">~100 words</option>
+            <option value="~150 words" selected>~150 words</option>
+            <option value="~200 words">~200 words</option>
+            <option value="~250 words">~250 words</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="call_to_action">Call to action</label>
+          <input id="call_to_action" name="call_to_action" placeholder="e.g., 45-minute audit next week?" />
+        </div>
+        <div>
+          <!-- Spacer to keep grid tidy -->
+        </div>
+      </div>
+
+      <div>
+        <label for="context">Context (why you, why now)</label>
+        <textarea id="context" name="context" placeholder="e.g., Observed cloud costs rising while ticket resolution times increasing; recent merger adds complexity."></textarea>
+      </div>
+
+      <div>
+        <label for="value_proposition">Value proposition</label>
+        <textarea id="value_proposition" name="value_proposition" placeholder="e.g., We help UK MSPs cut CX costs 20–30% while lifting NPS via AI-assisted triage and knowledge surfacing."></textarea>
+      </div>
+
+      <details>
+        <summary>Preview request payload</summary>
+        <pre id="payloadPreview" data-testid="payload-preview"></pre>
+      </details>
+
+      <div class="actions">
+        <button type="submit" class="primary" id="submitBtn" data-testid="submit-btn">Generate</button>
+        <button type="button" id="resetBtn">Reset</button>
+        <span id="status" class="meta" aria-live="polite"></span>
+      </div>
+    </form>
+
+    <h2 style="margin-top:24px; font-size:16px;">Generated script</h2>
+    <div class="actions" style="margin-bottom:8px;">
+      <button type="button" id="copyBtn" aria-label="Copy script" disabled>Copy</button>
+      <button type="button" id="downloadBtn" aria-label="Download script" disabled>Download .txt</button>
+      <span id="copyStatus" class="meta" aria-live="polite"></span>
+    </div>
+    <textarea id="scriptOutput" readonly placeholder="Your script will appear here after Generate…"></textarea>
+    <p id="scriptHelp" class="meta"></p>
+
+    <h2 style="margin-top:24px; font-size:16px;">API response</h2>
+    <pre id="result" data-testid="api-result" aria-live="polite"></pre>
+  </main>
+
+  <script>
+    const PACK = "uk_b2b_sales_core";
+    const TEMPLATE = "first_call_script_v2";
+
+    async function requireAuth() {
+      try {
+        const res = await fetch("/.auth/me", { credentials: "include", cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        const user = data && data.clientPrincipal ? data.clientPrincipal : null;
+        if (!user) {
+          const redirect = "/.auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.href);
+          window.location.replace(redirect);
+          throw new Error("Redirecting to login");
+        }
+        return user;
+      } catch (e) {
+        const redirect = "/.auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.href);
+        window.location.replace(redirect);
+        throw e;
+      }
+    }
+
+    function collectVariables(form) {
+      const fd = new FormData(form);
+      const vars = {};
+      for (const [k, v] of fd.entries()) vars[k] = v;
+      return vars;
+    }
+
+    function renderPayloadPreview(vars) {
+      const preview = { pack: PACK, template: TEMPLATE, variables: vars };
+      document.getElementById("payloadPreview").textContent = JSON.stringify(preview, null, 2);
+    }
+
+    function setUserBadge(user) {
+      const el = document.getElementById("userBadge");
+      if (!user) return;
+      const name = user.userDetails || user.userId || "signed in";
+      el.textContent = `Signed in as ${name}`;
+      el.classList.add("ok");
+    }
+
+    function updateDownloadState(enabled) {
+      document.getElementById("copyBtn").disabled = !enabled;
+      document.getElementById("downloadBtn").disabled = !enabled;
+    }
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      const user = await requireAuth();
+      setUserBadge(user);
+
+      const form = document.getElementById("tool-form");
+      const statusEl = document.getElementById("status");
+      const resultEl = document.getElementById("result");
+      const submitBtn = document.getElementById("submitBtn");
+      const copyBtn = document.getElementById("copyBtn");
+      const downloadBtn = document.getElementById("downloadBtn");
+      const copyStatus = document.getElementById("copyStatus");
+      const resetBtn = document.getElementById("resetBtn");
+      const scriptOutput = document.getElementById("scriptOutput");
+      const scriptHelp = document.getElementById("scriptHelp");
+
+      // live preview
+      form.addEventListener("input", () => renderPayloadPreview(collectVariables(form)));
+      renderPayloadPreview(collectVariables(form));
+
+      // reset clears everything
+      resetBtn.addEventListener("click", () => {
+        form.reset();
+        resultEl.textContent = "";
+        statusEl.textContent = "";
+        scriptOutput.value = "";
+        scriptHelp.textContent = "";
+        copyStatus.textContent = "";
+        updateDownloadState(false);
+        renderPayloadPreview(collectVariables(form));
+      });
+
+      // Copy button — attach once
+      copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(scriptOutput.value || "");
+          copyStatus.textContent = "Copied";
+          setTimeout(() => (copyStatus.textContent = ""), 1500);
+        } catch {
+          copyStatus.textContent = "Copy failed";
+        }
+      });
+
+      // Download button
+      downloadBtn.addEventListener("click", () => {
+        const blob = new Blob([scriptOutput.value || ""], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = Object.assign(document.createElement("a"), { href: url, download: "first-call-script.txt" });
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+
+      // Submit handler
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        resultEl.textContent = "";
+        scriptOutput.value = "";
+        scriptHelp.textContent = "";
+        statusEl.textContent = "Submitting…";
+        submitBtn.disabled = true;
+        updateDownloadState(false);
+
+        const variables = collectVariables(form);
+        renderPayloadPreview(variables);
+
+        try {
+          const res = await fetch("/api/generate", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pack: PACK, template: TEMPLATE, variables })
+          });
+
+          const text = await res.text();
+          let json;
+          try { json = JSON.parse(text); } catch { json = { raw: text }; }
+
+          if (!res.ok) {
+            statusEl.textContent = "Error";
+            statusEl.classList.add("err");
+          } else {
+            statusEl.textContent = "OK";
+            statusEl.classList.remove("err");
+            statusEl.classList.add("ok");
+          }
+
+          resultEl.textContent = JSON.stringify(json, null, 2);
+
+          // Display only model output (server returns output; preview is debug only)
+          const generated = (json && typeof json.output === "string" && json.output.trim()) ? json.output.trim() : "";
+          if (generated) {
+            scriptOutput.value = generated;
+            updateDownloadState(true);
+          } else {
+            scriptOutput.value = "";
+            scriptHelp.textContent = "No generated text yet — API returned no model output.";
+            updateDownloadState(false);
+          }
+        } catch (err) {
+          statusEl.textContent = "Request failed";
+          statusEl.classList.add("err");
+          resultEl.textContent = String(err);
+          updateDownloadState(false);
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
+    });
+  </script>
+</body>
+</html>
