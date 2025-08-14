@@ -35,7 +35,7 @@
   <main>
     <p class="meta">Generate a concise, UK-style first call script for B2B technology outreach.</p>
 
-    <form id="tool-form" data-testid="first-call-form">
+    <form id="tool-form" data-testid="first-call-form" autocomplete="off">
       <div class="row">
         <div>
           <label for="seller_name">Your name</label>
@@ -111,13 +111,20 @@
       </div>
     </form>
 
+    <h2 style="margin-top:24px; font-size:16px;">Generated script</h2>
+    <div class="actions" style="margin-bottom:8px;">
+      <button type="button" id="copyBtn" aria-label="Copy script" disabled>Copy</button>
+      <span id="copyStatus" class="meta" aria-live="polite"></span>
+    </div>
+    <textarea id="scriptOutput" readonly placeholder="Your script will appear here after Generate…"></textarea>
+
     <h2 style="margin-top:24px; font-size:16px;">API response</h2>
     <pre id="result" data-testid="api-result" aria-live="polite"></pre>
   </main>
 
   <script>
     const PACK = "uk_b2b_sales_core";
-    const TEMPLATE = "first_call_script"; // renamed template
+    const TEMPLATE = "first_call_script";
 
     async function requireAuth() {
       try {
@@ -165,21 +172,42 @@
       const statusEl = document.getElementById("status");
       const resultEl = document.getElementById("result");
       const submitBtn = document.getElementById("submitBtn");
+      const copyBtn = document.getElementById("copyBtn");
+      const copyStatus = document.getElementById("copyStatus");
       const resetBtn = document.getElementById("resetBtn");
+      const scriptOutput = document.getElementById("scriptOutput");
 
+      // live preview
       form.addEventListener("input", () => renderPayloadPreview(collectVariables(form)));
       renderPayloadPreview(collectVariables(form));
 
+      // reset clears everything
       resetBtn.addEventListener("click", () => {
         form.reset();
         resultEl.textContent = "";
         statusEl.textContent = "";
+        scriptOutput.value = "";
+        copyStatus.textContent = "";
+        copyBtn.disabled = true;
         renderPayloadPreview(collectVariables(form));
       });
 
+      // Copy button — attach ONCE
+      copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(scriptOutput.value || "");
+          copyStatus.textContent = "Copied";
+          setTimeout(() => (copyStatus.textContent = ""), 1500);
+        } catch {
+          copyStatus.textContent = "Copy failed";
+        }
+      });
+
+      // Submit handler
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
         resultEl.textContent = "";
+        scriptOutput.value = "";
         statusEl.textContent = "Submitting…";
         submitBtn.disabled = true;
 
@@ -201,16 +229,26 @@
           if (!res.ok) {
             statusEl.textContent = "Error";
             statusEl.classList.add("err");
+            copyBtn.disabled = true;
           } else {
             statusEl.textContent = "OK";
             statusEl.classList.remove("err");
             statusEl.classList.add("ok");
           }
+
           resultEl.textContent = JSON.stringify(json, null, 2);
+
+          if (json && typeof json.prompt === "string") {
+            scriptOutput.value = json.prompt.trim();
+            copyBtn.disabled = scriptOutput.value.length === 0;
+          } else {
+            copyBtn.disabled = true;
+          }
         } catch (err) {
           statusEl.textContent = "Request failed";
           statusEl.classList.add("err");
           resultEl.textContent = String(err);
+          copyBtn.disabled = true;
         } finally {
           submitBtn.disabled = false;
         }
