@@ -6,13 +6,15 @@
   <title>Inside Track Tools · First Call Script (v2)</title>
   <link rel="stylesheet" href="./styles.css" />
   <style>
-    /* Small, page-scoped helpers (rest lives in styles.css) */
+    /* Page-scoped helpers (small; most styles live in styles.css) */
     .visually-hidden{position:absolute!important;height:1px;width:1px;overflow:hidden;clip:rect(1px,1px,1px,1px);white-space:nowrap;border:0;padding:0;margin:-1px;}
     .badge{display:inline-flex;gap:.5rem;align-items:center;padding:.25rem .5rem;border-radius:999px;background:var(--surface-2);font-size:.875rem}
     .kicker{font-size:.875rem;color:var(--text-2);margin-top:.125rem}
     details.diag summary{cursor:pointer}
-    .remember-row{display:flex;align-items:center;gap:.5rem;margin-top:.25rem}
-    .note{color:var(--text-2);font-size:.9rem}
+    .compact-controls{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin: .25rem 0 var(--space-3);}
+    .compact-controls .note{color:var(--text-2);font-size:.9rem}
+    .compact-controls select{min-width: 160px; padding:6px 10px;}
+    .remember-row{display:flex;align-items:center;gap:.5rem}
   </style>
 </head>
 <body>
@@ -20,10 +22,27 @@
 
   <header class="app-header" role="banner">
     <div class="brand">
-      <h1 class="title">Inside Track Tools</h1>
-      <p class="kicker">First Call Script · v2</p>
+      <img class="logo" src="./larato-logo.svg" alt="Larato" />
+      <div class="brand-text">
+        <h1 class="title">Inside Track Tools</h1>
+        <p class="kicker">First Call Script · v2</p>
+      </div>
     </div>
-    <div class="signed-in">
+    <div class="header-right">
+      <!-- Discrete Call type selector lives in header but remains inside the form via 'form' attribute -->
+      <div class="calltype-mini">
+        <label for="call_type" class="mini-label">Call type</label>
+        <select id="call_type" name="call_type" form="script-form" required>
+          <option value="">Select…</option>
+          <option>Direct</option>
+          <option>Partner</option>
+        </select>
+        <label class="remember">
+          <input type="checkbox" id="remember_call_type" form="script-form" />
+          Remember
+        </label>
+      </div>
+
       <span id="user-badge" class="badge" aria-live="polite" aria-atomic="true">
         <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path></svg>
         <span>Loading user…</span>
@@ -33,51 +52,35 @@
 
   <main id="main" class="layout" role="main">
     <!-- LEFT: form + actions -->
-    <section class="panel left" aria-labelledby="form-title">
-      <h2 id="form-title">Script Inputs</h2>
+    <section class="panel left" aria-label="Form">
+      <!-- removed “Script Inputs” heading as requested -->
 
       <form id="script-form" novalidate>
-        <!-- NEW Card: Call type (with remember option) -->
-        <fieldset class="card" aria-describedby="map-indicator">
-          <legend>Call type</legend>
-          <div class="field">
-            <label for="call_type">Is this a direct sales call or via a partner? <span aria-hidden="true" class="req">*</span></label>
-            <select id="call_type" name="call_type" required>
-              <option value="">Select…</option>
-              <option>Direct</option>
-              <option>Partner</option>
-            </select>
-            <p class="error" id="call_type_error" role="alert" aria-live="polite"></p>
-            <div class="remember-row">
-              <input type="checkbox" id="remember_call_type" />
-              <label for="remember_call_type" class="note">Remember this for future sessions</label>
-            </div>
-            <p id="map-indicator" class="note">Default script map: <strong id="map-label">Not set</strong></p>
-          </div>
-        </fieldset>
+        <!-- Very compact helper row under the header: shows which script map will be used -->
+        <div class="compact-controls" aria-live="polite">
+          <span class="note">Default script map: <strong id="map-label">Not set</strong></span>
+          <span id="call_type_error" class="error" role="alert" aria-live="polite"></span>
+        </div>
 
-        <!-- Card: Caller -->
+        <!-- Card: Call details (merged + renamed) -->
         <fieldset class="card">
-          <legend>Caller details</legend>
-          <div class="field">
-            <label for="seller_name">Your name <span aria-hidden="true" class="req">*</span></label>
-            <input id="seller_name" name="seller_name" required autocomplete="name" />
-            <p class="help">Introduce yourself clearly at the start of the call.</p>
-            <p class="error" id="seller_name_error" role="alert" aria-live="polite"></p>
-          </div>
+          <legend>Call details</legend>
 
-          <div class="field">
-            <label for="seller_company">Your company <span aria-hidden="true" class="req">*</span></label>
-            <input id="seller_company" name="seller_company" required autocomplete="organization" />
-            <p class="help">Shown in the opening line and value statement.</p>
-            <p class="error" id="seller_company_error" role="alert" aria-live="polite"></p>
-          </div>
-        </fieldset>
-
-        <!-- Card: Prospect -->
-        <fieldset class="card">
-          <legend>Prospect details</legend>
           <div class="grid-2">
+            <div class="field">
+              <label for="seller_name">Your name <span aria-hidden="true" class="req">*</span></label>
+              <input id="seller_name" name="seller_name" required autocomplete="name" />
+              <p class="help">Shown in the opening line.</p>
+              <p class="error" id="seller_name_error" role="alert" aria-live="polite"></p>
+            </div>
+
+            <div class="field">
+              <label for="seller_company">Your company <span aria-hidden="true" class="req">*</span></label>
+              <input id="seller_company" name="seller_company" required autocomplete="organization" />
+              <p class="help">Organisation you represent.</p>
+              <p class="error" id="seller_company_error" role="alert" aria-live="polite"></p>
+            </div>
+
             <div class="field">
               <label for="prospect_name">Prospect name <span aria-hidden="true" class="req">*</span></label>
               <input id="prospect_name" name="prospect_name" required />
@@ -111,7 +114,7 @@
               <p class="error" id="product_error" role="alert" aria-live="polite"></p>
             </div>
 
-            <!-- CHANGED: Buyer type → Buyer behaviour -->
+            <!-- Buyer behaviour dropdown (renamed from Buyer type) -->
             <div class="field">
               <label for="buyer_behaviour">Buyer behaviour <span aria-hidden="true" class="req">*</span></label>
               <select id="buyer_behaviour" name="buyer_behaviour" required>
@@ -128,39 +131,39 @@
           </div>
         </fieldset>
 
-        <!-- Card: Script Preferences -->
+        <!-- Card: Script preferences -->
         <fieldset class="card">
           <legend>Script preferences</legend>
           <div class="grid-2">
             <div class="field">
               <label for="tone">Tone</label>
-              <input id="tone" name="tone" placeholder="Professional, warm, concise" />
-              <p class="help">Optional guidance for tone of voice.</p>
+              <select id="tone" name="tone">
+                <option value="">(No preference)</option>
+                <option>Professional (corporate)</option>
+                <option>Warm (relaxed)</option>
+              </select>
+              <p class="help">Optional style guidance.</p>
             </div>
 
             <div class="field">
               <label for="length">Length</label>
               <select id="length" name="length">
-                <option>~100 words</option>
-                <option>~50 words</option>
-                <option>~150 words</option>
+                <option>~50 words (≈30–45 sec)</option>
+                <option selected>~100 words (≈1 min)</option>
+                <option>~150 words (≈1.5–2 min)</option>
               </select>
+              <p class="help">Approximate spoken duration is shown.</p>
             </div>
           </div>
 
           <div class="field">
-            <label for="value_proposition">Value proposition</label>
-            <textarea id="value_proposition" name="value_proposition" rows="2" placeholder="Your one-liner value statement"></textarea>
+            <label for="value_proposition">Unique Selling Points (optional)</label>
+            <textarea id="value_proposition" name="value_proposition" rows="2" placeholder="Your USPs. Leave blank if you prefer the model to infer."></textarea>
           </div>
 
           <div class="field">
-            <label for="call_to_action">Call to action</label>
-            <input id="call_to_action" name="call_to_action" placeholder="E.g., 20-minute discovery next week" />
-          </div>
-
-          <div class="field">
-            <label for="context">Context</label>
-            <textarea id="context" name="context" rows="3" placeholder="Any relevant background for the model"></textarea>
+            <label for="context">Other points to cover in the call (optional)</label>
+            <textarea id="context" name="context" rows="3" placeholder="Any additional talking points. Optional."></textarea>
           </div>
         </fieldset>
 
@@ -206,7 +209,7 @@
 
         <aside class="intel card" aria-labelledby="intel-title">
           <div class="intel-head">
-            <h2 id="intel-title">Market Intelligence</h2>
+            <h2 id="intel-title">Buyer needs</h2>
             <button id="toggle-intel" class="btn small" type="button" aria-expanded="true" aria-controls="intel-body">Hide</button>
           </div>
           <div id="intel-body">
@@ -257,16 +260,16 @@
       const STORAGE_KEY = 'first_call_script_v2.form';
       const ACTIVITY_KEY = 'first_call_script_v2.activity';
       const OUTPUT_KEY = 'first_call_script_v2.last_output';
-      const CALL_PREF_KEY = 'first_call_script_v2.call_pref'; // NEW: persisted default call type
+      const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
       const INTEL_URL = './intel.json';
       const REQUIRED = [
-        'call_type',           // now in its own card
+        'call_type',
         'seller_name',
         'seller_company',
         'prospect_name',
         'prospect_role',
         'prospect_company',
-        'buyer_behaviour',     // CHANGED: replaces buyer_type
+        'buyer_behaviour',
         'product'
       ];
 
@@ -304,9 +307,10 @@
       let intel = null;
       let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
 
-      // Utility
+      // Utils
       const qs = (name) => form.querySelector(`[name="${name}"]`);
       const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+      const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
       function setBusy(isBusy) {
         submitBtn.disabled = isBusy || !form.checkValidity();
@@ -322,16 +326,19 @@
       }
 
       function validateField(input) {
+        // Special case: call_type error lives in compact row
+        if (input.id === 'call_type') {
+          const errEl = document.getElementById('call_type_error');
+          if (input.validity.valid) { errEl.textContent = ''; input.classList.remove('invalid'); }
+          else { errEl.textContent = 'Please choose a call type.'; input.classList.add('invalid'); }
+          return;
+        }
         const errorEl = document.getElementById(`${input.id}_error`);
         if (!errorEl) return;
-        if (input.validity.valid) {
-          errorEl.textContent = '';
-          input.classList.remove('invalid');
-        } else {
+        if (input.validity.valid) { errorEl.textContent = ''; input.classList.remove('invalid'); }
+        else {
           input.classList.add('invalid');
-          let message = 'Please fill out this field.';
-          if (input.validity.valueMissing) message = 'This field is required.';
-          errorEl.textContent = message;
+          errorEl.textContent = input.validity.valueMissing ? 'This field is required.' : 'Please check this value.';
         }
       }
 
@@ -355,72 +362,59 @@
       function clearFormState() {
         localStorage.removeItem(STORAGE_KEY);
         localStorage.removeItem(ACTIVITY_KEY);
-        // keep last output and call preference
       }
 
       function refreshSubmitState() {
         submitBtn.disabled = !form.checkValidity();
       }
 
-      // --- Market Intelligence (still product × buyer — may show fallback if no data) ---
+      // Market Intelligence (product × buyer mapping from stub; behaviours may not exist — fallback)
       function renderIntel(product, buyer) {
         if (!intel) return;
         const p = intel.products?.[product];
-        // buyer mapping kept for compatibility; may not exist for behaviours → fallback shown
-        const b = p?.buyers?.[buyer];
+        const b = p?.buyers?.[buyer]; // behaviour may not map; we fallback below
         const fallback = (arr) => (arr && arr.length ? arr : ['No data available for this selection.']);
-        intelSlots.priorities.replaceChildren(...fallback(b?.priorities).map(li));
-        intelSlots.pains.replaceChildren(...fallback(b?.pains).map(li));
-        intelSlots.triggers.replaceChildren(...fallback(b?.triggers).map(li));
-        intelSlots.proof.replaceChildren(...fallback(b?.proof).map(li));
-        intelSlots.objections.replaceChildren(...fallback(b?.objections).map(li));
-        intelSlots.ctas.replaceChildren(...fallback(b?.ctas).map(li));
+        intelSlots.priorities.replaceChildren(...fallback(b?.priorities).map(pEl));
+        intelSlots.pains.replaceChildren(...fallback(b?.pains).map(pEl));
+        intelSlots.triggers.replaceChildren(...fallback(b?.triggers).map(pEl));
+        intelSlots.proof.replaceChildren(...fallback(b?.proof).map(pEl));
+        intelSlots.objections.replaceChildren(...fallback(b?.objections).map(pEl));
+        intelSlots.ctas.replaceChildren(...fallback(b?.ctas).map(pEl));
       }
 
-      function li(text) {
-        const el = document.createElement('p');
-        el.textContent = text;
-        return el;
-      }
+      function pEl(text) { const el = document.createElement('p'); el.textContent = text; return el; }
 
-      // --- Call type preference (script map default) ---
+      // Call type remember → script map indicator
       function loadCallPref() {
         try {
           const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
-          if (pref?.call_type && !callTypeSel.value) {
-            callTypeSel.value = pref.call_type;
-          }
-          updateMapIndicator();
+          if (pref?.call_type && !callTypeSel.value) callTypeSel.value = pref.call_type;
           if (pref?.remember === true) rememberCallType.checked = true;
-        } catch { updateMapIndicator(); }
+        } catch {}
+        updateMapIndicator();
       }
 
       function saveCallPrefIfRequested() {
         if (rememberCallType.checked && callTypeSel.value) {
           localStorage.setItem(CALL_PREF_KEY, JSON.stringify({ remember: true, call_type: callTypeSel.value }));
-        } else {
-          // Do not discard an existing pref unless the user unticks remember
-          if (!rememberCallType.checked) {
-            localStorage.removeItem(CALL_PREF_KEY);
-          }
+        } else if (!rememberCallType.checked) {
+          localStorage.removeItem(CALL_PREF_KEY);
         }
         updateMapIndicator();
       }
 
       function updateMapIndicator() {
         const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
-        const label = pref?.call_type ? pref.call_type : 'Not set';
-        mapLabel.textContent = label;
+        mapLabel.textContent = pref?.call_type || (callTypeSel.value || 'Not set');
       }
 
-      // --- Activity log ---
+      // Activity log
       function addActivity(entry) {
         const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
         list.unshift(entry);
         localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0,3)));
         renderActivity();
       }
-
       function renderActivity() {
         const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
         activityLog.innerHTML = '';
@@ -434,29 +428,23 @@
         });
       }
 
-      // --- Delta between outputs ---
+      // Output delta
       function computeDelta(oldText, newText) {
-        const oldLines = oldText.split('\n');
-        const newLines = newText.split('\n');
+        const oldLines = oldText.split('\n'), newLines = newText.split('\n');
         let added = 0, removed = 0;
-        const oldSet = new Set(oldLines);
-        const newSet = new Set(newLines);
+        const oldSet = new Set(oldLines), newSet = new Set(newLines);
         newLines.forEach(l => { if (!oldSet.has(l) && l.trim()) added++; });
         oldLines.forEach(l => { if (!newSet.has(l) && l.trim()) removed++; });
         return { added, removed };
       }
-
       function renderDelta(delta) {
         deltaLog.innerHTML = '';
-        const a = document.createElement('li');
-        a.textContent = `+${delta.added} new line${delta.added===1?'':'s'}`;
-        const r = document.createElement('li');
-        r.textContent = `−${delta.removed} removed line${delta.removed===1?'':'s'}`;
-        deltaLog.appendChild(a);
-        deltaLog.appendChild(r);
+        const a = document.createElement('li'); a.textContent = `+${delta.added} new line${delta.added===1?'':'s'}`;
+        const r = document.createElement('li'); r.textContent = `−${delta.removed} removed line${delta.removed===1?'':'s'}`;
+        deltaLog.appendChild(a); deltaLog.appendChild(r);
       }
 
-      async function getUser() {
+      async function hydrateUserBadge() {
         try {
           const res = await fetch('/.auth/me', { credentials: 'include' });
           const el = document.getElementById('user-badge');
@@ -470,7 +458,7 @@
         }
       }
 
-      // Event wiring
+      // Events
       form.addEventListener('input', (e) => {
         if (e.target.matches('input,select,textarea')) {
           validateField(e.target);
@@ -480,12 +468,8 @@
       });
 
       form.addEventListener('change', (e) => {
-        if (e.target === productSel || e.target === buyerBehSel) {
-          renderIntel(productSel.value, buyerBehSel.value);
-        }
-        if (e.target === callTypeSel || e.target === rememberCallType) {
-          saveCallPrefIfRequested();
-        }
+        if (e.target === productSel || e.target === buyerBehSel) renderIntel(productSel.value, buyerBehSel.value);
+        if (e.target === callTypeSel || e.target === rememberCallType) saveCallPrefIfRequested();
       });
 
       document.getElementById('toggle-intel').addEventListener('click', () => {
@@ -498,8 +482,8 @@
       document.getElementById('reset').addEventListener('click', () => {
         form.reset();
         clearFormState();
-        // Keep remembered call type (separate store)
-        loadCallPref(); // will reapply remembered default & indicator
+        // keep remembered call type (separate store)
+        loadCallPref();
         renderIntel(productSel.value, buyerBehSel.value);
         renderActivity();
         refreshSubmitState();
@@ -531,7 +515,7 @@
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        // Validate
+        // Validate all, including compact call type
         let firstInvalid = null;
         [...form.elements].forEach(el => {
           if (el.matches('input,select,textarea')) {
@@ -548,7 +532,7 @@
         // Persist call type preference if asked
         saveCallPrefIfRequested();
 
-        // Collect variables using current field names, map buyer_behaviour -> buyer_type to keep API contract
+        // Map buyer_behaviour -> buyer_type (API unchanged)
         const fd = Object.fromEntries(new FormData(form).entries());
         const variables = {
           seller_name: fd.seller_name || '',
@@ -557,7 +541,7 @@
           prospect_role: fd.prospect_role || '',
           prospect_company: fd.prospect_company || '',
           call_type: fd.call_type || '',
-          buyer_type: fd.buyer_behaviour || '',   // API expects buyer_type
+          buyer_type: fd.buyer_behaviour || '',
           product: fd.product || '',
           tone: fd.tone || '',
           length: fd.length || '',
@@ -568,16 +552,15 @@
 
         const payload = {
           pack: 'uk_b2b_sales_core',
-          template: 'first_call_script_v2', // unchanged; back end can branch by call_type
+          template: 'first_call_script_v2',
           variables
         };
 
         setBusy(true);
         setStatus('Generating…');
-        diag.open = false;
-        diagJson.textContent = '';
-
+        diag.open = false; diagJson.textContent = '';
         const t0 = performance.now();
+
         try {
           const res = await fetch('/api/generate', {
             method: 'POST',
@@ -591,16 +574,11 @@
           try { data = JSON.parse(text); } catch {}
 
           if (!res.ok) {
-            if (res.status === 401) {
-              setStatus('Unauthorised. Please sign in again.', 'error');
-            } else if (res.status === 400) {
-              setStatus('Request was rejected. See diagnostics below.', 'error');
-            } else {
-              setStatus(`Error ${res.status}. See diagnostics below.`, 'error');
-            }
-            diag.open = true;
-            diagJson.textContent = JSON.stringify({ status: res.status, body: data || text }, null, 2);
-            document.getElementById('diagnostics').scrollIntoView({behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto':'smooth'});
+            if (res.status === 401) setStatus('Unauthorised. Please sign in again.', 'error');
+            else if (res.status === 400) setStatus('Request was rejected. See diagnostics below.', 'error');
+            else setStatus(`Error ${res.status}. See diagnostics below.`, 'error');
+            diag.open = true; diagJson.textContent = JSON.stringify({ status: res.status, body: data || text }, null, 2);
+            document.getElementById('diagnostics').scrollIntoView({behavior: prefersReducedMotion() ? 'auto':'smooth'});
             document.getElementById('diagnostics').focus();
             return;
           }
@@ -610,17 +588,13 @@
           const t1 = performance.now();
           outputMeta.textContent = `Generated at ${nowTime()} · pack: ${data.packPath || 'uk_b2b_sales_core'} · template: ${data.template || 'first_call_script_v2'} · ${(t1 - t0).toFixed(0)}ms`;
 
-          // Enable actions
-          copyBtn.disabled = !out;
-          downloadBtn.disabled = !out;
+          copyBtn.disabled = !out; downloadBtn.disabled = !out;
 
-          // Delta
           const delta = computeDelta(lastOutput, out);
           renderDelta(delta);
           lastOutput = out;
           localStorage.setItem(OUTPUT_KEY, out);
 
-          // Activity
           addActivity({
             time: nowTime(),
             product: variables.product || '—',
@@ -633,8 +607,7 @@
 
         } catch (err) {
           setStatus('Network error. Please try again.', 'error');
-          diag.open = true;
-          diagJson.textContent = String(err);
+          diag.open = true; diagJson.textContent = String(err);
           document.getElementById('diagnostics').focus();
         } finally {
           setBusy(false);
@@ -644,31 +617,19 @@
       // Init
       (async function init(){
         // Auth badge
-        try {
-          const res = await fetch('/.auth/me', { credentials: 'include' });
-          const el = document.getElementById('user-badge');
-          if (!res.ok) throw new Error('auth');
-          const data = await res.json();
-          const claim = data?.clientPrincipal?.userDetails || 'Signed in';
-          el.querySelector('span:last-child').textContent = claim;
-        } catch {
-          const el = document.getElementById('user-badge');
-          el.querySelector('span:last-child').innerHTML = 'Not signed in — <a href="/.auth/login/aad">Sign in</a>';
-        }
+        hydrateUserBadge();
 
-        // Load intel (unchanged schema)
+        // Load intel
         try {
           const res = await fetch(INTEL_URL, { cache: 'no-store' });
           intel = await res.json();
         } catch { intel = { products: {} }; }
 
-        // Restore form values
+        // Restore form values then apply call pref default
         loadForm();
-
-        // Apply remembered call type ONLY if field is empty (so it acts as a default)
         loadCallPref();
 
-        // Populate product options from intel.json (if available)
+        // Populate product options
         const products = Object.keys(intel.products || {});
         productSel.innerHTML = '<option value="">Select…</option>';
         products.forEach(p => {
@@ -677,16 +638,14 @@
           productSel.appendChild(opt);
         });
 
-        // Render intel on load if we have both values
-        if (productSel.value && buyerBehSel.value) {
-          renderIntel(productSel.value, buyerBehSel.value);
-        }
+        // Render intel on load if both values present
+        if (productSel.value && buyerBehSel.value) renderIntel(productSel.value, buyerBehSel.value);
 
-        // Validate once on load (for restored state)
+        // Initial validation state
         REQUIRED.forEach(name => { const el = qs(name); if (el) validateField(el); });
         submitBtn.disabled = !form.checkValidity();
 
-        // Activity + output
+        // Restore last output & activity
         renderActivity();
         const last = localStorage.getItem(OUTPUT_KEY);
         if (last) { outputEl.textContent = last; copyBtn.disabled = false; downloadBtn.disabled = false; }
