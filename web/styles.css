@@ -73,8 +73,8 @@ h3{font-size:1.1rem}
   gap:.8rem;
   padding: 8px 16px;
   border-radius: 999px;
-  background: #99f2d1;
-  border: 1px solid #28a2b5;
+  background: ##cfd7eb;
+  /* border: 1px solid #28a2b5;
   font-size: .95rem;
   white-space: nowrap;
 }
