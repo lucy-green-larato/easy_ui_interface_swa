@@ -85,7 +85,7 @@ h3 { font-size: 1.1rem; }
 }
 .panel{ background: var(--card-bg); border:1px solid var(--border); border-radius: var(--radius); padding: 16px; }
 .panel.left{ flex: 1 1 45%; }
-.panel.right{ flex: 1 1 55%; }
+.panel.right{ flex: 1 1 55%; display: grid; grid-template-columns: minmax(480px, 1fr) minmax(320px, 0.9fr); gap: 1.25rem; align-items: start;}
 
 /* Cards & legends (titles sit comfortably inside borders) */
 .card{ background: var(--card-bg); border:1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; box-shadow: var(--shadow); }
@@ -96,7 +96,7 @@ fieldset{ border:0; margin:0; padding:0; }
 
 /* Form fields */
 .grid-2{ display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-@media (max-width: 800px){ .grid-2{ grid-template-columns: 1fr; } }
+@media (max-width: 1200px){.panel.right {grid-template-columns: 1fr; } }
 
 .field{ margin-bottom: 12px; }
 label{ display:block; margin-bottom:6px; font-weight:600; }
