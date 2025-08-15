@@ -1,8 +1,6 @@
-// api/packs-debug/index.js
 const fs = require("fs");
 const path = require("path");
 
-// Try common locations; adjust if your packs.json sits elsewhere.
 const CANDIDATES = [
   process.env.PACKS_PATH,
   path.join(__dirname, "..", "packs.json"),
@@ -17,15 +15,9 @@ module.exports = async function (context, req) {
       const packs = JSON.parse(text);
       const core = packs["uk_b2b_sales_core"] || {};
       const names = Object.keys(core.templates || {});
-      context.res = {
-        headers: { "content-type": "application/json" },
-        body: { readingFrom: p, templates: names }
-      };
+      context.res = { headers: { "content-type": "application/json" }, body: { readingFrom: p, templates: names } };
       return;
-    } catch (e) { /* try next path */ }
+    } catch (e) {}
   }
-  context.res = {
-    status: 500,
-    body: { error: "packs.json not found", tried: CANDIDATES }
-  };
+  context.res = { status: 500, body: { error: "packs.json not found", tried: CANDIDATES } };
 };
