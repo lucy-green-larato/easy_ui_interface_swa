@@ -6,81 +6,65 @@
   <title>Inside Track Tools · First Call Script (v2)</title>
   <link rel="stylesheet" href="./styles.css" />
   <style>
-    /* Page-scoped helpers (small; most styles live in styles.css) */
+    /* Page-scoped helpers (keep light; main styles live in styles.css) */
     .visually-hidden{position:absolute!important;height:1px;width:1px;overflow:hidden;clip:rect(1px,1px,1px,1px);white-space:nowrap;border:0;padding:0;margin:-1px;}
-    .badge{display:inline-flex;gap:.5rem;align-items:center;padding:.25rem .5rem;border-radius:999px;background:var(--surface-2);font-size:.875rem}
     .kicker{font-size:.875rem;color:var(--text-2);margin-top:.125rem}
     details.diag summary{cursor:pointer}
-    .compact-controls{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin: .25rem 0 var(--space-3);}
-    .compact-controls .note{color:var(--text-2);font-size:.9rem}
-    .compact-controls select{min-width: 160px; padding:6px 10px;}
-    .remember-row{display:flex;align-items:center;gap:.5rem}
   </style>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
+  <!-- HEADER -->
   <header class="app-header" role="banner">
-  <!-- Left: logo + title -->
-  <div class="header-left">
-    <img class="logo brand" src="./larato-logo.svg" alt="Larato" />
-    <div class="brand-text">
-      <h1 class="app-title">Inside Track Tools</h1>
-      <p class="kicker">First Call Script · v2</p>
+    <!-- Left: logo + title -->
+    <div class="header-left">
+      <img class="logo" src="./larato-logo.svg" alt="Larato" />
+      <div class="brand-text">
+        <h1 class="app-title">Inside Track Tools</h1>
+        <p class="kicker">First Call Script · v2</p>
+      </div>
     </div>
-  </div>
 
-  <!-- Right: call type + badge -->
- <div class="header-right">
-  <!-- Sales model chip -->
-  <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
-    <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
+    <!-- Right: sales model chip + model note + user badge -->
+    <div class="header-right">
+      <!-- Sales model chip -->
+      <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
+        <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
 
-    <select id="call_type" name="call_type" form="script-form" required aria-describedby="call_type_error">
-      <option value="">Select…</option>
-      <option>Direct</option>
-      <option>Partner</option>
-    </select>
+        <select id="call_type" name="call_type" form="script-form" required aria-describedby="call_type_error">
+          <option value="">Select…</option>
+          <option>Direct</option>
+          <option>Partner</option>
+        </select>
 
-    <label class="remember">
-      <input type="checkbox" id="remember_call_type" form="script-form" />
-      Remember
-    </label>
+        <label class="remember">
+          <input type="checkbox" id="remember_call_type" form="script-form" />
+          Remember
+        </label>
 
-    <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
-  </div>
+        <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
+      </div>
 
-  <!-- Sales model note sits beside the chip -->
-  <span class="model-note">
-    <span class="label">Sales model in use:</span>
-    <strong id="map-label">Not set</strong>
-  </span>
+      <!-- Sales model note sits beside the chip -->
+      <span class="model-note">
+        <span class="label">Sales model in use:</span>
+        <strong id="map-label">Not set</strong>
+      </span>
 
-  <!-- User badge (hidden until hydrated) -->
-  <span id="user-badge" class="badge is-hidden" aria-live="polite" aria-atomic="true">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path></svg>
-    <span>Loading user…</span>
-  </span>
-</div>
-
-    <!-- User badge -->
-    <span id="user-badge" class="badge" aria-live="polite" aria-atomic="true">
-      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="7" r="4"></circle>
-        <path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path>
-      </svg>
-      <span>Loading user…</span>
-    </span>
-  </div>
-</header>
+      <!-- User badge (hidden until hydrated) -->
+      <span id="user-badge" class="badge is-hidden" aria-live="polite" aria-atomic="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path></svg>
+        <span>Loading user…</span>
+      </span>
+    </div>
+  </header>
 
   <main id="main" class="layout" role="main">
     <!-- LEFT: form + actions -->
     <section class="panel left" aria-label="Form">
-      <!-- removed “Script Inputs” heading as requested -->
-
       <form id="script-form" novalidate>
-        <!-- Card: Call details (merged + renamed) -->
+        <!-- Card: Call details -->
         <fieldset class="card">
           <legend>Call details</legend>
 
@@ -132,7 +116,7 @@
               <p class="error" id="product_error" role="alert" aria-live="polite"></p>
             </div>
 
-            <!-- Buyer behaviour dropdown (renamed from Buyer type) -->
+            <!-- Buyer behaviour dropdown -->
             <div class="field">
               <label for="buyer_behaviour">Buyer behaviour <span aria-hidden="true" class="req">*</span></label>
               <select id="buyer_behaviour" name="buyer_behaviour" required>
@@ -206,7 +190,7 @@
       </form>
     </section>
 
-    <!-- RIGHT: output + market intel -->
+    <!-- RIGHT: output + Buyer needs -->
     <section class="panel right" aria-labelledby="output-title">
       <div class="split">
         <div class="output-card card">
@@ -263,6 +247,7 @@
     </section>
   </main>
 
+  <!-- Activity item template -->
   <template id="activity-item">
     <li>
       <span class="time"></span>
@@ -344,7 +329,7 @@
       }
 
       function validateField(input) {
-        // Special case: call_type error lives in compact row
+        // Special case: call_type error lives inside the chip
         if (input.id === 'call_type') {
           const errEl = document.getElementById('call_type_error');
           if (input.validity.valid) { errEl.textContent = ''; input.classList.remove('invalid'); }
@@ -386,21 +371,29 @@
         submitBtn.disabled = !form.checkValidity();
       }
 
-      // Market Intelligence (product × buyer mapping from stub; behaviours may not exist — fallback)
-      function renderIntel(product, buyer) {
+      // Buyer needs panel — tolerant of either "buyers" or "behaviours"
+      function renderIntel(product, behaviourOrBuyerLabel) {
         if (!intel) return;
-        const p = intel.products?.[product];
-        const b = p?.buyers?.[buyer]; // behaviour may not map; we fallback below
-        const fallback = (arr) => (arr && arr.length ? arr : ['No data available for this selection.']);
-        intelSlots.priorities.replaceChildren(...fallback(b?.priorities).map(pEl));
-        intelSlots.pains.replaceChildren(...fallback(b?.pains).map(pEl));
-        intelSlots.triggers.replaceChildren(...fallback(b?.triggers).map(pEl));
-        intelSlots.proof.replaceChildren(...fallback(b?.proof).map(pEl));
-        intelSlots.objections.replaceChildren(...fallback(b?.objections).map(pEl));
-        intelSlots.ctas.replaceChildren(...fallback(b?.ctas).map(pEl));
-      }
+        const p = intel.products?.[product] || {};
+        const node =
+          p.behaviours?.[behaviourOrBuyerLabel] ||
+          p.buyers?.[behaviourOrBuyerLabel] ||
+          p.needs || {};
 
-      function pEl(text) { const el = document.createElement('p'); el.textContent = text; return el; }
+        setSlot('intel-priorities', arr(node.priorities));
+        setSlot('intel-pains',      arr(node.pains));
+        setSlot('intel-triggers',   arr(node.triggers));
+        setSlot('intel-proof',      arr(node.proof));
+        setSlot('intel-objections', arr(node.objections));
+        setSlot('intel-ctas',       arr(node.ctas));
+      }
+      function arr(v){ return Array.isArray(v) && v.length ? v : ['No data available for this selection.']; }
+      function pEl(text){ const el=document.createElement('p'); el.textContent=text; return el; }
+      function setSlot(id, items){
+        const slot = document.getElementById(id);
+        if (!slot) return;
+        slot.replaceChildren(...items.map(pEl));
+      }
 
       // Call type remember → script map indicator
       function loadCallPref() {
@@ -411,7 +404,6 @@
         } catch {}
         updateMapIndicator();
       }
-
       function saveCallPrefIfRequested() {
         if (rememberCallType.checked && callTypeSel.value) {
           localStorage.setItem(CALL_PREF_KEY, JSON.stringify({ remember: true, call_type: callTypeSel.value }));
@@ -420,7 +412,6 @@
         }
         updateMapIndicator();
       }
-
       function updateMapIndicator() {
         const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
         mapLabel.textContent = pref?.call_type || (callTypeSel.value || 'Not set');
@@ -462,17 +453,19 @@
         deltaLog.appendChild(a); deltaLog.appendChild(r);
       }
 
+      // Badge hydration (hide until populated; show sign-in if unauthorised)
       async function hydrateUserBadge() {
+        const el = document.getElementById('user-badge');
         try {
           const res = await fetch('/.auth/me', { credentials: 'include' });
-          const el = document.getElementById('user-badge');
-          if (!res.ok) throw new Error('auth');
+          if (!res.ok) throw new Error(String(res.status));
           const data = await res.json();
           const claim = data?.clientPrincipal?.userDetails || 'Signed in';
           el.querySelector('span:last-child').textContent = claim;
-        } catch {
-          const el = document.getElementById('user-badge');
-          el.querySelector('span:last-child').innerHTML = 'Not signed in — <a href="/.auth/login/aad">Sign in</a>';
+          el.classList.remove('is-hidden');
+        } catch (e) {
+          el.innerHTML = 'Not signed in — <a href="/.auth/login/aad">Sign in</a>';
+          el.classList.remove('is-hidden');
         }
       }
 
@@ -488,6 +481,12 @@
       form.addEventListener('change', (e) => {
         if (e.target === productSel || e.target === buyerBehSel) renderIntel(productSel.value, buyerBehSel.value);
         if (e.target === callTypeSel || e.target === rememberCallType) saveCallPrefIfRequested();
+
+        // Optional: tint the chip based on selection
+        if (e.target === callTypeSel) {
+          document.querySelector('.calltype-mini')
+            .setAttribute('data-mode', callTypeSel.value || '');
+        }
       });
 
       document.getElementById('toggle-intel').addEventListener('click', () => {
@@ -533,7 +532,7 @@
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        // Validate all, including compact call type
+        // Validate all, including call type
         let firstInvalid = null;
         [...form.elements].forEach(el => {
           if (el.matches('input,select,textarea')) {
@@ -649,10 +648,12 @@
 
         // Populate product options
         const products = Object.keys(intel.products || {});
+        const current = productSel.value;
         productSel.innerHTML = '<option value="">Select…</option>';
         products.forEach(p => {
           const opt = document.createElement('option');
           opt.value = p; opt.textContent = p;
+          if (p === current) opt.selected = true;
           productSel.appendChild(opt);
         });
 
