@@ -6,9 +6,88 @@
   <title>Inside Track Tools · First Call Script (v2)</title>
   <link rel="stylesheet" href="./styles.css?v=fix2" />
   <style>
-    /* Page-scoped helpers (keep light; main styles live in styles.css) */
-    .visually-hidden{position:absolute!important;height:1px;width:1px;overflow:hidden;clip:rect(1px,1px,1px,1px);white-space:nowrap;border:0;padding:0;margin:-1px;}
-    details.diag summary{cursor:pointer}
+    /* --- Minimal, safe page-scoped CSS to ensure layout & chip look right --- */
+    :root{
+      --bg:#f7f7f9; --surface-1:#fff; --surface-2:#eef0f4; --surface-3:#e5e8ee;
+      --text-1:#1d2129; --text-2:#5b6270; --accent:#2458e6; --accent-pressed:#1f49be;
+      --danger:#b00020; --ok:#0a7f2e; --ring:2px solid rgba(36,88,230,.35);
+      --shadow:0 1px 2px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.06);
+      --radius:10px; --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px;
+      --font-system:ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--text-1);font:16px/1.45 var(--font-system)}
+    .kicker{font-size:.875rem;color:var(--text-2);margin-top:.125rem}
+    .app-header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);padding:var(--space-3) var(--space-5)}
+    .header-left{display:flex;align-items:center;gap:.75rem;min-width:0;flex:1 1 auto}
+    .logo{width:clamp(44px,5vw,52px);height:auto;object-fit:contain;flex-shrink:0}
+    .brand-text{display:flex;flex-direction:column}
+    .app-title{font-weight:600;margin:.25rem 0 0}
+    .header-right{display:flex;align-items:center;gap:.75rem;flex:0 0 auto}
+
+    /* Chip with your colours (#99f2d1 background, #28a2b5 border) */
+    .calltype-mini{
+      display:flex;align-items:center;gap:.6rem;
+      padding:8px 14px;border-radius:999px;background:#99f2d1;border:1px solid #28a2b5;
+      font-size:.95rem;flex-wrap:wrap
+    }
+    .calltype-mini .mini-label{font-weight:600}
+    .calltype-mini select{padding:6px 10px;border-radius:8px;border:1px solid var(--surface-3);background:#fff}
+    .calltype-mini .remember{display:flex;align-items:center;gap:.35rem;color:var(--text-2)}
+    .error-inline{color:var(--danger);font-size:.85rem}
+
+    .model-note{display:inline-flex;align-items:center;gap:.35rem;padding:6px 10px;background:var(--surface-2);border:1px solid var(--surface-3);border-radius:999px;font-size:.9rem;color:var(--text-2)}
+
+    .badge{display:flex;align-items:center;gap:.4rem;padding:8px 12px;background:var(--surface-2);border:1px solid var(--surface-3);border-radius:999px;font-size:.9rem;color:var(--text-1);white-space:nowrap}
+    .badge svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
+    .badge.is-hidden{display:none}
+
+    /* --- Three-column layout (Form | Script | Buyer needs) --- */
+    .layout{
+      display:grid;
+      grid-template-columns: 1fr 1.1fr 1fr;     /* middle a touch wider */
+      gap: var(--space-5);
+      padding: var(--space-5);
+      align-items:start;
+    }
+    @media (max-width: 1200px){ .layout{ grid-template-columns: 1fr; } }
+
+    .panel{display:block}
+    .card{background:var(--surface-1);border-radius:var(--radius);box-shadow:var(--shadow);padding:var(--space-5);margin:0}
+    fieldset{border:0;margin:0 0 var(--space-5);padding:0}
+    legend{font-weight:600;margin-bottom:var(--space-3);font-size:1.125rem}
+
+    .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)}
+    @media (max-width: 800px){ .grid-2{grid-template-columns:1fr} }
+
+    label{display:block;margin-bottom:6px;font-weight:600}
+    input,select,textarea{
+      width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--surface-3);background:#fff;
+      outline:none;transition: box-shadow .15s ease, border-color .15s ease;
+    }
+    input:focus,select:focus,textarea:focus{ box-shadow: var(--ring); border-color: var(--accent); }
+    .help{margin:.25rem 0 0;color:var(--text-2);font-size:.9rem}
+    .error{min-height:1.25rem;color:var(--danger);font-size:.9rem;margin:.25rem 0 0}
+
+    .actions{display:flex;gap:var(--space-3);align-items:center;margin-top:var(--space-4);flex-wrap:wrap}
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:999px;border:1px solid var(--surface-3);background:var(--surface-1);cursor:pointer;font-weight:600}
+    .btn.small{padding:6px 10px;font-size:.9rem}
+    .btn.primary{background:var(--accent);color:#fff;border-color:transparent}
+    .btn.primary:hover{background:var(--accent-pressed)}
+    .spinner{width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;display:none}
+    .btn.primary.busy .spinner{display:inline-block;animation:spin .9s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    .status{margin-top:var(--space-3);min-height:1.35rem;color:var(--text-2)}
+    .status[data-kind="error"]{color:var(--danger)}
+    .status[data-kind="ok"]{color:var(--ok)}
+
+    /* Script & Buyer needs cards */
+    .output{white-space:pre-wrap;background:#f6f7fb;color:#1f2937;border:1px solid #e5e7eb;padding:var(--space-4);border-radius:8px;min-height:180px;outline:none}
+    .intel-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-3)}
+    @media (max-width: 900px){ .intel-grid{grid-template-columns:repeat(2,1fr)} }
+    @media (max-width: 600px){ .intel-grid{grid-template-columns:1fr} }
+    .intel .intel-slot{background:var(--surface-2);padding:var(--space-3);border-radius:8px}
   </style>
 </head>
 <body>
@@ -55,6 +134,7 @@
     </div>
   </header>
 
+  <!-- LAYOUT: Form | Script | Buyer needs -->
   <main id="main" class="layout" role="main">
     <!-- LEFT: form + actions -->
     <section class="panel left" aria-label="Form">
@@ -176,7 +256,7 @@
 
         <div id="status" class="status" role="status" aria-live="polite"></div>
 
-        <details id="diagnostics" class="diag">
+        <details id="diagnostics" class="diag card" style="margin-top:var(--space-5)">
           <summary>Diagnostics</summary>
           <pre id="diag-json" tabindex="0" aria-label="Diagnostics JSON"></pre>
           <p class="muted">If you see a 401 unauthorised error, please <a href="/.auth/login/aad">sign in again</a>.</p>
@@ -184,26 +264,29 @@
       </form>
     </section>
 
-    <!-- RIGHT: output + Buyer needs -->
-    <section class="panel right" aria-labelledby="output-title">
+    <!-- MIDDLE: Script output -->
+    <section class="panel middle">
       <div class="output-card card">
-        <div class="output-head">
+        <div class="output-head" style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3)">
           <h2 id="output-title">Generated Script</h2>
-          <div class="meta" id="output-meta" aria-live="polite"></div>
+          <div class="meta" id="output-meta" aria-live="polite" style="color:var(--text-2);font-size:.9rem"></div>
         </div>
         <pre id="output" class="output" tabindex="0" aria-label="Generated script will appear here"></pre>
-        <div class="change-log">
+        <div class="change-log" style="margin-top:var(--space-4)">
           <h3>What changed</h3>
           <ul id="delta-log" class="delta" aria-live="polite"></ul>
         </div>
-        <div class="activity">
+        <div class="activity" style="margin-top:var(--space-4)">
           <h3>Recent activity</h3>
-          <ol id="activity-log" class="activity-log" aria-live="polite"></ol>
+          <ol id="activity-log" class="activity-log" aria-live="polite" style="margin:0;padding-left:1.25rem"></ol>
         </div>
       </div>
+    </section>
 
-      <aside class="intel card" aria-labelledby="intel-title">
-        <div class="intel-head">
+    <!-- RIGHT: Buyer needs -->
+    <section class="panel right" aria-labelledby="intel-title">
+      <aside class="intel card">
+        <div class="intel-head" style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
           <h2 id="intel-title">Buyer needs</h2>
           <button id="toggle-intel" class="btn small" type="button" aria-expanded="true" aria-controls="intel-body">Hide</button>
         </div>
@@ -349,50 +432,38 @@
         submitBtn.disabled = !form.checkValidity();
       }
 
-      /* Buyer needs – tolerant renderer */
-      function normaliseKey(s){
-        return String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015\-_/]+/g,'-').trim();
-      }
-      function getKeyInsensitive(obj, requested){
-        if (!obj || typeof obj !== 'object') return null;
-        const want = normaliseKey(requested);
-        const keys = Object.keys(obj);
-        for (const k of keys) if (normaliseKey(k) === want) return k;
-        for (const k of keys) if (normaliseKey(k).includes(want)) return k;
-        return null;
-      }
-           /* Buyer needs – robust renderer with diagnostics */
-      const BEHAVIOUR_SYNONYMS = {
-        'early adopter': 'early-adopter',
-        'early majority': 'early-majority',
-        'late majority': 'late-majority',
-        'skeptic': 'sceptic',
-        'sceptic': 'sceptic'
-      };
-
+      /* ---------- Buyer needs renderer (robust & de-duplicated) ---------- */
       const norm = s => String(s || '')
         .toLowerCase()
-        .replace(/\s+/g, ' ')
-        .replace(/[\u2010-\u2015_\-\/]+/g, '-') // unify dashes/underscores
+        .replace(/\s+/g,' ')
+        .replace(/[\u2010-\u2015_\-\/]+/g,'-')   // unify dashes/underscores/slashes
         .trim();
 
-      const getKeyInsensitive = (obj, requested) => {
+      const BEHAVIOUR_SYNONYMS = {
+        'early adopter':'early-adopter',
+        'early majority':'early-majority',
+        'late majority':'late-majority',
+        'skeptic':'sceptic',
+        'sceptic':'sceptic'
+      };
+
+      function getKeyInsensitive(obj, requested){
         if (!obj || typeof obj !== 'object') return null;
         const want = norm(requested);
         const keys = Object.keys(obj);
-        for (const k of keys) if (norm(k) === want) return k;
-        for (const k of keys) if (norm(k).includes(want)) return k;
+        for (const k of keys) if (norm(k) === want) return k;       // exact
+        for (const k of keys) if (norm(k).includes(want)) return k; // contains
         return null;
-      };
+      }
 
       const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
       const pEl = t => { const el=document.createElement('p'); el.textContent=t; return el; };
-      const setSlot = (id, arr) => {
+      const setSlot = (id, arr=[]) => {
         const slot=document.getElementById(id);
-        const items=(arr&&arr.length?arr:['No data available for this selection.']);
+        const items=(arr.length?arr:['No data available for this selection.']);
         slot.replaceChildren(...items.map(pEl));
       };
-      const fillAllSlotsWith = arr => {
+      const fillAll = arr => {
         setSlot('intel-priorities', arr);
         setSlot('intel-pains',      arr);
         setSlot('intel-triggers',   arr);
@@ -409,14 +480,13 @@
         const productNode = productKey ? products[productKey] : null;
 
         if (!productNode){
-          const availableProducts = Object.keys(products).join(', ') || '—';
-          fillAllSlotsWith([`No data available (unknown product). Available products: ${availableProducts}`]);
+          fillAll([`No data available (unknown product).`]);
           return;
         }
 
+        // Resolve behaviour node (try behaviours -> buyers -> product.needs)
         let node = null;
 
-        // Try behaviours
         if (productNode.behaviours){
           let key = getKeyInsensitive(productNode.behaviours, behaviourLabel);
           if (!key){
@@ -426,7 +496,6 @@
           if (key) node = productNode.behaviours[key];
         }
 
-        // Try buyers
         if (!node && productNode.buyers){
           let key = getKeyInsensitive(productNode.buyers, behaviourLabel);
           if (!key){
@@ -436,7 +505,6 @@
           if (key) node = productNode.buyers[key];
         }
 
-        // Fallback: product-level needs
         if (!node && productNode.needs) node = productNode.needs;
 
         if (!node){
@@ -444,7 +512,7 @@
             ...Object.keys(productNode.behaviours || {}),
             ...Object.keys(productNode.buyers || {})
           ].join(', ') || '—';
-          fillAllSlotsWith([`No data for this behaviour. Available behaviours: ${behavioursList}`]);
+          fillAll([`No data for this behaviour. Available: ${behavioursList}`]);
           return;
         }
 
@@ -458,10 +526,7 @@
         };
 
         const allEmpty = Object.values(sections).every(a => a.length === 0);
-        if (allEmpty){
-          fillAllSlotsWith(['No data available for this selection.']);
-          return;
-        }
+        if (allEmpty){ fillAll(['No data available for this selection.']); return; }
 
         setSlot('intel-priorities', sections.priorities);
         setSlot('intel-pains',      sections.pains);
@@ -470,7 +535,7 @@
         setSlot('intel-objections', sections.objections);
         setSlot('intel-ctas',       sections.ctas);
       }
-
+      /* ------------------------------------------------------------------- */
 
       // Call type remember → map indicator
       function loadCallPref() {
@@ -554,11 +619,13 @@
       });
 
       form.addEventListener('change', (e) => {
-        if (e.target === productSel || e.target === buyerBehSel) renderIntel(productSel.value, buyerBehSel.value);
+        if (e.target === productSel || e.target === buyerBehSel) {
+          renderIntel(productSel.value, buyerBehSel.value);
+        }
         if (e.target === callTypeSel || e.target === rememberCallType) saveCallPrefIfRequested();
       });
 
-      document.getElementById('toggle-intel').addEventListener('click', () => {
+      toggleIntelBtn.addEventListener('click', () => {
         const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
         toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
         intelBody.hidden = expanded;
@@ -620,7 +687,6 @@
 
         saveCallPrefIfRequested();
         setBusy(true); setStatus('Generating…'); diag.open = false; diagJson.textContent = '';
-        const t0 = performance.now();
 
         try {
           const res = await fetch('/api/generate', {
@@ -628,44 +694,38 @@
           });
           const text = await res.text();
           let data = {}; try { data = JSON.parse(text); } catch {}
+
           if (!res.ok) {
             if (res.status === 401) setStatus('Unauthorised. Please sign in again.', 'error');
             else if (res.status === 400) setStatus('Request was rejected. See diagnostics below.', 'error');
             else setStatus(`Error ${res.status}. See diagnostics below.`, 'error');
             diag.open = true; diagJson.textContent = JSON.stringify({ status: res.status, body: data || text }, null, 2);
-            document.getElementById('diagnostics').scrollIntoView({behavior: prefersReducedMotion() ? 'auto':'smooth'});
-            document.getElementById('diagnostics').focus();
+            diag.scrollIntoView({behavior: prefersReducedMotion() ? 'auto':'smooth'});
+            diag.focus();
             return;
           }
 
           const out = (data.output || data.preview || '').trim();
           outputEl.textContent = out || '(No output returned.)';
-          const t1 = performance.now();
           outputMeta.textContent = `Generated ${nowTime()}`;
+
           copyBtn.disabled = !out; downloadBtn.disabled = !out;
 
-          const delta = computeDelta(lastOutput, out); 
-          deltaLog.innerHTML = '';
-          const a = document.createElement('li'); a.textContent = `+${delta.added} new line${delta.added===1?'':'s'}`;
-          const r = document.createElement('li'); r.textContent = `−${delta.removed} removed line${delta.removed===1?'':'s'}`;
-          deltaLog.appendChild(a); deltaLog.appendChild(r);
+          const delta = computeDelta(lastOutput, out);
+          renderDelta(delta);
           lastOutput = out; localStorage.setItem(OUTPUT_KEY, out);
 
-          const entry = { time: nowTime(), product: variables.product || '—', buyer_behaviour: variables.buyer_type || '—', length: variables.length || '—' };
-          const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]'); list.unshift(entry);
-          localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0,3)));
-          activityLog.innerHTML = '';
-          JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]').forEach(it => {
-            const node = activityTpl.content.cloneNode(true);
-            node.querySelector('.time').textContent = it.time;
-            node.querySelector('.product').textContent = it.product;
-            node.querySelector('.buyer').textContent = it.buyer_behaviour;
-            node.querySelector('.length').textContent = it.length;
-            activityLog.appendChild(node);
+          addActivity({
+            time: nowTime(),
+            product: variables.product || '—',
+            buyer_behaviour: variables.buyer_type || '—',
+            length: variables.length || '—'
           });
 
           setStatus('Done. Script ready.');
           document.getElementById('output-title').focus();
+
+          /* Optional: if your API returns intel too, you can map it here and call setSlot(...) */
 
         } catch (err) {
           setStatus('Network error. Please try again.', 'error');
@@ -679,24 +739,37 @@
       (async function init(){
         hydrateUserBadge();
 
-        try { const res = await fetch(INTEL_URL, { cache: 'no-store' }); intel = await res.json(); }
-        catch { intel = { products: {} }; }
+        // Load Buyer Needs intel
+        try {
+          const res = await fetch(INTEL_URL, { cache: 'no-store' });
+          intel = await res.json();
+        } catch { intel = { products: {} }; }
 
-        loadForm(); loadCallPref();
+        // Restore form values and prefs
+        loadForm();
+        loadCallPref();
 
+        // Populate product options from intel.json
         const products = Object.keys(intel.products || {});
         const current = productSel.value;
         productSel.innerHTML = '<option value="">Select…</option>';
         products.forEach(p => {
-          const opt = document.createElement('option'); opt.value = p; opt.textContent = p;
-          if (p === current) opt.selected = true; productSel.appendChild(opt);
+          const opt = document.createElement('option');
+          opt.value = p; opt.textContent = p;
+          if (p === current) opt.selected = true;
+          productSel.appendChild(opt);
         });
 
-        if (productSel.value && buyerBehSel.value) renderIntel(productSel.value, buyerBehSel.value);
+        // Initial render of Buyer Needs if both are selected
+        if (productSel.value && buyerBehSel.value) {
+          renderIntel(productSel.value, buyerBehSel.value);
+        }
 
+        // Initial validation & buttons state
         REQUIRED.forEach(name => { const el = qs(name); if (el) validateField(el); });
         submitBtn.disabled = !form.checkValidity();
 
+        // Restore last output & activity
         const last = localStorage.getItem(OUTPUT_KEY);
         if (last) { outputEl.textContent = last; copyBtn.disabled = false; downloadBtn.disabled = false; }
       })();
