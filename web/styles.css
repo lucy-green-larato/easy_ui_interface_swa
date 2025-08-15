@@ -49,7 +49,7 @@ h3{font-size:1.1rem}
 
 /* Logo: responsive via clamp (min 90px, ideal 12vw, max 140px) */
 .logo{
-  width: clamp(90px, 12vw, 140px);
+  width: clamp(44px, 5vw, 52px);
   height: auto;
   object-fit: contain;
   object-position: left center;
@@ -74,8 +74,8 @@ h3{font-size:1.1rem}
 
 /* Nicer, roomier chip with subtle accent */
 .calltype-mini{
-  display:flex; align-items:center; gap:.6rem;
-  padding: 8px 12px;
+  display:flex; align-items:center; gap:.8rem;
+  padding: 8px 16px;
   border-radius: 999px;
   background: #4ebdbe;                 /* gentle tint so it stands out */
   border: 1px solid #28a2b5;
