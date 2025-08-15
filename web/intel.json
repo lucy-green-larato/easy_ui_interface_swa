@@ -1,0 +1,42 @@
+{
+  "version": "stub-2025-08-15",
+  "products": {
+    "Connectivity": {
+      "buyers": {
+        "IT Director": {
+          "priorities": ["Resilience and uptime", "Scalable bandwidth", "Network visibility"],
+          "pains": ["Branch outages", "Shadow IT connectivity", "Rising MPLS costs"],
+          "triggers": ["Office moves", "New SaaS rollouts", "Vendor contract expiry"],
+          "proof": ["99.99% SLA examples", "Before/after latency figures", "Customer reference logos"],
+          "objections": ["We already have fibre", "Migration risk"],
+          "ctas": ["Pilot a secondary link", "20-minute WAN review"]
+        },
+        "CFO": {
+          "priorities": ["Predictable spend", "Cost-to-value clarity"],
+          "pains": ["Overage surprises", "Capex-heavy renewals"],
+          "triggers": ["Budget reforecast", "Vendor rate rise"],
+          "proof": ["3-year TCO model", "Benchmark vs incumbent"],
+          "objections": ["Hidden fees?"],
+          "ctas": ["Share last 2 bills for quick savings check"]
+        }
+      }
+    },
+    "Security": {
+      "buyers": {
+        "CISO": {
+          "priorities": ["Risk reduction", "Regulatory compliance"],
+          "pains": ["Alert fatigue", "Tool sprawl"],
+          "triggers": ["Audit findings", "M&A due diligence"],
+          "proof": ["MTTD/MTTR improvement", "ISO 27001 alignment"],
+          "objections": ["Integration complexity"],
+          "ctas": ["Schedule a controls gap scan"]
+        }
+      }
+    },
+    "Cloud": { "buyers": { "Head of Infrastructure": { "priorities": ["Right-size spend"], "pains": ["VM sprawl"], "triggers": ["Datacentre exit"], "proof": ["10–30% rightsizing"], "objections": ["Vendor lock-in"], "ctas": ["Cost optimisation review"] } } },
+    "UC & Collaboration": { "buyers": { "Head of Operations": { "priorities": ["Agent productivity"], "pains": ["Missed calls"], "triggers": ["Contact centre refresh"], "proof": ["AHT reduction"], "objections": ["Change management"], "ctas": ["Sandbox demo"] } } },
+    "Contact Centre": { "buyers": { "CX Leader": { "priorities": ["CSAT/ESAT"], "pains": ["Channel silos"], "triggers": ["Peak season"], "proof": ["NPS uplift"], "objections": ["Data migration"], "ctas": ["Data-light pilot"] } } },
+    "Managed Services": { "buyers": { "Operations Director": { "priorities": ["Coverage & SLA"], "pains": ["Skills gaps"], "triggers": ["Talent churn"], "proof": ["SLA adherence"], "objections": ["Loss of control"], "ctas": ["Runbook workshop"] } } },
+    "Devices": { "buyers": { "Procurement Lead": { "priorities": ["Lifecycle value"], "pains": ["Warranty admin"], "triggers": ["Hardware refresh"], "proof": ["DOA rates"], "objections": ["Compatibility"], "ctas": ["Bundle quote"] } } }
+  }
+}
