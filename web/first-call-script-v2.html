@@ -4,11 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Tools · First Call Script (v2)</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=fix2" />
   <style>
     /* Page-scoped helpers (keep light; main styles live in styles.css) */
     .visually-hidden{position:absolute!important;height:1px;width:1px;overflow:hidden;clip:rect(1px,1px,1px,1px);white-space:nowrap;border:0;padding:0;margin:-1px;}
-    .kicker{font-size:.875rem;color:var(--text-2);margin-top:.125rem}
     details.diag summary{cursor:pointer}
   </style>
 </head>
@@ -27,7 +26,6 @@
 
     <!-- Right: sales model chip + model note + user badge -->
     <div class="header-right">
-      <!-- Sales model chip -->
       <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
         <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
 
@@ -45,13 +43,11 @@
         <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
       </div>
 
-      <!-- Sales model note sits beside the chip -->
       <span class="model-note">
         <span class="label">Sales model in use:</span>
         <strong id="map-label">Not set</strong>
       </span>
 
-      <!-- User badge (hidden until hydrated) -->
       <span id="user-badge" class="badge is-hidden" aria-live="polite" aria-atomic="true">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path></svg>
         <span>Loading user…</span>
@@ -115,7 +111,6 @@
               <p class="error" id="product_error" role="alert" aria-live="polite"></p>
             </div>
 
-            <!-- Buyer behaviour dropdown -->
             <div class="field">
               <label for="buyer_behaviour">Buyer behaviour <span aria-hidden="true" class="req">*</span></label>
               <select id="buyer_behaviour" name="buyer_behaviour" required>
@@ -189,7 +184,7 @@
       </form>
     </section>
 
-    <!-- RIGHT: output + Buyer needs (no .split wrapper) -->
+    <!-- RIGHT: output + Buyer needs -->
     <section class="panel right" aria-labelledby="output-title">
       <div class="output-card card">
         <div class="output-head">
@@ -262,16 +257,7 @@
       const OUTPUT_KEY = 'first_call_script_v2.last_output';
       const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
       const INTEL_URL = './intel.json';
-      const REQUIRED = [
-        'call_type',
-        'seller_name',
-        'seller_company',
-        'prospect_name',
-        'prospect_role',
-        'prospect_company',
-        'buyer_behaviour',
-        'product'
-      ];
+      const REQUIRED = ['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
 
       // Elements
       const form = document.getElementById(FORM_ID);
@@ -321,12 +307,10 @@
       }
 
       function setStatus(msg, kind='info') {
-        statusEl.textContent = msg;
-        statusEl.dataset.kind = kind;
+        statusEl.textContent = msg; statusEl.dataset.kind = kind;
       }
 
       function validateField(input) {
-        // Special case: call_type error lives inside the chip
         if (input.id === 'call_type') {
           const errEl = document.getElementById('call_type_error');
           if (input.validity.valid) { errEl.textContent = ''; input.classList.remove('invalid'); }
@@ -352,10 +336,7 @@
         if (!raw) return;
         try {
           const data = JSON.parse(raw);
-          Object.entries(data).forEach(([k,v]) => {
-            const el = qs(k);
-            if (el) el.value = v;
-          });
+          Object.entries(data).forEach(([k,v]) => { const el = qs(k); if (el) el.value = v; });
         } catch {}
       }
 
@@ -368,52 +349,32 @@
         submitBtn.disabled = !form.checkValidity();
       }
 
-      /* ==============================
-         Buyer needs renderer (robust)
-         ============================== */
-
-      // Normalise keys for tolerant matching
+      /* Buyer needs – tolerant renderer */
       function normaliseKey(s){
-        return String(s || '')
-          .toLowerCase()
-          .replace(/\s+/g,' ')                 // collapse spaces
-          .replace(/[\u2010-\u2015\-_/]+/g,'-')// normalise hyphens/underscores/dashes
-          .trim();
+        return String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015\-_/]+/g,'-').trim();
       }
-
-      // Find a key in obj that equals (or contains) requested, case-insensitive
       function getKeyInsensitive(obj, requested){
         if (!obj || typeof obj !== 'object') return null;
         const want = normaliseKey(requested);
         const keys = Object.keys(obj);
-        // exact
         for (const k of keys) if (normaliseKey(k) === want) return k;
-        // contains (fallback)
         for (const k of keys) if (normaliseKey(k).includes(want)) return k;
         return null;
       }
-
-      // US/UK + formatting synonyms (extend as needed)
       const BEHAVIOUR_SYNONYMS = {
-        'early adopter': 'early-adopter',
-        'early majority': 'early-majority',
-        'late majority': 'late-majority',
-        'skeptic': 'sceptic',
-        'sceptic': 'sceptic'
+        'early adopter':'early-adopter',
+        'early majority':'early-majority',
+        'late majority':'late-majority',
+        'skeptic':'sceptic',
+        'sceptic':'sceptic'
       };
-
-      function toArr(v){
-        if (!v) return [];
-        if (Array.isArray(v)) return v.filter(Boolean).map(String);
-        return [String(v)];
-      }
-      function pEl(text){ const el=document.createElement('p'); el.textContent=text; return el; }
-      function setSlot(id, arr){
-        const slot = document.getElementById(id);
-        if (!slot) return;
-        const items = arr && arr.length ? arr : ['No data available for this selection.'];
+      const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
+      const pEl = t => { const el=document.createElement('p'); el.textContent=t; return el; };
+      const setSlot = (id, arr) => {
+        const slot=document.getElementById(id);
+        const items=(arr&&arr.length?arr:['No data available for this selection.']);
         slot.replaceChildren(...items.map(pEl));
-      }
+      };
       function fillAllSlotsWith(arr){
         setSlot('intel-priorities', arr);
         setSlot('intel-pains',      arr);
@@ -422,43 +383,24 @@
         setSlot('intel-objections', arr);
         setSlot('intel-ctas',       arr);
       }
-
       function renderIntel(productLabel, behaviourLabel){
         if (!intel) return;
-
         const products = intel.products || {};
         const productKey = getKeyInsensitive(products, productLabel);
         const productNode = productKey ? products[productKey] : null;
+        if (!productNode){ fillAllSlotsWith(['No data available for this selection. (Unknown product)']); return; }
 
-        if (!productNode){
-          fillAllSlotsWith(['No data available for this selection. (Unknown product)']);
-          return;
-        }
-
-        // Resolve behaviour/buyer node (behaviours | buyers | needs fallback)
         let node = null;
-
-        // Try behaviours container
         if (productNode.behaviours){
           let key = getKeyInsensitive(productNode.behaviours, behaviourLabel);
-          if (!key){
-            const syn = BEHAVIOUR_SYNONYMS[normaliseKey(behaviourLabel)];
-            if (syn) key = getKeyInsensitive(productNode.behaviours, syn);
-          }
+          if (!key){ const syn = BEHAVIOUR_SYNONYMS[normaliseKey(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.behaviours, syn); }
           if (key) node = productNode.behaviours[key];
         }
-
-        // Try buyers container if not found
         if (!node && productNode.buyers){
           let key = getKeyInsensitive(productNode.buyers, behaviourLabel);
-          if (!key){
-            const syn = BEHAVIOUR_SYNONYMS[normaliseKey(behaviourLabel)];
-            if (syn) key = getKeyInsensitive(productNode.buyers, syn);
-          }
+          if (!key){ const syn = BEHAVIOUR_SYNONYMS[normaliseKey(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.buyers, syn); }
           if (key) node = productNode.buyers[key];
         }
-
-        // Fallback to product-level "needs" block
         if (!node && productNode.needs) node = productNode.needs;
 
         const sections = {
@@ -469,13 +411,8 @@
           objections: toArr(node?.objections || node?.Objections),
           ctas:       toArr(node?.ctas || node?.CTAs || node?.callsToAction || node?.CallsToAction)
         };
-
         const allEmpty = Object.values(sections).every(a => a.length === 0);
-        if (allEmpty){
-          fillAllSlotsWith(['No data available for this selection.']);
-          return;
-        }
-
+        if (allEmpty){ fillAllSlotsWith(['No data available for this selection.']); return; }
         setSlot('intel-priorities', sections.priorities);
         setSlot('intel-pains',      sections.pains);
         setSlot('intel-triggers',   sections.triggers);
@@ -484,9 +421,7 @@
         setSlot('intel-ctas',       sections.ctas);
       }
 
-      /* ============================== */
-
-      // Call type remember → script map indicator
+      // Call type remember → map indicator
       function loadCallPref() {
         try {
           const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
@@ -528,7 +463,7 @@
         });
       }
 
-      // Output delta
+      // Delta
       function computeDelta(oldText, newText) {
         const oldLines = oldText.split('\n'), newLines = newText.split('\n');
         let added = 0, removed = 0;
@@ -544,7 +479,7 @@
         deltaLog.appendChild(a); deltaLog.appendChild(r);
       }
 
-      // Badge hydration (hide until populated; show sign-in if unauthorised)
+      // Badge hydration
       async function hydrateUserBadge() {
         const el = document.getElementById('user-badge');
         try {
@@ -563,21 +498,13 @@
       // Events
       form.addEventListener('input', (e) => {
         if (e.target.matches('input,select,textarea')) {
-          validateField(e.target);
-          saveForm();
-          refreshSubmitState();
+          validateField(e.target); saveForm(); refreshSubmitState();
         }
       });
 
       form.addEventListener('change', (e) => {
         if (e.target === productSel || e.target === buyerBehSel) renderIntel(productSel.value, buyerBehSel.value);
         if (e.target === callTypeSel || e.target === rememberCallType) saveCallPrefIfRequested();
-
-        // Optional: tint the chip based on selection
-        if (e.target === callTypeSel) {
-          document.querySelector('.calltype-mini')
-            .setAttribute('data-mode', callTypeSel.value || '');
-        }
       });
 
       document.getElementById('toggle-intel').addEventListener('click', () => {
@@ -588,42 +515,31 @@
       });
 
       document.getElementById('reset').addEventListener('click', () => {
-        form.reset();
-        clearFormState();
-        // keep remembered call type (separate store)
-        loadCallPref();
+        form.reset(); clearFormState(); loadCallPref();
         renderIntel(productSel.value, buyerBehSel.value);
-        renderActivity();
-        refreshSubmitState();
+        renderActivity(); refreshSubmitState();
         setStatus('Form reset. Stored values cleared.');
         form.querySelector('input, select, textarea')?.focus();
       });
 
       document.getElementById('copy').addEventListener('click', async () => {
-        const txt = outputEl.textContent;
-        if (!txt.trim()) return;
+        const txt = outputEl.textContent; if (!txt.trim()) return;
         await navigator.clipboard.writeText(txt);
         setStatus('Copied to clipboard.');
       });
 
       document.getElementById('download').addEventListener('click', () => {
-        const txt = outputEl.textContent;
-        if (!txt.trim()) return;
+        const txt = outputEl.textContent; if (!txt.trim()) return;
         const blob = new Blob([txt], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = `first-call-script_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        a.href = url; a.download = `first-call-script_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
         setStatus('Download started.');
       });
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        // Validate all, including call type
         let firstInvalid = null;
         [...form.elements].forEach(el => {
           if (el.matches('input,select,textarea')) {
@@ -631,16 +547,8 @@
             if (!firstInvalid && !el.checkValidity()) firstInvalid = el;
           }
         });
-        if (firstInvalid) {
-          setStatus('Please fix the highlighted fields.', 'error');
-          firstInvalid.focus();
-          return;
-        }
+        if (firstInvalid) { setStatus('Please fix the highlighted fields.', 'error'); firstInvalid.focus(); return; }
 
-        // Persist call type preference if asked
-        saveCallPrefIfRequested();
-
-        // Map buyer_behaviour -> buyer_type (API unchanged)
         const fd = Object.fromEntries(new FormData(form).entries());
         const variables = {
           seller_name: fd.seller_name || '',
@@ -657,30 +565,18 @@
           context: fd.context || '',
           value_proposition: fd.value_proposition || ''
         };
+        const payload = { pack: 'uk_b2b_sales_core', template: 'first_call_script_v2', variables };
 
-        const payload = {
-          pack: 'uk_b2b_sales_core',
-          template: 'first_call_script_v2',
-          variables
-        };
-
-        setBusy(true);
-        setStatus('Generating…');
-        diag.open = false; diagJson.textContent = '';
+        saveCallPrefIfRequested();
+        setBusy(true); setStatus('Generating…'); diag.open = false; diagJson.textContent = '';
         const t0 = performance.now();
 
         try {
           const res = await fetch('/api/generate', {
-            method: 'POST',
-            headers: {'Content-Type':'application/json'},
-            body: JSON.stringify(payload),
-            credentials: 'include'
+            method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload), credentials: 'include'
           });
-
           const text = await res.text();
-          let data = {};
-          try { data = JSON.parse(text); } catch {}
-
+          let data = {}; try { data = JSON.parse(text); } catch {}
           if (!res.ok) {
             if (res.status === 401) setStatus('Unauthorised. Please sign in again.', 'error');
             else if (res.status === 400) setStatus('Request was rejected. See diagnostics below.', 'error');
@@ -695,19 +591,26 @@
           outputEl.textContent = out || '(No output returned.)';
           const t1 = performance.now();
           outputMeta.textContent = `Generated ${nowTime()}`;
-
           copyBtn.disabled = !out; downloadBtn.disabled = !out;
 
-          const delta = computeDelta(lastOutput, out);
-          renderDelta(delta);
-          lastOutput = out;
-          localStorage.setItem(OUTPUT_KEY, out);
+          const delta = computeDelta(lastOutput, out); 
+          deltaLog.innerHTML = '';
+          const a = document.createElement('li'); a.textContent = `+${delta.added} new line${delta.added===1?'':'s'}`;
+          const r = document.createElement('li'); r.textContent = `−${delta.removed} removed line${delta.removed===1?'':'s'}`;
+          deltaLog.appendChild(a); deltaLog.appendChild(r);
+          lastOutput = out; localStorage.setItem(OUTPUT_KEY, out);
 
-          addActivity({
-            time: nowTime(),
-            product: variables.product || '—',
-            buyer_behaviour: variables.buyer_type || '—',
-            length: variables.length || '—'
+          const entry = { time: nowTime(), product: variables.product || '—', buyer_behaviour: variables.buyer_type || '—', length: variables.length || '—' };
+          const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]'); list.unshift(entry);
+          localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0,3)));
+          activityLog.innerHTML = '';
+          JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]').forEach(it => {
+            const node = activityTpl.content.cloneNode(true);
+            node.querySelector('.time').textContent = it.time;
+            node.querySelector('.product').textContent = it.product;
+            node.querySelector('.buyer').textContent = it.buyer_behaviour;
+            node.querySelector('.length').textContent = it.length;
+            activityLog.appendChild(node);
           });
 
           setStatus('Done. Script ready.');
@@ -723,43 +626,28 @@
 
       // Init
       (async function init(){
-        // Auth badge
         hydrateUserBadge();
 
-        // Load intel
-        try {
-          const res = await fetch(INTEL_URL, { cache: 'no-store' });
-          intel = await res.json();
-        } catch { intel = { products: {} }; }
+        try { const res = await fetch(INTEL_URL, { cache: 'no-store' }); intel = await res.json(); }
+        catch { intel = { products: {} }; }
 
-        // Restore form values then apply call pref default
-        loadForm();
-        loadCallPref();
+        loadForm(); loadCallPref();
 
-        // Populate product options from intel.json
         const products = Object.keys(intel.products || {});
         const current = productSel.value;
         productSel.innerHTML = '<option value="">Select…</option>';
         products.forEach(p => {
-          const opt = document.createElement('option');
-          opt.value = p; opt.textContent = p;
-          if (p === current) opt.selected = true;
-          productSel.appendChild(opt);
+          const opt = document.createElement('option'); opt.value = p; opt.textContent = p;
+          if (p === current) opt.selected = true; productSel.appendChild(opt);
         });
 
-        // Render intel on load if both values present
         if (productSel.value && buyerBehSel.value) renderIntel(productSel.value, buyerBehSel.value);
 
-        // Initial validation state
         REQUIRED.forEach(name => { const el = qs(name); if (el) validateField(el); });
         submitBtn.disabled = !form.checkValidity();
 
-        // Restore last output & activity
-        renderActivity();
         const last = localStorage.getItem(OUTPUT_KEY);
         if (last) { outputEl.textContent = last; copyBtn.disabled = false; downloadBtn.disabled = false; }
-
-        setStatus('Ready.');
       })();
     })();
   </script>
