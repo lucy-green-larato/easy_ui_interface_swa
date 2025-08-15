@@ -21,34 +21,41 @@
   <a class="skip-link" href="#main">Skip to content</a>
 
   <header class="app-header" role="banner">
-    <div class="brand">
-      <img class="logo" src="./larato-logo.svg" alt="Larato" />
-      <div class="brand-text">
-        <h1 class="title">Inside Track Tools</h1>
-        <p class="kicker">First Call Script · v2</p>
-      </div>
+  <!-- Left: logo + title -->
+  <div class="header-left">
+    <img class="logo brand" src="./larato-logo.svg" alt="Larato" />
+    <div class="brand-text">
+      <h1 class="app-title">Inside Track Tools</h1>
+      <p class="kicker">First Call Script · v2</p>
     </div>
-    <div class="header-right">
-      <!-- Discrete Call type selector lives in header but remains inside the form via 'form' attribute -->
-      <div class="calltype-mini">
-        <label for="call_type" class="mini-label">Call type</label>
-        <select id="call_type" name="call_type" form="script-form" required>
-          <option value="">Select…</option>
-          <option>Direct</option>
-          <option>Partner</option>
-        </select>
-        <label class="remember">
-          <input type="checkbox" id="remember_call_type" form="script-form" />
-          Remember
-        </label>
-      </div>
+  </div>
 
-      <span id="user-badge" class="badge" aria-live="polite" aria-atomic="true">
-        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path></svg>
-        <span>Loading user…</span>
-      </span>
+  <!-- Right: call type + badge -->
+  <div class="header-right">
+    <!-- Discrete Call type selector lives in header but remains inside the form via 'form' attribute -->
+    <div class="calltype-mini">
+      <label for="call_type" class="mini-label">Call type</label>
+      <select id="call_type" name="call_type" form="script-form" required>
+        <option value="">Select…</option>
+        <option>Direct</option>
+        <option>Partner</option>
+      </select>
+      <label class="remember">
+        <input type="checkbox" id="remember_call_type" form="script-form" />
+        Remember
+      </label>
     </div>
-  </header>
+
+    <!-- User badge -->
+    <span id="user-badge" class="badge" aria-live="polite" aria-atomic="true">
+      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="7" r="4"></circle>
+        <path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path>
+      </svg>
+      <span>Loading user…</span>
+    </span>
+  </div>
+</header>
 
   <main id="main" class="layout" role="main">
     <!-- LEFT: form + actions -->
