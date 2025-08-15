@@ -31,8 +31,18 @@ h3{font-size:1.1rem}
   display:flex; align-items:center; justify-content:space-between;
   padding: var(--space-5); background: var(--surface-1); box-shadow: var(--shadow);
   position:sticky; top:0; z-index:10;
+  gap: var(--space-5);
 }
+.brand{display:flex; align-items:center; gap: var(--space-4);}
+.brand .logo{ width: 140px; height:auto; object-fit:contain; }
+.brand .brand-text{ display:flex; flex-direction:column; }
 .title{margin:0}
+.header-right{display:flex; align-items:center; gap: var(--space-4); flex-wrap:wrap}
+.calltype-mini{display:flex; align-items:center; gap:.5rem; font-size:.95rem}
+.calltype-mini .mini-label{font-weight:600}
+.calltype-mini select{padding:6px 10px; border-radius:8px; border:1px solid var(--surface-3); background:#fff}
+.calltype-mini .remember{display:flex; align-items:center; gap:.35rem; color:var(--text-2)}
+
 .skip-link{position:absolute;left:-9999px;top:auto}
 .skip-link:focus{left:var(--space-5);top:var(--space-2);background:#000;color:#fff;padding:6px 10px;border-radius:6px;z-index:999}
 
