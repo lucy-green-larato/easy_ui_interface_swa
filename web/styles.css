@@ -1,3 +1,4 @@
+/* ===== Global vars ===== */
 :root{
   --bg: #f7f7f9;
   --surface-1:#ffffff;
@@ -27,7 +28,7 @@ h1{font-size:1.5rem}
 h2{font-size:1.25rem}
 h3{font-size:1.1rem}
 
-/* Header container (aligns with main content padding) */
+/* ===== Header ===== */
 .app-header{
   display:flex;
   align-items:center;
@@ -35,10 +36,7 @@ h3{font-size:1.1rem}
   flex-wrap:nowrap;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-5);
-  box-sizing:border-box;
 }
-
-/* Left: logo + title (takes the line) */
 .header-left{
   display:flex;
   align-items:center;
@@ -46,8 +44,6 @@ h3{font-size:1.1rem}
   min-width:0;
   flex: 1 1 auto;
 }
-
-/* Logo: responsive via clamp (min 90px, ideal 12vw, max 140px) */
 .logo{
   width: clamp(44px, 5vw, 52px);
   height: auto;
@@ -55,7 +51,6 @@ h3{font-size:1.1rem}
   object-position: left center;
   flex-shrink:0;
 }
-
 .brand-text{ display:flex; flex-direction:column; }
 .app-title{
   font-size:1.35rem;
@@ -64,22 +59,24 @@ h3{font-size:1.1rem}
 }
 .kicker{ font-size:.85rem; color:var(--text-2); margin:0; }
 
-/* Right: compact controls + badge */
 .header-right{
   display:flex;
   align-items:center;
-  gap:.75rem;           /* closer so the call type isn’t “lost” */
+  gap:.75rem;
   flex: 0 0 auto;
 }
 
-/* Nicer, roomier chip with subtle accent */
+/* ===== Direct/Partner chip ===== */
 .calltype-mini{
-  display:flex; align-items:center; gap:.8rem;
+  display:flex;
+  align-items:center;
+  gap:.8rem;
   padding: 8px 16px;
   border-radius: 999px;
-  background: #4ebdbe;                 /* gentle tint so it stands out */
+  background: #99f2d1;
   border: 1px solid #28a2b5;
   font-size: .95rem;
+  white-space: nowrap;
 }
 .calltype-mini .mini-label{ font-weight:600; color: var(--text-1); }
 .calltype-mini select{
@@ -87,15 +84,11 @@ h3{font-size:1.1rem}
   border-radius:8px;
   border:1px solid #cfd7eb;
   background:#fff;
-  appearance:auto;
 }
 .calltype-mini select:focus{ outline: none; box-shadow: var(--ring); border-color: var(--accent); }
 .calltype-mini .remember{ display:flex; align-items:center; gap:.35rem; color: var(--text-2); }
 
-/* Inline error, small and unobtrusive inside the chip */
-.error-inline{ color: var(--danger); font-size:.85rem; }
-
-/* Sales model note beside the chip */
+/* Sales model note */
 .model-note{
   display:inline-flex; align-items:center; gap:.35rem;
   padding: 6px 10px;
@@ -104,62 +97,48 @@ h3{font-size:1.1rem}
   border-radius: 999px;
   font-size: .9rem; color: var(--text-2);
 }
-.model-note .label{ color: var(--text-2); }
 
-/* Keep the right side compact so controls don't feel "lost" */
-.header-right{ gap: .75rem; }
-
-
-/* Call type as a small “chip” */
-.calltype-mini{
-  display:flex; align-items:center; gap:.45rem;
-  padding: 6px 10px;
-  border:1px solid var(--surface-3);
-  background: var(--surface-1);
-  border-radius: 999px;
-  font-size: .9rem;
-}
-.calltype-mini .mini-label{ font-weight:600; }
-.calltype-mini select{
-  padding:4px 8px;
-  border-radius:8px;
-  border:1px solid var(--surface-3);
-  background:#fff;
-}
-.calltype-mini .remember{
-  display:flex; align-items:center; gap:.35rem; color:var(--text-2);
-}
-
-/* User badge */
+/* ===== User badge ===== */
 .badge{
   display:flex; align-items:center; gap:.4rem;
   padding:8px 12px; background:var(--surface-2); border:1px solid var(--surface-3);
   border-radius:999px; font-size:.9rem; color:var(--text-1); white-space:nowrap;
 }
 .badge svg{ width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2; }
-.badge.is-hidden{ display:none; } 
+.badge.is-hidden{ display:none; }
 
-/* Skip link */
-.skip-link{position:absolute;left:-9999px;top:auto}
-.skip-link:focus{left:var(--space-5);top:var(--space-2);background:#000;color:#fff;padding:6px 10px;border-radius:6px;z-index:999}
-
-/* Layout */
+/* ===== Layout ===== */
 .layout{
-  display:grid; grid-template-columns: 1.2fr 1.8fr; gap: var(--space-5);
-  padding: var(--space-5); align-items:start;
+  display:grid;
+  grid-template-columns: 1fr 1.4fr 0.9fr; /* Call details | Script | Buyer needs */
+  gap: var(--space-5);
+  padding: var(--space-5);
+  align-items:start;
 }
-@media (max-width: 1100px){ .layout{ grid-template-columns: 1fr; } }
+.panel.right{ display: contents; }
+@media (max-width: 1100px){
+  .layout{ grid-template-columns: 1fr; }
+  .panel.right{ display: block; }
+}
 
-.panel.left, .panel.right{ display:block; }
 .card{
   background: var(--surface-1); border-radius: var(--radius); box-shadow: var(--shadow);
   padding: var(--space-5); margin-bottom: var(--space-5);
 }
-fieldset{border:0;margin:0;padding:0}
-legend{font-weight:600;margin-bottom:var(--space-3);font-size:1.125rem}
+fieldset.card{ padding-top: calc(var(--space-5) + 2px); }
+.card > legend{
+  display:inline-block;
+  margin: 0 0 var(--space-3);
+  padding: 0 .25rem;
+  background: var(--surface-1);
+  position: relative;
+  top: 2px;
+  font-weight: 700;
+  font-size: 1.125rem;
+}
 
+/* ===== Form fields ===== */
 .field{margin-bottom: var(--space-4);}
-.field:last-child{margin-bottom:0}
 label{display:block;margin-bottom:6px;font-weight:600}
 .req{color:var(--danger)}
 input,select,textarea{
@@ -167,41 +146,8 @@ input,select,textarea{
   outline:none; transition: box-shadow .15s ease, border-color .15s ease;
 }
 input:focus,select:focus,textarea:focus{ box-shadow: var(--ring); border-color: var(--accent); }
-input.invalid,select.invalid,textarea.invalid{ border-color: var(--danger); }
-.help{margin:.25rem 0 0;color:var(--text-2);font-size:.9rem}
-.error{min-height:1.25rem;color:var(--danger);font-size:.9rem;margin:.25rem 0 0}
 
-.grid-2{ display:grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
-@media (max-width: 800px){ .grid-2{ grid-template-columns: 1fr; } }
-
-.actions{ display:flex; gap: var(--space-3); align-items:center; margin-top: var(--space-4); flex-wrap:wrap }
-.btn{
-  display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:999px; border:1px solid var(--surface-3);
-  background:var(--surface-1); cursor:pointer; font-weight:600;
-}
-.btn.small{padding:6px 10px;font-size:.9rem}
-.btn[disabled]{opacity:.55;cursor:not-allowed}
-.btn.primary{ background: var(--accent); color:#fff; border-color: transparent; }
-.btn.primary:hover{ background: var(--accent-pressed); }
-.spinner{
-  width:16px;height:16px;border-radius:50%;
-  border: 2px solid rgba(255,255,255,.5); border-top-color:#fff; display:none;
-}
-.btn.primary.busy .spinner{ display:inline-block; animation:spin .9s linear infinite; }
-.btn.primary.busy .btn-label{ opacity:.85 }
-
-@keyframes spin{ to{ transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce){ *{transition:none!important; animation:none!important} }
-
-.status{
-  margin-top: var(--space-3); min-height: 1.35rem; color: var(--text-2);
-}
-.status[data-kind="error"]{ color: var(--danger); }
-.status[data-kind="ok"]{ color: var(--ok); }
-
-.split{ display:grid; grid-template-columns: 1fr 360px; gap: var(--space-5); }
-@media (max-width: 1200px){ .split{ grid-template-columns: 1fr; } }
-
+/* ===== Output & intel ===== */
 .output-card .output-head{ display:flex; align-items:baseline; justify-content:space-between; gap: var(--space-3) }
 .output-card .meta{ color: var(--text-2); font-size:.9rem }
 .output{
@@ -214,16 +160,5 @@ input.invalid,select.invalid,textarea.invalid{ border-color: var(--danger); }
   min-height: 180px;
   outline: none;
 }
-.change-log, .activity{ margin-top: var(--space-4); }
-.pill{ display:inline-block; padding:2px 8px; border-radius:999px; background: var(--surface-2); font-size:.85rem; margin-left:6px }
-.activity-log{ margin:0; padding-left:1.25rem }
-.activity-log li{ margin:.3rem 0 }
-
-.intel .intel-head{ display:flex; align-items:center; justify-content:space-between; gap:var(--space-3) }
-.intel-grid{ display:grid; grid-template-columns: 1fr; gap: var(--space-3); }
+.intel-grid{ display:grid; gap: var(--space-3); }
 .intel .intel-slot{ background: var(--surface-2); padding: var(--space-3); border-radius:8px; }
-
-.diag pre{
-  background:#0b1022; color:#cfe1ff; padding: var(--space-3); border-radius:8px; overflow:auto
-}
-.muted{ color: var(--text-2) }
