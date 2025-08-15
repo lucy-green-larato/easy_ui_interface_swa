@@ -5,54 +5,33 @@ const fs = require("fs");
 const path = require("path");
 const { z } = require("zod");
 
-// ---- Load packs from /prompts/packs.json if present ----
-function loadJsonPacks() {
-  try {
-    const jsonPath = path.resolve(__dirname, "..", "..", "prompts", "packs.json");
-    if (fs.existsSync(jsonPath)) {
-      const raw = fs.readFileSync(jsonPath, "utf8");
-      return JSON.parse(raw);
+// ---------- Unified packs loader (same behaviour as packs-debug) ----------
+let PACKS_CACHE = null;
+
+function loadPacks() {
+  if (PACKS_CACHE) return PACKS_CACHE;
+
+  const candidates = [
+    // Azure SWA runtime path (what packs-debug reported)
+    path.join(process.cwd(), "packs.json"),
+    // Local dev path (when running functions from /api)
+    path.join(__dirname, "..", "packs.json"),
+  ];
+
+  const tried = [];
+  for (const p of candidates) {
+    try {
+      const text = fs.readFileSync(p, "utf8");
+      const packs = JSON.parse(text);
+      PACKS_CACHE = { packs, packPath: p };
+      return PACKS_CACHE;
+    } catch (e) {
+      tried.push(`${p}: ${e.message}`);
     }
-  } catch (e) {
-    console.warn("packs.json load failed:", e.message);
   }
-  return null;
+  const msg = `packs.json not found. Tried:\n- ${tried.join("\n- ")}`;
+  throw new Error(msg);
 }
-
-// ---- Inline fallback (kept minimal) ----
-const inlinePacks = {
-  uk_b2b_sales_core: {
-    default: {
-      system:
-        "You are a top-performing B2B sales professional focused on the UK technology sector. Use only provided evidence. List missing info.",
-      temperature: 0.4,
-    },
-    opportunity_qualification:
-      "Opportunity qualification framework.\n\nCompany: {{company}}\nIndustry: {{industry}}\nWebsite: {{website}}\nSources: {{sources}}\n\nOutput:\n- Company profile (employees, revenue, segment, GTM approach, performance, decision-makers, events, estimated event ROI)\n- Pain points (growth, M&A, performance trends, alignment to our offering)\n- Budget and spend potential\n- Decision-making process\n- Competition and differentiation\n- Channel/adoption readiness\n- Prioritisation score (0–100 with rationale)\n- Missing info list",
-    first_call_script: {
-      system:
-        "You are a UK B2B technology sales assistant. Write concise, credible, British-English first-call scripts.",
-      temperature: 0.3,
-      prompt:
-        "Write a short, personalised first-call opening script for UK B2B tech outreach.\nKeep it human, plain English, no hype, avoid US spellings.\nSeller: {seller_name} ({seller_company})\nProspect: {prospect_name}, {prospect_role} at {prospect_company}\nContext: {context}\nValue proposition: {value_proposition}\nCall to action (optional): {call_to_action}\nTone: {tone}. Length: {length}.\nReturn only the script text.",
-      // NOTE: call_to_action intentionally NOT required
-      variables: [
-        "seller_name",
-        "seller_company",
-        "prospect_name",
-        "prospect_role",
-        "prospect_company",
-        "context",
-        "value_proposition",
-        "tone",
-        "length",
-      ],
-    },
-  },
-};
-
-// Prefer JSON packs; fallback to inline packs
-const packs = loadJsonPacks() || inlinePacks;
 
 // ---- Simple {{token}} and {token} replacement ----
 function compileTemplate(tpl, vars) {
@@ -190,17 +169,24 @@ module.exports = async function (context, req) {
 
     const { pack, template, variables } = parsed.data;
 
+    // Load packs from the same place packs-debug reads
+    const { packs, packPath } = loadPacks();
+
     // Resolve pack
     const packDef = packs[pack];
     if (!packDef) {
-      context.res = { status: 400, headers: cors, body: { error: `Unknown pack '${pack}'` } };
+      context.res = {
+        status: 400,
+        headers: cors,
+        body: { error: `Unknown pack '${pack}'`, packPath, availablePacks: Object.keys(packs || {}) }
+      };
       return;
     }
 
     // Support both shapes: nested .templates or flat
     const templates = packDef.templates || packDef;
 
-    // Resolve template + alias (first_call_script <-> intro_builder)
+    // Resolve template (+ legacy alias support if you still need it)
     let tplDef =
       templates[template] ||
       (template === "first_call_script" ? templates["intro_builder"] : null) ||
@@ -210,7 +196,11 @@ module.exports = async function (context, req) {
       context.res = {
         status: 400,
         headers: cors,
-        body: { error: `Unknown template '${template}' in pack '${pack}'` },
+        body: {
+          error: `Unknown template '${template}' in pack '${pack}'`,
+          packPath,
+          availableTemplates: Object.keys(templates || {})
+        },
       };
       return;
     }
@@ -227,18 +217,18 @@ module.exports = async function (context, req) {
 
     const templateString = typeof tplDef === "string" ? tplDef : String(tplDef.prompt || "");
     if (!templateString) {
-      context.res = { status: 400, headers: cors, body: { error: `Template '${template}' in pack '${pack}' has no prompt` } };
+      context.res = { status: 400, headers: cors, body: { error: `Template '${template}' in pack '${pack}' has no prompt`, packPath } };
       return;
     }
 
-    // Validate required variables (Fix A: make some optional even if present in template)
+    // Validate required variables (treat some as optional even if present in template)
     const OPTIONAL_VARS = new Set(["call_to_action"]);
     const required = requiredVarsForTemplate(tplDef).filter((k) => !OPTIONAL_VARS.has(k));
     const missing = required.filter(
       (k) => !(k in variables) || variables[k] == null || String(variables[k]).trim() === ""
     );
     if (missing.length) {
-      context.res = { status: 400, headers: cors, body: { error: "Missing required variables", required, missing } };
+      context.res = { status: 400, headers: cors, body: { error: "Missing required variables", required, missing, packPath } };
       return;
     }
 
@@ -265,6 +255,7 @@ module.exports = async function (context, req) {
         variables,
         pack,
         template,
+        packPath,                  // helpful for diagnostics
         output: llmText || ""      // ONLY model text; never the compiled prompt
       },
     };
