@@ -1,4 +1,4 @@
-// /api/shared/packs.ts
+// /api/shared/packs.js
 export const packs = {
   uk_b2b_sales_core: {
     default: {
