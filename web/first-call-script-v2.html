@@ -31,7 +31,7 @@
   </div>
 
   <!-- Right: call type + badge -->
-  <div class="header-right">
+ <div class="header-right">
   <!-- Sales model chip -->
   <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
     <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
@@ -50,22 +50,18 @@
     <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
   </div>
 
-  <!-- Live model note moved up next to the chip -->
+  <!-- Sales model note sits beside the chip -->
   <span class="model-note">
     <span class="label">Sales model in use:</span>
     <strong id="map-label">Not set</strong>
   </span>
 
-  <!-- User badge (unchanged) -->
-  <span id="user-badge" class="badge" aria-live="polite" aria-atomic="true">
-    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="7" r="4"></circle>
-      <path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path>
-    </svg>
+  <!-- User badge (hidden until hydrated) -->
+  <span id="user-badge" class="badge is-hidden" aria-live="polite" aria-atomic="true">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path></svg>
     <span>Loading user…</span>
   </span>
 </div>
-
 
     <!-- User badge -->
     <span id="user-badge" class="badge" aria-live="polite" aria-atomic="true">
