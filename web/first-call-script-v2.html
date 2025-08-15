@@ -191,59 +191,58 @@
     </section>
 
     <!-- RIGHT: output + Buyer needs -->
+    <!-- RIGHT: output + Buyer needs (no .split wrapper) -->
     <section class="panel right" aria-labelledby="output-title">
-      <div class="split">
-        <div class="output-card card">
-          <div class="output-head">
-            <h2 id="output-title">Generated Script</h2>
-            <div class="meta" id="output-meta" aria-live="polite"></div>
-          </div>
-          <pre id="output" class="output" tabindex="0" aria-label="Generated script will appear here"></pre>
-          <div class="change-log">
-            <h3>What changed</h3>
-            <ul id="delta-log" class="delta" aria-live="polite"></ul>
-          </div>
-          <div class="activity">
-            <h3>Recent activity</h3>
-            <ol id="activity-log" class="activity-log" aria-live="polite"></ol>
+      <div class="output-card card">
+        <div class="output-head">
+          <h2 id="output-title">Generated Script</h2>
+          <div class="meta" id="output-meta" aria-live="polite"></div>
+        </div>
+        <pre id="output" class="output" tabindex="0" aria-label="Generated script will appear here"></pre>
+        <div class="change-log">
+          <h3>What changed</h3>
+          <ul id="delta-log" class="delta" aria-live="polite"></ul>
+        </div>
+        <div class="activity">
+          <h3>Recent activity</h3>
+          <ol id="activity-log" class="activity-log" aria-live="polite"></ol>
+        </div>
+      </div>
+
+      <aside class="intel card" aria-labelledby="intel-title">
+        <div class="intel-head">
+          <h2 id="intel-title">Buyer needs</h2>
+          <button id="toggle-intel" class="btn small" type="button" aria-expanded="true" aria-controls="intel-body">Hide</button>
+        </div>
+        <div id="intel-body">
+          <div class="intel-grid">
+            <section>
+              <h3>1) Buyer Priorities</h3>
+              <div id="intel-priorities" class="intel-slot"></div>
+            </section>
+            <section>
+              <h3>2) Typical Pains</h3>
+              <div id="intel-pains" class="intel-slot"></div>
+            </section>
+            <section>
+              <h3>3) Triggers</h3>
+              <div id="intel-triggers" class="intel-slot"></div>
+            </section>
+            <section>
+              <h3>4) Value Proof</h3>
+              <div id="intel-proof" class="intel-slot"></div>
+            </section>
+            <section>
+              <h3>5) Objections</h3>
+              <div id="intel-objections" class="intel-slot"></div>
+            </section>
+            <section>
+              <h3>6) CTAs</h3>
+              <div id="intel-ctas" class="intel-slot"></div>
+            </section>
           </div>
         </div>
-
-        <aside class="intel card" aria-labelledby="intel-title">
-          <div class="intel-head">
-            <h2 id="intel-title">Buyer needs</h2>
-            <button id="toggle-intel" class="btn small" type="button" aria-expanded="true" aria-controls="intel-body">Hide</button>
-          </div>
-          <div id="intel-body">
-            <div class="intel-grid">
-              <section>
-                <h3>1) Buyer Priorities</h3>
-                <div id="intel-priorities" class="intel-slot"></div>
-              </section>
-              <section>
-                <h3>2) Typical Pains</h3>
-                <div id="intel-pains" class="intel-slot"></div>
-              </section>
-              <section>
-                <h3>3) Triggers</h3>
-                <div id="intel-triggers" class="intel-slot"></div>
-              </section>
-              <section>
-                <h3>4) Value Proof</h3>
-                <div id="intel-proof" class="intel-slot"></div>
-              </section>
-              <section>
-                <h3>5) Objections</h3>
-                <div id="intel-objections" class="intel-slot"></div>
-              </section>
-              <section>
-                <h3>6) CTAs</h3>
-                <div id="intel-ctas" class="intel-slot"></div>
-              </section>
-            </div>
-          </div>
-        </aside>
-      </div>
+      </aside>
     </section>
   </main>
 
