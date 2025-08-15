@@ -34,7 +34,7 @@ h3{font-size:1.1rem}
   gap: var(--space-5);
 }
 .brand{display:flex; align-items:center; gap: var(--space-4);}
-.brand .logo{ width: 140px; height:auto; object-fit:contain; }
+.brand .logo{width: clamp(90px, 12vw, 140px);}
 .brand .brand-text{ display:flex; flex-direction:column; }
 .title{margin:0}
 .header-right{display:flex; align-items:center; gap: var(--space-4); flex-wrap:wrap}
