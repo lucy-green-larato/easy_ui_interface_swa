@@ -586,7 +586,7 @@
           const out = (data.output || data.preview || '').trim();
           outputEl.textContent = out || '(No output returned.)';
           const t1 = performance.now();
-          outputMeta.textContent = `Generated at ${nowTime()} · pack: ${data.packPath || 'uk_b2b_sales_core'} · template: ${data.template || 'first_call_script_v2'} · ${(t1 - t0).toFixed(0)}ms`;
+          outputMeta.textContent = `Generated ${nowTime()}`;
 
           copyBtn.disabled = !out; downloadBtn.disabled = !out;
 
