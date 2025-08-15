@@ -145,7 +145,7 @@ h3{font-size:1.1rem}
 
 /* Layout */
 .layout{
-  display:grid; grid-template-columns: 1.1fr 1fr; gap: var(--space-5);
+  display:grid; grid-template-columns: 1.2fr 1.8fr; gap: var(--space-5);
   padding: var(--space-5); align-items:start;
 }
 @media (max-width: 1100px){ .layout{ grid-template-columns: 1fr; } }
