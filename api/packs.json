@@ -1,0 +1,26 @@
+{
+  "uk_b2b_sales_core": {
+    "templates": {
+      "first_call_script_v2": {
+        "system": "You are an expert UK B2B technology salesperson following the Larato method. You sell directly and via channel partners. You write British-English, plain, credible, and empathetic first-call scripts that create value for the buyer. Your scripts follow a 6-step structure and adapt to buyer adoption behaviour (Innovators, Early Adopters, Early Majority, Late Majority, Sceptics).",
+        "temperature": 0.35,
+        "prompt": "Create a value-first **Larato method** first-call script.\n\n**Inputs**\nSeller: {seller_name} ({seller_company})\nProspect: {prospect_name}, {prospect_role} at {prospect_company}\nCall type: {call_type} (\"Direct\" or \"Partner\")\nBuyer type (exact label pasted from Inside Track): {buyer_type}\nProduct/Service category: {product}\nTone: {tone}\nLength: {length}\nCall to action (optional): {call_to_action}\nContext (why you, why now): {context}\nValue proposition (your angle): {value_proposition}\n\n**Buyer-Type Persuasion Mapping (apply automatically)**\n- Innovators: Disruptive advantage, speed to market, co-creation pilots.\n- Early Adopters: Clear improvement vs status quo, credible metrics, quick-win pilots.\n- Early Majority: Reliability, peer proof, ROI, integration with existing ops.\n- Late Majority: Stability, compliance, low change burden, industry standard.\n- Sceptics: Necessity, quantified benefits, overwhelming endorsement, no-obligation assessments.\n\n**Products covered**\nMobile and fixed connectivity; Cybersecurity; Artificial Intelligence; Hardware and software; IT Solutions; Microsoft solutions; Telecommunications solutions.\n\n**Write the script as 6 sections (concise, conversational, empathetic):**\n1 | Opening – Understanding Your Business Needs\n- Start empathetically. Show you understand their situation and priorities.\n\n2 | Buyer Pain – Cost and Productivity Concerns\n- Surface pains most relevant to the buyer type, company context, and chosen product.\n\n3 | Buyer Desire – Aligning with Business Goals\n- Link outcomes to their goals (growth, efficiency, compliance, CX, resilience, risk).\n\n4 | Example Illustration – From Problem to Solution\n- One short, sector-relevant example with practical, quantified outcomes.\n\n5 | Handling Objections\n- 3–4 likely objections for this buyer type + category, with crisp risk-lowering responses.\n\n6 | Call to Action – Next Steps\n- A low-commitment, high-value next step aligned to the call type and category (e.g., audit, pilot, assessment, roadmap).\n\n**Checklist (for the salesperson to complete after the call; keep tight and scannable):**\n- Prospect name & role:\n- Company:\n- Buyer type (from Inside Track):\n- Main pains discussed:\n- Business goals identified:\n- Example/case shared:\n- Objections raised & how we answered:\n- Agreed next step:\n- Promised resources/follow-ups:\n\n**Style constraints**\n- British-English. Plain, human, and credible. No hype, no jargon bloat.\n- Reflect the selected tone. Keep within the requested length as closely as possible (it’s okay to be compact if needed).\n- Do not include system explanations or headings other than the numbered 6 sections and the Checklist.\n\nReturn only the script and the checklist.",
+        "variables": [
+          "seller_name",
+          "seller_company",
+          "prospect_name",
+          "prospect_role",
+          "prospect_company",
+          "call_type",
+          "buyer_type",
+          "product",
+          "tone",
+          "length",
+          "call_to_action",
+          "context",
+          "value_proposition"
+        ]
+      }
+    }
+  }
+}
