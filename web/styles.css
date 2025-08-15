@@ -72,6 +72,44 @@ h3{font-size:1.1rem}
   flex: 0 0 auto;
 }
 
+/* Nicer, roomier chip with subtle accent */
+.calltype-mini{
+  display:flex; align-items:center; gap:.6rem;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #4ebdbe;                 /* gentle tint so it stands out */
+  border: 1px solid #28a2b5;
+  font-size: .95rem;
+}
+.calltype-mini .mini-label{ font-weight:600; color: var(--text-1); }
+.calltype-mini select{
+  padding:6px 10px;
+  border-radius:8px;
+  border:1px solid #cfd7eb;
+  background:#fff;
+  appearance:auto;
+}
+.calltype-mini select:focus{ outline: none; box-shadow: var(--ring); border-color: var(--accent); }
+.calltype-mini .remember{ display:flex; align-items:center; gap:.35rem; color: var(--text-2); }
+
+/* Inline error, small and unobtrusive inside the chip */
+.error-inline{ color: var(--danger); font-size:.85rem; }
+
+/* Sales model note beside the chip */
+.model-note{
+  display:inline-flex; align-items:center; gap:.35rem;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--surface-3);
+  border-radius: 999px;
+  font-size: .9rem; color: var(--text-2);
+}
+.model-note .label{ color: var(--text-2); }
+
+/* Keep the right side compact so controls don't feel "lost" */
+.header-right{ gap: .75rem; }
+
+
 /* Call type as a small “chip” */
 .calltype-mini{
   display:flex; align-items:center; gap:.45rem;
