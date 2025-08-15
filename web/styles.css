@@ -47,17 +47,13 @@ h3{font-size:1.1rem}
   flex: 1 1 auto;
 }
 
-/* Logo: height-capped so it can’t dominate */
+/* Logo: responsive via clamp (min 90px, ideal 12vw, max 140px) */
 .logo{
-  height: 44px;           /* main control for compact header */
-  width: auto;
-  max-width: 160px;
+  width: clamp(90px, 12vw, 140px);
+  height: auto;
   object-fit: contain;
   object-position: left center;
   flex-shrink:0;
-}
-@media (min-width: 1280px){
-  .logo{ height: 52px; }  /* a touch larger on big screens */
 }
 
 .brand-text{ display:flex; flex-direction:column; }
