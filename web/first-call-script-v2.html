@@ -32,19 +32,40 @@
 
   <!-- Right: call type + badge -->
   <div class="header-right">
-    <!-- Discrete Call type selector lives in header but remains inside the form via 'form' attribute -->
-    <div class="calltype-mini">
-      <label for="call_type" class="mini-label">Call type</label>
-      <select id="call_type" name="call_type" form="script-form" required>
-        <option value="">Select…</option>
-        <option>Direct</option>
-        <option>Partner</option>
-      </select>
-      <label class="remember">
-        <input type="checkbox" id="remember_call_type" form="script-form" />
-        Remember
-      </label>
-    </div>
+  <!-- Sales model chip -->
+  <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
+    <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
+
+    <select id="call_type" name="call_type" form="script-form" required aria-describedby="call_type_error">
+      <option value="">Select…</option>
+      <option>Direct</option>
+      <option>Partner</option>
+    </select>
+
+    <label class="remember">
+      <input type="checkbox" id="remember_call_type" form="script-form" />
+      Remember
+    </label>
+
+    <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
+  </div>
+
+  <!-- Live model note moved up next to the chip -->
+  <span class="model-note">
+    <span class="label">Sales model in use:</span>
+    <strong id="map-label">Not set</strong>
+  </span>
+
+  <!-- User badge (unchanged) -->
+  <span id="user-badge" class="badge" aria-live="polite" aria-atomic="true">
+    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="7" r="4"></circle>
+      <path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path>
+    </svg>
+    <span>Loading user…</span>
+  </span>
+</div>
+
 
     <!-- User badge -->
     <span id="user-badge" class="badge" aria-live="polite" aria-atomic="true">
@@ -63,12 +84,6 @@
       <!-- removed “Script Inputs” heading as requested -->
 
       <form id="script-form" novalidate>
-        <!-- Very compact helper row under the header: shows which script map will be used -->
-        <div class="compact-controls" aria-live="polite">
-          <span class="note">Default script map: <strong id="map-label">Not set</strong></span>
-          <span id="call_type_error" class="error" role="alert" aria-live="polite"></span>
-        </div>
-
         <!-- Card: Call details (merged + renamed) -->
         <fieldset class="card">
           <legend>Call details</legend>
