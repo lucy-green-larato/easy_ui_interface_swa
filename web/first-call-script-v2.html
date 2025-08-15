@@ -361,13 +361,30 @@
         for (const k of keys) if (normaliseKey(k).includes(want)) return k;
         return null;
       }
+           /* Buyer needs – robust renderer with diagnostics */
       const BEHAVIOUR_SYNONYMS = {
-        'early adopter':'early-adopter',
-        'early majority':'early-majority',
-        'late majority':'late-majority',
-        'skeptic':'sceptic',
-        'sceptic':'sceptic'
+        'early adopter': 'early-adopter',
+        'early majority': 'early-majority',
+        'late majority': 'late-majority',
+        'skeptic': 'sceptic',
+        'sceptic': 'sceptic'
       };
+
+      const norm = s => String(s || '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[\u2010-\u2015_\-\/]+/g, '-') // unify dashes/underscores
+        .trim();
+
+      const getKeyInsensitive = (obj, requested) => {
+        if (!obj || typeof obj !== 'object') return null;
+        const want = norm(requested);
+        const keys = Object.keys(obj);
+        for (const k of keys) if (norm(k) === want) return k;
+        for (const k of keys) if (norm(k).includes(want)) return k;
+        return null;
+      };
+
       const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
       const pEl = t => { const el=document.createElement('p'); el.textContent=t; return el; };
       const setSlot = (id, arr) => {
@@ -375,44 +392,77 @@
         const items=(arr&&arr.length?arr:['No data available for this selection.']);
         slot.replaceChildren(...items.map(pEl));
       };
-      function fillAllSlotsWith(arr){
+      const fillAllSlotsWith = arr => {
         setSlot('intel-priorities', arr);
         setSlot('intel-pains',      arr);
         setSlot('intel-triggers',   arr);
         setSlot('intel-proof',      arr);
         setSlot('intel-objections', arr);
         setSlot('intel-ctas',       arr);
-      }
+      };
+
       function renderIntel(productLabel, behaviourLabel){
         if (!intel) return;
+
         const products = intel.products || {};
         const productKey = getKeyInsensitive(products, productLabel);
         const productNode = productKey ? products[productKey] : null;
-        if (!productNode){ fillAllSlotsWith(['No data available for this selection. (Unknown product)']); return; }
+
+        if (!productNode){
+          const availableProducts = Object.keys(products).join(', ') || '—';
+          fillAllSlotsWith([`No data available (unknown product). Available products: ${availableProducts}`]);
+          return;
+        }
 
         let node = null;
+
+        // Try behaviours
         if (productNode.behaviours){
           let key = getKeyInsensitive(productNode.behaviours, behaviourLabel);
-          if (!key){ const syn = BEHAVIOUR_SYNONYMS[normaliseKey(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.behaviours, syn); }
+          if (!key){
+            const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)];
+            if (syn) key = getKeyInsensitive(productNode.behaviours, syn);
+          }
           if (key) node = productNode.behaviours[key];
         }
+
+        // Try buyers
         if (!node && productNode.buyers){
           let key = getKeyInsensitive(productNode.buyers, behaviourLabel);
-          if (!key){ const syn = BEHAVIOUR_SYNONYMS[normaliseKey(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.buyers, syn); }
+          if (!key){
+            const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)];
+            if (syn) key = getKeyInsensitive(productNode.buyers, syn);
+          }
           if (key) node = productNode.buyers[key];
         }
+
+        // Fallback: product-level needs
         if (!node && productNode.needs) node = productNode.needs;
 
+        if (!node){
+          const behavioursList = [
+            ...Object.keys(productNode.behaviours || {}),
+            ...Object.keys(productNode.buyers || {})
+          ].join(', ') || '—';
+          fillAllSlotsWith([`No data for this behaviour. Available behaviours: ${behavioursList}`]);
+          return;
+        }
+
         const sections = {
-          priorities: toArr(node?.priorities || node?.Priorities),
-          pains:      toArr(node?.pains || node?.Pains),
-          triggers:   toArr(node?.triggers || node?.Triggers),
-          proof:      toArr(node?.proof || node?.Proof || node?.value || node?.Value),
-          objections: toArr(node?.objections || node?.Objections),
-          ctas:       toArr(node?.ctas || node?.CTAs || node?.callsToAction || node?.CallsToAction)
+          priorities: toArr(node?.priorities ?? node?.Priorities),
+          pains:      toArr(node?.pains      ?? node?.Pains),
+          triggers:   toArr(node?.triggers   ?? node?.Triggers),
+          proof:      toArr(node?.proof      ?? node?.Proof ?? node?.value ?? node?.Value),
+          objections: toArr(node?.objections ?? node?.Objections),
+          ctas:       toArr(node?.ctas       ?? node?.CTAs  ?? node?.callsToAction ?? node?.CallsToAction)
         };
+
         const allEmpty = Object.values(sections).every(a => a.length === 0);
-        if (allEmpty){ fillAllSlotsWith(['No data available for this selection.']); return; }
+        if (allEmpty){
+          fillAllSlotsWith(['No data available for this selection.']);
+          return;
+        }
+
         setSlot('intel-priorities', sections.priorities);
         setSlot('intel-pains',      sections.pains);
         setSlot('intel-triggers',   sections.triggers);
@@ -420,6 +470,7 @@
         setSlot('intel-objections', sections.objections);
         setSlot('intel-ctas',       sections.ctas);
       }
+
 
       // Call type remember → map indicator
       function loadCallPref() {
