@@ -189,7 +189,6 @@
       </form>
     </section>
 
-    <!-- RIGHT: output + Buyer needs -->
     <!-- RIGHT: output + Buyer needs (no .split wrapper) -->
     <section class="panel right" aria-labelledby="output-title">
       <div class="output-card card">
@@ -369,29 +368,123 @@
         submitBtn.disabled = !form.checkValidity();
       }
 
-      // Buyer needs panel — tolerant of either "buyers" or "behaviours"
-      function renderIntel(product, behaviourOrBuyerLabel) {
-        if (!intel) return;
-        const p = intel.products?.[product] || {};
-        const node =
-          p.behaviours?.[behaviourOrBuyerLabel] ||
-          p.buyers?.[behaviourOrBuyerLabel] ||
-          p.needs || {};
+      /* ==============================
+         Buyer needs renderer (robust)
+         ============================== */
 
-        setSlot('intel-priorities', arr(node.priorities));
-        setSlot('intel-pains',      arr(node.pains));
-        setSlot('intel-triggers',   arr(node.triggers));
-        setSlot('intel-proof',      arr(node.proof));
-        setSlot('intel-objections', arr(node.objections));
-        setSlot('intel-ctas',       arr(node.ctas));
+      // Normalise keys for tolerant matching
+      function normaliseKey(s){
+        return String(s || '')
+          .toLowerCase()
+          .replace(/\s+/g,' ')                 // collapse spaces
+          .replace(/[\u2010-\u2015\-_/]+/g,'-')// normalise hyphens/underscores/dashes
+          .trim();
       }
-      function arr(v){ return Array.isArray(v) && v.length ? v : ['No data available for this selection.']; }
+
+      // Find a key in obj that equals (or contains) requested, case-insensitive
+      function getKeyInsensitive(obj, requested){
+        if (!obj || typeof obj !== 'object') return null;
+        const want = normaliseKey(requested);
+        const keys = Object.keys(obj);
+        // exact
+        for (const k of keys) if (normaliseKey(k) === want) return k;
+        // contains (fallback)
+        for (const k of keys) if (normaliseKey(k).includes(want)) return k;
+        return null;
+      }
+
+      // US/UK + formatting synonyms (extend as needed)
+      const BEHAVIOUR_SYNONYMS = {
+        'early adopter': 'early-adopter',
+        'early majority': 'early-majority',
+        'late majority': 'late-majority',
+        'skeptic': 'sceptic',
+        'sceptic': 'sceptic'
+      };
+
+      function toArr(v){
+        if (!v) return [];
+        if (Array.isArray(v)) return v.filter(Boolean).map(String);
+        return [String(v)];
+      }
       function pEl(text){ const el=document.createElement('p'); el.textContent=text; return el; }
-      function setSlot(id, items){
+      function setSlot(id, arr){
         const slot = document.getElementById(id);
         if (!slot) return;
+        const items = arr && arr.length ? arr : ['No data available for this selection.'];
         slot.replaceChildren(...items.map(pEl));
       }
+      function fillAllSlotsWith(arr){
+        setSlot('intel-priorities', arr);
+        setSlot('intel-pains',      arr);
+        setSlot('intel-triggers',   arr);
+        setSlot('intel-proof',      arr);
+        setSlot('intel-objections', arr);
+        setSlot('intel-ctas',       arr);
+      }
+
+      function renderIntel(productLabel, behaviourLabel){
+        if (!intel) return;
+
+        const products = intel.products || {};
+        const productKey = getKeyInsensitive(products, productLabel);
+        const productNode = productKey ? products[productKey] : null;
+
+        if (!productNode){
+          fillAllSlotsWith(['No data available for this selection. (Unknown product)']);
+          return;
+        }
+
+        // Resolve behaviour/buyer node (behaviours | buyers | needs fallback)
+        let node = null;
+
+        // Try behaviours container
+        if (productNode.behaviours){
+          let key = getKeyInsensitive(productNode.behaviours, behaviourLabel);
+          if (!key){
+            const syn = BEHAVIOUR_SYNONYMS[normaliseKey(behaviourLabel)];
+            if (syn) key = getKeyInsensitive(productNode.behaviours, syn);
+          }
+          if (key) node = productNode.behaviours[key];
+        }
+
+        // Try buyers container if not found
+        if (!node && productNode.buyers){
+          let key = getKeyInsensitive(productNode.buyers, behaviourLabel);
+          if (!key){
+            const syn = BEHAVIOUR_SYNONYMS[normaliseKey(behaviourLabel)];
+            if (syn) key = getKeyInsensitive(productNode.buyers, syn);
+          }
+          if (key) node = productNode.buyers[key];
+        }
+
+        // Fallback to product-level "needs" block
+        if (!node && productNode.needs) node = productNode.needs;
+
+        const sections = {
+          priorities: toArr(node?.priorities || node?.Priorities),
+          pains:      toArr(node?.pains || node?.Pains),
+          triggers:   toArr(node?.triggers || node?.Triggers),
+          proof:      toArr(node?.proof || node?.Proof || node?.value || node?.Value),
+          objections: toArr(node?.objections || node?.Objections),
+          ctas:       toArr(node?.ctas || node?.CTAs || node?.callsToAction || node?.CallsToAction)
+        };
+
+        const allEmpty = Object.values(sections).every(a => a.length === 0);
+        if (allEmpty){
+          fillAllSlotsWith(['No data available for this selection.']);
+          return;
+        }
+
+        setSlot('intel-priorities', sections.priorities);
+        setSlot('intel-pains',      sections.pains);
+        setSlot('intel-triggers',   sections.triggers);
+        setSlot('intel-proof',      sections.proof);
+        setSlot('intel-objections', sections.objections);
+        setSlot('intel-ctas',       sections.ctas);
+      }
+
+      /* ============================== */
 
       // Call type remember → script map indicator
       function loadCallPref() {
@@ -623,7 +716,6 @@
         } catch (err) {
           setStatus('Network error. Please try again.', 'error');
           diag.open = true; diagJson.textContent = String(err);
-          document.getElementById('diagnostics').focus();
         } finally {
           setBusy(false);
         }
@@ -644,7 +736,7 @@
         loadForm();
         loadCallPref();
 
-        // Populate product options
+        // Populate product options from intel.json
         const products = Object.keys(intel.products || {});
         const current = productSel.value;
         productSel.innerHTML = '<option value="">Select…</option>';
