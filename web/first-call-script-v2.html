@@ -1,426 +1,619 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-app="inside-track-tools">
 <head>
   <meta charset="utf-8" />
-  <title>First Call Script · Inside Track Tools</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta http-equiv="Cache-Control" content="no-store" />
+  <title>Inside Track Tools · First Call Script (v2)</title>
+  <link rel="stylesheet" href="./styles.css" />
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; }
-    header { padding: 16px; border-bottom: 1px solid #eee; display:flex; align-items:center; gap:12px; }
-    header a { text-decoration: none; }
-    main { max-width: 960px; margin: 0 auto; padding: 16px; }
-    form { display: grid; gap: 12px; }
-    label { font-weight: 600; }
-    input, textarea, select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
-    textarea { min-height: 100px; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .actions { display: flex; gap: 12px; align-items: center; }
-    button { padding: 10px 14px; border-radius: 6px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
-    button.primary { background: #111; color: #fff; border-color: #111; }
-    .meta { color: #666; font-size: 13px; }
-    pre { background: #f7f7f7; padding: 12px; border-radius: 6px; overflow: auto; }
-    details { border: 1px solid #eee; border-radius: 6px; padding: 8px 12px; }
-    .ok { color: #0a7f2e; }
-    .err { color: #b00020; }
-    .panel { border: 1px solid #eee; border-radius: 8px; padding: 12px; background: #fafafa; }
-    .panel h3 { margin: 0 0 8px; font-size: 15px; }
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    /* In-page critical CSS (small) — rest in styles.css */
+    .visually-hidden{position:absolute!important;height:1px;width:1px;overflow:hidden;clip:rect(1px,1px,1px,1px);white-space:nowrap;border:0;padding:0;margin:-1px;}
+    .badge{display:inline-flex;gap:.5rem;align-items:center;padding:.25rem .5rem;border-radius:999px;background:var(--surface-2);font-size:.875rem}
+    .kicker{font-size:.875rem;color:var(--text-2);margin-top:.125rem}
+    details.diag summary{cursor:pointer}
   </style>
 </head>
 <body>
-  <header>
-    <a href="/" aria-label="Home">⬅︎ Home</a>
-    <h1 style="margin:0; font-size:18px;">First Call Script</h1>
-    <span id="userBadge" class="meta" style="margin-left:auto;"></span>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="app-header" role="banner">
+    <div class="brand">
+      <h1 class="title">Inside Track Tools</h1>
+      <p class="kicker">First Call Script · v2</p>
+    </div>
+    <div class="signed-in">
+      <span id="user-badge" class="badge" aria-live="polite" aria-atomic="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path></svg>
+        <span>Loading user…</span>
+      </span>
+    </div>
   </header>
 
-  <main>
-    <p class="meta">Generate a concise, UK-style first call script for B2B technology outreach using the Larato 6-step structure.</p>
+  <main id="main" class="layout" role="main">
+    <!-- LEFT: form + actions -->
+    <section class="panel left" aria-labelledby="form-title">
+      <h2 id="form-title">Script Inputs</h2>
 
-    <form id="tool-form" data-testid="first-call-form" autocomplete="off">
-      <div class="row">
-        <div>
-          <label for="seller_name">Your name</label>
-          <input id="seller_name" name="seller_name" required placeholder="e.g., Lucy Green" />
+      <form id="script-form" novalidate>
+        <!-- Card: Caller -->
+        <fieldset class="card">
+          <legend>Caller details</legend>
+          <div class="field">
+            <label for="seller_name">Your name <span aria-hidden="true" class="req">*</span></label>
+            <input id="seller_name" name="seller_name" required autocomplete="name" />
+            <p class="help">Introduce yourself clearly at the start of the call.</p>
+            <p class="error" id="seller_name_error" role="alert" aria-live="polite"></p>
+          </div>
+
+          <div class="field">
+            <label for="seller_company">Your company <span aria-hidden="true" class="req">*</span></label>
+            <input id="seller_company" name="seller_company" required autocomplete="organization" />
+            <p class="help">Shown in the opening line and value statement.</p>
+            <p class="error" id="seller_company_error" role="alert" aria-live="polite"></p>
+          </div>
+        </fieldset>
+
+        <!-- Card: Prospect -->
+        <fieldset class="card">
+          <legend>Prospect details</legend>
+          <div class="grid-2">
+            <div class="field">
+              <label for="prospect_name">Prospect name <span aria-hidden="true" class="req">*</span></label>
+              <input id="prospect_name" name="prospect_name" required />
+              <p class="error" id="prospect_name_error" role="alert" aria-live="polite"></p>
+            </div>
+
+            <div class="field">
+              <label for="prospect_role">Prospect role <span aria-hidden="true" class="req">*</span></label>
+              <input id="prospect_role" name="prospect_role" required />
+              <p class="error" id="prospect_role_error" role="alert" aria-live="polite"></p>
+            </div>
+
+            <div class="field">
+              <label for="prospect_company">Prospect company <span aria-hidden="true" class="req">*</span></label>
+              <input id="prospect_company" name="prospect_company" required />
+              <p class="error" id="prospect_company_error" role="alert" aria-live="polite"></p>
+            </div>
+
+            <div class="field">
+              <label for="call_type">Call type <span aria-hidden="true" class="req">*</span></label>
+              <select id="call_type" name="call_type" required>
+                <option value="">Select…</option>
+                <option>Direct</option>
+                <option>Partner</option>
+              </select>
+              <p class="help">Choose whether this is a direct outreach or via a partner.</p>
+              <p class="error" id="call_type_error" role="alert" aria-live="polite"></p>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Card: Targeting -->
+        <fieldset class="card">
+          <legend>Targeting</legend>
+          <div class="grid-2">
+            <div class="field">
+              <label for="product">Product <span aria-hidden="true" class="req">*</span></label>
+              <select id="product" name="product" required>
+                <option value="">Loading…</option>
+              </select>
+              <p class="help">One of the Inside Track product categories.</p>
+              <p class="error" id="product_error" role="alert" aria-live="polite"></p>
+            </div>
+
+            <div class="field">
+              <label for="buyer_type">Buyer type <span aria-hidden="true" class="req">*</span></label>
+              <select id="buyer_type" name="buyer_type" required>
+                <option value="">Select a product first</option>
+              </select>
+              <p class="help">Populated from Inside Track buyer labels for the chosen product.</p>
+              <p class="error" id="buyer_type_error" role="alert" aria-live="polite"></p>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Card: Script Preferences -->
+        <fieldset class="card">
+          <legend>Script preferences</legend>
+          <div class="grid-2">
+            <div class="field">
+              <label for="tone">Tone</label>
+              <input id="tone" name="tone" placeholder="Professional, warm, concise" />
+              <p class="help">Optional guidance for tone of voice.</p>
+            </div>
+
+            <div class="field">
+              <label for="length">Length</label>
+              <select id="length" name="length">
+                <option>~100 words</option>
+                <option>~50 words</option>
+                <option>~150 words</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="value_proposition">Value proposition</label>
+            <textarea id="value_proposition" name="value_proposition" rows="2" placeholder="Your one-liner value statement"></textarea>
+          </div>
+
+          <div class="field">
+            <label for="call_to_action">Call to action</label>
+            <input id="call_to_action" name="call_to_action" placeholder="E.g., 20-minute discovery next week" />
+          </div>
+
+          <div class="field">
+            <label for="context">Context</label>
+            <textarea id="context" name="context" rows="3" placeholder="Any relevant background for the model"></textarea>
+          </div>
+        </fieldset>
+
+        <!-- Actions -->
+        <div class="actions">
+          <button id="submit" class="btn primary" type="submit" disabled>
+            <span class="btn-label">Generate script</span>
+            <span class="spinner" aria-hidden="true"></span>
+          </button>
+          <button id="reset" class="btn" type="button">Reset</button>
+          <button id="copy" class="btn" type="button" disabled>Copy</button>
+          <button id="download" class="btn" type="button" disabled>Download .txt</button>
         </div>
-        <div>
-          <label for="seller_company">Your company</label>
-          <input id="seller_company" name="seller_company" required placeholder="e.g., Larato" />
+
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+
+        <details id="diagnostics" class="diag">
+          <summary>Diagnostics</summary>
+          <pre id="diag-json" tabindex="0" aria-label="Diagnostics JSON"></pre>
+          <p class="muted">If you see a 401 unauthorised error, please <a href="/.auth/login/aad">sign in again</a>.</p>
+        </details>
+      </form>
+    </section>
+
+    <!-- RIGHT: output + market intel -->
+    <section class="panel right" aria-labelledby="output-title">
+      <div class="split">
+        <div class="output-card card">
+          <div class="output-head">
+            <h2 id="output-title">Generated Script</h2>
+            <div class="meta" id="output-meta" aria-live="polite"></div>
+          </div>
+          <pre id="output" class="output" tabindex="0" aria-label="Generated script will appear here"></pre>
+          <div class="change-log">
+            <h3>What changed</h3>
+            <ul id="delta-log" class="delta" aria-live="polite"></ul>
+          </div>
+          <div class="activity">
+            <h3>Recent activity</h3>
+            <ol id="activity-log" class="activity-log" aria-live="polite"></ol>
+          </div>
         </div>
+
+        <aside class="intel card" aria-labelledby="intel-title">
+          <div class="intel-head">
+            <h2 id="intel-title">Market Intelligence</h2>
+            <button id="toggle-intel" class="btn small" type="button" aria-expanded="true" aria-controls="intel-body">Hide</button>
+          </div>
+          <div id="intel-body">
+            <div class="intel-grid">
+              <section>
+                <h3>1) Buyer Priorities</h3>
+                <div id="intel-priorities" class="intel-slot"></div>
+              </section>
+              <section>
+                <h3>2) Typical Pains</h3>
+                <div id="intel-pains" class="intel-slot"></div>
+              </section>
+              <section>
+                <h3>3) Triggers</h3>
+                <div id="intel-triggers" class="intel-slot"></div>
+              </section>
+              <section>
+                <h3>4) Value Proof</h3>
+                <div id="intel-proof" class="intel-slot"></div>
+              </section>
+              <section>
+                <h3>5) Objections</h3>
+                <div id="intel-objections" class="intel-slot"></div>
+              </section>
+              <section>
+                <h3>6) CTAs</h3>
+                <div id="intel-ctas" class="intel-slot"></div>
+              </section>
+            </div>
+          </div>
+        </aside>
       </div>
-
-      <div class="row">
-        <div>
-          <label for="prospect_name">Prospect name</label>
-          <input id="prospect_name" name="prospect_name" required placeholder="e.g., Alex Carter" />
-        </div>
-        <div>
-          <label for="prospect_role">Prospect role</label>
-          <input id="prospect_role" name="prospect_role" required placeholder="e.g., IT Director" />
-        </div>
-      </div>
-
-      <div class="row">
-        <div>
-          <label for="prospect_company">Prospect company</label>
-          <input id="prospect_company" name="prospect_company" required placeholder="e.g., Acme PLC" />
-        </div>
-        <div>
-          <label for="tone">Tone</label>
-          <select id="tone" name="tone">
-            <option value="Professional">Professional</option>
-            <option value="Warm">Warm</option>
-            <option value="Challenger">Challenger</option>
-            <option value="Friendly">Friendly</option>
-            <option value="Technical">Technical</option>
-            <option value="Consultative">Consultative</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- Call type + Product/Service -->
-      <div class="row">
-        <div>
-          <label for="call_type">Call type</label>
-          <select id="call_type" name="call_type">
-            <option value="Direct">Direct</option>
-            <option value="Partner">Partner</option>
-          </select>
-        </div>
-        <div>
-          <label for="product">Product / service</label>
-          <select id="product" name="product">
-            <option>Mobile and fixed connectivity</option>
-            <option>Cybersecurity</option>
-            <option>Artificial Intelligence</option>
-            <option>Hardware and software</option>
-            <option>IT Solutions</option>
-            <option>Microsoft solutions</option>
-            <option>Telecommunications solutions</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- Buyer type + Length -->
-      <div class="row">
-        <div>
-          <label for="buyer_type">Buyer type (paste exact label from Inside Track)</label>
-          <select id="buyer_type" name="buyer_type">
-            <option>Innovator</option>
-            <option>Early Adopter</option>
-            <option>Early Majority</option>
-            <option selected>Late Majority</option>
-            <option>Sceptic</option>
-          </select>
-        </div>
-        <div>
-          <label for="length">Approx length</label>
-          <select id="length" name="length">
-            <option value="~100 words">~100 words</option>
-            <option value="~150 words" selected>~150 words</option>
-            <option value="~200 words">~200 words</option>
-            <option value="~250 words">~250 words</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- Market Intelligence Panel (appears here, under the row in the screenshot) -->
-      <div id="playbookPanel" class="panel">
-        <h3>Market Intelligence · Baseline Script</h3>
-        <p class="meta" id="playbookMeta"></p>
-        <textarea id="playbookOutput" readonly placeholder="Select a Product / service and Buyer type to view the baseline script…"></textarea>
-      </div>
-
-      <div class="row">
-        <div>
-          <label for="call_to_action">Call to action</label>
-          <input id="call_to_action" name="call_to_action" placeholder="e.g., 45-minute Connectivity Audit next week?" />
-        </div>
-        <div><!-- spacer --></div>
-      </div>
-
-      <div>
-        <label for="context">Context (why you, why now)</label>
-        <textarea id="context" name="context" placeholder="e.g., Observed cloud costs rising while ticket resolution times increasing; recent merger adds complexity."></textarea>
-      </div>
-
-      <div>
-        <label for="value_proposition">Value proposition</label>
-        <textarea id="value_proposition" name="value_proposition" placeholder="e.g., We help UK MSPs cut CX costs 20–30% while lifting NPS via AI-assisted triage and knowledge surfacing."></textarea>
-      </div>
-
-      <details>
-        <summary>Preview request payload</summary>
-        <pre id="payloadPreview" data-testid="payload-preview"></pre>
-      </details>
-
-      <div class="actions">
-        <button type="submit" class="primary" id="submitBtn" data-testid="submit-btn">Generate</button>
-        <button type="button" id="resetBtn">Reset</button>
-        <span id="status" class="meta" aria-live="polite"></span>
-      </div>
-    </form>
-
-    <h2 style="margin-top:24px; font-size:16px;">Generated script</h2>
-    <div class="actions" style="margin-bottom:8px;">
-      <button type="button" id="copyBtn" aria-label="Copy script" disabled>Copy</button>
-      <button type="button" id="downloadBtn" aria-label="Download script" disabled>Download .txt</button>
-      <span id="copyStatus" class="meta" aria-live="polite"></span>
-    </div>
-
-    <!-- Two-column: Baseline vs Generated (optional). Keep just Generated if preferred. -->
-    <div class="grid-2">
-      <div>
-        <p class="meta">Baseline (above) is static reference content from Inside Track research.</p>
-      </div>
-      <div>
-        <textarea id="scriptOutput" readonly placeholder="Your generated script will appear here after Generate…"></textarea>
-        <p id="scriptHelp" class="meta"></p>
-      </div>
-    </div>
-
-    <h2 style="margin-top:24px; font-size:16px;">API response</h2>
-    <pre id="result" data-testid="api-result" aria-live="polite"></pre>
+    </section>
   </main>
 
+  <template id="activity-item">
+    <li>
+      <span class="time"></span>
+      <span class="pill product"></span>
+      <span class="pill buyer"></span>
+      <span class="pill length"></span>
+    </li>
+  </template>
+
   <script>
-    // ======== CONFIG ========
-    const PACK = "uk_b2b_sales_core";
-    const TEMPLATE = "first_call_script_v2";
+    (function () {
+      const FORM_ID = 'script-form';
+      const STORAGE_KEY = 'first_call_script_v2.form';
+      const ACTIVITY_KEY = 'first_call_script_v2.activity';
+      const OUTPUT_KEY = 'first_call_script_v2.last_output';
+      const INTEL_URL = './intel.json';
+      const REQUIRED = ['seller_name','seller_company','prospect_name','prospect_role','prospect_company','call_type','buyer_type','product'];
 
-    // Your market-intelligence library.
-    // Add all product × buyer-type combinations here.
-    // Keys must match the select option text for product and buyer_type.
-    const PLAYBOOK = {
-      "Mobile and fixed connectivity": {
-        "Late Majority": `1 | Your buyer’s business need
-Your business depends on reliable, cost-effective connectivity. But managing mobile and fixed services across multiple sites and teams is becoming more complex. You need a setup that just works, without requiring constant admin or firefighting. The goal is not transformation for its own sake — it’s smoother operations, clearer visibility and fewer headaches.
+      // Elements
+      const form = document.getElementById(FORM_ID);
+      const submitBtn = document.getElementById('submit');
+      const resetBtn = document.getElementById('reset');
+      const copyBtn = document.getElementById('copy');
+      const downloadBtn = document.getElementById('download');
+      const outputEl = document.getElementById('output');
+      const outputMeta = document.getElementById('output-meta');
+      const statusEl = document.getElementById('status');
+      const deltaLog = document.getElementById('delta-log');
+      const activityLog = document.getElementById('activity-log');
+      const activityTpl = document.getElementById('activity-item');
+      const diag = document.getElementById('diagnostics');
+      const diagJson = document.getElementById('diag-json');
+      const productSel = document.getElementById('product');
+      const buyerSel = document.getElementById('buyer_type');
+      const toggleIntelBtn = document.getElementById('toggle-intel');
+      const intelBody = document.getElementById('intel-body');
+      const intelSlots = {
+        priorities: document.getElementById('intel-priorities'),
+        pains: document.getElementById('intel-pains'),
+        triggers: document.getElementById('intel-triggers'),
+        proof: document.getElementById('intel-proof'),
+        objections: document.getElementById('intel-objections'),
+        ctas: document.getElementById('intel-ctas'),
+      };
 
-2 | Your buyer’s pain – Cost and Productivity Concerns
-Most businesses reach a point where their existing telecoms setup starts to bite:
-• Mobile usage is unpredictable and hard to forecast
-• Fixed-line services are stuck in long contracts that no longer fit
-• SLAs are missed and support is reactive
-• No one has a full picture of what’s used, needed or wasted
-Forty-three per cent of UK buyers say rising costs are already impacting plans. Thirty-two per cent say poor infrastructure is slowing them down. Even when things work on paper, the day-to-day effort to manage suppliers, changes and faults takes its toll.
+      let intel = null;
+      let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
 
-3 | Aligning with your buyer’s business goals
-You want infrastructure that supports growth without creating extra overhead. That usually includes:
-• A single view of your mobile and fixed estate across all locations
-• Alerts and usage controls to prevent overages before they happen
-• A support model that prioritises response, not red tape
-• Flexibility to scale bandwidth or shift SIMs without chasing paperwork
-It’s not about the latest tech. It’s about having confidence in the basics, knowing the right service is in place and working when needed.
+      // Utility
+      const qs = (name) => form.querySelector(`[name="${name}"]`);
+      const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 
-4 | An Example Illustration – From Problem to Solution (replace with your own if you prefer)
-One national retailer was managing fixed and mobile services across 70 sites. Each site had negotiated its own contracts, and mobile usage was being expensed rather than tracked centrally. When a POS upgrade required connectivity changes, the IT team had no clear view of what was installed where.
-Introducing a centralised estate view with pooled mobile data, flexible broadband provisioning and a support team who managed moves, adds and changes as a service delivered the following value.
-In the first six months:
-• Connectivity incidents dropped by 52 per cent
-• Mobile overspend was cut by 34 per cent
-• New store setup time dropped from 21 days to under 8
-• Finance could reconcile costs against usage for the first time
-The IT manager described it as “getting the lights turned back on”.
-
-5 | Suggestions for Handling Objections whilst on a call
-“We’ve got contracts we can’t get out of.”
-We work with what’s in place and apply governance over the top. When renewals roll around, you’ll already have a better model to move toward.
-“We don’t have time for a big project.”
-That’s fine. We start small — usually with two to five sites — and get results within a single billing cycle. It’s low risk, high impact.
-“This won’t fit our setup.”
-We customise everything around your business. Whether you have legacy tech or regional variations, we build a model that flexes with you.
-
-6 | Call to Action – Next Steps
-Let’s schedule a 45-minute Connectivity Audit. You’ll get:
-• A current-state map of your mobile and fixed services
-• A savings and simplification plan tailored to your operational structure
-• A pilot design that shows value within one quarter
-I’ll also include our “Retail Connectivity Toolkit”, with benchmarking data, supplier scorecards and a governance checklist. Would Monday or Thursday next week suit your team?`
+      function setBusy(isBusy) {
+        submitBtn.disabled = isBusy || !form.checkValidity();
+        resetBtn.disabled = isBusy;
+        copyBtn.disabled = isBusy || !outputEl.textContent.trim();
+        downloadBtn.disabled = isBusy || !outputEl.textContent.trim();
+        submitBtn.classList.toggle('busy', isBusy);
       }
 
-      // Example placeholders for where to add the rest:
-      // ,"Cybersecurity": { "Early Majority": "…", "Late Majority": "…", "Sceptic": "…" }
-      // ,"Artificial Intelligence": { "Innovator": "…", "Early Adopter": "…" }
-    };
+      function setStatus(msg, kind='info') {
+        statusEl.textContent = msg;
+        statusEl.dataset.kind = kind;
+      }
 
-    // ======== AUTH ========
-    async function requireAuth() {
-      try {
-        const res = await fetch("/.auth/me", { credentials: "include", cache: "no-store" });
-        const data = await res.json().catch(() => ({}));
-        const user = data && data.clientPrincipal ? data.clientPrincipal : null;
-        if (!user) {
-          const redirect = "/.auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.href);
-          window.location.replace(redirect);
-          throw new Error("Redirecting to login");
+      function validateField(input) {
+        const errorEl = document.getElementById(`${input.id}_error`);
+        if (!errorEl) return;
+        if (input.validity.valid) {
+          errorEl.textContent = '';
+          input.classList.remove('invalid');
+        } else {
+          input.classList.add('invalid');
+          let message = 'Please fill out this field.';
+          if (input.validity.valueMissing) message = 'This field is required.';
+          errorEl.textContent = message;
         }
-        return user;
-      } catch (e) {
-        const redirect = "/.auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.href);
-        window.location.replace(redirect);
-        throw e;
       }
-    }
 
-    // ======== FORM HELPERS ========
-    function collectVariables(form) {
-      const fd = new FormData(form);
-      const vars = {};
-      for (const [k, v] of fd.entries()) vars[k] = v;
-      return vars;
-    }
-
-    function renderPayloadPreview(vars) {
-      const preview = { pack: PACK, template: TEMPLATE, variables: vars };
-      document.getElementById("payloadPreview").textContent = JSON.stringify(preview, null, 2);
-    }
-
-    function setUserBadge(user) {
-      const el = document.getElementById("userBadge");
-      if (!user) return;
-      const name = user.userDetails || user.userId || "signed in";
-      el.textContent = `Signed in as ${name}`;
-      el.classList.add("ok");
-    }
-
-    function updateDownloadState(enabled) {
-      document.getElementById("copyBtn").disabled = !enabled;
-      document.getElementById("downloadBtn").disabled = !enabled;
-    }
-
-    // ======== PLAYBOOK UI ========
-    function updatePlaybook(product, buyerType) {
-      const out = document.getElementById("playbookOutput");
-      const meta = document.getElementById("playbookMeta");
-      const p = PLAYBOOK[product] || {};
-      const text = p[buyerType] || "";
-
-      meta.textContent = (product && buyerType)
-        ? `Product: ${product} · Buyer type: ${buyerType}`
-        : "";
-
-      if (text) {
-        out.value = text;
-      } else {
-        out.value = "No baseline script stored for this Product / Buyer type yet. Add it to PLAYBOOK in the page script.";
+      function saveForm() {
+        const data = Object.fromEntries(new FormData(form).entries());
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       }
-    }
 
-    // ======== BOOTSTRAP ========
-    document.addEventListener("DOMContentLoaded", async () => {
-      const user = await requireAuth();
-      setUserBadge(user);
-
-      const form = document.getElementById("tool-form");
-      const statusEl = document.getElementById("status");
-      const resultEl = document.getElementById("result");
-      const submitBtn = document.getElementById("submitBtn");
-      const copyBtn = document.getElementById("copyBtn");
-      const downloadBtn = document.getElementById("downloadBtn");
-      const copyStatus = document.getElementById("copyStatus");
-      const resetBtn = document.getElementById("resetBtn");
-      const scriptOutput = document.getElementById("scriptOutput");
-      const scriptHelp = document.getElementById("scriptHelp");
-      const productEl = document.getElementById("product");
-      const buyerTypeEl = document.getElementById("buyer_type");
-
-      // live preview + playbook refresh
-      form.addEventListener("input", () => {
-        const vars = collectVariables(form);
-        renderPayloadPreview(vars);
-        updatePlaybook(vars.product, vars.buyer_type);
-      });
-      renderPayloadPreview(collectVariables(form));
-      updatePlaybook(productEl.value, buyerTypeEl.value);
-
-      // reset clears everything
-      resetBtn.addEventListener("click", () => {
-        form.reset();
-        resultEl.textContent = "";
-        statusEl.textContent = "";
-        scriptOutput.value = "";
-        scriptHelp.textContent = "";
-        copyStatus.textContent = "";
-        updateDownloadState(false);
-        renderPayloadPreview(collectVariables(form));
-        updatePlaybook(productEl.value, buyerTypeEl.value);
-      });
-
-      // Copy button — attach once
-      copyBtn.addEventListener("click", async () => {
+      function loadForm() {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
         try {
-          await navigator.clipboard.writeText(scriptOutput.value || "");
+          const data = JSON.parse(raw);
+          Object.entries(data).forEach(([k,v]) => {
+            const el = qs(k);
+            if (el) el.value = v;
+          });
         } catch {}
-        copyStatus.textContent = "Copied";
-        setTimeout(() => (copyStatus.textContent = ""), 1500);
-      });
+      }
 
-      // Download button
-      downloadBtn.addEventListener("click", () => {
-        const blob = new Blob([scriptOutput.value || ""], { type: "text/plain;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = Object.assign(document.createElement("a"), { href: url, download: "first-call-script.txt" });
-        a.click();
-        URL.revokeObjectURL(url);
-      });
+      function clearFormState() {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(ACTIVITY_KEY);
+        // keep last output for delta comparison
+      }
 
-      // Submit handler
-      form.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        resultEl.textContent = "";
-        scriptOutput.value = "";
-        scriptHelp.textContent = "";
-        statusEl.textContent = "Submitting…";
-        submitBtn.disabled = true;
-        updateDownloadState(false);
+      function refreshSubmitState() {
+        submitBtn.disabled = !form.checkValidity();
+      }
 
-        const variables = collectVariables(form);
-        renderPayloadPreview(variables);
+      function renderIntel(product, buyer) {
+        if (!intel) return;
+        const p = intel.products?.[product];
+        const b = p?.buyers?.[buyer];
+        const fallback = (arr) => (arr && arr.length ? arr : ['No data available.']);
+        intelSlots.priorities.replaceChildren(...fallback(b?.priorities).map(li));
+        intelSlots.pains.replaceChildren(...fallback(b?.pains).map(li));
+        intelSlots.triggers.replaceChildren(...fallback(b?.triggers).map(li));
+        intelSlots.proof.replaceChildren(...fallback(b?.proof).map(li));
+        intelSlots.objections.replaceChildren(...fallback(b?.objections).map(li));
+        intelSlots.ctas.replaceChildren(...fallback(b?.ctas).map(li));
+      }
 
+      function li(text) {
+        const el = document.createElement('p');
+        el.textContent = text;
+        return el;
+      }
+
+      function populateProductAndBuyer() {
+        productSel.innerHTML = '<option value="">Select…</option>';
+        if (!intel?.products) return;
+        Object.keys(intel.products).forEach(prod => {
+          const opt = document.createElement('option');
+          opt.value = prod;
+          opt.textContent = prod;
+          productSel.appendChild(opt);
+        });
+        // If a product was restored, ensure buyers populate
+        if (productSel.value) populateBuyer(productSel.value);
+      }
+
+      function populateBuyer(product) {
+        buyerSel.innerHTML = '<option value="">Select…</option>';
+        const buyers = intel?.products?.[product]?.buyers || {};
+        Object.keys(buyers).forEach(b => {
+          const opt = document.createElement('option');
+          opt.value = b;
+          opt.textContent = b;
+          buyerSel.appendChild(opt);
+        });
+      }
+
+      function addActivity(entry) {
+        const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
+        list.unshift(entry);
+        localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0,3)));
+        renderActivity();
+      }
+
+      function renderActivity() {
+        const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
+        activityLog.innerHTML = '';
+        list.forEach(item => {
+          const node = activityTpl.content.cloneNode(true);
+          node.querySelector('.time').textContent = item.time;
+          node.querySelector('.product').textContent = item.product;
+          node.querySelector('.buyer').textContent = item.buyer_type;
+          node.querySelector('.length').textContent = item.length;
+          activityLog.appendChild(node);
+        });
+      }
+
+      function computeDelta(oldText, newText) {
+        const oldLines = oldText.split('\n');
+        const newLines = newText.split('\n');
+        let added = 0, removed = 0;
+        const oldSet = new Set(oldLines);
+        const newSet = new Set(newLines);
+        newLines.forEach(l => { if (!oldSet.has(l) && l.trim()) added++; });
+        oldLines.forEach(l => { if (!newSet.has(l) && l.trim()) removed++; });
+        return { added, removed };
+      }
+
+      function renderDelta(delta) {
+        deltaLog.innerHTML = '';
+        const items = [];
+        const a = document.createElement('li');
+        a.textContent = `+${delta.added} new line${delta.added===1?'':'s'}`;
+        const r = document.createElement('li');
+        r.textContent = `−${delta.removed} removed line${delta.removed===1?'':'s'}`;
+        items.push(a, r);
+        items.forEach(i => deltaLog.appendChild(i));
+      }
+
+      async function getUser() {
         try {
-          const res = await fetch("/api/generate", {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pack: PACK, template: TEMPLATE, variables })
+          const res = await fetch('/.auth/me', { credentials: 'include' });
+          const el = document.getElementById('user-badge');
+          if (!res.ok) throw new Error('auth');
+          const data = await res.json();
+          const claim = data?.clientPrincipal?.userDetails || 'Signed in';
+          el.querySelector('span:last-child').textContent = claim;
+        } catch {
+          const el = document.getElementById('user-badge');
+          el.querySelector('span:last-child').innerHTML = 'Not signed in — <a href="/.auth/login/aad">Sign in</a>';
+        }
+      }
+
+      // Event wiring
+      form.addEventListener('input', (e) => {
+        if (e.target.matches('input,select,textarea')) {
+          validateField(e.target);
+          saveForm();
+          refreshSubmitState();
+        }
+      });
+
+      form.addEventListener('change', (e) => {
+        if (e.target === productSel) {
+          populateBuyer(productSel.value);
+          // If buyer was restored to a value that no longer exists, clear it
+          if (![...buyerSel.options].some(o => o.value === buyerSel.value)) {
+            buyerSel.value = '';
+          }
+          renderIntel(productSel.value, buyerSel.value);
+        }
+        if (e.target === buyerSel) {
+          renderIntel(productSel.value, buyerSel.value);
+        }
+      });
+
+      toggleIntelBtn.addEventListener('click', () => {
+        const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
+        toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
+        intelBody.hidden = expanded;
+        toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
+      });
+
+      resetBtn.addEventListener('click', () => {
+        form.reset();
+        clearFormState();
+        populateProductAndBuyer();
+        renderIntel(productSel.value, buyerSel.value);
+        renderActivity();
+        refreshSubmitState();
+        setStatus('Form reset. Stored values cleared.');
+        form.querySelector('input, select, textarea')?.focus();
+      });
+
+      copyBtn.addEventListener('click', async () => {
+        const txt = outputEl.textContent;
+        if (!txt.trim()) return;
+        await navigator.clipboard.writeText(txt);
+        setStatus('Copied to clipboard.');
+      });
+
+      downloadBtn.addEventListener('click', () => {
+        const txt = outputEl.textContent;
+        if (!txt.trim()) return;
+        const blob = new Blob([txt], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `first-call-script_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setStatus('Download started.');
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        // Validate
+        let firstInvalid = null;
+        [...form.elements].forEach(el => {
+          if (el.matches('input,select,textarea')) {
+            validateField(el);
+            if (!firstInvalid && !el.checkValidity()) firstInvalid = el;
+          }
+        });
+        if (firstInvalid) {
+          setStatus('Please fix the highlighted fields.', 'error');
+          firstInvalid.focus();
+          return;
+        }
+
+        const payload = {
+          pack: 'uk_b2b_sales_core',
+          template: 'first_call_script_v2',
+          variables: Object.fromEntries(new FormData(form).entries())
+        };
+
+        setBusy(true);
+        setStatus('Generating…');
+        diag.open = false;
+        diagJson.textContent = '';
+
+        const t0 = performance.now();
+        try {
+          const res = await fetch('/api/generate', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(payload),
+            credentials: 'include'
           });
 
           const text = await res.text();
-          let json;
-          try { json = JSON.parse(text); } catch { json = { raw: text }; }
+          let data = {};
+          try { data = JSON.parse(text); } catch { /* sometimes Functions return plain text */ }
 
           if (!res.ok) {
-            statusEl.textContent = "Error";
-            statusEl.classList.add("err");
-          } else {
-            statusEl.textContent = "OK";
-            statusEl.classList.remove("err");
-            statusEl.classList.add("ok");
+            // Error handling
+            if (res.status === 401) {
+              setStatus('Unauthorised. Please sign in again.', 'error');
+            } else if (res.status === 400) {
+              setStatus('Request was rejected. See diagnostics below.', 'error');
+            } else {
+              setStatus(`Error ${res.status}. See diagnostics below.`, 'error');
+            }
+            diag.open = true;
+            diagJson.textContent = JSON.stringify({ status: res.status, body: data || text }, null, 2);
+            document.getElementById('diagnostics').scrollIntoView({behavior: prefersReducedMotion() ? 'auto':'smooth'});
+            document.getElementById('diagnostics').focus();
+            return;
           }
 
-          resultEl.textContent = JSON.stringify(json, null, 2);
+          const out = (data.output || data.preview || '').trim();
+          outputEl.textContent = out || '(No output returned.)';
+          const t1 = performance.now();
+          outputMeta.textContent = `Generated at ${nowTime()} · pack: ${data.packPath || 'uk_b2b_sales_core'} · template: ${data.template || 'first_call_script_v2'} · ${(t1 - t0).toFixed(0)}ms`;
 
-          // Display only model output (server returns output; preview is debug only)
-          const generated = (json && typeof json.output === "string" && json.output.trim()) ? json.output.trim() : "";
-          if (generated) {
-            scriptOutput.value = generated;
-            updateDownloadState(true);
-          } else {
-            scriptOutput.value = "";
-            scriptHelp.textContent = "No generated text yet — API returned no model output.";
-            updateDownloadState(false);
-          }
+          // Enable actions
+          copyBtn.disabled = !out;
+          downloadBtn.disabled = !out;
+
+          // Delta
+          const delta = computeDelta(lastOutput, out);
+          renderDelta(delta);
+          lastOutput = out;
+          localStorage.setItem(OUTPUT_KEY, out);
+
+          // Activity
+          const vars = payload.variables;
+          addActivity({ time: nowTime(), product: vars.product || '—', buyer_type: vars.buyer_type || '—', length: vars.length || '—' });
+
+          setStatus('Done. Script ready.');
+          document.getElementById('output-title').focus();
+
         } catch (err) {
-          statusEl.textContent = "Request failed";
-          statusEl.classList.add("err");
-          resultEl.textContent = String(err);
-          updateDownloadState(false);
+          setStatus('Network error. Please try again.', 'error');
+          diag.open = true;
+          diagJson.textContent = String(err);
+          document.getElementById('diagnostics').focus();
         } finally {
-          submitBtn.disabled = false;
+          setBusy(false);
         }
       });
-    });
+
+      function prefersReducedMotion() {
+        return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      }
+
+      // Init
+      (async function init(){
+        getUser();
+        // Load intel
+        try {
+          const res = await fetch(INTEL_URL, { cache: 'no-store' });
+          intel = await res.json();
+        } catch {
+          intel = { products: {} };
+        }
+        // Restore form values then populate selects so restored values stick
+        loadForm();
+        populateProductAndBuyer();
+        if (productSel.value) populateBuyer(productSel.value);
+        if (productSel.value && buyerSel.value) renderIntel(productSel.value, buyerSel.value);
+        // Validate once on load (for restored state)
+        REQUIRED.forEach(name => validateField(qs(name)));
+        refreshSubmitState();
+        // Render activity + output meta if any
+        renderActivity();
+        if (lastOutput) {
+          outputEl.textContent = lastOutput;
+          copyBtn.disabled = false;
+          downloadBtn.disabled = false;
+        }
+        setStatus('Ready.');
+      })();
+    })();
   </script>
 </body>
 </html>
