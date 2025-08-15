@@ -83,7 +83,7 @@ h3{font-size:1.1rem}
 }
 .calltype-mini .mini-label{ font-weight:600; color: var(--text-1); }
 .calltype-mini select{
-  padding:6px 10px;
+  padding:6px 12px;
   border-radius:8px;
   border:1px solid #cfd7eb;
   background:#fff;
@@ -132,10 +132,12 @@ h3{font-size:1.1rem}
 
 /* User badge */
 .badge{
-  display:flex; align-items:center; gap:.35rem;
-  font-size:.9rem; white-space:nowrap; flex-shrink:0;
+  display:flex; align-items:center; gap:.4rem;
+  padding:8px 12px; background:var(--surface-2); border:1px solid var(--surface-3);
+  border-radius:999px; font-size:.9rem; color:var(--text-1); white-space:nowrap;
 }
-.badge svg{ stroke:currentColor; fill:none; stroke-width:2; }
+.badge svg{ width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2; }
+.badge.is-hidden{ display:none; } 
 
 /* Skip link */
 .skip-link{position:absolute;left:-9999px;top:auto}
