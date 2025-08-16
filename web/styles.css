@@ -1,5 +1,14 @@
 /* === Global Styles === */
 :root {
+  /* Column sizing: tweak these to rebalance widths */
+  --left-min: 420px;
+  --middle-min: 620px;   /* script gets a bit more room */
+  --right-min: 380px;
+
+  --col-left: 1fr;
+  --col-middle: 1.45fr;  /* middle grows more */
+  --col-right: 1fr;
+
   --bg: #f8f9fa;
   --card-bg: #fff;
   --border: #e2e5ea;
@@ -19,7 +28,7 @@
 body {
   margin: 0;
   font: 16px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans";
-  background: #fff; /* flattened */
+  background: #fff;
   color: var(--text-1);
 }
 
@@ -51,7 +60,7 @@ h3 { font-size: 1.1rem; }
   display:inline-flex; align-items:center; gap:.6rem;
   padding: 8px 12px;
   border-radius:999px;
-  background:#eef0f4;        /* neutralised */
+  background:#eef0f4;
   border:1px solid var(--border);
   font-size:.95rem;
   white-space:nowrap;
@@ -79,49 +88,58 @@ h3 { font-size: 1.1rem; }
 .badge svg{ width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2; }
 .badge.is-hidden{ display:none; }
 
-/* === Layout === */
+/* === Layout: true 3-column grid ===================================== */
 .layout{
-  display:flex;
+  display: grid;
   gap: 24px;
   padding: 24px;
-  align-items:flex-start;
-  max-width:none;             /* use full width */
-  width:100%;
+  align-items: start;
+  grid-template-columns:
+    minmax(var(--left-min),  var(--col-left))
+    minmax(var(--middle-min),var(--col-middle))
+    minmax(var(--right-min), var(--col-right));
+  max-width: none;
+  width: 100%;
 }
 
-/* Flattened panels (no big boxes at the back) */
+/* Ensure each panel occupies its column */
+.panel.left   { grid-column: 1; }
+.panel.middle { grid-column: 2; }
+.panel.right  { grid-column: 3; }
+
+/* Panels themselves are transparent — cards inside provide the single white box */
 .panel{
   background: transparent;
   border: 0;
   border-radius: 0;
   padding: 0;
 }
-.panel.left{ flex: 1 1 45%; }
 
-/* Right side holds: [Generated Script] | [Buyer needs] */
-.panel.right{
-  flex: 1 1 55%;
-  display: grid;
-  grid-template-columns: minmax(520px, 1.25fr) minmax(360px, 1fr); /* script wider, buyer needs narrower */
-  gap: 1.25rem;
-  align-items: start;
-}
-
-/* Cards & legends (kept, but flattened) */
+/* === Cards & legends (single white card; no doubles) ================ */
 .card{
-  background: transparent;   /* flattened */
-  border: 0;                 /* flattened */
-  border-radius: 0;          /* flattened */
-  padding: 0;                /* flattened */
-  margin-bottom: 16px;
-  box-shadow: none;          /* flattened */
+  background: var(--card-bg);
+  border:1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin: 0 0 16px;
+  box-shadow: var(--shadow);
 }
+
+/* If a card ever nests inside a card, strip the inner one to avoid double boxes */
+.card .card{
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+}
+
 fieldset{ border:0; margin:0; padding:0; }
 .card > legend{
   display:inline-block; margin:0 0 12px; padding:0 .25rem; font-size:1.125rem; font-weight:700;
 }
 
-/* Form fields */
+/* === Form fields ===================================================== */
 .grid-2{ display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .field{ margin-bottom: 12px; }
 label{ display:block; margin-bottom:6px; font-weight:600; }
@@ -137,7 +155,7 @@ input.invalid, select.invalid, textarea.invalid{ border-color: var(--danger); }
 .error{ min-height:1.1rem; color:var(--danger); font-size:.9rem; margin:.25rem 0 0; }
 .error-inline{ color:var(--danger); font-size:.85rem; margin-left:.25rem; }
 
-/* Actions / buttons */
+/* === Buttons / actions ============================================== */
 .actions{ display:flex; gap: 12px; align-items:center; margin-top: 16px; flex-wrap:wrap; }
 .btn{
   display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:999px;
@@ -155,12 +173,12 @@ input.invalid, select.invalid, textarea.invalid{ border-color: var(--danger); }
 .status[data-kind="error"]{ color: var(--danger); }
 .status[data-kind="ok"]{ color: var(--ok); }
 
-/* Output card */
+/* === Generated Script ================================================= */
 .output-card .output-head{ display:flex; align-items:baseline; justify-content:space-between; gap: 12px; }
 .output-card .meta{ color: var(--text-2); font-size:.9rem; }
 .output{
   white-space: pre-wrap;
-  background: #fff;                 /* readable, but subtle */
+  background: #fff;
   color:#1f2937;
   border: 1px solid #e5e7eb;
   padding: 12px;
@@ -171,43 +189,47 @@ input.invalid, select.invalid, textarea.invalid{ border-color: var(--danger); }
 .change-log, .activity{ margin-top: 16px; }
 .pill{ display:inline-block; padding:2px 8px; border-radius:999px; background:#eef0f4; font-size:.85rem; margin-left:6px; }
 
-/* === Buyer needs grid === */
+/* === Buyer needs ===================================================== */
 .intel .intel-head{ display:flex; align-items:center; justify-content:space-between; gap: 12px; }
 
-/* Two columns by default on desktop; expand to three on very wide screens */
+/* Two columns by default on desktop; three on ultra-wide */
 .intel-grid{
   display:grid;
   grid-template-columns: repeat(2, minmax(260px, 1fr));
   gap: 12px;
 }
 
-/* Sections/slots flattened */
+/* Flat tiles (content-first) */
 .intel-grid section{ background: transparent; padding: 0; }
 .intel-slot{
   background: transparent;
   border-radius: 0;
   padding: 0;
   color: var(--text-2);
-  min-height: 0; /* let content define height */
+  min-height: 0;
 }
 
-/* Responsive */
+/* === Responsive breakpoints ========================================= */
 @media (min-width: 1600px){
   .intel-grid{ grid-template-columns: repeat(3, minmax(260px, 1fr)); }
+  /* give the middle column extra breathing room on very wide displays */
+  :root{ --middle-min: 720px; --col-middle: 1.6fr; --col-right: 0.9fr; }
 }
 
+/* Laptops / medium screens: 2 columns; Buyer needs spans full width below */
 @media (max-width: 1200px){
-  .panel.right { grid-template-columns: 1fr; }
+  .layout{ grid-template-columns: 1fr 1fr; }
+  .panel.left   { grid-column: 1; }
+  .panel.middle { grid-column: 2; }
+  .panel.right  { grid-column: 1 / -1; }            /* spans both columns */
+  .intel-grid   { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
 }
 
-@media (max-width: 1000px){
-  .layout{ flex-direction: column; }
-  .panel.left, .panel.right{ flex: 1 1 auto; }
-  .intel-grid{ grid-template-columns: repeat(2, minmax(200px, 1fr)); }
-}
-
-@media (max-width: 600px){
-  .intel-grid{ grid-template-columns: 1fr; }
+/* Tablets */
+@media (max-width: 800px){
+  .layout{ grid-template-columns: 1fr; }
+  .panel.left, .panel.middle, .panel.right { grid-column: 1; }
+  .intel-grid { grid-template-columns: 1fr; }
 }
 
 /* Utility */
