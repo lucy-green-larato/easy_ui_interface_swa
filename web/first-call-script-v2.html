@@ -29,7 +29,7 @@
     .calltype-mini{
       display:flex;align-items:center;gap:.6rem;
       padding:8px 14px;border-radius:999px;background:#99f2d1;border:1px solid #28a2b5;
-      font-size:.95rem;flex-wrap:wrap
+      font-size:.95rem;flex-wrap:wrap;white-space:nowrap; /* prevent wrapping per requirement */
     }
     .calltype-mini .mini-label{font-weight:600}
     .calltype-mini select{padding:6px 10px;border-radius:8px;border:1px solid var(--surface-3);background:#fff}
@@ -107,18 +107,15 @@
     <div class="header-right">
       <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
         <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
-
         <select id="call_type" name="call_type" form="script-form" required aria-describedby="call_type_error">
           <option value="">Select…</option>
           <option>Direct</option>
           <option>Partner</option>
         </select>
-
         <label class="remember">
           <input type="checkbox" id="remember_call_type" form="script-form" />
           Remember
         </label>
-
         <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
       </div>
 
@@ -140,8 +137,8 @@
     <section class="panel left" aria-label="Form">
       <form id="script-form" novalidate>
         <!-- Card: Call details -->
-        <fieldset class="card">
-          <legend>Call details</legend>
+        <fieldset class="card" aria-labelledby="legend-call-details">
+          <legend id="legend-call-details">Call details</legend>
 
           <div class="grid-2">
             <div class="field">
@@ -179,8 +176,8 @@
         </fieldset>
 
         <!-- Card: Targeting -->
-        <fieldset class="card">
-          <legend>Targeting</legend>
+        <fieldset class="card" aria-labelledby="legend-targeting">
+          <legend id="legend-targeting">Targeting</legend>
           <div class="grid-2">
             <div class="field">
               <label for="product">Product <span aria-hidden="true" class="req">*</span></label>
@@ -208,8 +205,8 @@
         </fieldset>
 
         <!-- Card: Script preferences -->
-        <fieldset class="card">
-          <legend>Script preferences</legend>
+        <fieldset class="card" aria-labelledby="legend-preferences">
+          <legend id="legend-preferences">Script preferences</legend>
           <div class="grid-2">
             <div class="field">
               <label for="tone">Tone</label>
@@ -373,7 +370,7 @@
         ctas: document.getElementById('intel-ctas'),
       };
 
-      let intel = null;
+      let intel = null;           // normalised shape used by Script 2 (see normaliser below)
       let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
 
       // Utils
@@ -472,6 +469,43 @@
         setSlot('intel-ctas',       arr);
       };
 
+      /* === NEW: schema normaliser so Script 2 works with Script 1's intel.json ===
+         Accepts either:
+         A) Script-1 style: { "<product>": { "<buyer label>": [six strings] } }
+         B) Script-2 style: { products:{ "<product>": { behaviours:{...}, buyers:{...}, needs:{...} } } }
+         Returns unified: { products:{ "<product>": { behaviours:{ "<behaviour>": {priorities, pains, triggers, proof, objections, ctas}}, needs:{...} } } }
+      */
+      function normaliseIntel(raw){
+        if (!raw || typeof raw !== 'object') return { products:{} };
+
+        // If it already looks like Script-2 (has "products"), keep as-is
+        if (raw.products && typeof raw.products === 'object') {
+          return raw;
+        }
+
+        // Otherwise, treat it as Script-1 and convert
+        const out = { products:{} };
+        Object.entries(raw).forEach(([product, buyersObj]) => {
+          const behaviours = {};
+          if (buyersObj && typeof buyersObj === 'object') {
+            Object.entries(buyersObj).forEach(([behaviour, arr]) => {
+              const [priorities, pains, triggers, proof, objections, ctas] = Array.isArray(arr) ? arr : [];
+              behaviours[behaviour] = {
+                priorities: toArr(priorities),
+                pains: toArr(pains),
+                triggers: toArr(triggers),
+                proof: toArr(proof),
+                objections: toArr(objections),
+                ctas: toArr(ctas)
+              };
+            });
+          }
+          out.products[product] = { behaviours };
+        });
+        return out;
+      }
+      /* ------------------------------------------------------------------- */
+
       function renderIntel(productLabel, behaviourLabel){
         if (!intel) return;
 
@@ -484,7 +518,7 @@
           return;
         }
 
-        // Resolve behaviour node (try behaviours -> buyers -> product.needs)
+        // Resolve behaviour node (prefer behaviours, fallback buyers, then generic needs)
         let node = null;
 
         if (productNode.behaviours){
@@ -725,8 +759,6 @@
           setStatus('Done. Script ready.');
           document.getElementById('output-title').focus();
 
-          /* Optional: if your API returns intel too, you can map it here and call setSlot(...) */
-
         } catch (err) {
           setStatus('Network error. Please try again.', 'error');
           diag.open = true; diagJson.textContent = String(err);
@@ -742,14 +774,18 @@
         // Load Buyer Needs intel
         try {
           const res = await fetch(INTEL_URL, { cache: 'no-store' });
-          intel = await res.json();
+          const raw = await res.json();
+
+          /* === CHANGED: normalise incoming intel to support Script-1 or Script-2 structures === */
+          intel = normaliseIntel(raw);
+
         } catch { intel = { products: {} }; }
 
         // Restore form values and prefs
         loadForm();
         loadCallPref();
 
-        // Populate product options from intel.json
+        // Populate product options (works for both schemas now)
         const products = Object.keys(intel.products || {});
         const current = productSel.value;
         productSel.innerHTML = '<option value="">Select…</option>';
