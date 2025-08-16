@@ -8,9 +8,6 @@
   <!-- No global overrides; styles scoped to this page -->
   <link rel="stylesheet" href="./styles.css?v=final-10of10" />
   <style>
-    /* ==============================
-       Page-scoped design tokens
-       ============================== */
     :root{
       --bg:#f7f7f9; --surface-1:#fff; --surface-2:#eef0f4; --surface-3:#e5e8ee;
       --text-1:#1d2129; --text-2:#5b6270; --accent:#2458e6; --accent-pressed:#1f49be;
@@ -22,27 +19,15 @@
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:var(--text-1);font:16px/1.5 var(--font-system)}
 
-    /* ==============================
-       Header
-       ============================== */
-    .app-header{
-      display:flex;align-items:center;justify-content:space-between;
-      gap:var(--space-3);padding:var(--space-3) var(--space-5);
-    }
+    .app-header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);padding:var(--space-3) var(--space-5)}
     .header-left{display:flex;align-items:center;gap:.75rem;min-width:0;flex:1 1 auto}
-    /* CHANGED: logo scales responsively using clamp per requirement */
     .logo{width:clamp(44px,5vw,56px);height:auto;object-fit:contain;flex-shrink:0}
     .brand-text{display:flex;flex-direction:column}
     .app-title{font-weight:600;margin:.25rem 0 0}
     .kicker{font-size:.875rem;color:var(--text-2);margin-top:.125rem}
     .header-right{display:flex;align-items:center;gap:.75rem;flex:0 0 auto}
 
-    /* Buttons (re-used for actions and header chip so everything matches) */
-    .btn{
-      display:inline-flex;align-items:center;gap:8px;padding:10px 14px;
-      border-radius:999px;border:1px solid var(--surface-3);
-      background:var(--surface-1);cursor:pointer;font-weight:600
-    }
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:999px;border:1px solid var(--surface-3);background:var(--surface-1);cursor:pointer;font-weight:600}
     .btn.small{padding:6px 10px;font-size:.9rem}
     .btn.primary{background:var(--accent);color:#fff;border-color:transparent}
     .btn.primary:hover{background:var(--accent-pressed)}
@@ -51,52 +36,22 @@
     .btn.primary.busy .spinner{display:inline-block;animation:spin .9s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
 
-    /* CHANGED: “Direct or partner sales” chip uses same style as other controls (no green box) */
-    .calltype-mini{
-      display:flex;align-items:center;gap:.6rem;
-      padding:6px 10px;border-radius:999px;background:var(--surface-1);
-      border:1px solid var(--surface-3);font-size:.95rem;white-space:nowrap
-    }
+    .calltype-mini{display:flex;align-items:center;gap:.6rem;padding:6px 10px;border-radius:999px;background:var(--surface-1);border:1px solid var(--surface-3);font-size:.95rem;white-space:nowrap}
     .calltype-mini .mini-label{font-weight:600}
     .calltype-mini select{padding:6px 10px;border-radius:8px;border:1px solid var(--surface-3);background:#fff}
     .calltype-mini .remember{display:flex;align-items:center;gap:.35rem;color:var(--text-2)}
     .error-inline{color:var(--danger);font-size:.85rem}
 
-    .model-note{
-      display:inline-flex;align-items:center;gap:.35rem;padding:6px 10px;
-      background:var(--surface-2);border:1px solid var(--surface-3);
-      border-radius:999px;font-size:.9rem;color:var(--text-2)
-    }
-    .badge{display:flex;align-items:center;gap:.4rem;padding:8px 12px;background:var(--surface-2);
-      border:1px solid var(--surface-3);border-radius:999px;font-size:.9rem;color:var(--text-1);white-space:nowrap}
+    .model-note{display:inline-flex;align-items:center;gap:.35rem;padding:6px 10px;background:var(--surface-2);border:1px solid var(--surface-3);border-radius:999px;font-size:.9rem;color:var(--text-2)}
+    .badge{display:flex;align-items:center;gap:.4rem;padding:8px 12px;background:var(--surface-2);border:1px solid var(--surface-3);border-radius:999px;font-size:.9rem;color:var(--text-1);white-space:nowrap}
     .badge svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
     .badge.is-hidden{display:none}
 
-    /* ==============================
-       Layout — 3 columns, full width
-       ============================== */
-    .layout{
-      display:grid;
-      grid-template-columns: minmax(360px,1fr) minmax(420px,1.2fr) minmax(360px,1fr); /* middle a touch wider */
-      gap: var(--space-6);
-      padding: var(--space-5);
-      align-items:start;
-      width:100%;
-      max-width:100vw; /* CHANGED: use all screen footprint */
-      box-sizing:border-box;
-    }
+    .layout{display:grid;grid-template-columns:minmax(360px,1fr) minmax(420px,1.2fr) minmax(360px,1fr);gap:var(--space-6);padding:var(--space-5);align-items:start;width:100%;max-width:100vw;box-sizing:border-box}
     @media (max-width: 1200px){ .layout{ grid-template-columns: 1fr; } }
 
     .panel{display:block}
-
-    /* “Card” style (used sparingly; we’ll remove big outer boxes) */
-    .card{
-      background:var(--surface-1);border-radius:var(--radius);
-      box-shadow:var(--shadow);padding:var(--space-5);
-      margin:0;border:1px solid #e9ebf0
-    }
-
-    /* CHANGED: Plain outer panels (no double borders, no background) */
+    .card{background:var(--surface-1);border-radius:var(--radius);box-shadow:var(--shadow);padding:var(--space-5);margin:0;border:1px solid #e9ebf0}
     .panel-plain{background:transparent;border:0;box-shadow:none;padding:0;margin:0}
 
     fieldset{border:0;margin:0 0 var(--space-5);padding:0}
@@ -106,11 +61,8 @@
     @media (max-width: 800px){ .grid-2{grid-template-columns:1fr} }
 
     label{display:block;margin-bottom:6px;font-weight:600}
-    input,select,textarea{
-      width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--surface-3);background:#fff;
-      outline:none;transition: box-shadow .15s ease, border-color .15s ease;
-    }
-    input:focus,select:focus,textarea:focus{ box-shadow: var(--ring); border-color: var(--accent); }
+    input,select,textarea{width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--surface-3);background:#fff;outline:none;transition: box-shadow .15s ease, border-color .15s ease}
+    input:focus,select:focus,textarea:focus{ box-shadow: var(--ring); border-color: var(--accent) }
     .help{margin:.25rem 0 0;color:var(--text-2);font-size:.9rem}
     .error{min-height:1.25rem;color:var(--danger);font-size:.9rem;margin:.25rem 0 0}
 
@@ -119,19 +71,13 @@
     .status[data-kind="error"]{color:var(--danger)}
     .status[data-kind="ok"]{color:var(--ok)}
 
-    /* Script output keeps a single subtle border for readability */
-    .output{
-      white-space:pre-wrap;background:#f6f7fb;color:#1f2937;border:1px solid #e5e7eb;
-      padding:var(--space-4);border-radius:8px;min-height:180px;outline:none
-    }
+    .output{white-space:pre-wrap;background:#f6f7fb;color:#1f2937;border:1px solid #e5e7eb;padding:var(--space-4);border-radius:8px;min-height:180px;outline:none}
 
-    /* Buyer needs — one column (no outer box) */
     .intel-grid{display:grid;grid-template-columns:1fr;gap:var(--space-3)}
     .intel .intel-slot{background:var(--surface-2);padding:var(--space-3);border-radius:8px;border:0}
   </style>
 </head>
 <body>
-  <!-- HEADER -->
   <header class="app-header" role="banner">
     <div class="header-left">
       <img class="logo" src="./larato-logo.svg" alt="Larato" />
@@ -142,7 +88,6 @@
     </div>
 
     <div class="header-right">
-      <!-- CHANGED: chip matches other controls; label text exact as requested -->
       <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
         <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
         <select id="call_type" name="call_type" form="script-form" required aria-describedby="call_type_error">
@@ -157,7 +102,6 @@
         <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
       </div>
 
-      <!-- CHANGED: “Sales model in use” text aligned with selector -->
       <span class="model-note" aria-live="polite">
         <span class="label">Sales model in use:</span>
         <strong id="map-label">Not set</strong>
@@ -170,12 +114,9 @@
     </div>
   </header>
 
-  <!-- LAYOUT: Form | Script | Buyer needs -->
   <main id="main" class="layout" role="main">
-    <!-- LEFT: form (no outer box) -->
     <section class="panel left" aria-label="Form">
       <form id="script-form" novalidate>
-        <!-- CHANGED: plain panel to remove double border -->
         <fieldset class="panel-plain" aria-labelledby="legend-call-details">
           <legend id="legend-call-details">Call details</legend>
           <div class="grid-2">
@@ -209,7 +150,6 @@
           </div>
         </fieldset>
 
-        <!-- We keep cards on these so the form stays visually grouped -->
         <fieldset class="card" aria-labelledby="legend-targeting">
           <legend id="legend-targeting">Targeting</legend>
           <div class="grid-2">
@@ -293,7 +233,6 @@
       </form>
     </section>
 
-    <!-- MIDDLE: Generated Script (plain outer panel) -->
     <section class="panel middle">
       <div class="panel-plain">
         <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-3)">
@@ -312,7 +251,6 @@
       </div>
     </section>
 
-    <!-- RIGHT: Buyer needs (plain outer panel) -->
     <section class="panel right" aria-labelledby="intel-title">
       <aside class="intel panel-plain">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-3)">
@@ -321,37 +259,18 @@
         </div>
         <div id="intel-body">
           <div class="intel-grid">
-            <section>
-              <h3>1) Buyer Priorities</h3>
-              <div id="intel-priorities" class="intel-slot"></div>
-            </section>
-            <section>
-              <h3>2) Typical Pains</h3>
-              <div id="intel-pains" class="intel-slot"></div>
-            </section>
-            <section>
-              <h3>3) Triggers</h3>
-              <div id="intel-triggers" class="intel-slot"></div>
-            </section>
-            <section>
-              <h3>4) Value Proof</h3>
-              <div id="intel-proof" class="intel-slot"></div>
-            </section>
-            <section>
-              <h3>5) Objections</h3>
-              <div id="intel-objections" class="intel-slot"></div>
-            </section>
-            <section>
-              <h3>6) CTAs</h3>
-              <div id="intel-ctas" class="intel-slot"></div>
-            </section>
+            <section><h3>1) Buyer Priorities</h3><div id="intel-priorities" class="intel-slot"></div></section>
+            <section><h3>2) Typical Pains</h3><div id="intel-pains" class="intel-slot"></div></section>
+            <section><h3>3) Triggers</h3><div id="intel-triggers" class="intel-slot"></div></section>
+            <section><h3>4) Value Proof</h3><div id="intel-proof" class="intel-slot"></div></section>
+            <section><h3>5) Objections</h3><div id="intel-objections" class="intel-slot"></div></section>
+            <section><h3>6) CTAs</h3><div id="intel-ctas" class="intel-slot"></div></section>
           </div>
         </div>
       </aside>
     </section>
   </main>
 
-  <!-- Activity item template -->
   <template id="activity-item">
     <li>
       <span class="time"></span>
@@ -361,14 +280,11 @@
     </li>
   </template>
 
-  <!-- TURN THIS SCRIPT INTO A MODULE + IMPORT THE LIBRARY -->
+  <!-- Module: uses lib/callLibrary.js -->
   <script type="module">
     import { getCallScript } from "./lib/callLibrary.js";
 
     (function () {
-      /* =========================================================================
-         Constants & element refs
-         ========================================================================= */
       const FORM_ID = 'script-form';
       const STORAGE_KEY = 'first_call_script_v2.form';
       const ACTIVITY_KEY = 'first_call_script_v2.activity';
@@ -376,12 +292,7 @@
       const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
       const INTEL_URL = './intel.json';
 
-      // CHANGED: explicit required field list (including header select outside form)
-      const REQUIRED = [
-        'call_type','seller_name','seller_company',
-        'prospect_name','prospect_role','prospect_company',
-        'buyer_behaviour','product'
-      ];
+      const REQUIRED = ['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
 
       const form = document.getElementById(FORM_ID);
       const submitBtn = document.getElementById('submit');
@@ -402,7 +313,6 @@
       const toggleIntelBtn = document.getElementById('toggle-intel');
       const intelBody = document.getElementById('intel-body');
 
-      // CHANGED: header controls live outside the form – wire explicitly
       const callTypeSel = document.getElementById('call_type');
       const rememberCallType = document.getElementById('remember_call_type');
       const mapLabel = document.getElementById('map-label');
@@ -410,14 +320,11 @@
       let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
       let intel = null;
 
-      /* =========================================================================
-         Utilities & accessibility helpers
-         ========================================================================= */
       const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
       const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
       function setBusy(isBusy) {
-        submitBtn.disabled = isBusy || !allRequiredFilled(form); /* CHANGED: deterministic */
+        submitBtn.disabled = isBusy || !allRequiredFilled(form);
         resetBtn.disabled = isBusy;
         const hasText = !!outputEl.textContent.trim();
         copyBtn.disabled = isBusy || !hasText;
@@ -426,7 +333,6 @@
       }
       function setStatus(msg, kind='info') { statusEl.textContent = msg; statusEl.dataset.kind = kind; }
 
-      // CHANGED: deterministic validation that includes header control + restored values
       function allRequiredFilled(formEl) {
         const missing = [];
         const label = {
@@ -435,15 +341,14 @@
           buyer_behaviour:'Buyer behaviour', product:'Product'
         };
         for (const name of REQUIRED) {
-          const el = formEl.elements[name] || document.getElementById(name); // covers header select
+          const el = formEl.elements[name] || document.getElementById(name);
           const val = (el && typeof el.value === 'string') ? el.value.trim() : '';
           if (!val) missing.push(label[name] || name);
         }
-        if (missing.length) { setStatus(`Please complete: ${missing.join(', ')}.`, 'error'); }
-        else { setStatus(''); }
+        if (missing.length) setStatus(`Please complete: ${missing.join(', ')}.`, 'error'); else setStatus('');
         return missing.length === 0;
       }
-      function refreshSubmitState(){ submitBtn.disabled = !allRequiredFilled(form); } /* CHANGED */
+      function refreshSubmitState(){ submitBtn.disabled = !allRequiredFilled(form); }
 
       function validateField(input) {
         const id = input.id;
@@ -454,7 +359,6 @@
         else { errorEl.textContent = id==='call_type' ? 'Please choose a call type.' : 'This field is required.'; input.setAttribute('aria-invalid','true'); input.classList.add('invalid'); }
       }
 
-      // Save/restore — explicitly include header select value
       function saveForm() {
         const fd = Object.fromEntries(new FormData(form).entries());
         fd.call_type = callTypeSel.value || fd.call_type || '';
@@ -473,9 +377,6 @@
       }
       function clearFormState() { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
 
-      /* =========================================================================
-         Buyer needs: tolerant matching + script-based reminders
-         ========================================================================= */
       const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
       const norm = s => String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015_\-\/]+/g,'-').replace(/[^\w\- ]+/g,'').trim();
       const BEHAVIOUR_SYNONYMS = { 'early adopter':'early-adopter','early majority':'early-majority','late majority':'late-majority','skeptic':'sceptic','sceptic':'sceptic' };
@@ -483,8 +384,8 @@
       function getKeyInsensitive(obj, requested){
         if (!obj || typeof obj !== 'object') return null;
         const want = norm(requested);
-        for (const k of Object.keys(obj)) if (norm(k) === want) return k;         // exact
-        for (const k of Object.keys(obj)) if (norm(k).includes(want)) return k;   // contains
+        for (const k of Object.keys(obj)) if (norm(k) === want) return k;
+        for (const k of Object.keys(obj)) if (norm(k).includes(want)) return k;
         return null;
       }
       const pEl = t => { const el=document.createElement('p'); el.textContent=t; return el; };
@@ -501,7 +402,6 @@
       function normaliseIntel(raw){
         if (!raw || typeof raw !== 'object') return { products:{} };
         if (raw.products && typeof raw.products === 'object') return raw;
-        // Back-compat with older shape: {Product:{Behaviour:[pri,pain,...]}}
         const out = { products:{} };
         Object.entries(raw).forEach(([product, buyersObj]) => {
           const behaviours = {};
@@ -518,7 +418,6 @@
 
       function renderIntel(productLabel, behaviourLabel){
         if (!intel) return;
-
         const products = intel.products || {};
         const productKey = getKeyInsensitive(products, productLabel);
         const productNode = productKey ? products[productKey] : null;
@@ -564,7 +463,6 @@
         setSlot('intel-ctas',       sections.ctas);
       }
 
-      // Light heuristic: pull 3 salient points from the generated script as reminders
       function extractKeyPoints(text){
         const sentences = String(text).split(/(?<=[.!?])\s+/).map(s=>s.trim()).filter(Boolean);
         const keywords = /(reduce|save|cut|improv|increase|risk|cost|time|secure|resilien|revenue|margin|efficien|customer|cx|compliance|ml|ai|automate|protect)/i;
@@ -586,9 +484,6 @@
         setSlot('intel-triggers',   ['Keep in mind:', points[2] || '']);
       }
 
-      /* =========================================================================
-         Activity / delta log
-         ========================================================================= */
       function addActivity(entry) {
         const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
         list.unshift(entry);
@@ -622,7 +517,6 @@
         deltaLog.appendChild(a); deltaLog.appendChild(r);
       }
 
-      // Badge hydration (best-effort)
       async function hydrateUserBadge() {
         const el = document.getElementById('user-badge');
         try {
@@ -638,11 +532,7 @@
         }
       }
 
-      /* =========================================================================
-         NEW: mapping helpers to library IDs
-         ========================================================================= */
       const toModeId = (v) => (String(v).toLowerCase().startsWith('p') ? 'partner' : 'direct');
-
       const toBuyerTypeId = (v) => {
         const s = String(v).toLowerCase();
         if (s.startsWith('innovator')) return 'innovators';
@@ -652,9 +542,6 @@
         if (s.startsWith('sceptic') || s.startsWith('skeptic')) return 'sceptics';
         return 'early_majority';
       };
-
-      // For products, prefer exact IDs if your <select> values match the library.
-      // Otherwise apply a light normaliser so "Connectivity (mobile & fixed)" → "connectivity".
       const toProductId = (v) => {
         const s = String(v).toLowerCase().trim();
         const directMap = {
@@ -674,10 +561,6 @@
         return s.replace(/[^\w]+/g,'_').replace(/_{2,}/g,'_').replace(/^_|_$/g,'');
       };
 
-      /* =========================================================================
-         Event wiring (crucial for enabling the button)
-         ========================================================================= */
-      // CHANGED: header select & remember checkbox emit directly to validator
       ['change','input','blur'].forEach(evt => {
         callTypeSel.addEventListener(evt, () => {
           validateField(callTypeSel);
@@ -691,7 +574,6 @@
         });
       });
 
-      // Inputs inside the form
       ['input','change','blur'].forEach(evt => {
         form.addEventListener(evt, (e) => {
           if (e.target.matches('input,select,textarea')) {
@@ -736,9 +618,6 @@
         setStatus('Download started.');
       });
 
-      /* =========================================================================
-         NEW: render helper to print the six stages as readable text
-         ========================================================================= */
       function renderFromLibraryPayload(lib) {
         const s = lib.stages;
         const section = (title, body, extras=[]) => {
@@ -759,7 +638,6 @@
         outputMeta.textContent = `Source: Larato Call Library · ${lib.meta.product_id} · ${lib.buyerType} · ${lib.meta.sales_mode} · Updated ${lib.meta.updated_at}`;
         copyBtn.disabled = false; downloadBtn.disabled = false;
 
-        // Fill Buyer needs from the stage summaries (short prompts for in-call)
         setSlot('intel-priorities', s.opening.buyer_needs_summary || []);
         setSlot('intel-pains', s.buyer_pain.buyer_needs_summary || []);
         setSlot('intel-triggers', s.buyer_desire.buyer_needs_summary || []);
@@ -768,9 +646,6 @@
         setSlot('intel-ctas', s.call_to_action.ctas_text?.length ? s.call_to_action.ctas_text : (s.call_to_action.buyer_needs_summary||[]));
       }
 
-      /* =========================================================================
-         SUBMIT: try Call Library first, fallback to /api/generate
-         ========================================================================= */
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
@@ -803,7 +678,6 @@
 
         setBusy(true); setStatus('Loading from Larato Call Library…'); diag.open = false; diagJson.textContent = '';
 
-        // 1) Try the structured library first
         const lookup = {
           product: toProductId(variables.product),
           buyerType: toBuyerTypeId(variables.buyer_type),
@@ -819,22 +693,16 @@
           renderDelta(delta);
           lastOutput = outputEl.textContent; localStorage.setItem(OUTPUT_KEY, lastOutput);
 
-          addActivity({
-            time: nowTime(),
-            product: variables.product || '—',
-            buyer_behaviour: variables.buyer_type || '—',
-            length: variables.length || '—'
-          });
+          addActivity({ time: nowTime(), product: variables.product || '—', buyer_behaviour: variables.buyer_type || '—', length: variables.length || '—' });
 
           setStatus('Done. (Using Larato Call Library)');
+          setBusy(false);                /* <-- important fix so the button un-busies */
           document.getElementById('output-title').focus();
           return; // success path — skip API
         } catch (libraryErr) {
-          // 2) If library file not found or malformed, fall back to your API
           setStatus('Call Library not available for this selection — using generator…');
         }
 
-        // Fallback: your existing generator
         const payload = { pack: 'uk_b2b_sales_core', template: 'first_call_script_v2', variables };
 
         try {
@@ -849,8 +717,7 @@
             else if (res.status === 400) setStatus('Request was rejected. See diagnostics below.', 'error');
             else setStatus(`Error ${res.status}. See diagnostics below.`, 'error');
             diag.open = true; diagJson.textContent = JSON.stringify({ status: res.status, body: data || text }, null, 2);
-            diag.scrollIntoView({behavior: prefersReducedMotion() ? 'auto':'smooth'});
-            diag.focus();
+            diag.scrollIntoView({behavior: prefersReducedMotion() ? 'auto':'smooth'}); diag.focus();
             return;
           }
 
@@ -864,14 +731,8 @@
           renderDelta(delta);
           lastOutput = out; localStorage.setItem(OUTPUT_KEY, out);
 
-          addActivity({
-            time: nowTime(),
-            product: variables.product || '—',
-            buyer_behaviour: variables.buyer_type || '—',
-            length: variables.length || '—'
-          });
+          addActivity({ time: nowTime(), product: variables.product || '—', buyer_behaviour: variables.buyer_type || '—', length: variables.length || '—' });
 
-          // Refresh Buyer needs from intel, then overlay reminders from the new script
           renderIntel(productSel.value, buyerBehSel.value);
           if (out) injectRemindersFromScript(out);
 
@@ -886,9 +747,6 @@
         }
       });
 
-      /* =========================================================================
-         Remembered call type chip
-         ========================================================================= */
       function loadCallPref() {
         try {
           const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
@@ -910,20 +768,14 @@
         mapLabel.textContent = pref?.call_type || (callTypeSel.value || 'Not set');
       }
 
-      /* =========================================================================
-         Init
-         ========================================================================= */
       (async function init(){
         hydrateUserBadge();
-
-        // Load and normalise intel.json (synonym/insensitive matching relies on this)
         try {
           const res = await fetch(INTEL_URL, { cache: 'no-store' });
           const raw = await res.json();
           intel = normaliseIntel(raw);
         } catch { intel = { products:{} }; }
 
-        // Populate product options from intel
         const products = Object.keys(intel.products || {});
         const current = productSel.value;
         productSel.innerHTML = '<option value="">Select…</option>';
@@ -934,17 +786,13 @@
           productSel.appendChild(opt);
         });
 
-        // Restore saved form state and remembered call type
         loadForm();
         loadCallPref();
 
-        // Initial Buyer needs (if both set)
         if (productSel.value && buyerBehSel.value) renderIntel(productSel.value, buyerBehSel.value);
 
-        // Ensure button state is correct on first paint (CHANGED: crucial)
         refreshSubmitState();
 
-        // Restore last output if present
         const last = localStorage.getItem(OUTPUT_KEY);
         if (last) { outputEl.textContent = last; copyBtn.disabled = false; downloadBtn.disabled = false; }
       })();
