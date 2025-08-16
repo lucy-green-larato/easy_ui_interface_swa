@@ -15,7 +15,7 @@
       --radius:10px; --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px; --space-6:32px;
       --font-system:ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
 
-      /* FIX: missing var caused Buyer Needs to expand; define a hard min */
+      /* Keep Buyer Needs narrow */
       --right-min: 280px;
     }
     html,body{height:100%}
@@ -333,8 +333,9 @@
 
   <!-- === MODULE: synthesise a CALL SCRIPT from curated library === -->
   <script type="module">
-    import { getIndex, canonical } from "/src/lib/callLibrary.js";
-    import { generateCallFromLibrary } from "/src/lib/callSynthesis.js";
+    /* RELATIVE imports + cache-bust so modules load in all deploy roots */
+    import { getIndex, canonical } from "./src/lib/callLibrary.js?v=2";
+    import { generateCallFromLibrary } from "./src/lib/callSynthesis.js?v=2";
 
     (function () {
       const FORM_ID = 'script-form';
@@ -374,7 +375,6 @@
       let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
 
       const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-      const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       const on = (el, evts, h, opt) => { if (el) evts.forEach(e => el.addEventListener(e, h, opt)); };
 
       function setBusy(isBusy) {
@@ -737,9 +737,7 @@
           buyer_type: fd.buyer_behaviour || '',
           product: fd.product || '',
           tone: fd.tone || '',
-          length: fd.length || '',
-          call_to_action: fd.call_to_action || '',
-          context: fd.context || ''
+          length: fd.length || ''
         };
 
         setBusy(true); setStatus('Synthesising call script from Library…'); diag && (diag.open = false); diagJson && (diagJson.textContent = '');
@@ -755,7 +753,7 @@
           role:          variables.prospect_role,
           sector:        '',
           company_size:  '',
-          scenario:      variables.context || '',
+          scenario:      '',
           meeting_type:  'first call'
         };
 
@@ -769,7 +767,7 @@
             length: Number(lengthHint)
           });
 
-          // NEW: Compose one empathetic UK narrative from stages (no headings)
+          // Compose one empathetic UK narrative from stages (no headings)
           const text = composeNarrativeFromStages(result.stages, variables);
 
           outputEl.textContent = text.trim();
@@ -802,7 +800,7 @@
 
       // ---------- Init ----------
       (async function init(){
-        // hydrate badge
+        // hydrate badge (optional sign-in indicator)
         (async () => {
           const el = document.getElementById('user-badge'); if (!el) return;
           try {
