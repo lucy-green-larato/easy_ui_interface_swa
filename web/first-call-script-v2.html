@@ -697,7 +697,7 @@
         setBusy(true); setStatus('Loading from Larato Call Library…'); diag.open = false; diagJson.textContent = '';
 
         const lookup = {
-          product: toProductId(variables.product),
+          product: variables.product,
           buyerType: toBuyerTypeId(variables.buyer_type),
           mode: toModeId(variables.call_type)
         };
@@ -794,7 +794,26 @@
           intel = normaliseIntel(raw);
         } catch { intel = { products:{} }; }
 
+        // Prefer Call Library index; fallback to intel.json if unavailable
+      try {
+        const idx = await loadCallLibIndex();
+        if (idx && Array.isArray(idx.products) && idx.products.length) {
+          populateProductsFromIndex(idx);
+        } else {
+          throw new Error('No index products');
+        }
+      } catch {
+        // Fallback: legacy intel.json
         const products = Object.keys(intel.products || {});
+        productSel.innerHTML = '<option value="">Select…</option>';
+        products.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p;
+          opt.textContent = p;
+          productSel.appendChild(opt);
+        });
+      }
+         
         const current = productSel.value;
         productSel.innerHTML = '<option value="">Select…</option>';
         products.forEach(p => {
