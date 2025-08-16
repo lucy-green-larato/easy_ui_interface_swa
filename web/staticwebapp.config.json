@@ -3,16 +3,38 @@
     {
       "route": "/content/call-library/*",
       "allowedRoles": ["anonymous", "authenticated"],
-      "headers": {
-        "Cache-Control": "no-store"
-      }
+      "headers": { "Cache-Control": "no-store" }
+    },
+    {
+      "route": "/src/*",
+      "allowedRoles": ["anonymous", "authenticated"],
+      "headers": { "Cache-Control": "no-store" }
+    },
+    {
+      "route": "/lib/*",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
+      "route": "/assets/*",
+      "allowedRoles": ["anonymous", "authenticated"]
     }
   ],
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/api/*", "/content/*"]
+    "exclude": [
+      "/api/*",
+      "/content/*",
+      "/src/*",
+      "/lib/*",
+      "/assets/*"
+    ]
   },
   "mimeTypes": {
-    ".json": "application/json; charset=utf-8"
+    ".json": "application/json; charset=utf-8",
+    ".js": "text/javascript",
+    ".mjs": "text/javascript",
+    ".css": "text/css",
+    ".svg": "image/svg+xml"
   }
 }
+
