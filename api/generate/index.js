@@ -127,6 +127,95 @@ const BodySchema = z.object({
   variables: z.record(z.any()).default({}),
 });
 
+/* =========================
+   NEW: Call Library helpers
+   ========================= */
+const FALLBACK_ORDER = ["early_majority","early_adopters","late_majority","sceptics","innovators"];
+
+const toModeId = (v = "") => (String(v).toLowerCase().startsWith("p") ? "partner" : "direct");
+const toBuyerTypeId = (v = "") => {
+  const s = String(v).toLowerCase();
+  if (s.startsWith("innovator")) return "innovators";
+  if (s.startsWith("early adopter")) return "early_adopters";
+  if (s.startsWith("early majority")) return "early_majority";
+  if (s.startsWith("late majority")) return "late_majority";
+  if (s.startsWith("sceptic") || s.startsWith("skeptic")) return "sceptics";
+  return "early_majority";
+};
+const toProductId = (v = "") => {
+  const s = String(v).toLowerCase().trim();
+  const map = {
+    "connectivity (mobile & fixed)": "connectivity",
+    "connectivity": "connectivity",
+    "cybersecurity": "cybersecurity",
+    "artificial intelligence": "ai",
+    "ai": "ai",
+    "hardware/software": "hardware_software",
+    "hardware & software": "hardware_software",
+    "it solutions": "it_solutions",
+    "microsoft solutions": "microsoft_solutions",
+    "telecoms solutions": "telecoms_solutions",
+    "telecommunications solutions": "telecoms_solutions",
+  };
+  if (map[s]) return map[s];
+  return s.replace(/[^\w]+/g, "_").replace(/_{2,}/g, "_").replace(/^_|_$/g, "");
+};
+
+function getOriginFromReq(req) {
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host || "localhost";
+  return `${proto}://${host}`;
+}
+
+async function fetchCallLibrary({ req, product, buyerType, mode }) {
+  const baseOverride = process.env.CALL_LIB_BASE || ""; // Optional CDN override
+  const origin = baseOverride || getOriginFromReq(req);
+  const url = `${origin}/content/call-library/v1/${mode}/${product}.json`;
+
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    const err = new Error(`Call library not found: ${mode}/${product}`);
+    err.status = res.status;
+    throw err;
+  }
+  const doc = await res.json();
+
+  let bt = buyerType;
+  if (!doc.buyer_types[bt]) bt = FALLBACK_ORDER.find(b => !!doc.buyer_types[b]);
+  if (!bt) {
+    const err = new Error(`No buyer_types available in ${mode}/${product}`);
+    err.status = 422;
+    throw err;
+  }
+
+  const chosen = doc.buyer_types[bt];
+  const ppIndex  = Object.fromEntries((doc.shared.proof_points || []).map(p => [p.id, p.text]));
+  const ctaIndex = Object.fromEntries((doc.shared.ctas || []).map(c => [c.id, c.text]));
+
+  const stageKeys = ["opening","buyer_pain","buyer_desire","example","objections","call_to_action"];
+  const stages = {};
+  stageKeys.forEach(k => {
+    const s = chosen.stages[k];
+    stages[k] = {
+      ...s,
+      proof_points_text: (s.proof_points || []).map(id => ppIndex[id]).filter(Boolean),
+      ctas_text: (s.ctas || []).map(id => ctaIndex[id]).filter(Boolean),
+    };
+  });
+
+  return {
+    type: "call_script_v1",
+    source: "larato_call_library",
+    meta: doc.meta,
+    tone: doc.shared.tone,
+    buyerType: bt,
+    stages,
+  };
+}
+
+/* =========================
+   Azure Function handler
+   ========================= */
 module.exports = async function (context, req) {
   // --- Basic CORS (lock down origin if needed) ---
   const cors = {
@@ -157,6 +246,44 @@ module.exports = async function (context, req) {
   try {
     // Handle string body defensively
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const queryKind = String(req.query?.kind || "").toLowerCase();
+    const bodyKind  = String(body?.kind || "").toLowerCase();
+    const kind = bodyKind || queryKind;
+
+    /* ===================================================
+       NEW: Serve Call Script Library via /api/generate
+       =================================================== */
+    if (kind === "call-script") {
+      try {
+        // Accept either top-level fields or inside variables (to match your form)
+        const v = body.variables || body || {};
+        const product   = toProductId(v.product || body.product || req.query?.product);
+        const buyerType = toBuyerTypeId(v.buyerType || v.buyer_type || body.buyerType || body.buyer_type || req.query?.buyerType || req.query?.buyer_type);
+        const mode      = toModeId(v.mode || v.call_type || body.mode || body.call_type || req.query?.mode || req.query?.call_type);
+
+        if (!product || !buyerType || !mode) {
+          context.res = { status: 400, headers: cors, body: { error: "Missing product / buyerType / mode" } };
+          return;
+        }
+
+        const result = await fetchCallLibrary({ req, product, buyerType, mode });
+        context.res = {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...cors, "Cache-Control": "no-store" },
+          body: result,
+        };
+        return;
+      } catch (e) {
+        // If you prefer an automatic fallback to your legacy generator,
+        // you can jump to the legacy path below instead of returning the error.
+        context.res = { status: e.status || 404, headers: cors, body: { error: e.message || "Call library unavailable" } };
+        return;
+      }
+    }
+
+    /* ===================================================
+       Legacy / existing packs + template generation path
+       =================================================== */
     const parsed = BodySchema.safeParse(body);
     if (!parsed.success) {
       context.res = {
