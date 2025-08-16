@@ -1,7 +1,7 @@
 /* === Global / Design Tokens ======================================= */
 :root{
   /* Color tokens (light) */
-  --bg:#ffffff;
+  --bg:#f6f7fb;               /* softer canvas so cards pop */
   --card-bg:#ffffff;
   --border:#e2e5ea;
   --text-1:#1d2129;
@@ -77,9 +77,9 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 .layout{
   display:grid; gap:var(--gap); padding:var(--gap); align-items:start; width:100%;
   grid-template-columns:
-    minmax(460px, 1.0fr)   /* LEFT  (Form)  */
-    minmax(780px, 2.0fr)   /* MIDDLE (Script) — dominant */
-    minmax(360px, 0.8fr);  /* RIGHT (Buyer needs) — supportive */
+    minmax(520px, 1fr)                 /* LEFT  (Form)              */
+    minmax(820px, 2.2fr)               /* MIDDLE (Script) — dominant*/
+    clamp(300px, 23vw, 380px);         /* RIGHT (Buyer needs) — slim*/
 }
 .panel{background:transparent; border:0; border-radius:0; padding:0}
 .panel.left{grid-column:1}
@@ -95,7 +95,9 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
   margin:0 0 var(--s-3);
   box-shadow:var(--shadow)
 }
+/* Kill nested “double boxes” */
 .card .card{background:transparent; border:0; box-shadow:none; padding:0; margin:0}
+
 fieldset{border:0; margin:0; padding:0}
 .card>legend{display:inline-block; margin:0 0 var(--s-2); padding:0 .25rem; font-size:1.125rem; font-weight:700}
 
@@ -156,7 +158,8 @@ input.invalid,select.invalid,textarea.invalid{ border-color: var(--danger); }
   display:flex; align-items:center; justify-content:space-between; gap:var(--s-2);
   position:sticky; top:0; background:var(--card-bg); z-index:1; padding-top:6px;
 }
-.intel-grid{ display:grid; grid-template-columns:1fr; gap:10px }
+/* FORCE one column everywhere */
+.intel-grid{ display:grid; grid-template-columns:1fr !important; gap:10px }
 .intel-grid section{ background:transparent; padding:0 }
 .intel-slot{
   background:transparent; padding:8px 0 0; color:var(--text-2);
@@ -166,7 +169,12 @@ input.invalid,select.invalid,textarea.invalid{ border-color: var(--danger); }
 
 /* === Ultra-wide tuning ============================================ */
 @media (min-width: 1600px){
-  .layout{ grid-template-columns: minmax(480px,1fr) minmax(900px,2.2fr) minmax(360px,.8fr) }
+  .layout{
+    grid-template-columns:
+      minmax(560px,1fr)
+      minmax(980px,2.5fr)
+      clamp(300px, 22vw, 380px);
+  }
 }
 
 /* === Laptop: stack Buyer needs under Script ======================== */
