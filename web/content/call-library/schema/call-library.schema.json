@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Larato Call Library (per product per mode)",
+  "type": "object",
+  "required": ["meta", "shared", "buyer_types"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["product_id", "sales_mode", "version", "updated_at"],
+      "properties": {
+        "product_id": {"type": "string"},
+        "sales_mode": {"enum": ["direct", "partner"]},
+        "version": {"type": "string"},
+        "updated_at": {"type": "string", "format": "date"}
+      }
+    },
+    "shared": {
+      "type": "object",
+      "required": ["tone", "proof_points", "ctas"],
+      "properties": {
+        "tone": {"type": "string"},
+        "proof_points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "text"],
+            "properties": {
+              "id": {"type": "string"},
+              "text": {"type": "string"},
+              "source_id": {"type": "string"}
+            }
+          }
+        },
+        "ctas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "text"],
+            "properties": {
+              "id": {"type": "string"},
+              "text": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "buyer_types": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["guidance", "stages"],
+        "properties": {
+          "guidance": {"type": "string"},
+          "stages": {
+            "type": "object",
+            "required": [
+              "opening",
+              "buyer_pain",
+              "buyer_desire",
+              "example",
+              "objections",
+              "call_to_action"
+            ],
+            "properties": {
+              "opening": {"$ref": "#/$defs/stage"},
+              "buyer_pain": {"$ref": "#/$defs/stage"},
+              "buyer_desire": {"$ref": "#/$defs/stage"},
+              "example": {"$ref": "#/$defs/stageWithProof"},
+              "objections": {"$ref": "#/$defs/objectionsStage"},
+              "call_to_action": {"$ref": "#/$defs/ctaStage"}
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "stage": {
+      "type": "object",
+      "required": ["script", "buyer_needs_summary"],
+      "properties": {
+        "script": {"type": "string"},
+        "buyer_needs_summary": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "stageWithProof": {
+      "allOf": [
+        {"$ref": "#/$defs/stage"},
+        {
+          "type": "object",
+          "properties": {
+            "proof_points": {"type": "array", "items": {"type": "string"}}
+          }
+        }
+      ]
+    },
+    "objectionsStage": {
+      "allOf": [
+        {"$ref": "#/$defs/stage"},
+        {
+          "type": "object",
+          "properties": {
+            "anticipated": {"type": "array", "items": {"type": "string"}}
+          }
+        }
+      ]
+    },
+    "ctaStage": {
+      "allOf": [
+        {"$ref": "#/$defs/stage"},
+        {
+          "type": "object",
+          "properties": {"ctas": {"type": "array", "items": {"type": "string"}}}
+        }
+      ]
+    }
+  }
+}
