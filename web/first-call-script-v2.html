@@ -13,7 +13,7 @@
       --shadow:0 1px 2px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.06);
       --radius:10px; --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px; --space-6:32px;
       --font-system:ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-      --right-min: 280px;
+      --right-min:280px;
     }
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:var(--text-1);font:16px/1.45 var(--font-system)}
@@ -40,7 +40,7 @@
     .badge{display:flex;align-items:center;gap:.4rem;padding:8px 12px;background:var(--surface-2);border:1px solid var(--surface-3);border-radius:999px;font-size:.9rem;color:var(--text-1);white-space:nowrap}
     .badge svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
     .badge.is-hidden{display:none}
-    .layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,2.65fr) minmax(var(--right-min),clamp(260px,14vw,300px));gap:var(--space-6);padding:var(--space-5);align-items:start;width:100%;max-width:100vw;box-sizing:border-box}
+    .layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,2.65fr) minmax(var(--right-min),clamp(260px,14vw,300px));gap:var(--space-6);padding:var(--space-5);align-items:start;box-sizing:border-box}
     @media (max-width:1200px){.layout{grid-template-columns:1fr}}
     .panel{display:block}
     .card{background:transparent;border:0;box-shadow:none;padding:0}
@@ -62,16 +62,10 @@
     .intel-grid{display:grid;grid-template-columns:1fr !important;gap:var(--space-3)}
     .intel .intel-slot{background:transparent;border:0}
   </style>
-
-  <!-- FORCE the placeholder so it can never stick on “Loading…” -->
-  <script>
-    document.addEventListener('DOMContentLoaded', function(){
-      var sel = document.getElementById('product');
-      if (sel) sel.innerHTML = '<option value="">Select…</option>';
-    });
-  </script>
 </head>
 <body>
+
+  <!-- HEADER -->
   <header class="app-header" role="banner">
     <div class="header-left">
       <img class="logo" src="./larato-logo.svg" alt="Larato" />
@@ -80,6 +74,7 @@
         <p class="kicker">First Call Script · v2</p>
       </div>
     </div>
+
     <div class="header-right">
       <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
         <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
@@ -91,7 +86,9 @@
         <label class="remember"><input type="checkbox" id="remember_call_type" form="script-form" />Remember</label>
         <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
       </div>
+
       <span class="model-note"><span class="label">Sales model in use:</span> <strong id="map-label">Not set</strong></span>
+
       <span id="user-badge" class="badge is-hidden" aria-live="polite" aria-atomic="true">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path></svg>
         <span>Loading user…</span>
@@ -99,17 +96,41 @@
     </div>
   </header>
 
+  <!-- LAYOUT -->
   <main id="main" class="layout" role="main">
+    <!-- LEFT -->
     <section class="panel left" aria-label="Form">
       <form id="script-form" novalidate>
         <fieldset class="card" aria-labelledby="legend-call-details">
           <legend id="legend-call-details">Call details</legend>
           <div class="grid-2">
-            <div class="field"><label for="seller_name">Your name <span aria-hidden="true" class="req">*</span></label><input id="seller_name" name="seller_name" required autocomplete="name" /><p class="help">Shown in the opening line.</p><p class="error" id="seller_name_error" role="alert" aria-live="polite"></p></div>
-            <div class="field"><label for="seller_company">Your company <span aria-hidden="true" class="req">*</span></label><input id="seller_company" name="seller_company" required autocomplete="organization" /><p class="help">Organisation you represent.</p><p class="error" id="seller_company_error" role="alert" aria-live="polite"></p></div>
-            <div class="field"><label for="prospect_name">Prospect name <span aria-hidden="true" class="req">*</span></label><input id="prospect_name" name="prospect_name" required /><p class="error" id="prospect_name_error" role="alert" aria-live="polite"></p></div>
-            <div class="field"><label for="prospect_role">Prospect role <span aria-hidden="true" class="req">*</span></label><input id="prospect_role" name="prospect_role" required placeholder="e.g., Finance Director" /><p class="error" id="prospect_role_error" role="alert" aria-live="polite"></p></div>
-            <div class="field"><label for="prospect_company">Prospect company <span aria-hidden="true" class="req">*</span></label><input id="prospect_company" name="prospect_company" required /><p class="error" id="prospect_company_error" role="alert" aria-live="polite"></p></div>
+            <div class="field">
+              <label for="seller_name">Your name <span aria-hidden="true" class="req">*</span></label>
+              <input id="seller_name" name="seller_name" required autocomplete="name" />
+              <p class="help">Shown in the opening line.</p>
+              <p class="error" id="seller_name_error" role="alert" aria-live="polite"></p>
+            </div>
+            <div class="field">
+              <label for="seller_company">Your company <span aria-hidden="true" class="req">*</span></label>
+              <input id="seller_company" name="seller_company" required autocomplete="organization" />
+              <p class="help">Organisation you represent.</p>
+              <p class="error" id="seller_company_error" role="alert" aria-live="polite"></p>
+            </div>
+            <div class="field">
+              <label for="prospect_name">Prospect name <span aria-hidden="true" class="req">*</span></label>
+              <input id="prospect_name" name="prospect_name" required />
+              <p class="error" id="prospect_name_error" role="alert" aria-live="polite"></p>
+            </div>
+            <div class="field">
+              <label for="prospect_role">Prospect role <span aria-hidden="true" class="req">*</span></label>
+              <input id="prospect_role" name="prospect_role" required placeholder="e.g., Finance Director" />
+              <p class="error" id="prospect_role_error" role="alert" aria-live="polite"></p>
+            </div>
+            <div class="field">
+              <label for="prospect_company">Prospect company <span aria-hidden="true" class="req">*</span></label>
+              <input id="prospect_company" name="prospect_company" required />
+              <p class="error" id="prospect_company_error" role="alert" aria-live="polite"></p>
+            </div>
           </div>
         </fieldset>
 
@@ -118,12 +139,14 @@
           <div class="grid-2">
             <div class="field">
               <label for="product">Product <span aria-hidden="true" class="req">*</span></label>
+              <!-- DEFAULT IS “Select…” SO IT CAN’T STICK ON “Loading…” -->
               <select id="product" name="product" required>
                 <option value="">Select…</option>
               </select>
               <p class="help">One of the Inside Track product categories.</p>
               <p class="error" id="product_error" role="alert" aria-live="polite"></p>
             </div>
+
             <div class="field">
               <label for="buyer_behaviour">Buyer behaviour <span aria-hidden="true" class="req">*</span></label>
               <select id="buyer_behaviour" name="buyer_behaviour" required>
@@ -165,7 +188,10 @@
         </fieldset>
 
         <div class="actions">
-          <button id="submit" class="btn primary" type="submit" disabled><span class="btn-label">Generate script</span><span class="spinner" aria-hidden="true"></span></button>
+          <button id="submit" class="btn primary" type="submit" disabled>
+            <span class="btn-label">Generate script</span>
+            <span class="spinner" aria-hidden="true"></span>
+          </button>
           <button id="reset" class="btn" type="button">Reset</button>
           <button id="copy" class="btn" type="button" disabled>Copy</button>
           <button id="download" class="btn" type="button" disabled>Download .txt</button>
@@ -181,6 +207,7 @@
       </form>
     </section>
 
+    <!-- MIDDLE -->
     <section class="panel middle">
       <div class="output-card card">
         <div class="output-head" style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3)">
@@ -199,6 +226,7 @@
       </div>
     </section>
 
+    <!-- RIGHT -->
     <section class="panel right" aria-labelledby="intel-title">
       <aside class="intel card">
         <div class="intel-head" style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
@@ -220,182 +248,209 @@
   </main>
 
   <template id="activity-item">
-    <li><span class="time"></span><span class="pill product"></span><span class="pill buyer"></span><span class="pill length"></span></li>
+    <li>
+      <span class="time"></span>
+      <span class="pill product"></span>
+      <span class="pill buyer"></span>
+      <span class="pill length"></span>
+    </li>
   </template>
 
+  <!-- ALL LOGIC: dynamic imports + bulletproof Product population -->
   <script type="module">
-    // Small helper: dynamic import with fallbacks
-    async function importFirst(paths){
-      let lastErr;
-      for (const p of paths){
-        try { return await import(p); } catch(e){ lastErr = e; }
-      }
-      throw lastErr || new Error('Module import failed');
+    // Built-in list so Product is always usable
+    const LOCAL_PRODUCTS = [
+      { id:'connectivity',        label:'Connectivity (mobile & fixed)' },
+      { id:'cybersecurity',       label:'Cybersecurity' },
+      { id:'ai',                  label:'Artificial Intelligence' },
+      { id:'hardware_software',   label:'Hardware/software' },
+      { id:'it_solutions',        label:'IT solutions' },
+      { id:'microsoft_solutions', label:'Microsoft solutions' },
+      { id:'telecoms_solutions',  label:'Telecoms solutions' }
+    ];
+
+    // ---- Dynamic imports (no hard failure) ----
+    let lib = null, synth = null;
+    try {
+      lib = await import('/src/lib/callLibrary.js');
+    } catch {
+      try { lib = await import('./src/lib/callLibrary.js'); } catch {}
+    }
+    try {
+      synth = await import('/src/lib/callSynthesis.js');
+    } catch {
+      try { synth = await import('./src/lib/callSynthesis.js'); } catch {}
     }
 
-    (async function () {
-      // Built-in fallback list so Product is ALWAYS usable
-      const LOCAL_FALLBACK_PRODUCTS = [
-        { id:'connectivity',        label:'Connectivity (mobile & fixed)' },
-        { id:'cybersecurity',       label:'Cybersecurity' },
-        { id:'ai',                  label:'Artificial Intelligence' },
-        { id:'hardware_software',   label:'Hardware/software' },
-        { id:'it_solutions',        label:'IT solutions' },
-        { id:'microsoft_solutions', label:'Microsoft solutions' },
-        { id:'telecoms_solutions',  label:'Telecoms solutions' }
+    // ---- Elements ----
+    const form = document.getElementById('script-form');
+    const productSel = document.getElementById('product');
+    const buyerBehSel = document.getElementById('buyer_behaviour');
+    const submitBtn = document.getElementById('submit');
+    const resetBtn = document.getElementById('reset');
+    const copyBtn = document.getElementById('copy');
+    const downloadBtn = document.getElementById('download');
+    const statusEl = document.getElementById('status');
+    const outputEl = document.getElementById('output');
+    const outputMeta = document.getElementById('output-meta');
+    const deltaLog = document.getElementById('delta-log');
+    const activityLog = document.getElementById('activity-log');
+    const activityTpl = document.getElementById('activity-item');
+
+    const REQUIRED = ['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
+    const nowTime = () => new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+
+    // ---- Helpers ----
+    function setStatus(m, kind='info'){ statusEl.textContent=m; statusEl.dataset.kind=kind; }
+    function allRequiredFilled(){
+      const ids = REQUIRED;
+      for (const id of ids){
+        const el = form.elements[id] || document.getElementById(id);
+        if (!el || !String(el.value||'').trim()) return false;
+      }
+      return true;
+    }
+    function refreshSubmit(){ submitBtn.disabled = !allRequiredFilled(); }
+    function setSlot(id, arr){ const el = document.getElementById(id); if (el) el.replaceChildren(...(arr?.length?arr:['No data']).map(t=>{const p=document.createElement('p'); p.textContent=t; return p;})); }
+    function computeDelta(a,b){
+      const A=(a||'').split('\n'), B=(b||'').split('\n'); let add=0, rem=0;
+      const SA=new Set(A), SB=new Set(B);
+      B.forEach(l=>{ if(!SA.has(l)&&l.trim()) add++; });
+      A.forEach(l=>{ if(!SB.has(l)&&l.trim()) rem++; });
+      return {add,rem};
+    }
+    function renderDelta(d){ deltaLog.innerHTML=''; const li1=document.createElement('li'); li1.textContent=`+${d.add} new lines`; const li2=document.createElement('li'); li2.textContent=`−${d.rem} removed lines`; deltaLog.append(li1,li2); }
+
+    // ---- Product index with fallbacks ----
+    async function loadIndex(){
+      // 1) Library helper
+      if (lib?.getIndex) {
+        try {
+          const idx = await lib.getIndex();
+          if (Array.isArray(idx?.products) && idx.products.length) return idx.products;
+        } catch {}
+      }
+      // 2) Direct URLs (covers site-root vs ./web root)
+      const urls = [
+        '/content/call-library/v1/index.json',
+        './content/call-library/v1/index.json',
+        '/web/content/call-library/v1/index.json'
       ];
-
-      // Try to load libraries, but never die if they fail
-      let lib = null, synth = null, libErr = null;
-      try {
-        lib   = await importFirst(['./src/lib/callLibrary.js?v=fix4','/src/lib/callLibrary.js?v=fix4']);
-        synth = await importFirst(['./src/lib/callSynthesis.js?v=fix4','/src/lib/callSynthesis.js?v=fix4']);
-      } catch (e) { libErr = e; }
-
-      const FORM_ID='script-form', STORAGE_KEY='first_call_script_v2.form', ACTIVITY_KEY='first_call_script_v2.activity', OUTPUT_KEY='first_call_script_v2.last_output', CALL_PREF_KEY='first_call_script_v2.call_pref', INTEL_URL='./intel.json', RESTORE_LAST=false;
-      const REQUIRED=['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
-
-      const form=document.getElementById(FORM_ID), submitBtn=document.getElementById('submit'), resetBtn=document.getElementById('reset'), copyBtn=document.getElementById('copy'), downloadBtn=document.getElementById('download'), outputEl=document.getElementById('output'), outputMeta=document.getElementById('output-meta'), statusEl=document.getElementById('status'), deltaLog=document.getElementById('delta-log'), activityLog=document.getElementById('activity-log'), activityTpl=document.getElementById('activity-item'), diag=document.getElementById('diagnostics'), diagJson=document.getElementById('diag-json');
-      const productSel=document.getElementById('product'), buyerBehSel=document.getElementById('buyer_behaviour'), toggleIntelBtn=document.getElementById('toggle-intel'), intelBody=document.getElementById('intel-body');
-      const callTypeSel=document.getElementById('call_type'), rememberCallType=document.getElementById('remember_call_type'), mapLabel=document.getElementById('map-label');
-
-      let intel=null, lastOutput=localStorage.getItem(OUTPUT_KEY)||'';
-      const nowTime = () => new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
-      const on=(el,evts,h,opt)=>{ if(el) evts.forEach(e=>el.addEventListener(e,h,opt)); };
-
-      // --- tiny UI helpers ---
-      function setBusy(b){ submitBtn&&(submitBtn.disabled=b||!allRequiredFilled(form)); resetBtn&&(resetBtn.disabled=b); const has=!!(outputEl?.textContent?.trim()); copyBtn&&(copyBtn.disabled=b||!has); downloadBtn&&(downloadBtn.disabled=b||!has); submitBtn&&submitBtn.classList.toggle('busy',b);}
-      function setStatus(msg,kind='info'){ if(statusEl){ statusEl.textContent=msg; statusEl.dataset.kind=kind; } }
-      function allRequiredFilled(formEl){ if(!formEl) return false; const labels={call_type:'Direct or partner sales',seller_name:'Your name',seller_company:'Your company',prospect_name:'Prospect name',prospect_role:'Prospect role',prospect_company:'Prospect company',buyer_behaviour:'Buyer behaviour',product:'Product'}; const missing=[]; for(const name of REQUIRED){ const el=formEl.elements[name]||document.getElementById(name); const val=(el&&typeof el.value==='string')?el.value.trim():''; if(!val) missing.push(labels[name]||name);} if(missing.length) setStatus(`Please complete: ${missing.join(', ')}.`,'error'); else setStatus(''); return missing.length===0;}
-      function refreshSubmitState(){ submitBtn&&(submitBtn.disabled=!allRequiredFilled(form)); }
-      function validateField(input){ if(!input) return; const id=input.id; const errorEl=document.getElementById(`${id}_error`)||(id==='call_type'?document.getElementById('call_type_error'):null); const valid=!!String(input.value||'').trim(); if(!errorEl) return; if(valid){ errorEl.textContent=''; input.removeAttribute('aria-invalid'); input.classList.remove('invalid'); } else { errorEl.textContent=id==='call_type'?'Please choose a call type.':'This field is required.'; input.setAttribute('aria-invalid','true'); input.classList.add('invalid'); } }
-      function saveForm(){ if(!form) return; const fd=Object.fromEntries(new FormData(form).entries()); localStorage.setItem(STORAGE_KEY, JSON.stringify(fd)); }
-      function loadForm(){ if(!form) return; const raw=localStorage.getItem(STORAGE_KEY); if(!raw) return; try{ const data=JSON.parse(raw); Object.entries(data).forEach(([k,v])=>{ const el=form.elements[k]||document.getElementById(k); if(el) el.value=v; }); }catch{} }
-      function clearFormState(){ localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
-
-      // --- Buyer needs helpers (unchanged) ---
-      const toArr=v=>Array.isArray(v)?v.filter(Boolean).map(String):(v?[String(v)]:[]);
-      const norm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015_\-\/]+/g,'-').replace(/[^\w\- ]+/g,'').trim();
-      const BEHAVIOUR_SYNONYMS={'early adopter':'early-adopter','early majority':'early-majority','late majority':'late-majority','skeptic':'sceptic','sceptic':'sceptic'};
-      function getKeyInsensitive(obj,requested){ if(!obj||typeof obj!=='object') return null; const want=norm(requested); for(const k of Object.keys(obj)) if(norm(k)===want) return k; for(const k of Object.keys(obj)) if(norm(k).includes(want)) return k; return null; }
-      const pEl=t=>{ const el=document.createElement('p'); el.textContent=t; return el; };
-      const setSlot=(id,arr=[])=>{ const slot=document.getElementById(id); const items=(arr.length?arr:['No data available for this selection.']); slot&&slot.replaceChildren(...items.map(pEl)); };
-      const fillAll=arr=>{ setSlot('intel-priorities',arr); setSlot('intel-pains',arr); setSlot('intel-triggers',arr); setSlot('intel-proof',arr); setSlot('intel-objections',arr); setSlot('intel-ctas',arr); };
-      function normaliseIntel(raw){ if(!raw||typeof raw!=='object') return {products:{}}; if(raw.products&&typeof raw.products==='object') return raw; const out={products:{}}; Object.entries(raw).forEach(([product,buyersObj])=>{ const behaviours={}; if(buyersObj&&typeof buyersObj==='object'){ Object.entries(buyersObj).forEach(([behaviour,arr])=>{ const [priorities,pains,triggers,proof,objections,ctas]=Array.isArray(arr)?arr:[]; behaviours[behaviour]={priorities:toArr(priorities),pains:toArr(pains),triggers:toArr(triggers),proof:toArr(proof),objections:toArr(objections),ctas:toArr(ctas)};}); } out.products[product]={behaviours};}); return out; }
-      function renderIntel(productLabel,behaviourLabel){ if(!intel) return; const products=intel.products||{}; const productKey=getKeyInsensitive(products,productLabel); const productNode=productKey?products[productKey]:null; if(!productNode){ fillAll(['No data available (unknown product).']); return; } let node=null; if(productNode.behaviours){ let key=getKeyInsensitive(productNode.behaviours,behaviourLabel); if(!key){ const syn=BEHAVIOUR_SYNONYMS[norm(behaviourLabel)]; if(syn) key=getKeyInsensitive(productNode.behaviours,syn);} if(key) node=productNode.behaviours[key]; } if(!node&&productNode.buyers){ let key=getKeyInsensitive(productNode.buyers,behaviourLabel); if(!key){ const syn=BEHAVIOUR_SYNONYMS[norm(behaviourLabel)]; if(syn) key=getKeyInsensitive(productNode.buyers,syn);} if(key) node=productNode.buyers[key]; } if(!node&&productNode.needs) node=productNode.needs; if(!node){ const behavioursList=[...Object.keys(productNode.behaviours||{}),...Object.keys(productNode.buyers||{})].join(', ')||'—'; fillAll([`No data for this behaviour. Available: ${behavioursList}`]); return; } const sections={priorities:toArr(node?.priorities??node?.Priorities),pains:toArr(node?.pains??node?.Pains),triggers:toArr(node?.triggers??node?.Triggers),proof:toArr(node?.proof??node?.Proof??node?.value??node?.Value),objections:toArr(node?.objections??node?.Objections),ctas:toArr(node?.ctas??node?.CTAs??node?.callsToAction??node?.CallsToAction)}; const allEmpty=Object.values(sections).every(a=>a.length===0); if(allEmpty){ fillAll(['No data available for this selection.']); return; } setSlot('intel-priorities',sections.priorities); setSlot('intel-pains',sections.pains); setSlot('intel-triggers',sections.triggers); setSlot('intel-proof',sections.proof); setSlot('intel-objections',sections.objections); setSlot('intel-ctas',sections.ctas); }
-
-      // --- UK narrative helpers ---
-      function toUkEnglish(text){ if(!text) return ''; const map=[[ /organization(s)?/gi,'organisation$1'],[/organize(d|s|r|ing)?/gi,'organise$1'],[/optimization/gi,'optimisation'],[/optimi(z|s)e(?!d|r|s|ing)/gi,'optimise'],[/center(s)?/gi,'centre$1'],[/modeling/gi,'modelling'],[/license/gi,'licence'],[/utilize/gi,'utilise'],[/program(s)?/gi,'programme$1']]; let out=text; for(const [re,rep] of map) out=out.replace(re,rep); return out; }
-      function stripHeadings(text){ if(!text) return ''; const head=/^(Opening|Buyer pain|Buyer desire|Example|Objections|Call to action)\s*[-–—]*\s*$/gim; return text.replace(head,'').replace(/\n{3,}/g,'\n\n').trim(); }
-      function ensureGreeting(text,v){ const p=(v?.prospect_name||'').trim(); const s=(v?.seller_name||'').trim(); const has=(p&&new RegExp(`\\b${p}\\b`,'i').test(text))||(s&&new RegExp(`\\b${s}\\b`,'i').test(text)); if(has) return text; const hello=p?`Hi ${p}, `:'Hi, '; const intro=(s||v?.seller_company)?`${hello}it’s ${s||'a colleague'}${v?.seller_company?` from ${v.seller_company}`:''}. `:hello; return `${intro}${text.charAt(0).toUpperCase()}${text.slice(1)}`; }
-      const asInline=arr=>Array.isArray(arr)&&arr.length?arr.join('; '):'';
-      function composeNarrativeFromStages(stages,variables){ const s=stages||{}, v=variables||{}, parts=[]; { const nameLine=v.prospect_name?`Hi ${v.prospect_name}, it’s ${v.seller_name||'a colleague'}${v.seller_company?` from ${v.seller_company}`:''}. `:`Hi, it’s ${v.seller_name||'a colleague'}${v.seller_company?` from ${v.seller_company}`:''}. `; const body=(s.opening?.talk_track||s.opening?.script||'').trim(); parts.push(`${nameLine}${body||'Thanks for taking my call—I'll keep this brief and useful.'}`); } { const pain=(s.buyer_pain?.talk_track||s.buyer_pain?.script||'').trim(); if(pain) parts.push(pain); const desire=(s.buyer_desire?.talk_track||s.buyer_desire?.script||'').trim(); if(desire) parts.push(desire); } { const ex=(s.example?.talk_track||s.example?.script||'').trim(); const proofs=asInline(s.example?.proof_points_text||s.example?.proof_points||[]); const line=[ex, proofs&&`For example: ${proofs}.`].filter(Boolean).join(' '); if(line) parts.push(line); } { const obj=(s.objections?.talk_track||s.objections?.script||'').trim(); const anticipated=asInline(s.objections?.anticipated||[]); const line=[obj, anticipated&&`Common concerns we handle: ${anticipated}.`].filter(Boolean).join(' '); if(line) parts.push(line); } { let cta=(s.call_to_action?.talk_track||s.call_to_action?.script||'').trim(); const ctas=s.call_to_action?.ctas_text||s.call_to_action?.ctas||[]; if(!cta&&Array.isArray(ctas)&&ctas.length) cta=String(ctas[0]); if(cta&&!/[.?!]$/.test(cta)) cta+='?'; if(cta) parts.push(cta); } let text=parts.filter(Boolean).join('\n\n').trim(); text=stripHeadings(text); text=toUkEnglish(text); text=ensureGreeting(text,v); return text; }
-
-      // --- Activity / delta ---
-      function addActivity(entry){ const list=JSON.parse(localStorage.getItem(ACTIVITY_KEY)||'[]'); list.unshift(entry); localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0,3))); renderActivity(); }
-      function renderActivity(){ const list=JSON.parse(localStorage.getItem(ACTIVITY_KEY)||'[]'); if(!activityLog) return; activityLog.innerHTML=''; list.forEach(item=>{ const node=activityTpl.content.cloneNode(true); node.querySelector('.time').textContent=item.time; node.querySelector('.product').textContent=item.product; node.querySelector('.buyer').textContent=item.buyer_behaviour||item.buyer||''; node.querySelector('.length').textContent=item.length||''; activityLog.appendChild(node); }); }
-      function computeDelta(oldText,newText){ const oldLines=(oldText||'').split('\n'), newLines=(newText||'').split('\n'); let added=0, removed=0; const oldSet=new Set(oldLines), newSet=new Set(newLines); newLines.forEach(l=>{ if(!oldSet.has(l)&&l.trim()) added++; }); oldLines.forEach(l=>{ if(!newSet.has(l)&&l.trim()) removed++; }); return {added,removed}; }
-      function renderDelta(delta){ if(!deltaLog) return; deltaLog.innerHTML=''; const a=document.createElement('li'); a.textContent=`+${delta.added} new line${delta.added===1?'':'s'}`; const r=document.createElement('li'); r.textContent=`−${delta.removed} removed line${delta.removed===1?'':'s'}`; deltaLog.appendChild(a); deltaLog.appendChild(r); }
-
-      function loadCallPref(){ try{ const pref=JSON.parse(localStorage.getItem(CALL_PREF_KEY)||'null'); if(pref?.call_type&&callTypeSel&&!callTypeSel.value) callTypeSel.value=pref.call_type; if(pref?.remember===true&&rememberCallType) rememberCallType.checked=true; }catch{} updateMapIndicator(); }
-      function saveCallPrefIfRequested(){ if(rememberCallType&&rememberCallType.checked&&callTypeSel&&callTypeSel.value){ localStorage.setItem(CALL_PREF_KEY, JSON.stringify({remember:true, call_type:callTypeSel.value})); } else if(rememberCallType&&!rememberCallType.checked){ localStorage.removeItem(CALL_PREF_KEY); } updateMapIndicator(); }
-      function updateMapIndicator(){ const pref=JSON.parse(localStorage.getItem(CALL_PREF_KEY)||'null'); if(mapLabel) mapLabel.textContent=pref?.call_type||(callTypeSel?.value||'Not set'); }
-
-      on(callTypeSel,['change','input','blur'],()=>{ validateField(callTypeSel); saveForm(); updateMapIndicator(); refreshSubmitState(); });
-      on(rememberCallType,['change','input','blur'],()=>{ saveCallPrefIfRequested(); refreshSubmitState(); });
-      on(form,['input','change','blur'],(e)=>{ if(e.target.matches('input,select,textarea')){ validateField(e.target); saveForm(); refreshSubmitState(); } if(e.type==='change'&&(e.target===productSel||e.target===buyerBehSel)){ renderIntel(productSel?.options?.[productSel.selectedIndex]?.text??productSel?.value??'', buyerBehSel?.value||''); } },true);
-      toggleIntelBtn&&toggleIntelBtn.addEventListener('click',()=>{ const expanded=toggleIntelBtn.getAttribute('aria-expanded')==='true'; toggleIntelBtn.setAttribute('aria-expanded',String(!expanded)); if(intelBody) intelBody.hidden=expanded; toggleIntelBtn.textContent=expanded?'Show':'Hide'; });
-      resetBtn&&resetBtn.addEventListener('click',()=>{ if(!form) return; form.reset(); clearFormState(); loadCallPref(); renderIntel(productSel?.options?.[productSel.selectedIndex]?.text??productSel?.value??'', buyerBehSel?.value||''); renderActivity(); refreshSubmitState(); setStatus('Form reset. Stored values cleared.'); form.querySelector('input, select, textarea')?.focus(); });
-      copyBtn&&copyBtn.addEventListener('click',async()=>{ const txt=outputEl?.textContent||''; if(!txt.trim())return; await navigator.clipboard.writeText(txt); setStatus('Copied to clipboard.'); });
-      downloadBtn&&downloadBtn.addEventListener('click',()=>{ const txt=outputEl?.textContent||''; if(!txt.trim())return; const blob=new Blob([txt],{type:'text/plain'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`first-call-script_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); setStatus('Download started.'); });
-
-      // -------- Load intel (for Buyer needs) --------
-      try{ const res=await fetch(INTEL_URL,{cache:'no-store'}); const raw=await res.json(); intel=normaliseIntel(raw); }catch{ intel={products:{}}; }
-
-      // -------- Product index with hard fallbacks --------
-      async function loadIndexOrFallback(){
-        // 1) Library helper
-        if (lib && lib.getIndex) {
-          try {
-            const idx = await lib.getIndex();
-            if (Array.isArray(idx?.products) && idx.products.length) return idx.products;
-          } catch {}
-        }
-        // 2) Direct URLs
-        const urls = ['/content/call-library/v1/index.json','./content/call-library/v1/index.json','/web/content/call-library/v1/index.json'];
-        for (const u of urls){
-          try {
-            const r = await fetch(u,{cache:'no-store'});
-            if (r.ok) {
-              const j = await r.json();
-              if (Array.isArray(j?.products) && j.products.length) return j.products;
-            }
-          } catch {}
-        }
-        // 3) Local constant
-        document.getElementById('product_error')?.appendChild(document.createTextNode(' Using built-in list (index unavailable).'));
-        return LOCAL_FALLBACK_PRODUCTS;
-      }
-
-      // Populate Product
-      try{
-        const items = await loadIndexOrFallback();
-        if (productSel) {
-          productSel.innerHTML = '<option value="">Select…</option>';
-          for (const { id, label } of items) {
-            const opt = document.createElement('option');
-            opt.value = id; opt.textContent = label || id;
-            productSel.appendChild(opt);
+      for (const u of urls){
+        try {
+          const r = await fetch(u, {cache:'no-store'});
+          if (r.ok) {
+            const j = await r.json();
+            if (Array.isArray(j?.products) && j.products.length) return j.products;
           }
-        }
-      } catch {
-        if (productSel) productSel.innerHTML = '<option value="">Select…</option>';
+        } catch {}
       }
+      // 3) Built-in list
+      document.getElementById('product_error')?.append(' Using built-in list.');
+      return LOCAL_PRODUCTS;
+    }
 
-      // Restore state / prefs
-      loadForm(); loadCallPref();
-      if(productSel?.value && buyerBehSel?.value){
-        renderIntel(productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '', buyerBehSel.value);
+    // ---- Populate Product immediately ----
+    (async () => {
+      const items = await loadIndex();
+      productSel.innerHTML = '<option value="">Select…</option>';
+      for (const {id, label} of items){
+        const opt = document.createElement('option');
+        opt.value = id; opt.textContent = label || id;
+        productSel.appendChild(opt);
       }
-      refreshSubmitState();
-
-      // -------- Submit: generate from Library --------
-      form && form.addEventListener('submit', async (e)=>{
-        e.preventDefault();
-        for(const name of REQUIRED){ const el=form.elements[name]||document.getElementById(name); if(!el||!String(el.value||'').trim()){ validateField(el); el?.focus(); setStatus('Please complete required fields.','error'); return; } }
-
-        if (!synth || !synth.generateCallFromLibrary) {
-          setStatus('Cannot generate: library engine not loaded.', 'error');
-          diag && (diag.open = true); diagJson && (diagJson.textContent = String(libErr || 'Missing module'));
-          return;
-        }
-
-        const fd=Object.fromEntries(new FormData(form).entries());
-        const variables={ seller_name:fd.seller_name||'', seller_company:fd.seller_company||'', prospect_name:fd.prospect_name||'', prospect_role:fd.prospect_role||'', prospect_company:fd.prospect_company||'', call_type:fd.call_type||'', buyer_type:fd.buyer_behaviour||'', product:fd.product||'', tone:fd.tone||'', length:fd.length||'' };
-
-        setBusy(true); setStatus('Synthesising call script from Library…'); diag&&(diag.open=false); diagJson&&(diagJson.textContent='');
-
-        const lookup={ product:variables.product, buyerType: (lib && lib.canonical ? lib.canonical.buyer(variables.buyer_type) : variables.buyer_type), mode: (lib && lib.canonical ? lib.canonical.mode(variables.call_type) : variables.call_type) };
-        const synthForm={ company:variables.prospect_company, role:variables.prospect_role, sector:'', company_size:'', scenario:'', meeting_type:'first call' };
-        const lengthHint=/\d+/.exec(variables.length||"")?.[0]||"100";
-
-        try{
-          const result=await synth.generateCallFromLibrary({ lookup, form:synthForm, tone:variables.tone, length:Number(lengthHint) });
-          const text=composeNarrativeFromStages(result.stages, variables);
-          outputEl.textContent=text.trim();
-          outputMeta.textContent=result.metaLine||`Library · ${lookup.product||'—'} · ${variables.buyer_type||'—'} · ${variables.call_type||'—'}`;
-          copyBtn&&(copyBtn.disabled=!text); downloadBtn&&(downloadBtn.disabled=!text);
-          setSlot('intel-priorities',result.buyerNeeds['intel-priorities']||[]); setSlot('intel-pains',result.buyerNeeds['intel-pains']||[]); setSlot('intel-triggers',result.buyerNeeds['intel-priorities']||[]); setSlot('intel-proof',result.buyerNeeds['intel-proof-points']||[]); setSlot('intel-objections',result.buyerNeeds['intel-objections']||[]); setSlot('intel-ctas',result.buyerNeeds['intel-ctas']||[]);
-          const delta=computeDelta(lastOutput,outputEl.textContent); renderDelta(delta); lastOutput=outputEl.textContent; localStorage.setItem(OUTPUT_KEY,lastOutput);
-          addActivity({time:nowTime(),product:variables.product||'—',buyer_behaviour:variables.buyer_type||'—',length:variables.length||'—'});
-          setStatus('Done. (Generated from curated Library)'); setBusy(false); document.getElementById('output-title')?.focus();
-        }catch(err){ setStatus('Could not generate a call script. Please check content paths.','error'); if(diag){ diag.open=true; diagJson.textContent=String(err); } setBusy(false); }
-      });
-
-      if(RESTORE_LAST && lastOutput){
-        outputEl.textContent=lastOutput; copyBtn&&(copyBtn.disabled=false); downloadBtn&&(downloadBtn.disabled=false);
-      }
+      refreshSubmit();
     })();
+
+    // ---- Form wiring (trimmed to essentials for this fix) ----
+    form.addEventListener('input', refreshSubmit);
+    form.addEventListener('change', refreshSubmit);
+
+    // Narrative helpers (as before)
+    function toUk(text){
+      if (!text) return '';
+      const map = [[/organization(s)?/gi,'organisation$1'],[/organize(d|s|r|ing)?/gi,'organise$1'],[/optimization/gi,'optimisation'],[/optimi(z|s)e(?!d|r|s|ing)/gi,'optimise'],[/center(s)?/gi,'centre$1'],[/modeling/gi,'modelling'],[/license/gi,'licence'],[/utilize/gi,'utilise']];
+      let out = text; for (const [re,rep] of map) out = out.replace(re,rep); return out;
+    }
+    function stripHeads(t){ return (t||'').replace(/^(Opening|Buyer pain|Buyer desire|Example|Objections|Call to action)\s*[-–—]*\s*$/gim,'').replace(/\n{3,}/g,'\n\n').trim(); }
+    function greet(text, v){
+      const p=(v.prospect_name||'').trim(), s=(v.seller_name||'').trim();
+      const hello = p ? `Hi ${p}, ` : 'Hi, ';
+      const intro = (s||v.seller_company) ? `${hello}it’s ${s||'a colleague'}${v.seller_company?` from ${v.seller_company}`:''}. ` : hello;
+      return intro + (text ? text.charAt(0).toUpperCase()+text.slice(1) : 'Thanks for taking my call—I’ll keep this brief and useful.');
+    }
+    const inline = a => Array.isArray(a)&&a.length ? a.join('; ') : '';
+
+    function compose(stages, v){
+      const s = stages || {};
+      const p = [];
+      p.push(greet((s.opening?.talk_track||s.opening?.script||'').trim(), v));
+      const pain = (s.buyer_pain?.talk_track||s.buyer_pain?.script||'').trim(); if (pain) p.push(pain);
+      const desire = (s.buyer_desire?.talk_track||s.buyer_desire?.script||'').trim(); if (desire) p.push(desire);
+      const ex = (s.example?.talk_track||s.example?.script||'').trim();
+      const proof = inline(s.example?.proof_points_text||s.example?.proof_points||[]);
+      if (ex || proof) p.push([ex, proof && `For example: ${proof}.`].filter(Boolean).join(' '));
+      const obj = (s.objections?.talk_track||s.objections?.script||'').trim();
+      const anticip = inline(s.objections?.anticipated||[]);
+      if (obj || anticip) p.push([obj, anticip && `Common concerns we handle: ${anticip}.`].filter(Boolean).join(' '));
+      let cta = (s.call_to_action?.talk_track||s.call_to_action?.script||'').trim();
+      const ctas = s.call_to_action?.ctas_text||s.call_to_action?.ctas||[];
+      if (!cta && ctas?.length) cta = String(ctas[0]);
+      if (cta && !/[.?!]$/.test(cta)) cta += '?';
+      if (cta) p.push(cta);
+      return toUk(stripHeads(p.filter(Boolean).join('\n\n').trim()));
+    }
+
+    // Submit (uses synth if available)
+    form.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      if (!allRequiredFilled()){ setStatus('Please complete all required fields.','error'); return; }
+      if (!synth?.generateCallFromLibrary){ setStatus('Cannot generate: library engine not loaded.','error'); return; }
+
+      const fd = Object.fromEntries(new FormData(form).entries());
+      const lookup = {
+        product: fd.product,
+        buyerType: lib?.canonical ? lib.canonical.buyer(fd.buyer_behaviour) : fd.buyer_behaviour,
+        mode:      lib?.canonical ? lib.canonical.mode(fd.call_type) : fd.call_type
+      };
+      const lengthHint = Number((/\d+/.exec(fd.length||'')?.[0]) || 100);
+      const formCtx = { company:fd.prospect_company, role:fd.prospect_role, sector:'', company_size:'', scenario:'', meeting_type:'first call' };
+
+      setStatus('Synthesising call script from Library…');
+      try{
+        const result = await synth.generateCallFromLibrary({
+          lookup, form: formCtx, tone: fd.tone, length: lengthHint
+        });
+        const text = compose(result.stages, {
+          seller_name:fd.seller_name, seller_company:fd.seller_company, prospect_name:fd.prospect_name
+        });
+        outputEl.textContent = text;
+        outputMeta.textContent = result.metaLine || `Library · ${lookup.product||'—'} · ${fd.buyer_behaviour||'—'} · ${fd.call_type||'—'}`;
+        copyBtn.disabled = !text; downloadBtn.disabled = !text;
+
+        setSlot('intel-priorities',   result.buyerNeeds['intel-priorities'] || []);
+        setSlot('intel-pains',        result.buyerNeeds['intel-pains'] || []);
+        setSlot('intel-triggers',     result.buyerNeeds['intel-priorities'] || []);
+        setSlot('intel-proof',        result.buyerNeeds['intel-proof-points'] || []);
+        setSlot('intel-objections',   result.buyerNeeds['intel-objections'] || []);
+        setSlot('intel-ctas',         result.buyerNeeds['intel-ctas'] || []);
+
+        const d = computeDelta('', text); renderDelta(d);
+        setStatus('Done.');
+      }catch(err){
+        setStatus('Could not generate a call script.','error');
+        document.getElementById('diag-json').textContent = String(err && err.stack || err);
+        document.getElementById('diagnostics').open = true;
+      }
+    });
+
+    // Reset
+    resetBtn.addEventListener('click', ()=>{
+      form.reset();
+      productSel.value = '';
+      refreshSubmit();
+      setStatus('Form reset.');
+    });
   </script>
 </body>
 </html>
