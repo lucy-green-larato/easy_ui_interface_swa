@@ -286,4 +286,30 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
       clamp(300px, 20vw, 520px);
   }
 }
+/* === Full-width layout with a SLIM right rail ===================== */
+
+/* Let the grid use the whole screen */
+:root { --stage-max: 100vw; }
+.stage, .layout { max-width: none; }
+
+/* 4/6/2 feel: left + middle grow, right rail stays narrow */
+.layout{
+  grid-template-columns:
+    minmax(520px, 1.25fr)          /* LEFT grows more */
+    minmax(820px, 2.75fr)          /* MIDDLE grows most */
+    clamp(220px, 14vw, 300px);     /* RIGHT stays slim */
+}
+
+/* Belt-and-braces cap on the right rail */
+.panel.right{ max-width: 300px; }
+
+/* Extra-wide monitors: keep right rail slim, give more to middle */
+@media (min-width: 1800px){
+  .layout{
+    grid-template-columns:
+      minmax(560px, 1.3fr)
+      minmax(1000px, 3fr)
+      clamp(220px, 12vw, 300px);
+  }
+}
 
