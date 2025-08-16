@@ -10,8 +10,7 @@
     const ACTIVITY_KEY = 'first_call_script_v2.activity';
     const OUTPUT_KEY = 'first_call_script_v2.last_output';
     const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
-    // In your repo, intel.json is at web/intel.json (not under /src)
-    const INTEL_URL = '/intel.json';
+    const INTEL_URL = '/intel.json'; // lives at /web/intel.json
 
     const REQUIRED = [
       'call_type','seller_name','seller_company',
@@ -24,8 +23,27 @@
     const resetBtn = document.getElementById('reset');
     const copyBtn = document.getElementById('copy');
     const downloadBtn = document.getElementById('download');
-    const outputEl = document.getElementById('output');
-    const outputMeta = document.getElementById('output-meta');
+
+    // Output area: tolerate renames, create if missing so code never crashes
+    let outputEl =
+      document.getElementById('output') ||
+      document.getElementById('output-text') ||
+      document.querySelector('[data-role="output"]');
+    if (!outputEl) {
+      outputEl = document.createElement('pre');
+      outputEl.id = 'output';
+      document.body.appendChild(outputEl);
+    }
+
+    let outputMeta =
+      document.getElementById('output-meta') ||
+      document.querySelector('[data-role="output-meta"]');
+    if (!outputMeta) {
+      outputMeta = document.createElement('div');
+      outputMeta.id = 'output-meta';
+      document.body.appendChild(outputMeta);
+    }
+
     const statusEl = document.getElementById('status');
     const deltaLog = document.getElementById('delta-log');
     const activityLog = document.getElementById('activity-log');
@@ -38,7 +56,7 @@
     const toggleIntelBtn = document.getElementById('toggle-intel');
     const intelBody = document.getElementById('intel-body');
 
-    // Prefer #call_type; fall back to #mode (your Direct/Partner select)
+    // Prefer #call_type; fall back to #mode (Direct/Partner)
     const callTypeSel = document.getElementById('call_type') || document.getElementById('mode');
     const rememberCallType = document.getElementById('remember_call_type');
     const mapLabel = document.getElementById('map-label');
@@ -52,16 +70,16 @@
     const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
     const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    // Safe event binder to avoid null crashes
-    const on = (el, events, handler, options) => { if (el) events.forEach(evt => el.addEventListener(evt, handler, options)); };
+    // Safe event binder (no-ops if element is missing)
+    const on = (el, events, handler, options) => { if (!el) return; events.forEach(evt => el.addEventListener(evt, handler, options)); };
 
     function setBusy(isBusy) {
-      submitBtn && (submitBtn.disabled = isBusy || !allRequiredFilled(form));
-      resetBtn && (resetBtn.disabled = isBusy);
-      const hasText = !!outputEl.textContent.trim();
-      copyBtn && (copyBtn.disabled = isBusy || !hasText);
-      downloadBtn && (downloadBtn.disabled = isBusy || !hasText);
-      submitBtn && submitBtn.classList.toggle('busy', isBusy);
+      if (submitBtn) submitBtn.disabled = isBusy || !allRequiredFilled(form);
+      if (resetBtn) resetBtn.disabled = isBusy;
+      const hasText = !!(outputEl && outputEl.textContent && outputEl.textContent.trim());
+      if (copyBtn) copyBtn.disabled = isBusy || !hasText;
+      if (downloadBtn) downloadBtn.disabled = isBusy || !hasText;
+      if (submitBtn) submitBtn.classList.toggle('busy', isBusy);
     }
     function setStatus(msg, kind='info') { if (statusEl) { statusEl.textContent = msg; statusEl.dataset.kind = kind; } }
 
@@ -81,7 +99,7 @@
       if (missing.length) setStatus(`Please complete: ${missing.join(', ')}.`, 'error'); else setStatus('');
       return missing.length === 0;
     }
-    function refreshSubmitState(){ submitBtn && (submitBtn.disabled = !allRequiredFilled(form)); }
+    function refreshSubmitState(){ if (submitBtn) submitBtn.disabled = !allRequiredFilled(form); }
 
     function validateField(input) {
       if (!input) return;
@@ -235,15 +253,17 @@
     }
     function renderActivity() {
       const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
-      activityLog.innerHTML = '';
-      list.forEach(item => {
-        const node = activityTpl.content.cloneNode(true);
-        node.querySelector('.time').textContent = item.time;
-        node.querySelector('.product').textContent = item.product;
-        node.querySelector('.buyer').textContent = item.buyer_behaviour;
-        node.querySelector('.length').textContent = item.length;
-        activityLog.appendChild(node);
-      });
+      if (activityLog) {
+        activityLog.innerHTML = '';
+        list.forEach(item => {
+          const node = activityTpl.content.cloneNode(true);
+          node.querySelector('.time').textContent = item.time;
+          node.querySelector('.product').textContent = item.product;
+          node.querySelector('.buyer').textContent = item.buyer_behaviour;
+          node.querySelector('.length').textContent = item.length;
+          activityLog.appendChild(node);
+        });
+      }
     }
     function computeDelta(oldText, newText) {
       const oldLines = (oldText||'').split('\n'), newLines = (newText||'').split('\n');
@@ -254,6 +274,7 @@
       return { added, removed };
     }
     function renderDelta(delta) {
+      if (!deltaLog) return;
       deltaLog.innerHTML = '';
       const a = document.createElement('li'); a.textContent = `+${delta.added} new line${delta.added===1?'':'s'}`;
       const r = document.createElement('li'); r.textContent = `−${delta.removed} removed line${delta.removed===1?'':'s'}`;
@@ -320,13 +341,15 @@
     });
 
     copyBtn && copyBtn.addEventListener('click', async () => {
-      const txt = outputEl.textContent; if (!txt.trim()) return;
+      const txt = outputEl ? outputEl.textContent : '';
+      if (!txt.trim()) return;
       await navigator.clipboard.writeText(txt);
       setStatus('Copied to clipboard.');
     });
 
     downloadBtn && downloadBtn.addEventListener('click', () => {
-      const txt = outputEl.textContent; if (!txt.trim()) return;
+      const txt = outputEl ? outputEl.textContent : '';
+      if (!txt.trim()) return;
       const blob = new Blob([txt], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -339,8 +362,7 @@
        Render helper (library payload → text + buyer needs)
        ========================================================================= */
     function renderFromLibraryPayload(lib) {
-      // Your current renderer expects a v1-style keyed object under lib.stages.
-      // If you switch to the array form from getCallScript(), you’ll need a mapper here.
+      // NOTE: this expects lib.stages to be a keyed object (v1 style)
       const s = lib.stages;
       const section = (title, body, extras=[]) => {
         let out = `\n${title}\n${'-'.repeat(title.length)}\n${body}\n`;
@@ -355,10 +377,11 @@
         section('Objections', s.objections.script, [s.objections.anticipated||[]]) +
         section('Call to action', s.call_to_action.script, [s.call_to_action.ctas_text||[]]);
 
-      outputEl.textContent = text.trim();
-      outputMeta.textContent = `Source: Larato Call Library · ${lib.meta.product_id} · ${lib.buyerType} · ${lib.meta.sales_mode} · Updated ${lib.meta.updated_at}`;
-      copyBtn && (copyBtn.disabled = false);
-      downloadBtn && (downloadBtn.disabled = false);
+      if (outputEl) outputEl.textContent = text.trim();
+      if (outputMeta) outputMeta.textContent =
+        `Source: Larato Call Library · ${lib.meta.product_id} · ${lib.buyerType} · ${lib.meta.sales_mode} · Updated ${lib.meta.updated_at}`;
+      if (copyBtn) copyBtn.disabled = false;
+      if (downloadBtn) downloadBtn.disabled = false;
 
       setSlot('intel-priorities', s.opening.buyer_needs_summary || []);
       setSlot('intel-pains', s.buyer_pain.buyer_needs_summary || []);
@@ -400,7 +423,7 @@
         value_proposition: fd.value_proposition || ''
       };
 
-      setBusy(true); setStatus('Loading from Larato Call Library…'); diag && (diag.open = false); diagJson && (diagJson.textContent = '');
+      setBusy(true); setStatus('Loading from Larato Call Library…'); if (diag) diag.open = false; if (diagJson) diagJson.textContent = '';
 
       const lookup = {
         product: variables.product,
@@ -412,9 +435,9 @@
         const lib = await getCallScript(lookup);
         renderFromLibraryPayload(lib);
 
-        const delta = computeDelta(lastOutput, outputEl.textContent);
+        const delta = computeDelta(lastOutput, outputEl ? outputEl.textContent : '');
         renderDelta(delta);
-        lastOutput = outputEl.textContent; localStorage.setItem(OUTPUT_KEY, lastOutput);
+        lastOutput = outputEl ? outputEl.textContent : ''; localStorage.setItem(OUTPUT_KEY, lastOutput);
 
         addActivity({ time: nowTime(), product: variables.product || '—', buyer_behaviour: variables.buyer_type || '—', length: variables.length || '—' });
 
@@ -444,11 +467,11 @@
         }
 
         const out = (data.output || data.preview || '').trim();
-        outputEl.textContent = out || '(No output returned.)';
-        outputMeta.textContent = `Generated ${nowTime()}`;
+        if (outputEl) outputEl.textContent = out || '(No output returned.)';
+        if (outputMeta) outputMeta.textContent = `Generated ${nowTime()}`;
 
-        copyBtn && (copyBtn.disabled = !out);
-        downloadBtn && (downloadBtn.disabled = !out);
+        if (copyBtn) copyBtn.disabled = !out;
+        if (downloadBtn) downloadBtn.disabled = !out;
 
         const delta = computeDelta(lastOutput, out);
         renderDelta(delta);
@@ -541,9 +564,13 @@
       // Ensure button state is correct on first paint
       refreshSubmitState();
 
-      // Restore last output if present
+      // Restore last output if present (null-safe)
       const last = localStorage.getItem(OUTPUT_KEY);
-      if (last) { outputEl.textContent = last; copyBtn && (copyBtn.disabled = false); downloadBtn && (downloadBtn.disabled = false); }
+      if (last && outputEl) {
+        outputEl.textContent = last;
+        if (copyBtn) copyBtn.disabled = false;
+        if (downloadBtn) downloadBtn.disabled = false;
+      }
     })();
   })();
 </script>
