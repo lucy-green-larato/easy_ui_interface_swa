@@ -1,4 +1,73 @@
-<script type="module">
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Larato · First Call Script v2</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <form id="script-form">
+      <label>Sales model
+        <select id="call_type" name="call_type" required>
+          <option value="">Select…</option>
+          <option value="direct">Direct</option>
+          <option value="partner">Partner</option>
+        </select>
+      </label>
+
+      <label>Buyer behaviour
+        <select id="buyer_behaviour" name="buyer_behaviour" required>
+          <option value="">Select…</option>
+          <option value="early_adopter">Early Adopter</option>
+          <option value="early_majority">Early Majority</option>
+          <option value="late_majority">Late Majority</option>
+        </select>
+      </label>
+
+      <label>Product
+        <select id="product" name="product" required>
+          <option value="">Loading…</option>
+        </select>
+      </label>
+
+      <div class="actions">
+        <button id="submit" type="submit">Generate</button>
+        <button id="reset" type="button">Reset</button>
+        <button id="copy" type="button" disabled>Copy</button>
+        <button id="download" type="button" disabled>Download</button>
+      </div>
+    </form>
+
+    <section aria-labelledby="output-title">
+      <h3 id="output-title">Your script</h3>
+      <pre id="output" class="output"></pre>
+      <div id="output-meta" class="muted"></div>
+    </section>
+
+    <div id="status" class="status"></div>
+
+    <details id="diagnostics">
+      <summary>Diagnostics</summary>
+      <pre id="diag-json"></pre>
+    </details>
+
+    <ul id="delta-log"></ul>
+
+    <template id="activity-item">
+      <li>
+        <span class="time"></span> ·
+        <span class="product"></span> ·
+        <span class="buyer"></span> ·
+        <span class="length"></span>
+      </li>
+    </template>
+
+    <ul id="activity-log"></ul>
+  </main>
+
+ <script type="module">
   import { getIndex, getCallScript, canonical } from "/src/lib/callLibrary.js";
 
   (function () {
@@ -574,3 +643,5 @@
     })();
   })();
 </script>
+</body>
+</html>
