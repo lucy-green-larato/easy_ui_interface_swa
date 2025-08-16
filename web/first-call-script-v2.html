@@ -336,463 +336,476 @@
     </li>
   </template>
 
-  <!-- === MODULE: library-first, generator fallback === -->
- <!-- === MODULE: synthesise a CALL SCRIPT from curated library === -->
-<script type="module">
-  import { getIndex, canonical } from "/src/lib/callLibrary.js";
-  import { generateCallFromLibrary } from "/src/lib/callSynthesis.js";
+  <!-- === MODULE: synthesise a CALL SCRIPT from curated library === -->
+  <script type="module">
+    import { getIndex, canonical } from "/src/lib/callLibrary.js";
+    import { generateCallFromLibrary } from "/src/lib/callSynthesis.js";
 
-  (function () {
-    const FORM_ID = 'script-form';
-    const STORAGE_KEY = 'first_call_script_v2.form';
-    const ACTIVITY_KEY = 'first_call_script_v2.activity';
-    const OUTPUT_KEY = 'first_call_script_v2.last_output';
-    const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
-    const INTEL_URL = './intel.json';
-    const RESTORE_LAST = false;
+    (function () {
+      const FORM_ID = 'script-form';
+      const STORAGE_KEY = 'first_call_script_v2.form';
+      const ACTIVITY_KEY = 'first_call_script_v2.activity';
+      const OUTPUT_KEY = 'first_call_script_v2.last_output';
+      const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
+      const INTEL_URL = './intel.json';
+      const RESTORE_LAST = false;
 
-    const REQUIRED = ['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
+      const REQUIRED = ['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
 
-    const form = document.getElementById(FORM_ID);
-    const submitBtn = document.getElementById('submit');
-    const resetBtn = document.getElementById('reset');
-    const copyBtn = document.getElementById('copy');
-    const downloadBtn = document.getElementById('download');
-    const outputEl = document.getElementById('output');
-    const outputMeta = document.getElementById('output-meta');
-    const statusEl = document.getElementById('status');
-    const deltaLog = document.getElementById('delta-log');
-    const activityLog = document.getElementById('activity-log');
-    const activityTpl = document.getElementById('activity-item');
-    const diag = document.getElementById('diagnostics');
-    const diagJson = document.getElementById('diag-json');
+      const form = document.getElementById(FORM_ID);
+      const submitBtn = document.getElementById('submit');
+      const resetBtn = document.getElementById('reset');
+      const copyBtn = document.getElementById('copy');
+      const downloadBtn = document.getElementById('download');
+      const outputEl = document.getElementById('output');
+      const outputMeta = document.getElementById('output-meta');
+      const statusEl = document.getElementById('status');
+      const deltaLog = document.getElementById('delta-log');
+      const activityLog = document.getElementById('activity-log');
+      const activityTpl = document.getElementById('activity-item');
+      const diag = document.getElementById('diagnostics');
+      const diagJson = document.getElementById('diag-json');
 
-    const productSel = document.getElementById('product');
-    const buyerBehSel = document.getElementById('buyer_behaviour');
-    const toggleIntelBtn = document.getElementById('toggle-intel');
-    const intelBody = document.getElementById('intel-body');
+      const productSel = document.getElementById('product');
+      const buyerBehSel = document.getElementById('buyer_behaviour');
+      const toggleIntelBtn = document.getElementById('toggle-intel');
+      const intelBody = document.getElementById('intel-body');
 
-    const callTypeSel = document.getElementById('call_type');
-    const rememberCallType = document.getElementById('remember_call_type');
-    const mapLabel = document.getElementById('map-label');
+      const callTypeSel = document.getElementById('call_type');
+      const rememberCallType = document.getElementById('remember_call_type');
+      const mapLabel = document.getElementById('map-label');
 
-    let intel = null;
-    let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
+      let intel = null;
+      let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
 
-    const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-    const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const on = (el, evts, h, opt) => { if (el) evts.forEach(e => el.addEventListener(e, h, opt)); };
+      const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+      const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const on = (el, evts, h, opt) => { if (el) evts.forEach(e => el.addEventListener(e, h, opt)); };
 
-    function setBusy(isBusy) {
-      submitBtn && (submitBtn.disabled = isBusy || !allRequiredFilled(form));
-      resetBtn && (resetBtn.disabled = isBusy);
-      const hasText = !!(outputEl?.textContent?.trim());
-      copyBtn && (copyBtn.disabled = isBusy || !hasText);
-      downloadBtn && (downloadBtn.disabled = isBusy || !hasText);
-      submitBtn && submitBtn.classList.toggle('busy', isBusy);
-    }
-    function setStatus(msg, kind='info'){ if (statusEl){ statusEl.textContent = msg; statusEl.dataset.kind = kind; } }
-
-    function allRequiredFilled(formEl){
-      if (!formEl) return false;
-      const labels = { call_type:'Direct or partner sales', seller_name:'Your name', seller_company:'Your company',
-        prospect_name:'Prospect name', prospect_role:'Prospect role', prospect_company:'Prospect company',
-        buyer_behaviour:'Buyer behaviour', product:'Product' };
-      const missing = [];
-      for (const name of REQUIRED){
-        const el = formEl.elements[name] || document.getElementById(name);
-        const val = (el && typeof el.value === 'string') ? el.value.trim() : '';
-        if (!val) missing.push(labels[name] || name);
+      function setBusy(isBusy) {
+        submitBtn && (submitBtn.disabled = isBusy || !allRequiredFilled(form));
+        resetBtn && (resetBtn.disabled = isBusy);
+        const hasText = !!(outputEl?.textContent?.trim());
+        copyBtn && (copyBtn.disabled = isBusy || !hasText);
+        downloadBtn && (downloadBtn.disabled = isBusy || !hasText);
+        submitBtn && submitBtn.classList.toggle('busy', isBusy);
       }
-      if (missing.length) setStatus(`Please complete: ${missing.join(', ')}.`, 'error'); else setStatus('');
-      return missing.length === 0;
-    }
-    function refreshSubmitState(){ submitBtn && (submitBtn.disabled = !allRequiredFilled(form)); }
+      function setStatus(msg, kind='info'){ if (statusEl){ statusEl.textContent = msg; statusEl.dataset.kind = kind; } }
 
-    function validateField(input) {
-      if (!input) return;
-      const id = input.id;
-      const errorEl = document.getElementById(`${id}_error`) || (id==='call_type' ? document.getElementById('call_type_error') : null);
-      const valid = !!String(input.value || '').trim();
-      if (!errorEl) return;
-      if (valid) { errorEl.textContent=''; input.removeAttribute('aria-invalid'); input.classList.remove('invalid'); }
-      else { errorEl.textContent = id==='call_type' ? 'Please choose a call type.' : 'This field is required.'; input.setAttribute('aria-invalid','true'); input.classList.add('invalid'); }
-    }
-
-    function saveForm(){
-      if (!form) return;
-      const fd = Object.fromEntries(new FormData(form).entries());
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(fd));
-    }
-    function loadForm(){
-      if (!form) return;
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      try {
-        const data = JSON.parse(raw);
-        Object.entries(data).forEach(([k,v]) => {
-          const el = form.elements[k] || document.getElementById(k);
-          if (el) el.value = v;
-        });
-      } catch {}
-    }
-    function clearFormState(){ localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
-
-    // ---------- Buyer needs helpers ----------
-    const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
-    const norm = s => String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015_\-\/]+/g,'-').replace(/[^\w\- ]+/g,'').trim();
-    const BEHAVIOUR_SYNONYMS = { 'early adopter':'early-adopter','early majority':'early-majority','late majority':'late-majority','skeptic':'sceptic','sceptic':'sceptic' };
-    function getKeyInsensitive(obj, requested){
-      if (!obj || typeof obj !== 'object') return null;
-      const want = norm(requested);
-      for (const k of Object.keys(obj)) if (norm(k) === want) return k;
-      for (const k of Object.keys(obj)) if (norm(k).includes(want)) return k;
-      return null;
-    }
-    const pEl = t => { const el=document.createElement('p'); el.textContent=t; return el; };
-    const setSlot = (id, arr=[]) => {
-      const slot=document.getElementById(id);
-      const items=(arr.length?arr:['No data available for this selection.']);
-      slot && slot.replaceChildren(...items.map(pEl));
-    };
-    const fillAll = arr => {
-      setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr);
-      setSlot('intel-proof', arr); setSlot('intel-objections', arr); setSlot('intel-ctas', arr);
-    };
-
-    function normaliseIntel(raw){
-      if (!raw || typeof raw !== 'object') return { products:{} };
-      if (raw.products && typeof raw.products === 'object') return raw;
-      const out = { products:{} };
-      Object.entries(raw).forEach(([product, buyersObj]) => {
-        const behaviours = {};
-        if (buyersObj && typeof buyersObj === 'object') {
-          Object.entries(buyersObj).forEach(([behaviour, arr]) => {
-            const [priorities, pains, triggers, proof, objections, ctas] = Array.isArray(arr) ? arr : [];
-            behaviours[behaviour] = { priorities: toArr(priorities), pains: toArr(pains), triggers: toArr(triggers), proof: toArr(proof), objections: toArr(objections), ctas: toArr(ctas) };
-          });
+      function allRequiredFilled(formEl){
+        if (!formEl) return false;
+        const labels = { call_type:'Direct or partner sales', seller_name:'Your name', seller_company:'Your company',
+          prospect_name:'Prospect name', prospect_role:'Prospect role', prospect_company:'Prospect company',
+          buyer_behaviour:'Buyer behaviour', product:'Product' };
+        const missing = [];
+        for (const name of REQUIRED){
+          const el = formEl.elements[name] || document.getElementById(name);
+          const val = (el && typeof el.value === 'string') ? el.value.trim() : '';
+          if (!val) missing.push(labels[name] || name);
         }
-        out.products[product] = { behaviours };
-      });
-      return out;
-    }
-
-    function renderIntel(productLabel, behaviourLabel){
-      if (!intel) return;
-      const products = intel.products || {};
-      const productKey = getKeyInsensitive(products, productLabel);
-      const productNode = productKey ? products[productKey] : null;
-      if (!productNode){ fillAll([`No data available (unknown product).`]); return; }
-
-      let node = null;
-      if (productNode.behaviours){
-        let key = getKeyInsensitive(productNode.behaviours, behaviourLabel);
-        if (!key){ const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.behaviours, syn); }
-        if (key) node = productNode.behaviours[key];
+        if (missing.length) setStatus(`Please complete: ${missing.join(', ')}.`, 'error'); else setStatus('');
+        return missing.length === 0;
       }
-      if (!node && productNode.buyers){
-        let key = getKeyInsensitive(productNode.buyers, behaviourLabel);
-        if (!key){ const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.buyers, syn); }
-        if (key) node = productNode.buyers[key];
-      }
-      if (!node && productNode.needs) node = productNode.needs;
+      function refreshSubmitState(){ submitBtn && (submitBtn.disabled = !allRequiredFilled(form)); }
 
-      if (!node){
-        const behavioursList = [...Object.keys(productNode.behaviours || {}), ...Object.keys(productNode.buyers || {})].join(', ') || '—';
-        fillAll([`No data for this behaviour. Available: ${behavioursList}`]);
-        return;
+      function validateField(input) {
+        if (!input) return;
+        const id = input.id;
+        const errorEl = document.getElementById(`${id}_error`) || (id==='call_type' ? document.getElementById('call_type_error') : null);
+        const valid = !!String(input.value || '').trim();
+        if (!errorEl) return;
+        if (valid) { errorEl.textContent=''; input.removeAttribute('aria-invalid'); input.classList.remove('invalid'); }
+        else { errorEl.textContent = id==='call_type' ? 'Please choose a call type.' : 'This field is required.'; input.setAttribute('aria-invalid','true'); input.classList.add('invalid'); }
       }
 
-      const sections = {
-        priorities: toArr(node?.priorities ?? node?.Priorities),
-        pains:      toArr(node?.pains      ?? node?.Pains),
-        triggers:   toArr(node?.triggers   ?? node?.Triggers),
-        proof:      toArr(node?.proof      ?? node?.Proof ?? node?.value ?? node?.Value),
-        objections: toArr(node?.objections ?? node?.Objections),
-        ctas:       toArr(node?.ctas       ?? node?.CTAs  ?? node?.callsToAction ?? node?.CallsToAction)
-      };
-
-      const allEmpty = Object.values(sections).every(a => a.length === 0);
-      if (allEmpty){ fillAll(['No data available for this selection.']); return; }
-
-      setSlot('intel-priorities', sections.priorities);
-      setSlot('intel-pains',      sections.pains);
-      setSlot('intel-triggers',   sections.triggers);
-      setSlot('intel-proof',      sections.proof);
-      setSlot('intel-objections', sections.objections);
-      setSlot('intel-ctas',       sections.ctas);
-    }
-
-    // ---------- Activity / delta ----------
-    function addActivity(entry) {
-      const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
-      list.unshift(entry);
-      localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0,3)));
-      renderActivity();
-    }
-    function renderActivity() {
-      const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
-      if (!activityLog) return;
-      activityLog.innerHTML = '';
-      list.forEach(item => {
-        const node = activityTpl.content.cloneNode(true);
-        node.querySelector('.time').textContent = item.time;
-        node.querySelector('.product').textContent = item.product;
-        node.querySelector('.buyer').textContent = item.buyer_behaviour || item.buyer || '';
-        node.querySelector('.length').textContent = item.length || '';
-        activityLog.appendChild(node);
-      });
-    }
-    function computeDelta(oldText, newText) {
-      const oldLines = (oldText||'').split('\n'), newLines = (newText||'').split('\n');
-      let added = 0, removed = 0;
-      const oldSet = new Set(oldLines), newSet = new Set(newLines);
-      newLines.forEach(l => { if (!oldSet.has(l) && l.trim()) added++; });
-      oldLines.forEach(l => { if (!newSet.has(l) && l.trim()) removed++; });
-      return { added, removed };
-    }
-    function renderDelta(delta) {
-      if (!deltaLog) return;
-      deltaLog.innerHTML = '';
-      const a = document.createElement('li'); a.textContent = `+${delta.added} new line${delta.added===1?'':'s'}`;
-      const r = document.createElement('li'); r.textContent = `−${delta.removed} removed line${delta.removed===1?'':'s'}`;
-      deltaLog.appendChild(a); deltaLog.appendChild(r);
-    }
-
-    // ---------- Header chip (remembered call type) ----------
-    function loadCallPref() {
-      try {
-        const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
-        if (pref?.call_type && callTypeSel && !callTypeSel.value) callTypeSel.value = pref.call_type;
-        if (pref?.remember === true && rememberCallType) rememberCallType.checked = true;
-      } catch {}
-      updateMapIndicator();
-    }
-    function saveCallPrefIfRequested() {
-      if (rememberCallType && rememberCallType.checked && callTypeSel && callTypeSel.value) {
-        localStorage.setItem(CALL_PREF_KEY, JSON.stringify({ remember: true, call_type: callTypeSel.value }));
-      } else if (rememberCallType && !rememberCallType.checked) {
-        localStorage.removeItem(CALL_PREF_KEY);
+      function saveForm(){
+        if (!form) return;
+        const fd = Object.fromEntries(new FormData(form).entries());
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(fd));
       }
-      updateMapIndicator();
-    }
-    function updateMapIndicator() {
-      const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
-      if (mapLabel) mapLabel.textContent = pref?.call_type || (callTypeSel?.value || 'Not set');
-    }
-
-    // ---------- Events ----------
-    on(callTypeSel, ['change','input','blur'], () => {
-      validateField(callTypeSel); saveForm(); updateMapIndicator(); refreshSubmitState();
-    });
-    on(rememberCallType, ['change','input','blur'], () => {
-      saveCallPrefIfRequested(); refreshSubmitState();
-    });
-
-    on(form, ['input','change','blur'], (e) => {
-      if (e.target.matches('input,select,textarea')) {
-        validateField(e.target); saveForm(); refreshSubmitState();
-      }
-      if (e.type==='change' && (e.target === productSel || e.target === buyerBehSel)) {
-        renderIntel(productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '', buyerBehSel?.value || '');
-      }
-    }, true);
-
-    toggleIntelBtn && toggleIntelBtn.addEventListener('click', () => {
-      const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
-      toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
-      if (intelBody) intelBody.hidden = expanded;
-      toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
-    });
-
-    resetBtn && resetBtn.addEventListener('click', () => {
-      if (!form) return;
-      form.reset(); clearFormState(); loadCallPref();
-      renderIntel(productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '', buyerBehSel?.value || '');
-      renderActivity(); refreshSubmitState();
-      setStatus('Form reset. Stored values cleared.');
-      form.querySelector('input, select, textarea')?.focus();
-    });
-
-    copyBtn && copyBtn.addEventListener('click', async () => {
-      const txt = outputEl?.textContent || ''; if (!txt.trim()) return;
-      await navigator.clipboard.writeText(txt);
-      setStatus('Copied to clipboard.');
-    });
-
-    downloadBtn && downloadBtn.addEventListener('click', () => {
-      const txt = outputEl?.textContent || ''; if (!txt.trim()) return;
-      const blob = new Blob([txt], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `first-call-script_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
-      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-      setStatus('Download started.');
-    });
-
-    // ---------- Submit: SYNTHESISE from library (model or rules) ----------
-    form && form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-
-      // focus first missing
-      for (const name of REQUIRED){
-        const el = form.elements[name] || document.getElementById(name);
-        if (!el || !String(el.value||'').trim()){
-          validateField(el); el?.focus(); setStatus('Please complete required fields.', 'error'); return;
-        }
-      }
-
-      const fd = Object.fromEntries(new FormData(form).entries());
-      const variables = {
-        seller_name: fd.seller_name || '',
-        seller_company: fd.seller_company || '',
-        prospect_name: fd.prospect_name || '',
-        prospect_role: fd.prospect_role || '',
-        prospect_company: fd.prospect_company || '',
-        call_type: fd.call_type || '',
-        buyer_type: fd.buyer_behaviour || '',
-        product: fd.product || '',
-        tone: fd.tone || '',
-        length: fd.length || '',
-        call_to_action: fd.call_to_action || '',
-        context: fd.context || '',
-        value_proposition: fd.value_proposition || ''
-      };
-
-      setBusy(true); setStatus('Synthesising call script from Library…'); diag && (diag.open = false); diagJson && (diagJson.textContent = '');
-
-      const lookup = {
-        product: variables.product,
-        buyerType: canonical.buyer(variables.buyer_type),
-        mode: canonical.mode(variables.call_type)
-      };
-
-      // Build the minimal "form" object the synthesiser uses for context
-      const synthForm = {
-        company:       variables.prospect_company,
-        role:          variables.prospect_role,
-        sector:        '',
-        company_size:  '',
-        scenario:      variables.context || variables.value_proposition || '',
-        meeting_type:  'first call'
-      };
-
-      try {
-        const result = await generateCallFromLibrary({
-          lookup,
-          form: synthForm,
-          tone: variables.tone // e.g., "Professional (corporate)" | "Warm (relaxed)" | ""
-          // If you have a server LLM, pass a generate(messages)->text here
-        });
-
-        // Render talk tracks (6-step Larato method)
-        const s = result.stages;
-        const section = (title, body) => `\n${title}\n${'-'.repeat(title.length)}\n${body}\n`;
-        const text =
-          section('Opening', s.opening.talk_track) +
-          section('Buyer pain', s.buyer_pain.talk_track) +
-          section('Buyer desire', s.buyer_desire.talk_track) +
-          section('Example', s.example.talk_track) +
-          section('Objections', s.objections.talk_track) +
-          section('Call to action', s.call_to_action.talk_track);
-
-        outputEl.textContent = text.trim();
-        outputMeta.textContent = result.metaLine;
-        copyBtn && (copyBtn.disabled = false); downloadBtn && (downloadBtn.disabled = false);
-
-        // Buyer Needs (right column) from curated library (through synthesiser result)
-        // Map "triggers" to priorities/desire prompts (no dedicated key in library)
-        setSlot('intel-priorities',   result.buyerNeeds['intel-priorities'] || []);
-        setSlot('intel-pains',        result.buyerNeeds['intel-pains'] || []);
-        setSlot('intel-triggers',     result.buyerNeeds['intel-priorities'] || []);
-        setSlot('intel-proof',        result.buyerNeeds['intel-proof-points'] || []);
-        setSlot('intel-objections',   result.buyerNeeds['intel-objections'] || []);
-        setSlot('intel-ctas',         result.buyerNeeds['intel-ctas'] || []);
-
-        const delta = computeDelta(lastOutput, outputEl.textContent);
-        renderDelta(delta);
-        lastOutput = outputEl.textContent; localStorage.setItem(OUTPUT_KEY, lastOutput);
-
-        addActivity({ time: nowTime(), product: variables.product || '—', buyer_behaviour: variables.buyer_type || '—', length: variables.length || '—' });
-
-        setStatus('Done. (Generated from curated Library)');
-        setBusy(false);
-        document.getElementById('output-title')?.focus();
-      } catch (err) {
-        setStatus('Could not generate a call script. Please check content paths.', 'error');
-        if (diag) { diag.open = true; diagJson.textContent = String(err); }
-        setBusy(false);
-      }
-    });
-
-    // ---------- Init ----------
-    (async function init(){
-      // hydrate badge
-      (async () => {
-        const el = document.getElementById('user-badge'); if (!el) return;
+      function loadForm(){
+        if (!form) return;
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
         try {
-          const res = await fetch('/.auth/me', { credentials: 'include' });
-          if (!res.ok) throw new Error(String(res.status));
-          const data = await res.json();
-          const claim = data?.clientPrincipal?.userDetails || 'Signed in';
-          el.querySelector('span:last-child').textContent = claim;
-          el.classList.remove('is-hidden');
-        } catch {
-          el.innerHTML = 'Not signed in — <a href="/.auth/login/aad">Sign in</a>';
-          el.classList.remove('is-hidden');
+          const data = JSON.parse(raw);
+          Object.entries(data).forEach(([k,v]) => {
+            const el = form.elements[k] || document.getElementById(k);
+            if (el) el.value = v;
+          });
+        } catch {}
+      }
+      function clearFormState(){ localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
+
+      // ---------- Buyer needs helpers ----------
+      const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
+      const norm = s => String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015_\-\/]+/g,'-').replace(/[^\w\- ]+/g,'').trim();
+      const BEHAVIOUR_SYNONYMS = { 'early adopter':'early-adopter','early majority':'early-majority','late majority':'late-majority','skeptic':'sceptic','sceptic':'sceptic' };
+      function getKeyInsensitive(obj, requested){
+        if (!obj || typeof obj !== 'object') return null;
+        const want = norm(requested);
+        for (const k of Object.keys(obj)) if (norm(k) === want) return k;
+        for (const k of Object.keys(obj)) if (norm(k).includes(want)) return k;
+        return null;
+      }
+      const pEl = t => { const el=document.createElement('p'); el.textContent=t; return el; };
+      const setSlot = (id, arr=[]) => {
+        const slot=document.getElementById(id);
+        const items=(arr.length?arr:['No data available for this selection.']);
+        slot && slot.replaceChildren(...items.map(pEl));
+      };
+      const fillAll = arr => {
+        setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr);
+        setSlot('intel-proof', arr); setSlot('intel-objections', arr); setSlot('intel-ctas', arr);
+      };
+
+      function normaliseIntel(raw){
+        if (!raw || typeof raw !== 'object') return { products:{} };
+        if (raw.products && typeof raw.products === 'object') return raw;
+        const out = { products:{} };
+        Object.entries(raw).forEach(([product, buyersObj]) => {
+          const behaviours = {};
+          if (buyersObj && typeof buyersObj === 'object') {
+            Object.entries(buyersObj).forEach(([behaviour, arr]) => {
+              const [priorities, pains, triggers, proof, objections, ctas] = Array.isArray(arr) ? arr : [];
+              behaviours[behaviour] = { priorities: toArr(priorities), pains: toArr(pains), triggers: toArr(triggers), proof: toArr(proof), objections: toArr(objections), ctas: toArr(ctas) };
+            });
+          }
+          out.products[product] = { behaviours };
+        });
+        return out;
+      }
+
+      function renderIntel(productLabel, behaviourLabel){
+        if (!intel) return;
+        const products = intel.products || {};
+        const productKey = getKeyInsensitive(products, productLabel);
+        const productNode = productKey ? products[productKey] : null;
+        if (!productNode){ fillAll([`No data available (unknown product).`]); return; }
+
+        let node = null;
+        if (productNode.behaviours){
+          let key = getKeyInsensitive(productNode.behaviours, behaviourLabel);
+          if (!key){ const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.behaviours, syn); }
+          if (key) node = productNode.behaviours[key];
         }
-      })();
+        if (!node && productNode.buyers){
+          let key = getKeyInsensitive(productNode.buyers, behaviourLabel);
+          if (!key){ const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.buyers, syn); }
+          if (key) node = productNode.buyers[key];
+        }
+        if (!node && productNode.needs) node = productNode.needs;
 
-      // Load intel (for Buyer needs pane when library not loaded yet)
-      try {
-        const res = await fetch(INTEL_URL, { cache: 'no-store' });
-        const raw = await res.json();
-        intel = normaliseIntel(raw);
-      } catch { intel = { products:{} }; }
+        if (!node){
+          const behavioursList = [...Object.keys(productNode.behaviours || {}), ...Object.keys(productNode.buyers || {})].join(', ') || '—';
+          fillAll([`No data for this behaviour. Available: ${behavioursList}`]);
+          return;
+        }
 
-      // Populate Product from call-library index; fallback to intel.json keys
-      try {
-        const idx = await getIndex();            // /content/call-library/v1/index.json
-        const items = Array.isArray(idx?.products) ? idx.products : [];
-        if (productSel) {
-          productSel.innerHTML = '<option value="">Select…</option>';
-          for (const { id, label } of items) {
-            const opt = document.createElement('option');
-            opt.value = id; opt.textContent = label || id;
-            productSel.appendChild(opt);
+        const sections = {
+          priorities: toArr(node?.priorities ?? node?.Priorities),
+          pains:      toArr(node?.pains      ?? node?.Pains),
+          triggers:   toArr(node?.triggers   ?? node?.Triggers),
+          proof:      toArr(node?.proof      ?? node?.Proof ?? node?.value ?? node?.Value),
+          objections: toArr(node?.objections ?? node?.Objections),
+          ctas:       toArr(node?.ctas       ?? node?.CTAs  ?? node?.callsToAction ?? node?.CallsToAction)
+        };
+
+        const allEmpty = Object.values(sections).every(a => a.length === 0);
+        if (allEmpty){ fillAll(['No data available for this selection.']); return; }
+
+        setSlot('intel-priorities', sections.priorities);
+        setSlot('intel-pains',      sections.pains);
+        setSlot('intel-triggers',   sections.triggers);
+        setSlot('intel-proof',      sections.proof);
+        setSlot('intel-objections', sections.objections);
+        setSlot('intel-ctas',       sections.ctas);
+      }
+
+      // ---------- Activity / delta ----------
+      function addActivity(entry) {
+        const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
+        list.unshift(entry);
+        localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0,3)));
+        renderActivity();
+      }
+      function renderActivity() {
+        const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
+        if (!activityLog) return;
+        activityLog.innerHTML = '';
+        list.forEach(item => {
+          const node = activityTpl.content.cloneNode(true);
+          node.querySelector('.time').textContent = item.time;
+          node.querySelector('.product').textContent = item.product;
+          node.querySelector('.buyer').textContent = item.buyer_behaviour || item.buyer || '';
+          node.querySelector('.length').textContent = item.length || '';
+          activityLog.appendChild(node);
+        });
+      }
+      function computeDelta(oldText, newText) {
+        const oldLines = (oldText||'').split('\n'), newLines = (newText||'').split('\n');
+        let added = 0, removed = 0;
+        const oldSet = new Set(oldLines), newSet = new Set(newLines);
+        newLines.forEach(l => { if (!oldSet.has(l) && l.trim()) added++; });
+        oldLines.forEach(l => { if (!newSet.has(l) && l.trim()) removed++; });
+        return { added, removed };
+      }
+      function renderDelta(delta) {
+        if (!deltaLog) return;
+        deltaLog.innerHTML = '';
+        const a = document.createElement('li'); a.textContent = `+${delta.added} new line${delta.added===1?'':'s'}`;
+        const r = document.createElement('li'); r.textContent = `−${delta.removed} removed line${delta.removed===1?'':'s'}`;
+        deltaLog.appendChild(a); deltaLog.appendChild(r);
+      }
+
+      // ---------- Header chip (remembered call type) ----------
+      function loadCallPref() {
+        try {
+          const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
+          if (pref?.call_type && callTypeSel && !callTypeSel.value) callTypeSel.value = pref.call_type;
+          if (pref?.remember === true && rememberCallType) rememberCallType.checked = true;
+        } catch {}
+        updateMapIndicator();
+      }
+      function saveCallPrefIfRequested() {
+        if (rememberCallType && rememberCallType.checked && callTypeSel && callTypeSel.value) {
+          localStorage.setItem(CALL_PREF_KEY, JSON.stringify({ remember: true, call_type: callTypeSel.value }));
+        } else if (rememberCallType && !rememberCallType.checked) {
+          localStorage.removeItem(CALL_PREF_KEY);
+        }
+        updateMapIndicator();
+      }
+      function updateMapIndicator() {
+        const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
+        if (mapLabel) mapLabel.textContent = pref?.call_type || (callTypeSel?.value || 'Not set');
+      }
+
+      // ---------- Events ----------
+      on(callTypeSel, ['change','input','blur'], () => {
+        validateField(callTypeSel); saveForm(); updateMapIndicator(); refreshSubmitState();
+      });
+      on(rememberCallType, ['change','input','blur'], () => {
+        saveCallPrefIfRequested(); refreshSubmitState();
+      });
+
+      on(form, ['input','change','blur'], (e) => {
+        if (e.target.matches('input,select,textarea')) {
+          validateField(e.target); saveForm(); refreshSubmitState();
+        }
+        if (e.type==='change' && (e.target === productSel || e.target === buyerBehSel)) {
+          renderIntel(productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '', buyerBehSel?.value || '');
+        }
+      }, true);
+
+      toggleIntelBtn && toggleIntelBtn.addEventListener('click', () => {
+        const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
+        toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
+        if (intelBody) intelBody.hidden = expanded;
+        toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
+      });
+
+      resetBtn && resetBtn.addEventListener('click', () => {
+        if (!form) return;
+        form.reset(); clearFormState(); loadCallPref();
+        renderIntel(productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '', buyerBehSel?.value || '');
+        renderActivity(); refreshSubmitState();
+        setStatus('Form reset. Stored values cleared.');
+        form.querySelector('input, select, textarea')?.focus();
+      });
+
+      copyBtn && copyBtn.addEventListener('click', async () => {
+        const txt = outputEl?.textContent || ''; if (!txt.trim()) return;
+        await navigator.clipboard.writeText(txt);
+        setStatus('Copied to clipboard.');
+      });
+
+      downloadBtn && downloadBtn.addEventListener('click', () => {
+        const txt = outputEl?.textContent || ''; if (!txt.trim()) return;
+        const blob = new Blob([txt], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `first-call-script_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        setStatus('Download started.');
+      });
+
+      // ---------- Submit: SYNTHESISE from library (model or rules) ----------
+      form && form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        // focus first missing
+        for (const name of REQUIRED){
+          const el = form.elements[name] || document.getElementById(name);
+          if (!el || !String(el.value||'').trim()){
+            validateField(el); el?.focus(); setStatus('Please complete required fields.', 'error'); return;
           }
         }
-      } catch {
-        if (productSel) {
-          productSel.innerHTML = '<option value="">Select…</option>';
-          Object.keys(intel.products || {}).forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p; opt.textContent = p;
-            productSel.appendChild(opt);
+
+        const fd = Object.fromEntries(new FormData(form).entries());
+        const variables = {
+          seller_name: fd.seller_name || '',
+          seller_company: fd.seller_company || '',
+          prospect_name: fd.prospect_name || '',
+          prospect_role: fd.prospect_role || '',
+          prospect_company: fd.prospect_company || '',
+          call_type: fd.call_type || '',
+          buyer_type: fd.buyer_behaviour || '',
+          product: fd.product || '',
+          tone: fd.tone || '',
+          length: fd.length || '',
+          call_to_action: fd.call_to_action || '',
+          context: fd.context || '',
+          value_proposition: fd.value_proposition || ''
+        };
+
+        setBusy(true); setStatus('Synthesising call script from Library…'); diag && (diag.open = false); diagJson && (diagJson.textContent = '');
+
+        const lookup = {
+          product: variables.product,
+          buyerType: canonical.buyer(variables.buyer_type),
+          mode: canonical.mode(variables.call_type)
+        };
+
+        // Build the minimal "form" object the synthesiser uses for context
+        const synthForm = {
+          company:       variables.prospect_company,
+          role:          variables.prospect_role,
+          sector:        '',
+          company_size:  '',
+          scenario:      variables.context || variables.value_proposition || '',
+          meeting_type:  'first call'
+        };
+
+        // Word-count target from the Length dropdown ("~50 words …")
+        const lengthHint = /\d+/.exec(variables.length || "")?.[0] || "100";
+
+        // Optional: wire to a server LLM endpoint that accepts {messages} and returns {text}
+        // const generate = async (messages) => {
+        //   const r = await fetch('/api/generate-call', {
+        //     method: 'POST',
+        //     headers: {'Content-Type':'application/json'},
+        //     body: JSON.stringify({ messages })
+        //   });
+        //   const j = await r.json();
+        //   return typeof j.text === 'string' ? j.text : JSON.stringify(j);
+        // };
+
+        try {
+          const result = await generateCallFromLibrary({
+            lookup,
+            form: synthForm,
+            tone: variables.tone,          // "Professional (corporate)" | "Warm (relaxed)" | ""
+            length: Number(lengthHint),    // <— pass length target to the synthesiser
+            // generate                       // <— uncomment if you have the server endpoint
           });
+
+          // Render talk tracks (6-step Larato method)
+          const s = result.stages;
+          const section = (title, body) => `\n${title}\n${'-'.repeat(title.length)}\n${body}\n`;
+          const text =
+            section('Opening', s.opening.talk_track) +
+            section('Buyer pain', s.buyer_pain.talk_track) +
+            section('Buyer desire', s.buyer_desire.talk_track) +
+            section('Example', s.example.talk_track) +
+            section('Objections', s.objections.talk_track) +
+            section('Call to action', s.call_to_action.talk_track);
+
+          outputEl.textContent = text.trim();
+          outputMeta.textContent = result.metaLine;
+          copyBtn && (copyBtn.disabled = false); downloadBtn && (downloadBtn.disabled = false);
+
+          // Buyer Needs (right column) from curated library (through synthesiser result)
+          // Map "triggers" to priorities/desire prompts (library has no dedicated "triggers")
+          setSlot('intel-priorities',   result.buyerNeeds['intel-priorities'] || []);
+          setSlot('intel-pains',        result.buyerNeeds['intel-pains'] || []);
+          setSlot('intel-triggers',     result.buyerNeeds['intel-priorities'] || []);
+          setSlot('intel-proof',        result.buyerNeeds['intel-proof-points'] || []);
+          setSlot('intel-objections',   result.buyerNeeds['intel-objections'] || []);
+          setSlot('intel-ctas',         result.buyerNeeds['intel-ctas'] || []);
+
+          const delta = computeDelta(lastOutput, outputEl.textContent);
+          renderDelta(delta);
+          lastOutput = outputEl.textContent; localStorage.setItem(OUTPUT_KEY, lastOutput);
+
+          addActivity({ time: nowTime(), product: variables.product || '—', buyer_behaviour: variables.buyer_type || '—', length: variables.length || '—' });
+
+          setStatus('Done. (Generated from curated Library)');
+          setBusy(false);
+          document.getElementById('output-title')?.focus();
+        } catch (err) {
+          setStatus('Could not generate a call script. Please check content paths.', 'error');
+          if (diag) { diag.open = true; diagJson.textContent = String(err); }
+          setBusy(false);
         }
-      }
+      });
 
-      // Restore saved form state and remembered call type
-      loadForm();
-      loadCallPref();
+      // ---------- Init ----------
+      (async function init(){
+        // hydrate badge
+        (async () => {
+          const el = document.getElementById('user-badge'); if (!el) return;
+          try {
+            const res = await fetch('/.auth/me', { credentials: 'include' });
+            if (!res.ok) throw new Error(String(res.status));
+            const data = await res.json();
+            const claim = data?.clientPrincipal?.userDetails || 'Signed in';
+            el.querySelector('span:last-child').textContent = claim;
+            el.classList.remove('is-hidden');
+          } catch {
+            el.innerHTML = 'Not signed in — <a href="/.auth/login/aad">Sign in</a>';
+            el.classList.remove('is-hidden');
+          }
+        })();
 
-      // Initial Buyer needs
-      if (productSel?.value && buyerBehSel?.value) {
-        renderIntel(productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '', buyerBehSel.value);
-      }
+        // Load intel (for Buyer needs pane when library not loaded yet)
+        try {
+          const res = await fetch(INTEL_URL, { cache: 'no-store' });
+          const raw = await res.json();
+          intel = normaliseIntel(raw);
+        } catch { intel = { products:{} }; }
 
-      refreshSubmitState();
+        // Populate Product from call-library index; fallback to intel.json keys
+        try {
+          const idx = await getIndex();            // /content/call-library/v1/index.json
+          const items = Array.isArray(idx?.products) ? idx.products : [];
+          if (productSel) {
+            productSel.innerHTML = '<option value="">Select…</option>';
+            for (const { id, label } of items) {
+              const opt = document.createElement('option');
+              opt.value = id; opt.textContent = label || id;
+              productSel.appendChild(opt);
+            }
+          }
+        } catch {
+          if (productSel) {
+            productSel.innerHTML = '<option value="">Select…</option>';
+            Object.keys(intel.products || {}).forEach(p => {
+              const opt = document.createElement('option');
+              opt.value = p; opt.textContent = p;
+              productSel.appendChild(opt);
+            });
+          }
+        }
 
-      if (RESTORE_LAST && lastOutput) {
-        outputEl.textContent = lastOutput;
-        copyBtn && (copyBtn.disabled = false);
-        downloadBtn && (downloadBtn.disabled = false);
-      }
+        // Restore saved form state and remembered call type
+        loadForm();
+        loadCallPref();
+
+        // Initial Buyer needs
+        if (productSel?.value && buyerBehSel?.value) {
+          renderIntel(productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '', buyerBehSel.value);
+        }
+
+        refreshSubmitState();
+
+        if (RESTORE_LAST && lastOutput) {
+          outputEl.textContent = lastOutput;
+          copyBtn && (copyBtn.disabled = false);
+          downloadBtn && (downloadBtn.disabled = false);
+        }
+      })();
     })();
-  })();
-</script>
+  </script>
 
-  
 </body>
 </html>
