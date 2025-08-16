@@ -12,13 +12,13 @@
   --ok:#0a7f2e;
 
   /* Stage & header */
-  --stage-max: 1350px;            /* slightly wider to fit 4/6/2 layout */
+  --stage-max: 100vw;             /* FULL WIDTH (was 1350px) */
   --header-h: 64px;
 
   /* 3-col proportions */
   --left-min: 480px;
   --middle-min: 780px;
-  --right-min: 260px;             /* slimmer right rail */
+  --right-min: 220px;             /* slimmer right rail */
 
   /* Elevation / radii / rings */
   --radius:12px;
@@ -87,16 +87,17 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 .badge svg{width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2}
 .badge.is-hidden{display:none}
 
-/* === Layout — centered 3-column grid =============================== */
+/* === Layout — full-width 3-column grid ============================ */
 .stage{max-width: var(--stage-max); margin-inline:auto}
 .layout{
   display:grid; gap:var(--gap); padding:var(--gap); align-items:start; width:100%;
   max-width: var(--stage-max);
   margin-inline: auto;
+  /* LEFT / MIDDLE expand, RIGHT stays slim */
   grid-template-columns:
-    minmax(var(--left-min), 1.1fr)
-    minmax(var(--middle-min), 2.2fr)
-    clamp(var(--right-min), 22vw, 340px);
+    minmax(var(--left-min), 1.35fr)
+    minmax(var(--middle-min), 2.65fr)
+    clamp(var(--right-min), 14vw, 300px);
 }
 
 /* === Three white “windows” ======================================== */
@@ -111,7 +112,7 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 }
 .panel.left{grid-column:1}
 .panel.middle{grid-column:2}
-.panel.right{grid-column:3; max-width:340px} /* keep the rail slim */
+.panel.right{grid-column:3; max-width:300px} /* keep the rail slim */
 
 /* Kill nested “double boxes” */
 .panel .card{background:transparent; border:0; box-shadow:none; padding:0; margin:0}
@@ -189,12 +190,12 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
 .intel-chip{ display:inline-block; padding:4px 8px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.85rem; color:var(--text-2); margin:0 6px 6px 0 }
 
 /* === Ultra-wide tuning ============================================ */
-@media (min-width: 1600px){
+@media (min-width: 1800px){
   .layout{
     grid-template-columns:
-      minmax(520px, 1.1fr)
-      minmax(900px, 2.4fr)
-      clamp(240px, 18vw, 340px);
+      minmax(560px, 1.4fr)
+      minmax(1020px, 3fr)
+      clamp(var(--right-min), 12vw, 300px);
   }
 }
 
@@ -233,7 +234,7 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
     --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 30px rgba(0,0,0,.35);
   }
   .output{ background:var(--card-bg); border-color:var(--border); color:var(--text-1) }
-  input,select,textarea{ background:#10151d; color:var(--text-1); border-color:var(--border) }
+  input,select,textarea{ background:#10151d; color:#text-1; border-color:#2a3342 }
   .intel-grid li,.intel-chip{ background:#1d2532; color:var(--text-2); border-color:#2a3342 }
   *::-webkit-scrollbar-thumb{ background:#3a4559 }
   *::-webkit-scrollbar-thumb:hover{ background:#4b5870 }
@@ -259,90 +260,4 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   position:absolute !important; width:1px !important; height:1px !important;
   padding:0 !important; margin:-1px !important; overflow:hidden !important;
   clip:rect(0,0,0,0) !important; white-space:nowrap !important; border:0 !important;
-}
-/* === Full-width 3-column layout (remove right-side empty space) === */
-
-/* 1) Remove the stage/container cap */
-:root { --stage-max: 100vw; }          /* no more 1350px cap */
-.stage, .layout { max-width: none; }   /* allow full-bleed width */
-
-/* 2) Make the grid actively use the whole width */
-.layout{
-  grid-template-columns:
-    minmax(420px, 1.1fr)               /* LEFT  (Form)    */
-    minmax(640px, 2.2fr)               /* MIDDLE (Script) */
-    clamp(260px, 22vw, 420px);         /* RIGHT  (Buyer)  */
-}
-
-/* Keep the right rail narrow but not hard-capped */
-.panel.right{ max-width: none; }
-
-/* 3) Ultra-wide screens: scale a touch more while keeping the rail slim */
-@media (min-width: 1800px){
-  .layout{
-    grid-template-columns:
-      minmax(520px, 1.2fr)
-      minmax(860px, 2.4fr)
-      clamp(300px, 20vw, 520px);
-  }
-}
-/* === Full-width layout with a SLIM right rail ===================== */
-
-/* Let the grid use the whole screen */
-:root { --stage-max: 100vw; }
-.stage, .layout { max-width: none; }
-
-/* 4/6/2 feel: left + middle grow, right rail stays narrow */
-.layout{
-  grid-template-columns:
-    minmax(520px, 1.25fr)          /* LEFT grows more */
-    minmax(820px, 2.75fr)          /* MIDDLE grows most */
-    clamp(220px, 14vw, 300px);     /* RIGHT stays slim */
-}
-
-/* Belt-and-braces cap on the right rail */
-.panel.right{ max-width: 300px; }
-
-/* Extra-wide monitors: keep right rail slim, give more to middle */
-@media (min-width: 1800px){
-  .layout{
-    grid-template-columns:
-      minmax(560px, 1.3fr)
-      minmax(1000px, 3fr)
-      clamp(220px, 12vw, 300px);
-  }
-}
-
-/* === Full-width 3-col layout (keep Buyer needs slim) ============== */
-
-/* 1) Kill any container max-width around the grid */
-:root { --stage-max: 100vw; }
-.stage, .layout { max-width: none !important; width: 100% !important; }
-
-/* Defensive: if your grid lives inside a generic “container”, remove caps */
-:where(.app-stage, .app-container, .container, .content, .page)
-  :where(.layout){
-  max-width: none !important;
-  width: 100% !important;
-}
-
-/* 2) Let left+middle grow; keep right rail narrow */
-.layout{
-  grid-template-columns:
-    minmax(520px, 1.35fr)           /* LEFT grows */
-    minmax(820px, 2.65fr)           /* MIDDLE grows most */
-    clamp(220px, 14vw, 300px);      /* RIGHT stays slim */
-}
-
-/* Ensure the right rail never stretches */
-.panel.right{ max-width: 300px !important; }
-
-/* 3) Ultra-wide monitors: give even more to the middle, keep rail slim */
-@media (min-width: 1800px){
-  .layout{
-    grid-template-columns:
-      minmax(560px, 1.4fr)
-      minmax(1020px, 3fr)
-      clamp(220px, 12vw, 300px);
-  }
 }
