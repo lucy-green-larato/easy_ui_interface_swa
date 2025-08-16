@@ -4,6 +4,10 @@
       "route": "/content/call-library/*",
       "allowedRoles": ["anonymous", "authenticated"],
       "headers": { "Cache-Control": "no-store" }
+    },
+    {
+      "route": "/src/*",
+      "allowedRoles": ["anonymous", "authenticated"]
     }
   ],
   "navigationFallback": {
@@ -11,11 +15,14 @@
     "exclude": [
       "/api/*",
       "/content/*",
-      "/src/*"
+      "/src/*",
+      "/favicon.ico",
+      "/robots.txt"
     ]
   },
   "mimeTypes": {
-    ".json": "application/json; charset=utf-8",
-    ".js": "text/javascript"
+    ".js": "application/javascript; charset=utf-8",
+    ".mjs": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8"
   }
 }
