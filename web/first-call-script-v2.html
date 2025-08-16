@@ -1,5 +1,5 @@
 <script type="module">
-  import { getCallScript } from "/src/lib/callLibrary.js";
+  import { getCallScript } from "./lib/callLibrary.js";  // <-- relative path
 
   (function () {
     const FORM_ID = 'script-form';
@@ -7,7 +7,7 @@
     const ACTIVITY_KEY = 'first_call_script_v2.activity';
     const OUTPUT_KEY = 'first_call_script_v2.last_output';
     const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
-    const INTEL_URL = '/src/intel.json';
+    const INTEL_URL = './intel.json';                          // <-- relative keeps it simple
     const CALLLIB_INDEX_URL = '/content/call-library/v1/index.json';
 
     const REQUIRED = ['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
@@ -41,27 +41,26 @@
     const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
     const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    // ---- Helpers for Call Library index (array-of-objects) ----
+    // ---------- Call Library index ----------
     async function loadCallLibIndex() {
       const res = await fetch(CALLLIB_INDEX_URL, { cache: 'no-store' });
       if (!res.ok) return null;
       return await res.json(); // { products:[{id,label}], ... }
     }
-
     function populateProductsFromIndex(indexJson) {
       const items = Array.isArray(indexJson?.products) ? indexJson.products : [];
       productSel.innerHTML = '<option value="">Select…</option>';
       for (const { id, label } of items) {
         const opt = document.createElement('option');
-        opt.value = id;                 // canonical ID (e.g. "connectivity")
+        opt.value = id;                 // canonical id (e.g., "connectivity")
         opt.textContent = label || id;  // human label
         productSel.appendChild(opt);
       }
     }
-
     const getSelectedProductLabel = () =>
       productSel.options[productSel.selectedIndex]?.text || productSel.value || '';
 
+    // ---------- UI helpers (unchanged) ----------
     function setBusy(isBusy) {
       submitBtn.disabled = isBusy || !allRequiredFilled(form);
       resetBtn.disabled = isBusy;
@@ -116,11 +115,10 @@
     }
     function clearFormState() { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
 
-    // ---- Buyer needs helpers (unchanged) ----
+    // ---------- Buyer needs helpers (unchanged) ----------
     const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
     const norm = s => String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015_\-\/]+/g,'-').replace(/[^\w\- ]+/g,'').trim();
     const BEHAVIOUR_SYNONYMS = { 'early adopter':'early-adopter','early majority':'early-majority','late majority':'late-majority','skeptic':'sceptic','sceptic':'sceptic' };
-
     function getKeyInsensitive(obj, requested){
       if (!obj || typeof obj !== 'object') return null;
       const want = norm(requested);
@@ -138,7 +136,6 @@
       setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr);
       setSlot('intel-proof', arr); setSlot('intel-objections', arr); setSlot('intel-ctas', arr);
     };
-
     function normaliseIntel(raw){
       if (!raw || typeof raw !== 'object') return { products:{} };
       if (raw.products && typeof raw.products === 'object') return raw;
@@ -155,7 +152,6 @@
       });
       return out;
     }
-
     function renderIntel(productLabel, behaviourLabel){
       if (!intel) return;
       const products = intel.products || {};
@@ -164,7 +160,6 @@
       if (!productNode){ fillAll([`No data available (unknown product).`]); return; }
 
       let node = null;
-
       if (productNode.behaviours){
         let key = getKeyInsensitive(productNode.behaviours, behaviourLabel);
         if (!key){ const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.behaviours, syn); }
@@ -282,10 +277,9 @@
       if (s.startsWith('sceptic') || s.startsWith('skeptic')) return 'sceptics';
       return 'early_majority';
     };
-    // toProductId retained only for generator fallback if ever needed
     const toProductId = (v) => {
       const s = String(v).toLowerCase().trim();
-      const directMap = {
+      const map = {
         'connectivity (mobile & fixed)':'connectivity',
         'connectivity':'connectivity',
         'cybersecurity':'cybersecurity',
@@ -298,11 +292,10 @@
         'telecoms solutions':'telecoms_solutions',
         'telecommunications solutions':'telecoms_solutions'
       };
-      if (directMap[s]) return directMap[s];
-      return s.replace(/[^\w]+/g,'_').replace(/_{2,}/g,'_').replace(/^_|_$/g,'');
+      return map[s] || s.replace(/[^\w]+/g,'_').replace(/_{2,}/g,'_').replace(/^_|_$/g,'');
     };
 
-    // ---- Events
+    // Events
     ['change','input','blur'].forEach(evt => {
       callTypeSel.addEventListener(evt, () => {
         validateField(callTypeSel);
@@ -324,7 +317,7 @@
           refreshSubmitState();
         }
         if (e.type==='change' && (e.target === productSel || e.target === buyerBehSel)) {
-          // pass the LABEL to intel (intel.json uses human names)
+          // IMPORTANT: pass the label to intel (intel.json uses human names)
           renderIntel(getSelectedProductLabel(), buyerBehSel.value);
         }
       }, true);
@@ -340,7 +333,7 @@
     document.getElementById('reset').addEventListener('click', () => {
       form.reset(); clearFormState();
       setStatus('Form reset.');
-      renderIntel(getSelectedProductLabel(), buyerBehSel.value); // use label
+      renderIntel(getSelectedProductLabel(), buyerBehSel.value);
       refreshSubmitState();
       form.querySelector('input, select, textarea')?.focus();
     });
@@ -381,6 +374,7 @@
       outputMeta.textContent = `Source: Larato Call Library · ${lib.meta.product_id} · ${lib.buyerType} · ${lib.meta.sales_mode} · Updated ${lib.meta.updated_at}`;
       copyBtn.disabled = false; downloadBtn.disabled = false;
 
+      // Buyer-needs slots from stage summaries
       setSlot('intel-priorities', s.opening.buyer_needs_summary || []);
       setSlot('intel-pains', s.buyer_pain.buyer_needs_summary || []);
       setSlot('intel-triggers', s.buyer_desire.buyer_needs_summary || []);
@@ -391,7 +385,6 @@
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-
       if (!allRequiredFilled(form)){
         const firstMissing = REQUIRED.find(n => {
           const el = form.elements[n] || document.getElementById(n);
@@ -422,7 +415,7 @@
       setBusy(true); setStatus('Loading from Larato Call Library…'); diag.open = false; diagJson.textContent = '';
 
       const lookup = {
-        product: variables.product,                         // canonical ID from index
+        product: variables.product,                         // canonical id from index
         buyerType: toBuyerTypeId(variables.buyer_type),
         mode: toModeId(variables.call_type)
       };
@@ -440,14 +433,13 @@
         setStatus('Done. (Using Larato Call Library)');
         setBusy(false);
         document.getElementById('output-title').focus();
-        return; // success path — skip API
+        return; // success — skip generator
       } catch (libraryErr) {
         setStatus('Call Library not available for this selection — using generator…');
       }
 
-      // Fallback: legacy generator
+      // Generator fallback
       const payload = { pack: 'uk_b2b_sales_core', template: 'first_call_script_v2', variables };
-
       try {
         const res = await fetch('/api/generate', {
           method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload), credentials: 'include'
@@ -476,13 +468,12 @@
 
         addActivity({ time: nowTime(), product: variables.product || '—', buyer_behaviour: variables.buyer_type || '—', length: variables.length || '—' });
 
-        // Buyer needs (intel) uses labels, not IDs:
+        // intel uses labels, not ids
         renderIntel(getSelectedProductLabel(), buyerBehSel.value);
         if (out) injectRemindersFromScript(out);
 
         setStatus('Done. Script ready. (Generator fallback)');
         document.getElementById('output-title').focus();
-
       } catch (err) {
         setStatus('Network error. Please try again.', 'error');
         diag.open = true; diagJson.textContent = String(err);
@@ -515,14 +506,14 @@
     (async function init(){
       hydrateUserBadge();
 
-      // Load intel.json (for Buyer needs panel)
+      // intel.json (for Buyer needs)
       try {
         const res = await fetch(INTEL_URL, { cache: 'no-store' });
         const raw = await res.json();
         intel = normaliseIntel(raw);
       } catch { intel = { products:{} }; }
 
-      // Populate products from Call Library index, fallback to intel.json
+      // Populate products from call-library index; fallback to intel.json
       try {
         const idx = await loadCallLibIndex();
         if (idx && Array.isArray(idx.products) && idx.products.length) {
@@ -531,7 +522,6 @@
           throw new Error('No index products');
         }
       } catch {
-        // Fallback: legacy intel.json shape
         productSel.innerHTML = '<option value="">Select…</option>';
         Object.keys(intel.products || {}).forEach(p => {
           const opt = document.createElement('option');
@@ -541,7 +531,7 @@
         });
       }
 
-      // Restore saved state & call prefs
+      // Restore saved state and call prefs
       loadForm();
       loadCallPref();
 
