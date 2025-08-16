@@ -12,13 +12,13 @@
   --ok:#0a7f2e;
 
   /* Stage & header */
-  --stage-max: 100vw;             /* FULL WIDTH (was 1350px) */
+  --stage-max: 100vw;             /* FULL WIDTH (remove container cap) */
   --header-h: 64px;
 
   /* 3-col proportions */
   --left-min: 480px;
   --middle-min: 780px;
-  --right-min: 220px;             /* slimmer right rail */
+  --right-min: 220px;             /* base min for Buyer needs */
 
   /* Elevation / radii / rings */
   --radius:12px;
@@ -51,14 +51,14 @@ body{
 h1,h2,h3{margin:0 0 var(--s-2); line-height:1.2; font-weight:600}
 h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 
-/* Focus visibility: outline for non-form controls, shadow for form fields */
+/* Focus visibility */
 :where(a,button,[role="button"],[tabindex]:not(input):not(select):not(textarea)):focus-visible{
   outline:var(--ring-outline);
   outline-offset:2px;
   border-radius:10px;
 }
 
-/* Subtle scrollbars (WebKit) */
+/* Scrollbars (WebKit) */
 *::-webkit-scrollbar{width:10px;height:10px}
 *::-webkit-scrollbar-thumb{background:#cfd5e0;border-radius:999px}
 *::-webkit-scrollbar-thumb:hover{background:#b8c1d0}
@@ -93,11 +93,12 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
   display:grid; gap:var(--gap); padding:var(--gap); align-items:start; width:100%;
   max-width: var(--stage-max);
   margin-inline: auto;
+
   /* LEFT / MIDDLE expand, RIGHT stays slim */
   grid-template-columns:
-    minmax(var(--left-min), 1.35fr)
-    minmax(var(--middle-min), 2.65fr)
-    clamp(var(--right-min), 14vw, 300px);
+    minmax(0, 1.35fr)                                  /* LEFT */
+    minmax(0, 2.65fr)                                  /* MIDDLE */
+    minmax(var(--right-min), clamp(14vw, 260px, 300px));/* RIGHT cap ≤300px */
 }
 
 /* === Three white “windows” ======================================== */
@@ -112,9 +113,9 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 }
 .panel.left{grid-column:1}
 .panel.middle{grid-column:2}
-.panel.right{grid-column:3; max-width:300px} /* keep the rail slim */
+.panel.right{grid-column:3; max-width:300px}          /* keep the rail slim */
 
-/* Kill nested “double boxes” */
+/* Avoid nested double borders */
 .panel .card{background:transparent; border:0; box-shadow:none; padding:0; margin:0}
 
 /* Section titles within panels */
@@ -166,7 +167,6 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   padding:14px; border-radius:12px; min-height:240px; outline:none; resize:vertical;
   font-variant-ligatures: contextual;
 }
-/* Keep the script visible under the sticky header */
 .panel.middle .output-card{ position: sticky; top: calc(var(--header-h) + 12px); z-index: 5; }
 
 /* === Right (Buyer needs) — single slim column ===================== */
@@ -174,7 +174,6 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   display:flex; align-items:center; justify-content:space-between; gap:var(--s-2);
   position:sticky; top: calc(var(--header-h) + 8px); background:var(--card-bg); z-index:4; padding-top:6px;
 }
-/* FORCE one column everywhere */
 .intel-grid{ display:grid; grid-template-columns:1fr !important; gap:10px }
 .intel-grid section{ background:transparent; padding:0 }
 .intel-slot{
@@ -182,20 +181,53 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   border-top:1px solid var(--border); border-radius:0;
 }
 .intel-grid section:first-child .intel-slot{ border-top:0 }
-
-/* If your Buyer needs lists are UL/LI, render as compact chips */
 .intel-grid ul{ list-style:none; padding-left:0; margin:6px 0 0; display:flex; flex-wrap:wrap; gap:6px }
 .intel-grid li{ display:inline-block; padding:4px 8px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.85rem; color:var(--text-2) }
-/* If you output plain spans, give them the same chip look */
 .intel-chip{ display:inline-block; padding:4px 8px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.85rem; color:var(--text-2); margin:0 6px 6px 0 }
+
+/* === Dark Mode (auto) ============================================= */
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f1318; --card-bg:#141a1f; --border:#2a3342;
+    --text-1:#e6eaf2; --text-2:#a9b2c3;
+    --accent:#6da7ff; --accent-pressed:#5a8ee0;
+    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 30px rgba(0,0,0,.35);
+  }
+  .output{ background:var(--card-bg); border-color:var(--border); color:var(--text-1) }
+  input,select,textarea{ background:#10151d; color:#e6eaf2; border-color:#2a3342 }
+  .intel-grid li,.intel-chip{ background:#1d2532; color:var(--text-2); border-color:#2a3342 }
+  *::-webkit-scrollbar-thumb{ background:#3a4559 }
+  *::-webkit-scrollbar-thumb:hover{ background:#4b5870 }
+}
+
+/* === FIX: show dropdown caret on single-selects =================== */
+.layout select:not([multiple]) {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>\
+<polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 14px 14px;
+  padding-right: 36px; /* room for the chevron */
+}
+@media (prefers-color-scheme: dark){
+  .layout select:not([multiple]) {
+    background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a9b2c3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>\
+<polyline points='6 9 12 15 18 9'/></svg>");
+  }
+}
 
 /* === Ultra-wide tuning ============================================ */
 @media (min-width: 1800px){
   .layout{
     grid-template-columns:
-      minmax(560px, 1.4fr)
-      minmax(1020px, 3fr)
-      clamp(var(--right-min), 12vw, 300px);
+      minmax(0, 1.4fr)
+      minmax(0, 3fr)
+      minmax(var(--right-min), 300px);
   }
 }
 
@@ -223,21 +255,6 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   :root{ --border:#8a93a6; }
   .btn,.calltype-mini,.model-note,.badge{ border-width:2px }
   :where(a,button,[role="button"],[tabindex]:not(input):not(select):not(textarea)):focus-visible{ outline-width:4px }
-}
-
-/* === Dark Mode (auto) ============================================= */
-@media (prefers-color-scheme: dark){
-  :root{
-    --bg:#0f1318; --card-bg:#141a1f; --border:#2a3342;
-    --text-1:#e6eaf2; --text-2:#a9b2c3;
-    --accent:#6da7ff; --accent-pressed:#5a8ee0;
-    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 30px rgba(0,0,0,.35);
-  }
-  .output{ background:var(--card-bg); border-color:var(--border); color:var(--text-1) }
-  input,select,textarea{ background:#10151d; color:#text-1; border-color:#2a3342 }
-  .intel-grid li,.intel-chip{ background:#1d2532; color:var(--text-2); border-color:#2a3342 }
-  *::-webkit-scrollbar-thumb{ background:#3a4559 }
-  *::-webkit-scrollbar-thumb:hover{ background:#4b5870 }
 }
 
 /* === Print: one-page script export ================================ */
