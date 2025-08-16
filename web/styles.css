@@ -1,19 +1,29 @@
 /* === Global / Design Tokens ======================================= */
 :root{
   /* Color tokens (light) */
-  --bg:#f6f7fb;               /* softer canvas so cards pop */
+  --bg:#f6f7fb;
   --card-bg:#ffffff;
   --border:#e2e5ea;
   --text-1:#1d2129;
-  --text-2:#5b6270;
+  --text-2:#4a5160; /* a touch darker for contrast */
   --accent:#2458e6;
   --accent-pressed:#1f49be;
   --danger:#b00020;
   --ok:#0a7f2e;
 
+  /* Layout proportions that fit 1440px comfortably */
+  --left-min: 420px;
+  --middle-min: 640px;
+  --right-min: 320px;
+  --col-left: 1fr;
+  --col-middle: 1.6fr;
+  --col-right: 0.9fr;
+
   /* Elevation / radii / rings */
   --radius:12px;
-  --ring:2px solid color-mix(in oklab, var(--accent) 55%, white);
+  /* Use a SHADOW value for box-shadow focus rings */
+  --ring-shadow: 0 0 0 2px rgba(36,88,230,.35);
+  --ring-outline: 3px solid rgba(36,88,230,.8);
   --shadow:0 1px 2px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.06);
 
   /* Fluid type scale */
@@ -41,9 +51,9 @@ body{
 h1,h2,h3{margin:0 0 var(--s-2); line-height:1.2; font-weight:600}
 h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 
-/* Better focus visibility */
-:focus-visible{
-  outline:3px solid var(--accent);
+/* Focus visibility: outline for non-form controls, shadow for form fields */
+:where(a,button,[role="button"],[tabindex]:not(input):not(select):not(textarea)):focus-visible{
+  outline:var(--ring-outline);
   outline-offset:2px;
   border-radius:10px;
 }
@@ -73,13 +83,13 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 .badge svg{width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2}
 .badge.is-hidden{display:none}
 
-/* === Layout — 3-column grid (Script dominant) ===================== */
+/* === Layout — 3-column grid (Script dominant, fits 1440px) ======== */
 .layout{
   display:grid; gap:var(--gap); padding:var(--gap); align-items:start; width:100%;
   grid-template-columns:
-    minmax(520px, 1fr)                 /* LEFT  (Form)              */
-    minmax(820px, 2.2fr)               /* MIDDLE (Script) — dominant*/
-    clamp(300px, 23vw, 380px);         /* RIGHT (Buyer needs) — slim*/
+    minmax(var(--left-min),  var(--col-left))     /* LEFT  (Form)      */
+    minmax(var(--middle-min),var(--col-middle))   /* MIDDLE (Script)   */
+    minmax(var(--right-min), var(--col-right));   /* RIGHT (Intel)     */
 }
 .panel{background:transparent; border:0; border-radius:0; padding:0}
 .panel.left{grid-column:1}
@@ -91,7 +101,7 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
   background:var(--card-bg);
   border:1px solid var(--border);
   border-radius:var(--radius);
-  padding:20px;
+  padding:18px;
   margin:0 0 var(--s-3);
   box-shadow:var(--shadow)
 }
@@ -99,22 +109,25 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 .card .card{background:transparent; border:0; box-shadow:none; padding:0; margin:0}
 
 fieldset{border:0; margin:0; padding:0}
-.card>legend{display:inline-block; margin:0 0 var(--s-2); padding:0 .25rem; font-size:1.125rem; font-weight:700}
+.card>legend,.card>h2{display:block; margin:0 0 var(--s-2); font-size:1.05rem; font-weight:700}
+.card>.kicker{ margin:-2px 0 10px; color:var(--text-2); font-size:.9rem; }
 
 /* === Form ========================================================= */
-.grid-2{display:grid; grid-template-columns:1fr 1fr; gap:var(--s-3)}
-.field{margin-bottom:var(--s-3)}
-label{display:block; margin-bottom:6px; font-weight:600}
+.grid-2{display:grid; grid-template-columns:1fr 1fr; gap:14px 16px}
+.field{margin:0}
+label{display:block; margin:2px 0 6px; font-weight:600; font-size:.95rem}
 .req{color:var(--danger)}
 input,select,textarea{
-  width:100%; padding:10px 12px; border-radius:10px; border:1px solid #e5e8ee; background:#fff;
-  outline:none; transition: box-shadow .15s ease, border-color .15s ease;
+  width:100%; padding:10px 12px; border-radius:12px; border:1px solid #dee3ea; background:#fff;
+  font:inherit; line-height:1.4; outline:none; transition: box-shadow .15s ease, border-color .15s ease;
 }
-input:focus,select:focus,textarea:focus{ box-shadow: var(--ring); border-color: var(--accent); }
+select{ -webkit-appearance:none; appearance:none; background-image:none; }
+input:focus,select:focus,textarea:focus{ border-color: var(--accent); box-shadow: var(--ring-shadow); }
 input.invalid,select.invalid,textarea.invalid{ border-color: var(--danger); }
-.help{ margin:.25rem 0 0; color:var(--text-2); font-size:.9rem; }
+.help{ margin:.35rem 0 0; color:var(--text-2); font-size:.85rem; }
 .error{ min-height:1.1rem; color: var(--danger); font-size:.9rem; margin:.25rem 0 0; }
 .error-inline{ color: var(--danger); font-size:.85rem; margin-left:.25rem; }
+input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#6b7280; border-color:#e5e7eb; cursor:not-allowed; }
 
 /* Buttons / actions */
 .actions{ display:flex; gap: var(--s-3); align-items:center; margin-top: var(--s-3); flex-wrap:wrap; }
@@ -126,6 +139,7 @@ input.invalid,select.invalid,textarea.invalid{ border-color: var(--danger); }
 .btn[disabled]{ opacity:.55; cursor:not-allowed }
 .btn.primary{ background: var(--accent); color:#fff; border-color: transparent }
 .btn.primary:hover{ background: var(--accent-pressed) }
+.btn:focus-visible{ box-shadow: var(--ring-shadow); border-color: var(--accent); }
 .spinner{ width:16px; height:16px; border-radius:50%; border:2px solid rgba(255,255,255,.5); border-top-color:#fff; display:none }
 .btn.primary.busy .spinner{ display:inline-block; animation:spin .9s linear infinite }
 @keyframes spin{ to{ transform: rotate(360deg) } }
@@ -139,9 +153,12 @@ input.invalid,select.invalid,textarea.invalid{ border-color: var(--danger); }
 .output-card .meta{ color: var(--text-2); font-size:.9rem }
 .output{
   white-space:pre-wrap; background:#fff; color:#1f2937; border:1px solid #e5e7eb;
-  padding:14px; border-radius:10px; min-height:240px; outline:none;
+  padding:14px; border-radius:12px; min-height:240px; outline:none; resize:vertical;
   font-variant-ligatures: contextual;
 }
+
+/* Optional: keep the script in view */
+.panel.middle .output-card{ position: sticky; top: calc(72px + 12px); }
 
 /* On widescreens: What changed & Recent activity side-by-side */
 @media (min-width: 1200px){
@@ -169,17 +186,12 @@ input.invalid,select.invalid,textarea.invalid{ border-color: var(--danger); }
 
 /* === Ultra-wide tuning ============================================ */
 @media (min-width: 1600px){
-  .layout{
-    grid-template-columns:
-      minmax(560px,1fr)
-      minmax(980px,2.5fr)
-      clamp(300px, 22vw, 380px);
-  }
+  :root{ --middle-min: 720px; --col-middle: 1.8fr; --col-right: 0.9fr; }
 }
 
 /* === Laptop: stack Buyer needs under Script ======================== */
-@media (max-width: 1280px){
-  .layout{ grid-template-columns:1.1fr 1fr }
+@media (max-width: 1200px){
+  .layout{ grid-template-columns:1fr 1fr }
   .panel.left{ grid-column:1 }
   .panel.middle{ grid-column:2 }
   .panel.right{ grid-column:1 / -1 }
@@ -190,6 +202,7 @@ input.invalid,select.invalid,textarea.invalid{ border-color: var(--danger); }
   .layout{ grid-template-columns:1fr }
   .panel.left,.panel.middle,.panel.right{ grid-column:1 }
   .panel.middle{ grid-template-columns:1fr }
+  .grid-2{ grid-template-columns:1fr; }
 }
 
 /* === Accessibility: motion & contrast ============================= */
@@ -199,7 +212,7 @@ input.invalid,select.invalid,textarea.invalid{ border-color: var(--danger); }
 @media (prefers-contrast: more){
   :root{ --border:#8a93a6; }
   .btn,.calltype-mini,.model-note,.badge{ border-width:2px }
-  :focus-visible{ outline-width:4px }
+  :where(a,button,[role="button"],[tabindex]:not(input):not(select):not(textarea)):focus-visible{ outline-width:4px }
 }
 
 /* === Dark Mode (auto) ============================================= */
@@ -237,46 +250,4 @@ input.invalid,select.invalid,textarea.invalid{ border-color: var(--danger); }
   position:absolute !important; width:1px !important; height:1px !important;
   padding:0 !important; margin:-1px !important; overflow:hidden !important;
   clip:rect(0,0,0,0) !important; white-space:nowrap !important; border:0 !important;
-}
-
-/* === Bridge layer: apply to your current markup === */
-/* Put this AFTER your existing stylesheet */
-
-/* Card header (works whether you use <legend> or <h2>) */
-.card > legend, .card > h2 {
-  display:block; margin:0 0 6px; font-size:1.05rem; font-weight:700;
-}
-.card > .kicker, .card header .kicker { margin-top:2px; color:var(--text-2); font-size:.9rem; }
-
-/* 2-col field grid with comfy gaps (matches your screenshot) */
-.card .grid-2 { display:grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
-@media (max-width: 640px){ .card .grid-2 { grid-template-columns: 1fr; } }
-
-/* Field stack rhythm */
-.field { margin: 0; }
-.field label { display:block; margin: 2px 0 6px; font-weight:600; font-size:.95rem; }
-
-/* Inputs/selects/textarea look & feel */
-input, select, textarea {
-  width:100%; padding: 10px 12px;
-  border: 1px solid #dee3ea; border-radius: 12px; background:#fff;
-  font: inherit; line-height: 1.4; outline: none;
-}
-select { -webkit-appearance:none; appearance:none; background-image:none; }
-input:focus, select:focus, textarea:focus {
-  border-color: var(--accent); box-shadow: var(--ring);
-}
-
-/* Help/optional copy */
-.help { margin-top:6px; color: var(--text-2); font-size:.85rem; }
-
-/* Disabled states like your screenshot */
-input[disabled], select[disabled], textarea[disabled] {
-  background:#f3f4f6; color:#6b7280; border-color:#e5e7eb; cursor:not-allowed;
-}
-
-/* Card styling to match the rounded/soft look */
-.card {
-  border-radius: 14px; padding: 18px; box-shadow: var(--shadow);
-  background: var(--card-bg); border:1px solid var(--border);
 }
