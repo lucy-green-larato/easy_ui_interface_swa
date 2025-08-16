@@ -10,7 +10,8 @@
     const ACTIVITY_KEY = 'first_call_script_v2.activity';
     const OUTPUT_KEY = 'first_call_script_v2.last_output';
     const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
-    const INTEL_URL = '/src/intel.json'; // intel lives under /src
+    // In your repo, intel.json is at web/intel.json (not under /src)
+    const INTEL_URL = '/intel.json';
 
     const REQUIRED = [
       'call_type','seller_name','seller_company',
@@ -37,7 +38,8 @@
     const toggleIntelBtn = document.getElementById('toggle-intel');
     const intelBody = document.getElementById('intel-body');
 
-    const callTypeSel = document.getElementById('call_type');
+    // Prefer #call_type; fall back to #mode (your Direct/Partner select)
+    const callTypeSel = document.getElementById('call_type') || document.getElementById('mode');
     const rememberCallType = document.getElementById('remember_call_type');
     const mapLabel = document.getElementById('map-label');
 
@@ -50,17 +52,21 @@
     const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
     const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+    // Safe event binder to avoid null crashes
+    const on = (el, events, handler, options) => { if (el) events.forEach(evt => el.addEventListener(evt, handler, options)); };
+
     function setBusy(isBusy) {
-      submitBtn.disabled = isBusy || !allRequiredFilled(form);
-      resetBtn.disabled = isBusy;
+      submitBtn && (submitBtn.disabled = isBusy || !allRequiredFilled(form));
+      resetBtn && (resetBtn.disabled = isBusy);
       const hasText = !!outputEl.textContent.trim();
-      copyBtn.disabled = isBusy || !hasText;
-      downloadBtn.disabled = isBusy || !hasText;
-      submitBtn.classList.toggle('busy', isBusy);
+      copyBtn && (copyBtn.disabled = isBusy || !hasText);
+      downloadBtn && (downloadBtn.disabled = isBusy || !hasText);
+      submitBtn && submitBtn.classList.toggle('busy', isBusy);
     }
-    function setStatus(msg, kind='info') { statusEl.textContent = msg; statusEl.dataset.kind = kind; }
+    function setStatus(msg, kind='info') { if (statusEl) { statusEl.textContent = msg; statusEl.dataset.kind = kind; } }
 
     function allRequiredFilled(formEl) {
+      if (!formEl) return false;
       const missing = [];
       const label = {
         call_type:'Direct or partner sales', seller_name:'Your name', seller_company:'Your company',
@@ -75,24 +81,28 @@
       if (missing.length) setStatus(`Please complete: ${missing.join(', ')}.`, 'error'); else setStatus('');
       return missing.length === 0;
     }
-    function refreshSubmitState(){ submitBtn.disabled = !allRequiredFilled(form); }
+    function refreshSubmitState(){ submitBtn && (submitBtn.disabled = !allRequiredFilled(form)); }
 
     function validateField(input) {
+      if (!input) return;
       const id = input.id;
       const errorEl = document.getElementById(`${id}_error`) || (id==='call_type' ? document.getElementById('call_type_error') : null);
-      if (!errorEl) return;
       const valid = !!String(input.value || '').trim();
-      if (valid) { errorEl.textContent=''; input.removeAttribute('aria-invalid'); input.classList.remove('invalid'); }
-      else { errorEl.textContent = id==='call_type' ? 'Please choose a call type.' : 'This field is required.'; input.setAttribute('aria-invalid','true'); input.classList.add('invalid'); }
+      if (errorEl) {
+        if (valid) { errorEl.textContent=''; input.removeAttribute('aria-invalid'); input.classList.remove('invalid'); }
+        else { errorEl.textContent = id==='call_type' ? 'Please choose a call type.' : 'This field is required.'; input.setAttribute('aria-invalid','true'); input.classList.add('invalid'); }
+      }
     }
 
     // Save/restore state (include header control value)
     function saveForm() {
+      if (!form) return;
       const fd = Object.fromEntries(new FormData(form).entries());
-      fd.call_type = callTypeSel.value || fd.call_type || '';
+      fd.call_type = (callTypeSel && callTypeSel.value) || fd.call_type || '';
       localStorage.setItem(STORAGE_KEY, JSON.stringify(fd));
     }
     function loadForm() {
+      if (!form) return;
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       try {
@@ -106,7 +116,7 @@
     function clearFormState() { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
 
     /* =========================================================================
-       Buyer needs helpers (unchanged)
+       Buyer needs helpers
        ========================================================================= */
     const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
     const norm = s => String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015_\-\/]+/g,'-').replace(/[^\w\- ]+/g,'').trim();
@@ -122,7 +132,7 @@
     const setSlot = (id, arr=[]) => {
       const slot=document.getElementById(id);
       const items=(arr.length?arr:['No data for this selection.']);
-      slot.replaceChildren(...items.map(pEl));
+      slot && slot.replaceChildren(...items.map(pEl));
     };
     const fillAll = arr => {
       setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr);
@@ -190,11 +200,9 @@
       setSlot('intel-ctas',       sections.ctas);
     }
 
-    // Use the label from the <select> (intel.json uses human names)
     const getSelectedProductLabel = () =>
-      productSel.options[productSel.selectedIndex]?.text || productSel.value || '';
+      productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
 
-    // Tiny heuristic for reminders from generated text
     function extractKeyPoints(text){
       const sentences = String(text).split(/(?<=[.!?])\s+/).map(s=>s.trim()).filter(Boolean);
       const keywords = /(reduce|save|cut|improv|increase|risk|cost|time|secure|resilien|revenue|margin|efficien|customer|cx|compliance|ml|ai|automate|protect)/i;
@@ -255,6 +263,7 @@
     // Badge hydration
     async function hydrateUserBadge() {
       const el = document.getElementById('user-badge');
+      if (!el) return;
       try {
         const res = await fetch('/.auth/me', { credentials: 'include' });
         if (!res.ok) throw new Error(String(res.status));
@@ -269,57 +278,54 @@
     }
 
     /* =========================================================================
-       Events
+       Events (null-safe)
        ========================================================================= */
-    ['change','input','blur'].forEach(evt => {
-      callTypeSel.addEventListener(evt, () => {
-        validateField(callTypeSel);
+    on(callTypeSel, ['change','input','blur'], () => {
+      validateField(callTypeSel);
+      saveForm();
+      updateMapIndicator();
+      refreshSubmitState();
+    });
+    on(rememberCallType, ['change','input','blur'], () => {
+      saveCallPrefIfRequested();
+      refreshSubmitState();
+    });
+
+    on(form, ['input','change','blur'], (e) => {
+      if (e.target.matches('input,select,textarea')) {
+        validateField(e.target);
         saveForm();
-        updateMapIndicator();
         refreshSubmitState();
-      });
-      rememberCallType.addEventListener(evt, () => {
-        saveCallPrefIfRequested();
-        refreshSubmitState();
-      });
-    });
+      }
+      if (e.type==='change' && (e.target === productSel || e.target === buyerBehSel)) {
+        // intel.json expects human label
+        renderIntel(getSelectedProductLabel(), buyerBehSel?.value || '');
+      }
+    }, true);
 
-    ['input','change','blur'].forEach(evt => {
-      form.addEventListener(evt, (e) => {
-        if (e.target.matches('input,select,textarea')) {
-          validateField(e.target);
-          saveForm();
-          refreshSubmitState();
-        }
-        if (e.type==='change' && (e.target === productSel || e.target === buyerBehSel)) {
-          // intel.json expects human label
-          renderIntel(getSelectedProductLabel(), buyerBehSel.value);
-        }
-      }, true);
-    });
-
-    toggleIntelBtn.addEventListener('click', () => {
+    toggleIntelBtn && toggleIntelBtn.addEventListener('click', () => {
       const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
       toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
-      intelBody.hidden = expanded;
+      if (intelBody) intelBody.hidden = expanded;
       toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
     });
 
-    document.getElementById('reset').addEventListener('click', () => {
+    resetBtn && resetBtn.addEventListener('click', () => {
+      if (!form) return;
       form.reset(); clearFormState();
       setStatus('Form reset.');
-      renderIntel(getSelectedProductLabel(), buyerBehSel.value);
+      renderIntel(getSelectedProductLabel(), buyerBehSel?.value || '');
       refreshSubmitState();
       form.querySelector('input, select, textarea')?.focus();
     });
 
-    document.getElementById('copy').addEventListener('click', async () => {
+    copyBtn && copyBtn.addEventListener('click', async () => {
       const txt = outputEl.textContent; if (!txt.trim()) return;
       await navigator.clipboard.writeText(txt);
       setStatus('Copied to clipboard.');
     });
 
-    document.getElementById('download').addEventListener('click', () => {
+    downloadBtn && downloadBtn.addEventListener('click', () => {
       const txt = outputEl.textContent; if (!txt.trim()) return;
       const blob = new Blob([txt], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
@@ -333,13 +339,14 @@
        Render helper (library payload → text + buyer needs)
        ========================================================================= */
     function renderFromLibraryPayload(lib) {
+      // Your current renderer expects a v1-style keyed object under lib.stages.
+      // If you switch to the array form from getCallScript(), you’ll need a mapper here.
       const s = lib.stages;
       const section = (title, body, extras=[]) => {
         let out = `\n${title}\n${'-'.repeat(title.length)}\n${body}\n`;
         extras.forEach(x => { if (Array.isArray(x) && x.length) out += `• ${x.join('\n• ')}\n`; });
         return out;
       };
-
       const text =
         section('Opening', s.opening.script) +
         section('Buyer pain', s.buyer_pain.script) +
@@ -350,7 +357,8 @@
 
       outputEl.textContent = text.trim();
       outputMeta.textContent = `Source: Larato Call Library · ${lib.meta.product_id} · ${lib.buyerType} · ${lib.meta.sales_mode} · Updated ${lib.meta.updated_at}`;
-      copyBtn.disabled = false; downloadBtn.disabled = false;
+      copyBtn && (copyBtn.disabled = false);
+      downloadBtn && (downloadBtn.disabled = false);
 
       setSlot('intel-priorities', s.opening.buyer_needs_summary || []);
       setSlot('intel-pains', s.buyer_pain.buyer_needs_summary || []);
@@ -363,7 +371,7 @@
     /* =========================================================================
        Submit: use Call Library first; fallback to generator
        ========================================================================= */
-    form.addEventListener('submit', async (e) => {
+    form && form.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (!allRequiredFilled(form)){
         const firstMissing = REQUIRED.find(n => {
@@ -382,7 +390,7 @@
         prospect_name: fd.prospect_name || '',
         prospect_role: fd.prospect_role || '',
         prospect_company: fd.prospect_company || '',
-        call_type: fd.call_type || callTypeSel.value || '',
+        call_type: fd.call_type || (callTypeSel && callTypeSel.value) || '',
         buyer_type: fd.buyer_behaviour || '',
         product: fd.product || '', // canonical id from index
         tone: fd.tone || '',
@@ -392,7 +400,7 @@
         value_proposition: fd.value_proposition || ''
       };
 
-      setBusy(true); setStatus('Loading from Larato Call Library…'); diag.open = false; diagJson.textContent = '';
+      setBusy(true); setStatus('Loading from Larato Call Library…'); diag && (diag.open = false); diagJson && (diagJson.textContent = '');
 
       const lookup = {
         product: variables.product,
@@ -412,13 +420,13 @@
 
         setStatus('Done. (Using Larato Call Library)');
         setBusy(false);
-        document.getElementById('output-title').focus();
+        document.getElementById('output-title')?.focus();
         return; // success — skip generator
       } catch (libraryErr) {
         setStatus('Call Library not available for this selection — using generator…');
       }
 
-      // ---- Generator fallback (unchanged path) ----
+      // ---- Generator fallback ----
       const payload = { pack: 'uk_b2b_sales_core', template: 'first_call_script_v2', variables };
       try {
         const res = await fetch('/api/generate', {
@@ -431,8 +439,7 @@
           if (res.status === 401) setStatus('Unauthorised. Please sign in again.', 'error');
           else if (res.status === 400) setStatus('Request was rejected. See diagnostics below.', 'error');
           else setStatus(`Error ${res.status}. See diagnostics below.`, 'error');
-          diag.open = true; diagJson.textContent = JSON.stringify({ status: res.status, body: data || text }, null, 2);
-          diag.scrollIntoView({behavior: prefersReducedMotion() ? 'auto':'smooth'}); diag.focus();
+          if (diag) { diag.open = true; diagJson.textContent = JSON.stringify({ status: res.status, body: data || text }, null, 2); diag.scrollIntoView({behavior: prefersReducedMotion() ? 'auto':'smooth'}); diag.focus(); }
           return;
         }
 
@@ -440,7 +447,8 @@
         outputEl.textContent = out || '(No output returned.)';
         outputMeta.textContent = `Generated ${nowTime()}`;
 
-        copyBtn.disabled = !out; downloadBtn.disabled = !out;
+        copyBtn && (copyBtn.disabled = !out);
+        downloadBtn && (downloadBtn.disabled = !out);
 
         const delta = computeDelta(lastOutput, out);
         renderDelta(delta);
@@ -448,15 +456,14 @@
 
         addActivity({ time: nowTime(), product: variables.product || '—', buyer_behaviour: variables.buyer_type || '—', length: variables.length || '—' });
 
-        // intel uses labels, not ids
-        renderIntel(getSelectedProductLabel(), buyerBehSel.value);
+        renderIntel(getSelectedProductLabel(), buyerBehSel?.value || '');
         if (out) injectRemindersFromScript(out);
 
         setStatus('Done. Script ready. (Generator fallback)');
-        document.getElementById('output-title').focus();
+        document.getElementById('output-title')?.focus();
       } catch (err) {
         setStatus('Network error. Please try again.', 'error');
-        diag.open = true; diagJson.textContent = String(err);
+        if (diag) { diag.open = true; diagJson.textContent = String(err); }
       } finally {
         setBusy(false);
       }
@@ -468,22 +475,21 @@
     function loadCallPref() {
       try {
         const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
-        if (pref?.call_type && !callTypeSel.value) callTypeSel.value = pref.call_type;
-        if (pref?.remember === true) rememberCallType.checked = true;
+        if (pref?.call_type && callTypeSel && !callTypeSel.value) callTypeSel.value = pref.call_type;
       } catch {}
       updateMapIndicator();
     }
     function saveCallPrefIfRequested() {
-      if (rememberCallType.checked && callTypeSel.value) {
+      if (rememberCallType && rememberCallType.checked && callTypeSel && callTypeSel.value) {
         localStorage.setItem(CALL_PREF_KEY, JSON.stringify({ remember: true, call_type: callTypeSel.value }));
-      } else if (!rememberCallType.checked) {
+      } else if (rememberCallType && !rememberCallType.checked) {
         localStorage.removeItem(CALL_PREF_KEY);
       }
       updateMapIndicator();
     }
     function updateMapIndicator() {
       const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
-      mapLabel.textContent = pref?.call_type || (callTypeSel.value || 'Not set');
+      if (mapLabel) mapLabel.textContent = pref?.call_type || (callTypeSel?.value || 'Not set');
     }
 
     /* =========================================================================
@@ -503,21 +509,24 @@
       try {
         const idx = await getIndex(); // from /src/lib/callLibrary.js
         const items = Array.isArray(idx?.products) ? idx.products : [];
-        productSel.innerHTML = '<option value="">Select…</option>';
-        for (const { id, label } of items) {
-          const opt = document.createElement('option');
-          opt.value = id;             // canonical id
-          opt.textContent = label || id;
-          productSel.appendChild(opt);
+        if (productSel) {
+          productSel.innerHTML = '<option value="">Select…</option>';
+          for (const { id, label } of items) {
+            const opt = document.createElement('option');
+            opt.value = id;             // canonical id
+            opt.textContent = label || id;
+            productSel.appendChild(opt);
+          }
         }
       } catch {
-        // Fallback: legacy intel.json products (keys)
-        productSel.innerHTML = '<option value="">Select…</option>';
-        Object.keys(intel.products || {}).forEach(p => {
-          const opt = document.createElement('option');
-          opt.value = p; opt.textContent = p;
-          productSel.appendChild(opt);
-        });
+        if (productSel) {
+          productSel.innerHTML = '<option value="">Select…</option>';
+          Object.keys(intel.products || {}).forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p; opt.textContent = p;
+            productSel.appendChild(opt);
+          });
+        }
       }
 
       // Restore saved form state and remembered call type
@@ -525,7 +534,7 @@
       loadCallPref();
 
       // Initial Buyer needs (use label for intel)
-      if (productSel.value && buyerBehSel.value) {
+      if (productSel?.value && buyerBehSel?.value) {
         renderIntel(getSelectedProductLabel(), buyerBehSel.value);
       }
 
@@ -534,7 +543,7 @@
 
       // Restore last output if present
       const last = localStorage.getItem(OUTPUT_KEY);
-      if (last) { outputEl.textContent = last; copyBtn.disabled = false; downloadBtn.disabled = false; }
+      if (last) { outputEl.textContent = last; copyBtn && (copyBtn.disabled = false); downloadBtn && (downloadBtn.disabled = false); }
     })();
   })();
 </script>
