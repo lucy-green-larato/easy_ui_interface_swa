@@ -4,74 +4,99 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Tools · First Call Script (v2)</title>
-  <link rel="stylesheet" href="./styles.css?v=lookfix-plainpanels" />
+
+  <!-- No global overrides; styles scoped to this page -->
+  <link rel="stylesheet" href="./styles.css?v=final-10of10" />
   <style>
-    /* Page-scoped CSS only */
+    /* ==============================
+       Page-scoped design tokens
+       ============================== */
     :root{
       --bg:#f7f7f9; --surface-1:#fff; --surface-2:#eef0f4; --surface-3:#e5e8ee;
       --text-1:#1d2129; --text-2:#5b6270; --accent:#2458e6; --accent-pressed:#1f49be;
       --danger:#b00020; --ok:#0a7f2e; --ring:2px solid rgba(36,88,230,.35);
       --shadow:0 1px 2px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.06);
-      --radius:10px; --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px; --space-6:32px;
+      --radius:12px; --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px; --space-6:32px;
       --font-system:ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
     }
     html,body{height:100%}
-    body{margin:0;background:var(--bg);color:var(--text-1);font:16px/1.45 var(--font-system)}
+    body{margin:0;background:var(--bg);color:var(--text-1);font:16px/1.5 var(--font-system)}
 
-    /* Header */
-    .app-header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);padding:var(--space-3) var(--space-5)}
+    /* ==============================
+       Header
+       ============================== */
+    .app-header{
+      display:flex;align-items:center;justify-content:space-between;
+      gap:var(--space-3);padding:var(--space-3) var(--space-5);
+    }
     .header-left{display:flex;align-items:center;gap:.75rem;min-width:0;flex:1 1 auto}
-    .logo{width:clamp(44px,5vw,52px);height:auto;object-fit:contain;flex-shrink:0}
+    /* CHANGED: logo scales responsively using clamp per requirement */
+    .logo{width:clamp(44px,5vw,56px);height:auto;object-fit:contain;flex-shrink:0}
     .brand-text{display:flex;flex-direction:column}
     .app-title{font-weight:600;margin:.25rem 0 0}
     .kicker{font-size:.875rem;color:var(--text-2);margin-top:.125rem}
     .header-right{display:flex;align-items:center;gap:.75rem;flex:0 0 auto}
 
-    /* Buttons */
-    .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:999px;border:1px solid var(--surface-3);background:var(--surface-1);cursor:pointer;font-weight:600}
+    /* Buttons (re-used for actions and header chip so everything matches) */
+    .btn{
+      display:inline-flex;align-items:center;gap:8px;padding:10px 14px;
+      border-radius:999px;border:1px solid var(--surface-3);
+      background:var(--surface-1);cursor:pointer;font-weight:600
+    }
     .btn.small{padding:6px 10px;font-size:.9rem}
     .btn.primary{background:var(--accent);color:#fff;border-color:transparent}
     .btn.primary:hover{background:var(--accent-pressed)}
+    .btn[disabled]{opacity:.6;cursor:not-allowed}
     .spinner{width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;display:none}
     .btn.primary.busy .spinner{display:inline-block;animation:spin .9s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
 
-    /* “Direct or partner sales” – same look as other controls */
+    /* CHANGED: “Direct or partner sales” chip uses same style as other controls (no green box) */
     .calltype-mini{
       display:flex;align-items:center;gap:.6rem;
-      padding:6px 10px;border-radius:999px;
-      background:var(--surface-1); border:1px solid var(--surface-3);
-      font-size:.95rem; white-space:nowrap;
+      padding:6px 10px;border-radius:999px;background:var(--surface-1);
+      border:1px solid var(--surface-3);font-size:.95rem;white-space:nowrap
     }
     .calltype-mini .mini-label{font-weight:600}
     .calltype-mini select{padding:6px 10px;border-radius:8px;border:1px solid var(--surface-3);background:#fff}
     .calltype-mini .remember{display:flex;align-items:center;gap:.35rem;color:var(--text-2)}
     .error-inline{color:var(--danger);font-size:.85rem}
 
-    .model-note{display:inline-flex;align-items:center;gap:.35rem;padding:6px 10px;background:var(--surface-2);border:1px solid var(--surface-3);border-radius:999px;font-size:.9rem;color:var(--text-2)}
-    .badge{display:flex;align-items:center;gap:.4rem;padding:8px 12px;background:var(--surface-2);border:1px solid var(--surface-3);border-radius:999px;font-size:.9rem;color:var(--text-1);white-space:nowrap}
+    .model-note{
+      display:inline-flex;align-items:center;gap:.35rem;padding:6px 10px;
+      background:var(--surface-2);border:1px solid var(--surface-3);
+      border-radius:999px;font-size:.9rem;color:var(--text-2)
+    }
+    .badge{display:flex;align-items:center;gap:.4rem;padding:8px 12px;background:var(--surface-2);
+      border:1px solid var(--surface-3);border-radius:999px;font-size:.9rem;color:var(--text-1);white-space:nowrap}
     .badge svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
     .badge.is-hidden{display:none}
 
-    /* LAYOUT — use full screen width, no outer “cards” on the three big sections */
+    /* ==============================
+       Layout — 3 columns, full width
+       ============================== */
     .layout{
       display:grid;
-      grid-template-columns: minmax(340px,1fr) minmax(420px,1.2fr) minmax(340px,1fr); /* middle a touch wider */
+      grid-template-columns: minmax(360px,1fr) minmax(420px,1.2fr) minmax(360px,1fr); /* middle a touch wider */
       gap: var(--space-6);
       padding: var(--space-5);
       align-items:start;
       width:100%;
-      max-width:100vw; /* fill footprint */
+      max-width:100vw; /* CHANGED: use all screen footprint */
       box-sizing:border-box;
     }
     @media (max-width: 1200px){ .layout{ grid-template-columns: 1fr; } }
 
     .panel{display:block}
 
-    /* Default “card” (kept for other parts of the page) */
-    .card{background:var(--surface-1);border-radius:var(--radius);box-shadow:var(--shadow);padding:var(--space-5);margin:0;border:1px solid #e9ebf0}
+    /* “Card” style (used sparingly; we’ll remove big outer boxes) */
+    .card{
+      background:var(--surface-1);border-radius:var(--radius);
+      box-shadow:var(--shadow);padding:var(--space-5);
+      margin:0;border:1px solid #e9ebf0
+    }
 
-    /* CHANGED: Plain panels = no background, no border, no shadow (for the 3 big areas) */
+    /* CHANGED: Plain outer panels (no double borders, no background) */
     .panel-plain{background:transparent;border:0;box-shadow:none;padding:0;margin:0}
 
     fieldset{border:0;margin:0 0 var(--space-5);padding:0}
@@ -94,10 +119,13 @@
     .status[data-kind="error"]{color:var(--danger)}
     .status[data-kind="ok"]{color:var(--ok)}
 
-    /* Script output keeps a subtle single border for readability */
-    .output{white-space:pre-wrap;background:#f6f7fb;color:#1f2937;border:1px solid #e5e7eb;padding:var(--space-4);border-radius:8px;min-height:180px;outline:none}
+    /* Script output keeps a single subtle border for readability */
+    .output{
+      white-space:pre-wrap;background:#f6f7fb;color:#1f2937;border:1px solid #e5e7eb;
+      padding:var(--space-4);border-radius:8px;min-height:180px;outline:none
+    }
 
-    /* Buyer needs as ONE column, with light chips and NO extra box around the whole panel */
+    /* Buyer needs — one column (no outer box) */
     .intel-grid{display:grid;grid-template-columns:1fr;gap:var(--space-3)}
     .intel .intel-slot{background:var(--surface-2);padding:var(--space-3);border-radius:8px;border:0}
   </style>
@@ -114,6 +142,7 @@
     </div>
 
     <div class="header-right">
+      <!-- CHANGED: chip matches other controls; label text exact as requested -->
       <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
         <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
         <select id="call_type" name="call_type" form="script-form" required aria-describedby="call_type_error">
@@ -128,7 +157,8 @@
         <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
       </div>
 
-      <span class="model-note">
+      <!-- CHANGED: “Sales model in use” text aligned with selector -->
+      <span class="model-note" aria-live="polite">
         <span class="label">Sales model in use:</span>
         <strong id="map-label">Not set</strong>
       </span>
@@ -142,10 +172,10 @@
 
   <!-- LAYOUT: Form | Script | Buyer needs -->
   <main id="main" class="layout" role="main">
-    <!-- LEFT: form (“Call details” is now plain, no box) -->
+    <!-- LEFT: form (no outer box) -->
     <section class="panel left" aria-label="Form">
       <form id="script-form" novalidate>
-        <!-- CHANGED: remove card background behind Call details -->
+        <!-- CHANGED: plain panel to remove double border -->
         <fieldset class="panel-plain" aria-labelledby="legend-call-details">
           <legend id="legend-call-details">Call details</legend>
           <div class="grid-2">
@@ -179,7 +209,7 @@
           </div>
         </fieldset>
 
-        <!-- Keep cards for the other two sections so the form remains structured -->
+        <!-- We keep cards on these so the form stays visually grouped -->
         <fieldset class="card" aria-labelledby="legend-targeting">
           <legend id="legend-targeting">Targeting</legend>
           <div class="grid-2">
@@ -263,9 +293,9 @@
       </form>
     </section>
 
-    <!-- MIDDLE: Generated Script (plain, no outer card) -->
+    <!-- MIDDLE: Generated Script (plain outer panel) -->
     <section class="panel middle">
-      <div class="output-card panel-plain"> <!-- CHANGED -->
+      <div class="panel-plain">
         <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-3)">
           <h2 id="output-title">Generated Script</h2>
           <div class="meta" id="output-meta" aria-live="polite" style="color:var(--text-2);font-size:.9rem"></div>
@@ -282,9 +312,9 @@
       </div>
     </section>
 
-    <!-- RIGHT: Buyer needs (plain, no outer card; content still gets subtle chips) -->
+    <!-- RIGHT: Buyer needs (plain outer panel) -->
     <section class="panel right" aria-labelledby="intel-title">
-      <aside class="intel panel-plain"> <!-- CHANGED -->
+      <aside class="intel panel-plain">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-3)">
           <h2 id="intel-title">Buyer needs</h2>
           <button id="toggle-intel" class="btn small" type="button" aria-expanded="true" aria-controls="intel-body">Hide</button>
@@ -321,6 +351,7 @@
     </section>
   </main>
 
+  <!-- Activity item template -->
   <template id="activity-item">
     <li>
       <span class="time"></span>
@@ -332,14 +363,22 @@
 
   <script>
     (function () {
-      /* Everything below is unchanged logic-wise. Keeping it short: only the look changed. */
+      /* =========================================================================
+         Constants & element refs
+         ========================================================================= */
       const FORM_ID = 'script-form';
       const STORAGE_KEY = 'first_call_script_v2.form';
       const ACTIVITY_KEY = 'first_call_script_v2.activity';
       const OUTPUT_KEY = 'first_call_script_v2.last_output';
       const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
       const INTEL_URL = './intel.json';
-      const REQUIRED = ['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
+
+      // CHANGED: explicit required field list (including header select outside form)
+      const REQUIRED = [
+        'call_type','seller_name','seller_company',
+        'prospect_name','prospect_role','prospect_company',
+        'buyer_behaviour','product'
+      ];
 
       const form = document.getElementById(FORM_ID);
       const submitBtn = document.getElementById('submit');
@@ -354,36 +393,28 @@
       const activityTpl = document.getElementById('activity-item');
       const diag = document.getElementById('diagnostics');
       const diagJson = document.getElementById('diag-json');
+
       const productSel = document.getElementById('product');
       const buyerBehSel = document.getElementById('buyer_behaviour');
       const toggleIntelBtn = document.getElementById('toggle-intel');
       const intelBody = document.getElementById('intel-body');
+
+      // CHANGED: header controls live outside the form – wire explicitly
       const callTypeSel = document.getElementById('call_type');
       const rememberCallType = document.getElementById('remember_call_type');
       const mapLabel = document.getElementById('map-label');
 
+      let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
+      let intel = null;
+
+      /* =========================================================================
+         Utilities & accessibility helpers
+         ========================================================================= */
       const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-      // Deterministic validation: handles header select + restored values
-      function allRequiredFilled(formEl) {
-        const missing = [];
-        const map = {
-          call_type:'Direct or partner sales', seller_name:'Your name', seller_company:'Your company',
-          prospect_name:'Prospect name', prospect_role:'Prospect role', prospect_company:'Prospect company',
-          buyer_behaviour:'Buyer behaviour', product:'Product'
-        };
-        for (const name of REQUIRED) {
-          const el = formEl.elements[name] || document.getElementById(name); // covers header select (form-associated)
-          const val = (el && typeof el.value === 'string') ? el.value.trim() : '';
-          if (!val) missing.push(map[name] || name);
-        }
-        statusEl.textContent = missing.length ? `Please complete: ${missing.join(', ')}.` : '';
-        statusEl.dataset.kind = missing.length ? 'error' : 'info';
-        return missing.length === 0;
-      }
-      function refreshSubmitState(){ submitBtn.disabled = !allRequiredFilled(form); }
+      const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
       function setBusy(isBusy) {
-        submitBtn.disabled = isBusy || !form.checkValidity();
+        submitBtn.disabled = isBusy || !allRequiredFilled(form); /* CHANGED: deterministic */
         resetBtn.disabled = isBusy;
         const hasText = !!outputEl.textContent.trim();
         copyBtn.disabled = isBusy || !hasText;
@@ -391,184 +422,107 @@
         submitBtn.classList.toggle('busy', isBusy);
       }
       function setStatus(msg, kind='info') { statusEl.textContent = msg; statusEl.dataset.kind = kind; }
-      function validateField(input) {
-        if (input.id === 'call_type') {
-          const errEl = document.getElementById('call_type_error');
-          if (input.validity.valid) { errEl.textContent = ''; input.classList.remove('invalid'); }
-          else { errEl.textContent = 'Please choose a call type.'; input.classList.add('invalid'); }
-          return;
+
+      // CHANGED: deterministic validation that includes header control + restored values
+      function allRequiredFilled(formEl) {
+        const missing = [];
+        const label = {
+          call_type:'Direct or partner sales', seller_name:'Your name', seller_company:'Your company',
+          prospect_name:'Prospect name', prospect_role:'Prospect role', prospect_company:'Prospect company',
+          buyer_behaviour:'Buyer behaviour', product:'Product'
+        };
+        for (const name of REQUIRED) {
+          const el = formEl.elements[name] || document.getElementById(name); // covers header select
+          const val = (el && typeof el.value === 'string') ? el.value.trim() : '';
+          if (!val) missing.push(label[name] || name);
         }
-        const errorEl = document.getElementById(`${input.id}_error`);
-        if (!errorEl) return;
-        if (input.validity.valid) { errorEl.textContent = ''; input.classList.remove('invalid'); }
-        else {
-          input.classList.add('invalid');
-          errorEl.textContent = input.validity.valueMissing ? 'This field is required.' : 'Please check this value.';
-        }
+        if (missing.length) { setStatus(`Please complete: ${missing.join(', ')}.`, 'error'); }
+        else { setStatus(''); }
+        return missing.length === 0;
       }
+      function refreshSubmitState(){ submitBtn.disabled = !allRequiredFilled(form); } /* CHANGED */
+
+      function validateField(input) {
+        const id = input.id;
+        const errorEl = document.getElementById(`${id}_error`) || (id==='call_type' ? document.getElementById('call_type_error') : null);
+        if (!errorEl) return;
+        const valid = !!String(input.value || '').trim();
+        if (valid) { errorEl.textContent=''; input.removeAttribute('aria-invalid'); input.classList.remove('invalid'); }
+        else { errorEl.textContent = id==='call_type' ? 'Please choose a call type.' : 'This field is required.'; input.setAttribute('aria-invalid','true'); input.classList.add('invalid'); }
+      }
+
+      // Save/restore — explicitly include header select value
       function saveForm() {
-        const data = Object.fromEntries(new FormData(form).entries());
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        const fd = Object.fromEntries(new FormData(form).entries());
+        fd.call_type = callTypeSel.value || fd.call_type || '';
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(fd));
       }
       function loadForm() {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return;
-        try { const data = JSON.parse(raw); Object.entries(data).forEach(([k,v]) => { const el = form.querySelector(`[name="${k}"]`); if (el) el.value = v; }); } catch {}
-      }
-      function refreshSubmitState(){ submitBtn.disabled = !form.checkValidity(); }
-
-      ['input','change'].forEach(evt => {
-        form.addEventListener(evt, (e) => {
-          if (e.target.matches('input,select,textarea')) {
-            validateField(e.target); saveForm(); refreshSubmitState();
-          }
-          if (e.target === productSel || e.target === buyerBehSel) {
-            renderIntel(productSel.value, buyerBehSel.value);
-          }
-          if (e.target === callTypeSel || e.target === rememberCallType) saveCallPrefIfRequested();
-        });
-      });
-
-      toggleIntelBtn.addEventListener('click', () => {
-        const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
-        toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
-        intelBody.hidden = expanded;
-        toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
-      });
-
-      document.getElementById('reset').addEventListener('click', () => {
-        form.reset(); localStorage.removeItem(STORAGE_KEY);
-        setStatus('Form reset.'); renderIntel(productSel.value, buyerBehSel.value);
-        refreshSubmitState(); form.querySelector('input, select, textarea')?.focus();
-      });
-
-      document.getElementById('copy').addEventListener('click', async () => {
-        const txt = outputEl.textContent; if (!txt.trim()) return;
-        await navigator.clipboard.writeText(txt);
-        setStatus('Copied to clipboard.');
-      });
-      document.getElementById('download').addEventListener('click', () => {
-        const txt = outputEl.textContent; if (!txt.trim()) return;
-        const blob = new Blob([txt], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `first-call-script_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
-        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-        setStatus('Download started.');
-      });
-
-      form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-
-        let firstInvalid = null;
-        [...form.elements].forEach(el => {
-          if (el.matches('input,select,textarea')) {
-            validateField(el);
-            if (!firstInvalid && !el.checkValidity()) firstInvalid = el;
-          }
-        });
-        if (firstInvalid) { setStatus('Please fix the highlighted fields.', 'error'); firstInvalid.focus(); return; }
-
-        const fd = Object.fromEntries(new FormData(form).entries());
-        const variables = {
-          seller_name: fd.seller_name || '',
-          seller_company: fd.seller_company || '',
-          prospect_name: fd.prospect_name || '',
-          prospect_role: fd.prospect_role || '',
-          prospect_company: fd.prospect_company || '',
-          call_type: fd.call_type || '',
-          buyer_type: fd.buyer_behaviour || '',
-          product: fd.product || '',
-          tone: fd.tone || '',
-          length: fd.length || '',
-          call_to_action: fd.call_to_action || '',
-          context: fd.context || '',
-          value_proposition: fd.value_proposition || ''
-        };
-        const payload = { pack: 'uk_b2b_sales_core', template: 'first_call_script_v2', variables };
-
-        setBusy(true); setStatus('Generating…'); diag.open = false; diagJson.textContent = '';
-
         try {
-          const res = await fetch('/api/generate', {
-            method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload), credentials: 'include'
+          const data = JSON.parse(raw);
+          Object.entries(data).forEach(([k,v]) => {
+            const el = form.elements[k] || document.getElementById(k);
+            if (el) el.value = v;
           });
-          const text = await res.text();
-          let data = {}; try { data = JSON.parse(text); } catch {}
-
-          if (!res.ok) {
-            setStatus(`Error ${res.status}. See diagnostics.`, 'error');
-            diag.open = true; diagJson.textContent = JSON.stringify({ status: res.status, body: data || text }, null, 2);
-            return;
-          }
-
-          const out = (data.output || data.preview || '').trim();
-          outputEl.textContent = out || '(No output returned.)';
-          outputMeta.textContent = `Generated ${nowTime()}`;
-          copyBtn.disabled = !out; downloadBtn.disabled = !out;
-
-          const delta = computeDelta(localStorage.getItem(OUTPUT_KEY)||'', out);
-          renderDelta(delta);
-          localStorage.setItem(OUTPUT_KEY, out);
-
-          addActivity({ time: nowTime(), product: variables.product || '—', buyer_behaviour: variables.buyer_type || '—', length: variables.length || '—' });
-
-          renderIntel(productSel.value, buyerBehSel.value);
-          if (out) injectRemindersFromScript(out);
-
-          setStatus('Done. Script ready.');
-          document.getElementById('output-title').focus();
-
-        } catch (err) {
-          setStatus('Network error. Please try again.', 'error');
-          diag.open = true; diagJson.textContent = String(err);
-        } finally {
-          setBusy(false);
-        }
-      });
-
-      /* ---- helpers kept concise (unchanged from prior version) ---- */
-      function addActivity(entry){
-        const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]'); list.unshift(entry);
-        localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0,3))); renderActivity();
+        } catch {}
       }
-      function renderActivity(){
-        const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]'); activityLog.innerHTML='';
-        list.forEach(item => {
-          const node = activityTpl.content.cloneNode(true);
-          node.querySelector('.time').textContent = item.time;
-          node.querySelector('.product').textContent = item.product;
-          node.querySelector('.buyer').textContent = item.buyer_behaviour;
-          node.querySelector('.length').textContent = item.length;
-          activityLog.appendChild(node);
-        });
-      }
-      function computeDelta(a,b){const A=(a||'').split('\n'),B=(b||'').split('\n');let add=0,rem=0;const SA=new Set(A),SB=new Set(B);B.forEach(l=>{if(!SA.has(l)&&l.trim())add++});A.forEach(l=>{if(!SB.has(l)&&l.trim())rem++});return{added:add,removed:rem}}
-      function renderDelta(d){deltaLog.innerHTML='';const x=document.createElement('li');x.textContent=`+${d.added} new line${d.added===1?'':'s'}`;const y=document.createElement('li');y.textContent=`−${d.removed} removed line${d.removed===1?'':'s'}`;deltaLog.appendChild(x);deltaLog.appendChild(y);}
+      function clearFormState() { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
 
-      /* Intel + reminders (same behaviour as before) */
-      const norm = s => String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015_\-\/]+/g,'-').trim();
+      /* =========================================================================
+         Buyer needs: tolerant matching + script-based reminders
+         ========================================================================= */
+      const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
+      const norm = s => String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015_\-\/]+/g,'-').replace(/[^\w\- ]+/g,'').trim();
       const BEHAVIOUR_SYNONYMS = { 'early adopter':'early-adopter','early majority':'early-majority','late majority':'late-majority','skeptic':'sceptic','sceptic':'sceptic' };
+
       function getKeyInsensitive(obj, requested){
         if (!obj || typeof obj !== 'object') return null;
         const want = norm(requested);
-        for (const k of Object.keys(obj)) if (norm(k) === want) return k;
-        for (const k of Object.keys(obj)) if (norm(k).includes(want)) return k;
+        for (const k of Object.keys(obj)) if (norm(k) === want) return k;         // exact
+        for (const k of Object.keys(obj)) if (norm(k).includes(want)) return k;   // contains
         return null;
       }
-      const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
       const pEl = t => { const el=document.createElement('p'); el.textContent=t; return el; };
-      const setSlot = (id, arr=[]) => { const slot=document.getElementById(id); const items=(arr.length?arr:['No data for this behaviour. Available: IT Director, CFO']); slot.replaceChildren(...items.map(pEl)); };
-      const fillAll = arr => { setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr); setSlot('intel-proof', arr); setSlot('intel-objections', arr); setSlot('intel-ctas', arr); };
+      const setSlot = (id, arr=[]) => {
+        const slot=document.getElementById(id);
+        const items=(arr.length?arr:['No data for this selection.']);
+        slot.replaceChildren(...items.map(pEl));
+      };
+      const fillAll = arr => {
+        setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr);
+        setSlot('intel-proof', arr); setSlot('intel-objections', arr); setSlot('intel-ctas', arr);
+      };
+
+      function normaliseIntel(raw){
+        if (!raw || typeof raw !== 'object') return { products:{} };
+        if (raw.products && typeof raw.products === 'object') return raw;
+        // Back-compat with older shape: {Product:{Behaviour:[pri,pain,...]}}
+        const out = { products:{} };
+        Object.entries(raw).forEach(([product, buyersObj]) => {
+          const behaviours = {};
+          if (buyersObj && typeof buyersObj === 'object') {
+            Object.entries(buyersObj).forEach(([behaviour, arr]) => {
+              const [priorities, pains, triggers, proof, objections, ctas] = Array.isArray(arr) ? arr : [];
+              behaviours[behaviour] = { priorities: toArr(priorities), pains: toArr(pains), triggers: toArr(triggers), proof: toArr(proof), objections: toArr(objections), ctas: toArr(ctas) };
+            });
+          }
+          out.products[product] = { behaviours };
+        });
+        return out;
+      }
 
       function renderIntel(productLabel, behaviourLabel){
-        if (!window._intel) return;
-        const products = window._intel.products || {};
+        if (!intel) return;
+
+        const products = intel.products || {};
         const productKey = getKeyInsensitive(products, productLabel);
         const productNode = productKey ? products[productKey] : null;
         if (!productNode){ fillAll([`No data available (unknown product).`]); return; }
 
         let node = null;
+
         if (productNode.behaviours){
           let key = getKeyInsensitive(productNode.behaviours, behaviourLabel);
           if (!key){ const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.behaviours, syn); }
@@ -607,11 +561,18 @@
         setSlot('intel-ctas',       sections.ctas);
       }
 
+      // Light heuristic: pull 3 salient points from the generated script as reminders
       function extractKeyPoints(text){
         const sentences = String(text).split(/(?<=[.!?])\s+/).map(s=>s.trim()).filter(Boolean);
         const keywords = /(reduce|save|cut|improv|increase|risk|cost|time|secure|resilien|revenue|margin|efficien|customer|cx|compliance|ml|ai|automate|protect)/i;
-        const scored = sentences.map(s => { let sc=0; sc += (s.match(/[,;:]/g)||[]).length; if (keywords.test(s)) sc+=3; if (s.length>=60 && s.length<=180) sc+=2; if (/we|you|your|let's/i.test(s)) sc+=1; return { s, sc }; })
-                                .sort((a,b)=>b.sc-a.sc);
+        const scored = sentences.map(s => {
+          let score = 0;
+          score += (s.match(/[,;:]/g)||[]).length;
+          if (keywords.test(s)) score += 3;
+          if (s.length >= 60 && s.length <= 180) score += 2;
+          if (/we|you|your|let's/i.test(s)) score += 1;
+          return { s, score };
+        }).sort((a,b)=>b.score-a.score);
         return (scored.length?scored:sentences).slice(0,3).map(o=>o.s);
       }
       function injectRemindersFromScript(text){
@@ -622,19 +583,43 @@
         setSlot('intel-triggers',   ['Keep in mind:', points[2] || '']);
       }
 
-      // Prefs & badge
-      function updateMapIndicator() {
-        const pref = JSON.parse(localStorage.getItem('first_call_script_v2.call_pref') || 'null');
-        mapLabel.textContent = pref?.call_type || (callTypeSel.value || 'Not set');
+      /* =========================================================================
+         Activity / delta log
+         ========================================================================= */
+      function addActivity(entry) {
+        const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
+        list.unshift(entry);
+        localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0,3)));
+        renderActivity();
       }
-      function saveCallPrefIfRequested() {
-        if (rememberCallType.checked && callTypeSel.value) {
-          localStorage.setItem('first_call_script_v2.call_pref', JSON.stringify({ remember: true, call_type: callTypeSel.value }));
-        } else if (!rememberCallType.checked) {
-          localStorage.removeItem('first_call_script_v2.call_pref');
-        }
-        updateMapIndicator();
+      function renderActivity() {
+        const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
+        activityLog.innerHTML = '';
+        list.forEach(item => {
+          const node = activityTpl.content.cloneNode(true);
+          node.querySelector('.time').textContent = item.time;
+          node.querySelector('.product').textContent = item.product;
+          node.querySelector('.buyer').textContent = item.buyer_behaviour;
+          node.querySelector('.length').textContent = item.length;
+          activityLog.appendChild(node);
+        });
       }
+      function computeDelta(oldText, newText) {
+        const oldLines = (oldText||'').split('\n'), newLines = (newText||'').split('\n');
+        let added = 0, removed = 0;
+        const oldSet = new Set(oldLines), newSet = new Set(newLines);
+        newLines.forEach(l => { if (!oldSet.has(l) && l.trim()) added++; });
+        oldLines.forEach(l => { if (!newSet.has(l) && l.trim()) removed++; });
+        return { added, removed };
+      }
+      function renderDelta(delta) {
+        deltaLog.innerHTML = '';
+        const a = document.createElement('li'); a.textContent = `+${delta.added} new line${delta.added===1?'':'s'}`;
+        const r = document.createElement('li'); r.textContent = `−${delta.removed} removed line${delta.removed===1?'':'s'}`;
+        deltaLog.appendChild(a); deltaLog.appendChild(r);
+      }
+
+      // Badge hydration (best-effort)
       async function hydrateUserBadge() {
         const el = document.getElementById('user-badge');
         try {
@@ -650,28 +635,189 @@
         }
       }
 
-      // Init
+      /* =========================================================================
+         Event wiring (crucial for enabling the button)
+         ========================================================================= */
+      // CHANGED: header select & remember checkbox emit directly to validator
+      ['change','input','blur'].forEach(evt => {
+        callTypeSel.addEventListener(evt, () => {
+          validateField(callTypeSel);
+          saveForm();
+          updateMapIndicator();
+          refreshSubmitState();
+        });
+        rememberCallType.addEventListener(evt, () => {
+          saveCallPrefIfRequested();
+          refreshSubmitState();
+        });
+      });
+
+      // Inputs inside the form
+      ['input','change','blur'].forEach(evt => {
+        form.addEventListener(evt, (e) => {
+          if (e.target.matches('input,select,textarea')) {
+            validateField(e.target);
+            saveForm();
+            refreshSubmitState();
+          }
+          if (e.type==='change' && (e.target === productSel || e.target === buyerBehSel)) {
+            renderIntel(productSel.value, buyerBehSel.value);
+          }
+        }, true);
+      });
+
+      toggleIntelBtn.addEventListener('click', () => {
+        const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
+        toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
+        intelBody.hidden = expanded;
+        toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
+      });
+
+      document.getElementById('reset').addEventListener('click', () => {
+        form.reset(); clearFormState();
+        setStatus('Form reset.');
+        renderIntel(productSel.value, buyerBehSel.value);
+        refreshSubmitState();
+        form.querySelector('input, select, textarea')?.focus();
+      });
+
+      document.getElementById('copy').addEventListener('click', async () => {
+        const txt = outputEl.textContent; if (!txt.trim()) return;
+        await navigator.clipboard.writeText(txt);
+        setStatus('Copied to clipboard.');
+      });
+
+      document.getElementById('download').addEventListener('click', () => {
+        const txt = outputEl.textContent; if (!txt.trim()) return;
+        const blob = new Blob([txt], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `first-call-script_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        setStatus('Download started.');
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        if (!allRequiredFilled(form)){
+          const firstMissing = REQUIRED.find(n => {
+            const el = form.elements[n] || document.getElementById(n);
+            return !el || !String(el.value||'').trim();
+          });
+          const el = form.elements[firstMissing] || document.getElementById(firstMissing);
+          if (el) el.focus();
+          return;
+        }
+
+        const fd = Object.fromEntries(new FormData(form).entries());
+        const variables = {
+          seller_name: fd.seller_name || '',
+          seller_company: fd.seller_company || '',
+          prospect_name: fd.prospect_name || '',
+          prospect_role: fd.prospect_role || '',
+          prospect_company: fd.prospect_company || '',
+          call_type: fd.call_type || callTypeSel.value || '',
+          buyer_type: fd.buyer_behaviour || '',
+          product: fd.product || '',
+          tone: fd.tone || '',
+          length: fd.length || '',
+          call_to_action: fd.call_to_action || '',
+          context: fd.context || '',
+          value_proposition: fd.value_proposition || ''
+        };
+        const payload = { pack: 'uk_b2b_sales_core', template: 'first_call_script_v2', variables };
+
+        setBusy(true); setStatus('Generating…'); diag.open = false; diagJson.textContent = '';
+
+        try {
+          const res = await fetch('/api/generate', {
+            method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload), credentials: 'include'
+          });
+          const text = await res.text();
+          let data = {}; try { data = JSON.parse(text); } catch {}
+
+          if (!res.ok) {
+            if (res.status === 401) setStatus('Unauthorised. Please sign in again.', 'error');
+            else if (res.status === 400) setStatus('Request was rejected. See diagnostics below.', 'error');
+            else setStatus(`Error ${res.status}. See diagnostics below.`, 'error');
+            diag.open = true; diagJson.textContent = JSON.stringify({ status: res.status, body: data || text }, null, 2);
+            diag.scrollIntoView({behavior: prefersReducedMotion() ? 'auto':'smooth'});
+            diag.focus();
+            return;
+          }
+
+          const out = (data.output || data.preview || '').trim();
+          outputEl.textContent = out || '(No output returned.)';
+          outputMeta.textContent = `Generated ${nowTime()}`;
+
+          copyBtn.disabled = !out; downloadBtn.disabled = !out;
+
+          const delta = computeDelta(lastOutput, out);
+          renderDelta(delta);
+          lastOutput = out; localStorage.setItem(OUTPUT_KEY, out);
+
+          addActivity({
+            time: nowTime(),
+            product: variables.product || '—',
+            buyer_behaviour: variables.buyer_type || '—',
+            length: variables.length || '—'
+          });
+
+          // Refresh Buyer needs from intel, then overlay reminders from the new script
+          renderIntel(productSel.value, buyerBehSel.value);
+          if (out) injectRemindersFromScript(out);
+
+          setStatus('Done. Script ready.');
+          document.getElementById('output-title').focus();
+
+        } catch (err) {
+          setStatus('Network error. Please try again.', 'error');
+          diag.open = true; diagJson.textContent = String(err);
+        } finally {
+          setBusy(false);
+        }
+      });
+
+      /* =========================================================================
+         Remembered call type chip
+         ========================================================================= */
+      function loadCallPref() {
+        try {
+          const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
+          if (pref?.call_type && !callTypeSel.value) callTypeSel.value = pref.call_type;
+          if (pref?.remember === true) rememberCallType.checked = true;
+        } catch {}
+        updateMapIndicator();
+      }
+      function saveCallPrefIfRequested() {
+        if (rememberCallType.checked && callTypeSel.value) {
+          localStorage.setItem(CALL_PREF_KEY, JSON.stringify({ remember: true, call_type: callTypeSel.value }));
+        } else if (!rememberCallType.checked) {
+          localStorage.removeItem(CALL_PREF_KEY);
+        }
+        updateMapIndicator();
+      }
+      function updateMapIndicator() {
+        const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
+        mapLabel.textContent = pref?.call_type || (callTypeSel.value || 'Not set');
+      }
+
+      /* =========================================================================
+         Init
+         ========================================================================= */
       (async function init(){
         hydrateUserBadge();
 
-        // Load Buyer needs intel and normalise (works with Script-1/Script-2 shapes)
+        // Load and normalise intel.json (synonym/insensitive matching relies on this)
         try {
           const res = await fetch(INTEL_URL, { cache: 'no-store' });
           const raw = await res.json();
-          window._intel = raw.products ? raw : (function normalise(old){
-            const out={products:{}}; Object.entries(old||{}).forEach(([prod,beh])=>{
-              const behaviours={}; Object.entries(beh||{}).forEach(([key,arr])=>{
-                const [pri,pa,tr,pr,ob,ct]=Array.isArray(arr)?arr:[];
-                behaviours[key]={priorities:toArr(pri),pains:toArr(pa),triggers:toArr(tr),proof:toArr(pr),objections:toArr(ob),ctas:toArr(ct)};
-              });
-              out.products[prod]={behaviours};
-            }); return out;
-          })(raw);
-        } catch { window._intel = { products:{} }; }
+          intel = normaliseIntel(raw);
+        } catch { intel = { products:{} }; }
 
-        // Populate products
-        const productSel = document.getElementById('product');
-        const products = Object.keys(window._intel.products || {});
+        // Populate product options from intel
+        const products = Object.keys(intel.products || {});
         const current = productSel.value;
         productSel.innerHTML = '<option value="">Select…</option>';
         products.forEach(p => {
@@ -681,14 +827,17 @@
           productSel.appendChild(opt);
         });
 
+        // Restore saved form state and remembered call type
         loadForm();
-        updateMapIndicator();
-        if (productSel.value && document.getElementById('buyer_behaviour').value) {
-          renderIntel(productSel.value, document.getElementById('buyer_behaviour').value);
-        }
+        loadCallPref();
+
+        // Initial Buyer needs (if both set)
+        if (productSel.value && buyerBehSel.value) renderIntel(productSel.value, buyerBehSel.value);
+
+        // Ensure button state is correct on first paint (CHANGED: crucial)
         refreshSubmitState();
 
-        // Restore last output
+        // Restore last output if present
         const last = localStorage.getItem(OUTPUT_KEY);
         if (last) { outputEl.textContent = last; copyBtn.disabled = false; downloadBtn.disabled = false; }
       })();
