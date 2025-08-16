@@ -1,4 +1,18 @@
 {
-  "navigationFallback": { "rewrite": "/index.html" }
+  "routes": [
+    {
+      "route": "/content/call-library/*",
+      "allowedRoles": ["anonymous", "authenticated"],
+      "headers": {
+        "Cache-Control": "no-store"
+      }
+    }
+  ],
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/api/*", "/content/*"]
+  },
+  "mimeTypes": {
+    ".json": "application/json; charset=utf-8"
+  }
 }
-
