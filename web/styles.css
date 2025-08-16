@@ -12,13 +12,13 @@
   --ok:#0a7f2e;
 
   /* Stage & header */
-  --stage-max: 1350px;            /* centres the app on large screens */
-  --header-h: 64px;               /* used by sticky offsets */
+  --stage-max: 1350px;            /* slightly wider to fit 4/6/2 layout */
+  --header-h: 64px;
 
   /* 3-col proportions */
   --left-min: 480px;
   --middle-min: 780px;
-  --right-min: 260px;             /* slightly slimmer */
+  --right-min: 260px;             /* slimmer right rail */
 
   /* Elevation / radii / rings */
   --radius:12px;
@@ -79,7 +79,7 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 .kicker{font-size:.9em; color:var(--text-2); margin-top:.125rem}
 .header-right{display:flex; align-items:center; gap:.5rem}
 
-/* Pills / sales model + small controls (matches screenshot) */
+/* Pills / sales model */
 .calltype-mini{display:inline-flex; align-items:center; gap:.6rem; padding:8px 12px; border-radius:999px; background:#eef0f4; border:1px solid var(--border); font-size:.95rem}
 .calltype-mini .mini-label{font-weight:600}
 .calltype-mini select{padding:6px 10px; border-radius:8px; border:1px solid #cfd7eb; background:#fff}
@@ -87,35 +87,36 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 .badge svg{width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2}
 .badge.is-hidden{display:none}
 
-/* === Layout — centred 3-column grid =============================== */
-.stage{max-width:var(--stage-max); margin-inline:auto}
+/* === Layout — centered 3-column grid =============================== */
+.stage{max-width: var(--stage-max); margin-inline:auto}
 .layout{
   display:grid; gap:var(--gap); padding:var(--gap); align-items:start; width:100%;
   max-width: var(--stage-max);
   margin-inline: auto;
   grid-template-columns:
-    minmax(var(--left-min), 1.1fr)           /* LEFT  (Form)   */
-    minmax(var(--middle-min), 2.2fr)         /* MIDDLE (Script)*/
-    clamp(var(--right-min), 22vw, 340px);    /* RIGHT (Intel)  — slim & capped */
+    minmax(var(--left-min), 1.1fr)
+    minmax(var(--middle-min), 2.2fr)
+    clamp(var(--right-min), 22vw, 340px);
 }
-.panel{background:transparent; border:0; border-radius:0; padding:0; min-width:0}
-.panel.left{grid-column:1}
-.panel.middle{grid-column:2}
-.panel.right{grid-column:3}
 
-/* Cards: single white surface (three “windows”) */
-.card{
+/* === Three white “windows” ======================================== */
+.panel{
+  position: relative;
   background:var(--card-bg);
   border:1px solid var(--border);
   border-radius:var(--radius);
   padding:18px;
-  margin:0 0 var(--s-3);
   box-shadow:var(--shadow);
-  transition: box-shadow .18s ease, transform .18s ease;
+  min-width:0;
 }
-.card:hover{ box-shadow: 0 8px 20px rgba(16,24,40,.12); }
-.card .card{background:transparent; border:0; box-shadow:none; padding:0; margin:0} /* no double boxes */
+.panel.left{grid-column:1}
+.panel.middle{grid-column:2}
+.panel.right{grid-column:3; max-width:340px} /* keep the rail slim */
 
+/* Kill nested “double boxes” */
+.panel .card{background:transparent; border:0; box-shadow:none; padding:0; margin:0}
+
+/* Section titles within panels */
 fieldset{border:0; margin:0; padding:0}
 .card>legend,.card>h2{display:block; margin:0 0 var(--s-2); font-size:1.05rem; font-weight:700}
 .card>.kicker{ margin:-2px 0 10px; color:var(--text-2); font-size:.9rem; }
@@ -137,7 +138,7 @@ input.invalid,select.invalid,textarea.invalid{ border-color: var(--danger); }
 .error-inline{ color: var(--danger); font-size:.85rem; margin-left:.25rem; }
 input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#6b7280; border-color:#e5e7eb; cursor:not-allowed; }
 
-/* Buttons / actions (Generate, Reset, Copy, Download) */
+/* Buttons / actions */
 .actions{ display:flex; gap: var(--s-3); align-items:center; margin-top: var(--s-3); flex-wrap:wrap; }
 .btn{
   display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:999px;
@@ -167,7 +168,7 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
 /* Keep the script visible under the sticky header */
 .panel.middle .output-card{ position: sticky; top: calc(var(--header-h) + 12px); z-index: 5; }
 
-/* === Right (Buyer needs) — narrow rail with chips ================= */
+/* === Right (Buyer needs) — single slim column ===================== */
 .intel .intel-head{
   display:flex; align-items:center; justify-content:space-between; gap:var(--s-2);
   position:sticky; top: calc(var(--header-h) + 8px); background:var(--card-bg); z-index:4; padding-top:6px;
@@ -175,17 +176,17 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
 /* FORCE one column everywhere */
 .intel-grid{ display:grid; grid-template-columns:1fr !important; gap:10px }
 .intel-grid section{ background:transparent; padding:0 }
-/* If your markup uses UL/LI, render as chips with no bullets */
-.intel-grid ul{ list-style:none; padding-left:0; margin:6px 0 0; display:flex; flex-wrap:wrap; gap:6px }
-.intel-grid li{ display:inline-block; padding:4px 8px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.85rem; color:var(--text-2) }
-/* If you render plain spans/divs, this keeps spacing the same */
-.intel-chip{ display:inline-block; padding:4px 8px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.85rem; color:var(--text-2); margin:0 6px 6px 0 }
-
 .intel-slot{
   background:transparent; padding:8px 0 0; color:var(--text-2);
   border-top:1px solid var(--border); border-radius:0;
 }
 .intel-grid section:first-child .intel-slot{ border-top:0 }
+
+/* If your Buyer needs lists are UL/LI, render as compact chips */
+.intel-grid ul{ list-style:none; padding-left:0; margin:6px 0 0; display:flex; flex-wrap:wrap; gap:6px }
+.intel-grid li{ display:inline-block; padding:4px 8px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.85rem; color:var(--text-2) }
+/* If you output plain spans, give them the same chip look */
+.intel-chip{ display:inline-block; padding:4px 8px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.85rem; color:var(--text-2); margin:0 6px 6px 0 }
 
 /* === Ultra-wide tuning ============================================ */
 @media (min-width: 1600px){
@@ -202,7 +203,7 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   .layout{ grid-template-columns:1fr 1fr }
   .panel.left{ grid-column:1 }
   .panel.middle{ grid-column:2 }
-  .panel.right{ grid-column:1 / -1 }
+  .panel.right{ grid-column:1 / -1; max-width:none }
 }
 
 /* === Tablet / Phone =============================================== */
@@ -246,7 +247,10 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   .layout{ display:block; padding:0; max-width:none; }
   .output-card, .output{ box-shadow:none; border:0; padding:0; }
   #output-title{ margin:0 0 6mm; font-size:20pt }
-  #output{ font: 12pt/1.4 "Segoe UI", Roboto, Arial, sans-serif; white-space:pre-wrap; }
+  #output{
+    font: 12pt/1.4 "Segoe UI", Roboto, Arial, sans-serif;
+    white-space:pre-wrap;
+  }
   .change-log,.activity{ display:none }
 }
 
