@@ -4,32 +4,44 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Tools · First Call Script (v2)</title>
-  <link rel="stylesheet" href="./styles.css?v=fix2" />
+  <link rel="stylesheet" href="./styles.css?v=fix3" />
   <style>
-    /* --- Minimal, safe page-scoped CSS to ensure layout & chip look right --- */
+    /* =============== Page-scoped CSS only (no global overrides) =============== */
     :root{
       --bg:#f7f7f9; --surface-1:#fff; --surface-2:#eef0f4; --surface-3:#e5e8ee;
       --text-1:#1d2129; --text-2:#5b6270; --accent:#2458e6; --accent-pressed:#1f49be;
       --danger:#b00020; --ok:#0a7f2e; --ring:2px solid rgba(36,88,230,.35);
       --shadow:0 1px 2px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.06);
-      --radius:10px; --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px;
+      --radius:10px; --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px; --space-6:32px;
       --font-system:ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
     }
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:var(--text-1);font:16px/1.45 var(--font-system)}
-    .kicker{font-size:.875rem;color:var(--text-2);margin-top:.125rem}
+
+    /* Header */
     .app-header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);padding:var(--space-3) var(--space-5)}
     .header-left{display:flex;align-items:center;gap:.75rem;min-width:0;flex:1 1 auto}
-    .logo{width:clamp(44px,5vw,52px);height:auto;object-fit:contain;flex-shrink:0}
+    .logo{width:clamp(44px,5vw,52px);height:auto;object-fit:contain;flex-shrink:0} /* responsive logo */
     .brand-text{display:flex;flex-direction:column}
     .app-title{font-weight:600;margin:.25rem 0 0}
+    .kicker{font-size:.875rem;color:var(--text-2);margin-top:.125rem}
     .header-right{display:flex;align-items:center;gap:.75rem;flex:0 0 auto}
 
-    /* Chip with your colours (#99f2d1 background, #28a2b5 border) */
+    /* Buttons (shared) */
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:999px;border:1px solid var(--surface-3);background:var(--surface-1);cursor:pointer;font-weight:600}
+    .btn.small{padding:6px 10px;font-size:.9rem}
+    .btn.primary{background:var(--accent);color:#fff;border-color:transparent}
+    .btn.primary:hover{background:var(--accent-pressed)}
+    .spinner{width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;display:none}
+    .btn.primary.busy .spinner{display:inline-block;animation:spin .9s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* (1) STYLE FIX — make the “Direct or partner sales” control look like other buttons */
     .calltype-mini{
       display:flex;align-items:center;gap:.6rem;
-      padding:8px 14px;border-radius:999px;background:#99f2d1;border:1px solid #28a2b5;
-      font-size:.95rem;flex-wrap:wrap;white-space:nowrap; /* prevent wrapping per requirement */
+      padding:6px 10px;border-radius:999px;
+      background:var(--surface-1); border:1px solid var(--surface-3);  /* CHANGED: remove green chip look */
+      font-size:.95rem; white-space:nowrap;
     }
     .calltype-mini .mini-label{font-weight:600}
     .calltype-mini select{padding:6px 10px;border-radius:8px;border:1px solid var(--surface-3);background:#fff}
@@ -37,23 +49,36 @@
     .error-inline{color:var(--danger);font-size:.85rem}
 
     .model-note{display:inline-flex;align-items:center;gap:.35rem;padding:6px 10px;background:var(--surface-2);border:1px solid var(--surface-3);border-radius:999px;font-size:.9rem;color:var(--text-2)}
-
     .badge{display:flex;align-items:center;gap:.4rem;padding:8px 12px;background:var(--surface-2);border:1px solid var(--surface-3);border-radius:999px;font-size:.9rem;color:var(--text-1);white-space:nowrap}
     .badge svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
     .badge.is-hidden{display:none}
 
-    /* --- Three-column layout (Form | Script | Buyer needs) --- */
+    /* (1) LAYOUT & “use all screen” */
     .layout{
       display:grid;
-      grid-template-columns: 1fr 1.1fr 1fr;     /* middle a touch wider */
-      gap: var(--space-5);
+      grid-template-columns: 1fr 1.15fr 1fr; /* middle slightly wider to avoid squashing */
+      gap: var(--space-6);
       padding: var(--space-5);
       align-items:start;
+      width:100%;
+      max-width:100vw;             /* fill available width */
+      box-sizing:border-box;
     }
     @media (max-width: 1200px){ .layout{ grid-template-columns: 1fr; } }
 
     .panel{display:block}
-    .card{background:var(--surface-1);border-radius:var(--radius);box-shadow:var(--shadow);padding:var(--space-5);margin:0}
+    .card{
+      background:var(--surface-1);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      padding:var(--space-5);
+      margin:0;
+      border:1px solid #e9ebf0;   /* single subtle border */
+    }
+
+    /* (1) Remove double-borders when nested */
+    .card .card{border:0; box-shadow:none; padding:0}
+
     fieldset{border:0;margin:0 0 var(--space-5);padding:0}
     legend{font-weight:600;margin-bottom:var(--space-3);font-size:1.125rem}
 
@@ -70,31 +95,27 @@
     .error{min-height:1.25rem;color:var(--danger);font-size:.9rem;margin:.25rem 0 0}
 
     .actions{display:flex;gap:var(--space-3);align-items:center;margin-top:var(--space-4);flex-wrap:wrap}
-    .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:999px;border:1px solid var(--surface-3);background:var(--surface-1);cursor:pointer;font-weight:600}
-    .btn.small{padding:6px 10px;font-size:.9rem}
-    .btn.primary{background:var(--accent);color:#fff;border-color:transparent}
-    .btn.primary:hover{background:var(--accent-pressed)}
-    .spinner{width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;display:none}
-    .btn.primary.busy .spinner{display:inline-block;animation:spin .9s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
-
     .status{margin-top:var(--space-3);min-height:1.35rem;color:var(--text-2)}
     .status[data-kind="error"]{color:var(--danger)}
     .status[data-kind="ok"]{color:var(--ok)}
 
-    /* Script & Buyer needs cards */
-    .output{white-space:pre-wrap;background:#f6f7fb;color:#1f2937;border:1px solid #e5e7eb;padding:var(--space-4);border-radius:8px;min-height:180px;outline:none}
-    .intel-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-3)}
-    @media (max-width: 900px){ .intel-grid{grid-template-columns:repeat(2,1fr)} }
-    @media (max-width: 600px){ .intel-grid{grid-template-columns:1fr} }
-    .intel .intel-slot{background:var(--surface-2);padding:var(--space-3);border-radius:8px}
+    /* Script output */
+    .output{
+      white-space:pre-wrap;background:#f6f7fb;color:#1f2937;
+      border:1px solid #e5e7eb;  /* keep single border for readability */
+      padding:var(--space-4);border-radius:8px;min-height:180px;outline:none
+    }
+
+    /* (1) Buyer needs as ONE column */
+    .intel-grid{display:grid;grid-template-columns:1fr;gap:var(--space-3)}   /* CHANGED: single column */
+    .intel .intel-slot{background:var(--surface-2);padding:var(--space-3);border-radius:8px;border:0} /* CHANGED: no inner border */
+
   </style>
 </head>
 <body>
 
   <!-- HEADER -->
   <header class="app-header" role="banner">
-    <!-- Left: logo + title -->
     <div class="header-left">
       <img class="logo" src="./larato-logo.svg" alt="Larato" />
       <div class="brand-text">
@@ -103,8 +124,8 @@
       </div>
     </div>
 
-    <!-- Right: sales model chip + model note + user badge -->
     <div class="header-right">
+      <!-- (1) Restyled control (now matches other buttons) -->
       <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
         <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
         <select id="call_type" name="call_type" form="script-form" required aria-describedby="call_type_error">
@@ -133,13 +154,11 @@
 
   <!-- LAYOUT: Form | Script | Buyer needs -->
   <main id="main" class="layout" role="main">
-    <!-- LEFT: form + actions -->
+    <!-- LEFT -->
     <section class="panel left" aria-label="Form">
       <form id="script-form" novalidate>
-        <!-- Card: Call details -->
         <fieldset class="card" aria-labelledby="legend-call-details">
           <legend id="legend-call-details">Call details</legend>
-
           <div class="grid-2">
             <div class="field">
               <label for="seller_name">Your name <span aria-hidden="true" class="req">*</span></label>
@@ -175,7 +194,6 @@
           </div>
         </fieldset>
 
-        <!-- Card: Targeting -->
         <fieldset class="card" aria-labelledby="legend-targeting">
           <legend id="legend-targeting">Targeting</legend>
           <div class="grid-2">
@@ -204,7 +222,6 @@
           </div>
         </fieldset>
 
-        <!-- Card: Script preferences -->
         <fieldset class="card" aria-labelledby="legend-preferences">
           <legend id="legend-preferences">Script preferences</legend>
           <div class="grid-2">
@@ -240,7 +257,6 @@
           </div>
         </fieldset>
 
-        <!-- Actions -->
         <div class="actions">
           <button id="submit" class="btn primary" type="submit" disabled>
             <span class="btn-label">Generate script</span>
@@ -261,7 +277,7 @@
       </form>
     </section>
 
-    <!-- MIDDLE: Script output -->
+    <!-- MIDDLE -->
     <section class="panel middle">
       <div class="output-card card">
         <div class="output-head" style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3)">
@@ -280,7 +296,7 @@
       </div>
     </section>
 
-    <!-- RIGHT: Buyer needs -->
+    <!-- RIGHT -->
     <section class="panel right" aria-labelledby="intel-title">
       <aside class="intel card">
         <div class="intel-head" style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
@@ -319,7 +335,6 @@
     </section>
   </main>
 
-  <!-- Activity item template -->
   <template id="activity-item">
     <li>
       <span class="time"></span>
@@ -339,7 +354,6 @@
       const INTEL_URL = './intel.json';
       const REQUIRED = ['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
 
-      // Elements
       const form = document.getElementById(FORM_ID);
       const submitBtn = document.getElementById('submit');
       const resetBtn = document.getElementById('reset');
@@ -370,10 +384,9 @@
         ctas: document.getElementById('intel-ctas'),
       };
 
-      let intel = null;           // normalised shape used by Script 2 (see normaliser below)
+      let intel = null;           // normalised intel
       let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
 
-      // Utils
       const qs = (name) => form.querySelector(`[name="${name}"]`);
       const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
       const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -381,15 +394,14 @@
       function setBusy(isBusy) {
         submitBtn.disabled = isBusy || !form.checkValidity();
         resetBtn.disabled = isBusy;
-        copyBtn.disabled = isBusy || !outputEl.textContent.trim();
-        downloadBtn.disabled = isBusy || !outputEl.textContent.trim();
+        const hasText = !!outputEl.textContent.trim();
+        copyBtn.disabled = isBusy || !hasText;
+        downloadBtn.disabled = isBusy || !hasText;
         submitBtn.classList.toggle('busy', isBusy);
       }
-
       function setStatus(msg, kind='info') {
         statusEl.textContent = msg; statusEl.dataset.kind = kind;
       }
-
       function validateField(input) {
         if (input.id === 'call_type') {
           const errEl = document.getElementById('call_type_error');
@@ -405,54 +417,33 @@
           errorEl.textContent = input.validity.valueMissing ? 'This field is required.' : 'Please check this value.';
         }
       }
-
       function saveForm() {
         const data = Object.fromEntries(new FormData(form).entries());
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       }
-
       function loadForm() {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return;
-        try {
-          const data = JSON.parse(raw);
-          Object.entries(data).forEach(([k,v]) => { const el = qs(k); if (el) el.value = v; });
-        } catch {}
+        try { const data = JSON.parse(raw); Object.entries(data).forEach(([k,v]) => { const el = qs(k); if (el) el.value = v; }); } catch {}
       }
-
       function clearFormState() {
         localStorage.removeItem(STORAGE_KEY);
         localStorage.removeItem(ACTIVITY_KEY);
       }
-
       function refreshSubmitState() {
         submitBtn.disabled = !form.checkValidity();
       }
 
-      /* ---------- Buyer needs renderer (robust & de-duplicated) ---------- */
-      const norm = s => String(s || '')
-        .toLowerCase()
-        .replace(/\s+/g,' ')
-        .replace(/[\u2010-\u2015_\-\/]+/g,'-')   // unify dashes/underscores/slashes
-        .trim();
-
-      const BEHAVIOUR_SYNONYMS = {
-        'early adopter':'early-adopter',
-        'early majority':'early-majority',
-        'late majority':'late-majority',
-        'skeptic':'sceptic',
-        'sceptic':'sceptic'
-      };
-
+      /* ----- robust matching utils ----- */
+      const norm = s => String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015_\-\/]+/g,'-').trim();
+      const BEHAVIOUR_SYNONYMS = { 'early adopter':'early-adopter','early majority':'early-majority','late majority':'late-majority','skeptic':'sceptic','sceptic':'sceptic' };
       function getKeyInsensitive(obj, requested){
         if (!obj || typeof obj !== 'object') return null;
         const want = norm(requested);
-        const keys = Object.keys(obj);
-        for (const k of keys) if (norm(k) === want) return k;       // exact
-        for (const k of keys) if (norm(k).includes(want)) return k; // contains
+        for (const k of Object.keys(obj)) if (norm(k) === want) return k;
+        for (const k of Object.keys(obj)) if (norm(k).includes(want)) return k;
         return null;
       }
-
       const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
       const pEl = t => { const el=document.createElement('p'); el.textContent=t; return el; };
       const setSlot = (id, arr=[]) => {
@@ -469,21 +460,11 @@
         setSlot('intel-ctas',       arr);
       };
 
-      /* === NEW: schema normaliser so Script 2 works with Script 1's intel.json ===
-         Accepts either:
-         A) Script-1 style: { "<product>": { "<buyer label>": [six strings] } }
-         B) Script-2 style: { products:{ "<product>": { behaviours:{...}, buyers:{...}, needs:{...} } } }
-         Returns unified: { products:{ "<product>": { behaviours:{ "<behaviour>": {priorities, pains, triggers, proof, objections, ctas}}, needs:{...} } } }
-      */
+      /* ----- NEW: schema normaliser (so Script-1 or Script-2 intel.json both work) ----- */
       function normaliseIntel(raw){
         if (!raw || typeof raw !== 'object') return { products:{} };
-
-        // If it already looks like Script-2 (has "products"), keep as-is
-        if (raw.products && typeof raw.products === 'object') {
-          return raw;
-        }
-
-        // Otherwise, treat it as Script-1 and convert
+        if (raw.products && typeof raw.products === 'object') return raw; // already Script-2 shape
+        // Script-1 shape => convert
         const out = { products:{} };
         Object.entries(raw).forEach(([product, buyersObj]) => {
           const behaviours = {};
@@ -504,7 +485,6 @@
         });
         return out;
       }
-      /* ------------------------------------------------------------------- */
 
       function renderIntel(productLabel, behaviourLabel){
         if (!intel) return;
@@ -513,39 +493,23 @@
         const productKey = getKeyInsensitive(products, productLabel);
         const productNode = productKey ? products[productKey] : null;
 
-        if (!productNode){
-          fillAll([`No data available (unknown product).`]);
-          return;
-        }
+        if (!productNode){ fillAll([`No data available (unknown product).`]); return; }
 
-        // Resolve behaviour node (prefer behaviours, fallback buyers, then generic needs)
         let node = null;
-
         if (productNode.behaviours){
           let key = getKeyInsensitive(productNode.behaviours, behaviourLabel);
-          if (!key){
-            const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)];
-            if (syn) key = getKeyInsensitive(productNode.behaviours, syn);
-          }
+          if (!key){ const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.behaviours, syn); }
           if (key) node = productNode.behaviours[key];
         }
-
         if (!node && productNode.buyers){
           let key = getKeyInsensitive(productNode.buyers, behaviourLabel);
-          if (!key){
-            const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)];
-            if (syn) key = getKeyInsensitive(productNode.buyers, syn);
-          }
+          if (!key){ const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.buyers, syn); }
           if (key) node = productNode.buyers[key];
         }
-
         if (!node && productNode.needs) node = productNode.needs;
 
         if (!node){
-          const behavioursList = [
-            ...Object.keys(productNode.behaviours || {}),
-            ...Object.keys(productNode.buyers || {})
-          ].join(', ') || '—';
+          const behavioursList = [...Object.keys(productNode.behaviours || {}), ...Object.keys(productNode.buyers || {})].join(', ') || '—';
           fillAll([`No data for this behaviour. Available: ${behavioursList}`]);
           return;
         }
@@ -569,31 +533,32 @@
         setSlot('intel-objections', sections.objections);
         setSlot('intel-ctas',       sections.ctas);
       }
-      /* ------------------------------------------------------------------- */
 
-      // Call type remember → map indicator
-      function loadCallPref() {
-        try {
-          const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
-          if (pref?.call_type && !callTypeSel.value) callTypeSel.value = pref.call_type;
-          if (pref?.remember === true) rememberCallType.checked = true;
-        } catch {}
-        updateMapIndicator();
+      /* ----- (3) NEW: Extract three key reminders FROM THE GENERATED SCRIPT ----- */
+      function extractKeyPoints(text){
+        // very lightweight heuristic: split to sentences, pick strong ones by keywords/length
+        const sentences = String(text).split(/(?<=[.!?])\s+/).map(s=>s.trim()).filter(Boolean);
+        const keywords = /(reduce|save|cut|improv|increase|risk|cost|time|secure|resilien|revenue|margin|efficien|customer|cx|compliance|ml|ai|automate|protect)/i;
+        const scored = sentences.map(s => {
+          let score = 0;
+          score += (s.match(/[,;:]/g)||[]).length;     // structure
+          if (keywords.test(s)) score += 3;
+          if (s.length >= 60 && s.length <= 180) score += 2; // snackable
+          if (/we|you|your|let's/i.test(s)) score += 1;      // action oriented
+          return { s, score };
+        }).sort((a,b)=>b.score-a.score);
+        const picks = (scored.length?scored:sentences).slice(0,3).map(o=>o.s);
+        return picks.length ? picks : ['(No salient points detected.)'];
       }
-      function saveCallPrefIfRequested() {
-        if (rememberCallType.checked && callTypeSel.value) {
-          localStorage.setItem(CALL_PREF_KEY, JSON.stringify({ remember: true, call_type: callTypeSel.value }));
-        } else if (!rememberCallType.checked) {
-          localStorage.removeItem(CALL_PREF_KEY);
-        }
-        updateMapIndicator();
-      }
-      function updateMapIndicator() {
-        const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
-        mapLabel.textContent = pref?.call_type || (callTypeSel.value || 'Not set');
+      function injectRemindersFromScript(text){
+        const points = extractKeyPoints(text);
+        // Prepend “From your script:” line and show points in the first three sections as reminders
+        setSlot('intel-priorities', ['From your script:', ...points.slice(0,1)]);
+        setSlot('intel-pains',      ['Reminder:', ...points.slice(1,2)]);
+        setSlot('intel-triggers',   ['Keep in mind:', ...points.slice(2,3)]);
       }
 
-      // Activity log
+      // Activity log helpers
       function addActivity(entry) {
         const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
         list.unshift(entry);
@@ -645,18 +610,24 @@
         }
       }
 
-      // Events
+      /* ====================== Events ====================== */
+
+      // (2) BUG FIX — selects fire "change" (not always "input"). Always refresh submit state.
       form.addEventListener('input', (e) => {
         if (e.target.matches('input,select,textarea')) {
           validateField(e.target); saveForm(); refreshSubmitState();
         }
       });
-
       form.addEventListener('change', (e) => {
+        if (e.target.matches('input,select,textarea')) {
+          validateField(e.target); saveForm(); refreshSubmitState();   /* CHANGED */
+        }
         if (e.target === productSel || e.target === buyerBehSel) {
           renderIntel(productSel.value, buyerBehSel.value);
         }
-        if (e.target === callTypeSel || e.target === rememberCallType) saveCallPrefIfRequested();
+        if (e.target === callTypeSel || e.target === rememberCallType) {
+          saveCallPrefIfRequested();
+        }
       });
 
       toggleIntelBtn.addEventListener('click', () => {
@@ -692,6 +663,8 @@
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
+
+        // Validate & focus first invalid
         let firstInvalid = null;
         [...form.elements].forEach(el => {
           if (el.matches('input,select,textarea')) {
@@ -756,6 +729,10 @@
             length: variables.length || '—'
           });
 
+          /* (3) populate Buyer needs both from intel.json and from the generated script */
+          renderIntel(productSel.value, buyerBehSel.value);   // base intel
+          if (out) injectRemindersFromScript(out);            // add 3 key reminders
+
           setStatus('Done. Script ready.');
           document.getElementById('output-title').focus();
 
@@ -767,25 +744,43 @@
         }
       });
 
+      // Prefs
+      function loadCallPref() {
+        try {
+          const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
+          if (pref?.call_type && !callTypeSel.value) callTypeSel.value = pref.call_type;
+          if (pref?.remember === true) rememberCallType.checked = true;
+        } catch {}
+        updateMapIndicator();
+      }
+      function saveCallPrefIfRequested() {
+        if (rememberCallType.checked && callTypeSel.value) {
+          localStorage.setItem(CALL_PREF_KEY, JSON.stringify({ remember: true, call_type: callTypeSel.value }));
+        } else if (!rememberCallType.checked) {
+          localStorage.removeItem(CALL_PREF_KEY);
+        }
+        updateMapIndicator();
+      }
+      function updateMapIndicator() {
+        const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
+        mapLabel.textContent = pref?.call_type || (callTypeSel.value || 'Not set');
+      }
+
       // Init
       (async function init(){
         hydrateUserBadge();
 
-        // Load Buyer Needs intel
+        // Load intel
         try {
           const res = await fetch(INTEL_URL, { cache: 'no-store' });
           const raw = await res.json();
-
-          /* === CHANGED: normalise incoming intel to support Script-1 or Script-2 structures === */
-          intel = normaliseIntel(raw);
-
+          intel = normaliseIntel(raw);    /* CHANGED */
         } catch { intel = { products: {} }; }
 
-        // Restore form values and prefs
         loadForm();
         loadCallPref();
 
-        // Populate product options (works for both schemas now)
+        // Populate products (works with both schemas after normalisation)
         const products = Object.keys(intel.products || {});
         const current = productSel.value;
         productSel.innerHTML = '<option value="">Select…</option>';
@@ -796,16 +791,14 @@
           productSel.appendChild(opt);
         });
 
-        // Initial render of Buyer Needs if both are selected
-        if (productSel.value && buyerBehSel.value) {
-          renderIntel(productSel.value, buyerBehSel.value);
-        }
+        // Initial Buyer needs render if both selected
+        if (productSel.value && buyerBehSel.value) renderIntel(productSel.value, buyerBehSel.value);
 
-        // Initial validation & buttons state
+        // Validate required fields and enable button if valid
         REQUIRED.forEach(name => { const el = qs(name); if (el) validateField(el); });
-        submitBtn.disabled = !form.checkValidity();
+        refreshSubmitState();  /* CHANGED: ensure button reflects current validity */
 
-        // Restore last output & activity
+        // Restore last output
         const last = localStorage.getItem(OUTPUT_KEY);
         if (last) { outputEl.textContent = last; copyBtn.disabled = false; downloadBtn.disabled = false; }
       })();
