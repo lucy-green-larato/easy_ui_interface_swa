@@ -14,6 +14,9 @@
       --shadow:0 1px 2px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.06);
       --radius:10px; --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px; --space-6:32px;
       --font-system:ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+
+      /* FIX: missing var caused Buyer Needs to expand; define a hard min */
+      --right-min: 280px;
     }
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:var(--text-1);font:16px/1.45 var(--font-system)}
@@ -101,7 +104,8 @@
       padding:var(--space-4);border-radius:8px;min-height:180px;outline:none
     }
 
-    .intel-grid{display:grid;grid-template-columns:1fr;gap:var(--space-3)}
+    /* Force Buyer Needs to single column, narrow */
+    .intel-grid{display:grid;grid-template-columns:1fr !important;gap:var(--space-3)}
     .intel .intel-slot{background:transparent;border:0}
   </style>
 </head>
@@ -238,15 +242,6 @@
             </div>
           </div>
 
-          <div class="field">
-            <label for="value_proposition">Unique Selling Points (optional)</label>
-            <textarea id="value_proposition" name="value_proposition" rows="2" placeholder="Your USPs. Leave blank if you prefer the model to infer."></textarea>
-          </div>
-
-          <div class="field">
-            <label for="context">Other points to cover in the call (optional)</label>
-            <textarea id="context" name="context" rows="3" placeholder="Any additional talking points. Optional."></textarea>
-          </div>
         </fieldset>
 
         <div class="actions">
@@ -522,6 +517,96 @@
         setSlot('intel-ctas',       sections.ctas);
       }
 
+      // ---------- UK narrative helpers ----------
+      function toUkEnglish(text){
+        if (!text) return '';
+        const map = [
+          [/organization(s)?/gi, 'organisation$1'],
+          [/organize(d|s|r|ing)?/gi, 'organise$1'],
+          [/optimization/gi, 'optimisation'],
+          [/optimi(z|s)e(?!d|r|s|ing)/gi, 'optimise'],
+          [/center(s)?/gi, 'centre$1'],
+          [/modeling/gi, 'modelling'],
+          [/license/gi, 'licence'],
+          [/utilize/gi, 'utilise'],
+          [/program(s)?/gi, 'programme$1']
+        ];
+        let out = text;
+        for (const [re, rep] of map) out = out.replace(re, rep);
+        return out;
+      }
+      function stripHeadings(text){
+        if (!text) return '';
+        const head = /^(Opening|Buyer pain|Buyer desire|Example|Objections|Call to action)\s*[-–—]*\s*$/gim;
+        return text.replace(head, '').replace(/\n{3,}/g, '\n\n').trim();
+      }
+      function ensureGreeting(text, v){
+        const p = (v?.prospect_name||'').trim();
+        const s = (v?.seller_name||'').trim();
+        const has = (p && new RegExp(`\\b${p}\\b`,'i').test(text)) || (s && new RegExp(`\\b${s}\\b`,'i').test(text));
+        if (has) return text;
+        const hello = p ? `Hi ${p}, ` : 'Hi, ';
+        const intro = (s || v?.seller_company)
+          ? `${hello}it’s ${s || 'a colleague'}${v?.seller_company ? ` from ${v.seller_company}` : ''}. `
+          : hello;
+        return `${intro}${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+      }
+      const asInline = (arr) => Array.isArray(arr) && arr.length ? arr.join('; ') : '';
+
+      function composeNarrativeFromStages(stages, variables){
+        const s = stages || {};
+        const v = variables || {};
+        const parts = [];
+
+        // Empathetic name-led opening
+        {
+          const nameLine = v.prospect_name
+            ? `Hi ${v.prospect_name}, it’s ${v.seller_name || 'a colleague'}${v.seller_company ? ` from ${v.seller_company}` : ''}. `
+            : `Hi, it’s ${v.seller_name || 'a colleague'}${v.seller_company ? ` from ${v.seller_company}` : ''}. `;
+          const body = (s.opening?.talk_track || s.opening?.script || '').trim();
+          parts.push(`${nameLine}${body || 'Thanks for taking my call—I'll keep this brief and useful.'}`);
+        }
+
+        // Pain → Desire
+        {
+          const pain = (s.buyer_pain?.talk_track || s.buyer_pain?.script || '').trim();
+          if (pain) parts.push(pain);
+          const desire = (s.buyer_desire?.talk_track || s.buyer_desire?.script || '').trim();
+          if (desire) parts.push(desire);
+        }
+
+        // Example + proof
+        {
+          const ex = (s.example?.talk_track || s.example?.script || '').trim();
+          const proofs = asInline(s.example?.proof_points_text || s.example?.proof_points || []);
+          const line = [ex, proofs && `For example: ${proofs}.`].filter(Boolean).join(' ');
+          if (line) parts.push(line);
+        }
+
+        // Objections as reassurance
+        {
+          const obj = (s.objections?.talk_track || s.objections?.script || '').trim();
+          const anticipated = asInline(s.objections?.anticipated || []);
+          const line = [obj, anticipated && `Common concerns we handle: ${anticipated}.`].filter(Boolean).join(' ');
+          if (line) parts.push(line);
+        }
+
+        // CTA last and only
+        {
+          let cta = (s.call_to_action?.talk_track || s.call_to_action?.script || '').trim();
+          const ctas = s.call_to_action?.ctas_text || s.call_to_action?.ctas || [];
+          if (!cta && Array.isArray(ctas) && ctas.length) cta = String(ctas[0]);
+          if (cta && !/[.?!]$/.test(cta)) cta += '?';
+          if (cta) parts.push(cta);
+        }
+
+        let text = parts.filter(Boolean).join('\n\n').trim();
+        text = stripHeadings(text);
+        text = toUkEnglish(text);
+        text = ensureGreeting(text, v);
+        return text;
+      }
+
       // ---------- Activity / delta ----------
       function addActivity(entry) {
         const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
@@ -629,7 +714,7 @@
         setStatus('Download started.');
       });
 
-      // ---------- Submit: SYNTHESISE from library (model or rules) ----------
+      // ---------- Submit: SYNTHESISE from library (rules/LLM) ----------
       form && form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
@@ -654,8 +739,7 @@
           tone: fd.tone || '',
           length: fd.length || '',
           call_to_action: fd.call_to_action || '',
-          context: fd.context || '',
-          value_proposition: fd.value_proposition || ''
+          context: fd.context || ''
         };
 
         setBusy(true); setStatus('Synthesising call script from Library…'); diag && (diag.open = false); diagJson && (diagJson.textContent = '');
@@ -666,56 +750,33 @@
           mode: canonical.mode(variables.call_type)
         };
 
-        // Build the minimal "form" object the synthesiser uses for context
         const synthForm = {
           company:       variables.prospect_company,
           role:          variables.prospect_role,
           sector:        '',
           company_size:  '',
-          scenario:      variables.context || variables.value_proposition || '',
+          scenario:      variables.context || '',
           meeting_type:  'first call'
         };
 
-        // Word-count target from the Length dropdown ("~50 words …")
         const lengthHint = /\d+/.exec(variables.length || "")?.[0] || "100";
-
-        // Optional: wire to a server LLM endpoint that accepts {messages} and returns {text}
-        // const generate = async (messages) => {
-        //   const r = await fetch('/api/generate-call', {
-        //     method: 'POST',
-        //     headers: {'Content-Type':'application/json'},
-        //     body: JSON.stringify({ messages })
-        //   });
-        //   const j = await r.json();
-        //   return typeof j.text === 'string' ? j.text : JSON.stringify(j);
-        // };
 
         try {
           const result = await generateCallFromLibrary({
             lookup,
             form: synthForm,
-            tone: variables.tone,          // "Professional (corporate)" | "Warm (relaxed)" | ""
-            length: Number(lengthHint),    // <— pass length target to the synthesiser
-            // generate                       // <— uncomment if you have the server endpoint
+            tone: variables.tone,
+            length: Number(lengthHint)
           });
 
-          // Render talk tracks (6-step Larato method)
-          const s = result.stages;
-          const section = (title, body) => `\n${title}\n${'-'.repeat(title.length)}\n${body}\n`;
-          const text =
-            section('Opening', s.opening.talk_track) +
-            section('Buyer pain', s.buyer_pain.talk_track) +
-            section('Buyer desire', s.buyer_desire.talk_track) +
-            section('Example', s.example.talk_track) +
-            section('Objections', s.objections.talk_track) +
-            section('Call to action', s.call_to_action.talk_track);
+          // NEW: Compose one empathetic UK narrative from stages (no headings)
+          const text = composeNarrativeFromStages(result.stages, variables);
 
           outputEl.textContent = text.trim();
-          outputMeta.textContent = result.metaLine;
-          copyBtn && (copyBtn.disabled = false); downloadBtn && (downloadBtn.disabled = false);
+          outputMeta.textContent = result.metaLine || `Library · ${lookup.product || '—'} · ${variables.buyer_type || '—'} · ${variables.call_type || '—'}`;
+          copyBtn && (copyBtn.disabled = !text); downloadBtn && (downloadBtn.disabled = !text);
 
-          // Buyer Needs (right column) from curated library (through synthesiser result)
-          // Map "triggers" to priorities/desire prompts (library has no dedicated "triggers")
+          // Buyer Needs (right column)
           setSlot('intel-priorities',   result.buyerNeeds['intel-priorities'] || []);
           setSlot('intel-pains',        result.buyerNeeds['intel-pains'] || []);
           setSlot('intel-triggers',     result.buyerNeeds['intel-priorities'] || []);
@@ -766,7 +827,7 @@
 
         // Populate Product from call-library index; fallback to intel.json keys
         try {
-          const idx = await getIndex();            // /content/call-library/v1/index.json
+          const idx = await getIndex();
           const items = Array.isArray(idx?.products) ? idx.products : [];
           if (productSel) {
             productSel.innerHTML = '<option value="">Select…</option>';
