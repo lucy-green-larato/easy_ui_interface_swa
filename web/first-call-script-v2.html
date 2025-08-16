@@ -363,6 +363,24 @@
       const mapLabel = document.getElementById('map-label');
 
       const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+      // Deterministic validation: handles header select + restored values
+      function allRequiredFilled(formEl) {
+        const missing = [];
+        const map = {
+          call_type:'Direct or partner sales', seller_name:'Your name', seller_company:'Your company',
+          prospect_name:'Prospect name', prospect_role:'Prospect role', prospect_company:'Prospect company',
+          buyer_behaviour:'Buyer behaviour', product:'Product'
+        };
+        for (const name of REQUIRED) {
+          const el = formEl.elements[name] || document.getElementById(name); // covers header select (form-associated)
+          const val = (el && typeof el.value === 'string') ? el.value.trim() : '';
+          if (!val) missing.push(map[name] || name);
+        }
+        statusEl.textContent = missing.length ? `Please complete: ${missing.join(', ')}.` : '';
+        statusEl.dataset.kind = missing.length ? 'error' : 'info';
+        return missing.length === 0;
+      }
+      function refreshSubmitState(){ submitBtn.disabled = !allRequiredFilled(form); }
 
       function setBusy(isBusy) {
         submitBtn.disabled = isBusy || !form.checkValidity();
