@@ -1,0 +1,40 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2025-08-16",
+  "products": [
+    {"id": "connectivity", "label": "Connectivity (mobile & fixed)"},
+    {"id": "cybersecurity", "label": "Cybersecurity"},
+    {"id": "ai", "label": "Artificial Intelligence"},
+    {"id": "hardware_software", "label": "Hardware/software"},
+    {"id": "it_solutions", "label": "IT solutions"},
+    {"id": "microsoft_solutions", "label": "Microsoft solutions"},
+    {"id": "telecoms_solutions", "label": "Telecoms solutions"}
+  ],
+  "buyer_types": [
+    {"id": "innovators", "label": "Innovators"},
+    {"id": "early_adopters", "label": "Early Adopters"},
+    {"id": "early_majority", "label": "Early Majority"},
+    {"id": "late_majority", "label": "Late Majority"},
+    {"id": "sceptics", "label": "Sceptics"}
+  ],
+  "sales_modes": [
+    {"id": "direct", "label": "Direct Buyer Library"},
+    {"id": "partner", "label": "Partner Library"}
+  ],
+  "stages": [
+    "opening",
+    "buyer_pain",
+    "buyer_desire",
+    "example",
+    "objections",
+    "call_to_action"
+  ],
+  "style": {
+    "locale": "en-GB",
+    "principles": [
+      "Empathy and value first",
+      "Conversational, British English",
+      "Focus on outcomes, not features"
+    ]
+  }
+}
