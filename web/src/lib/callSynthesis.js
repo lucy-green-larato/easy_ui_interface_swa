@@ -1,7 +1,10 @@
+// File: /src/lib/callSynthesis.js
 // Browser ESM. Sits next to callLibrary.js and imports it.
 import { getCallScript } from "./callLibrary.js";
 
 /** @typedef {"professional"|"warm"|"neutral"} Tone */
+
+/** Canonicalise tone labels from UI ("Professional (corporate)" / "Warm (relaxed)" / blank) */
 const canonTone = (t) => {
   const x = String(t || "").toLowerCase();
   if (x.startsWith("pro")) return "professional";
@@ -9,21 +12,29 @@ const canonTone = (t) => {
   return "neutral";
 };
 
-// Build a compact facts pack from the curated library record
+/** Pick how much content to surface based on target length */
+function pickBudget(length) {
+  const n = Number(length || 100);
+  if (n <= 70) return { list: 2, askShort: true };
+  if (n >= 140) return { list: 4, askShort: false };
+  return { list: 3, askShort: false };
+}
+
+/** Build a compact facts pack from the curated library record */
 function factsFromLibrary(rec, form) {
-  const s = rec.stages || {};
+  const s = rec?.stages || {};
   const proof = s.example?.proof_points_text || s.example?.proof_points || [];
   const ctas  = s.call_to_action?.ctas_text || s.call_to_action?.ctas || [];
   return {
-    product: rec.meta.product_label || rec.meta.product_id,
-    buyerType: rec.meta.buyerType,
-    salesMode: rec.meta.sales_mode,
-    opening: s.opening?.buyer_needs_summary?.join(" · ") || "",
-    pain: s.buyer_pain?.buyer_needs_summary?.join(" · ") || "",
-    desire: s.buyer_desire?.buyer_needs_summary?.join(" · ") || "",
-    proofPoints: Array.isArray(proof) ? proof : [],
-    objections: s.objections?.anticipated || [],
-    ctas: Array.isArray(ctas) ? ctas : [],
+    product: rec?.meta?.product_label || rec?.meta?.product_id || "",
+    buyerType: rec?.meta?.buyerType || "",
+    salesMode: rec?.meta?.sales_mode || "",
+    opening: (s.opening?.buyer_needs_summary || []).join(" · "),
+    pain: (s.buyer_pain?.buyer_needs_summary || []).join(" · "),
+    desire: (s.buyer_desire?.buyer_needs_summary || []).join(" · "),
+    proofPoints: Array.isArray(proof) ? proof.filter(Boolean) : [],
+    objections: Array.isArray(s.objections?.anticipated) ? s.objections.anticipated.filter(Boolean) : (s.objections?.buyer_needs_summary || []),
+    ctas: Array.isArray(ctas) ? ctas.filter(Boolean) : (s.call_to_action?.buyer_needs_summary || []),
     form: {
       company: form?.company || "",
       role: form?.role || "",
@@ -35,35 +46,54 @@ function factsFromLibrary(rec, form) {
   };
 }
 
-// Minimal deterministic fallback (works offline / without any API)
-function ruleBased(rec, facts, tone) {
-  const soften = tone === "warm" ? "Thanks for taking a moment today." : "Appreciate your time.";
-  const style  = tone === "professional" ? "Let’s keep this business-focused." : "Let’s keep this practical.";
+/** Simple sentence helpers */
+const q = (s) => (s.endsWith("?") ? s : s.replace(/[.]+$/,"") + "?");
+const dot = (s) => (s.endsWith(".") || s.endsWith("?")) ? s : s + ".";
+
+/** Minimal deterministic fallback (works offline / without any API), with length shaping */
+function ruleBased(rec, facts, tone, length) {
+  const budget = pickBudget(length);
+  const soften = tone === "warm"
+    ? "Thanks for taking a moment today."
+    : "Appreciate your time.";
+  const style  = tone === "professional"
+    ? "Let’s stay outcome-focused."
+    : "Let’s keep this practical.";
+  const org = facts.form.company || "your organisation";
+
+  const list = (arr) => (arr || []).slice(0, budget.list).join("; ");
+  const ask1 = budget.askShort ? "How does this show up day to day?" : `How does this show up at ${org}?`;
+  const ask2 = budget.askShort ? "Where does it bite most?" : "Where does this bite most—field teams, new sites, or finance visibility?";
+  const ask3 = budget.askShort ? "Which outcomes matter first?" : "Which two outcomes would matter most in the next quarter?";
+  const ask4 = budget.askShort ? "Would a light pilot help?" : "Would a similar phased approach work here?";
+  const ask5 = budget.askShort ? "What would build confidence?" : "What would you need to feel confident?";
+  const ask6 = budget.askShort ? "Would next week suit?" : "Would a brief session next week suit?";
+
   return {
     stages: {
       opening: { talk_track:
-        `${soften} ${style} We often hear: ${facts.opening}. Briefly—how does this show up at ${facts.form.company || "your organisation"}?`
+        dot(`${soften} ${style} We often hear: ${facts.opening || "pressure on cost and productivity with limited visibility."} ${q(ask1)}`)
       },
       buyer_pain: { talk_track:
-        `Common pressure points: ${facts.pain}. Where does this bite most—field teams, new sites, or finance visibility?`
+        dot(`Common pressure points: ${list((facts.pain || "").split(" · ").filter(Boolean)) || "cost leakage, slow sites, out-of-bundle charges"}. ${q(ask2)}`)
       },
       buyer_desire: { talk_track:
-        `Teams want: ${facts.desire}. Which two outcomes would matter most in the next quarter?`
+        dot(`Teams typically want: ${list((facts.desire || "").split(" · ").filter(Boolean)) || "measurable improvements, clear controls, simple reporting"}. ${q(ask3)}`)
       },
       example: { talk_track:
-        facts.proofPoints.length
-          ? `For context, peers achieved: ${facts.proofPoints.join("; ")}. Would a similar phased approach work here?`
-          : `We usually start with a small, low-risk pilot to prove value. Would that be acceptable?`
+        facts.proofPoints?.length
+          ? dot(`For context, peers achieved: ${list(facts.proofPoints)} ${q(ask4)}`)
+          : dot(`We usually start with a small, low-risk pilot to prove value. ${q(ask4)}`)
       },
       objections: { talk_track:
-        (facts.objections.length
-          ? `Usual concerns: ${facts.objections.join("; ")}. We handle this with phased pilots and portability—what would you need to feel confident?`
-          : `If you have concerns, we mitigate with a phased pilot and clear exit—what would you need to feel confident?`)
+        (facts.objections?.length
+          ? dot(`Usual concerns: ${list(facts.objections)} We mitigate with staged pilots and portability—${q(ask5)}`)
+          : dot(`If there are concerns, we mitigate with a phased pilot and clear exit—${q(ask5)}`))
       },
       call_to_action: { talk_track:
-        (facts.ctas.length
-          ? `Next sensible step: ${facts.ctas.join("; ")}. Would a brief session next week suit?`
-          : `Next step could be a short review to baseline today and highlight quick wins. Does early next week work?`)
+        (facts.ctas?.length
+          ? dot(`Next sensible step: ${list(facts.ctas)} ${q(ask6)}`)
+          : dot(`A short review to baseline today and highlight quick wins is a safe next step. ${q(ask6)}`))
       }
     },
     meta: { tone, source: "generated-from-library" }
@@ -72,9 +102,9 @@ function ruleBased(rec, facts, tone) {
 
 /**
  * Generate a call script from curated content.
- * If you have a server LLM endpoint, pass a generate(messages)->text fn.
+ * Pass an optional `generate(messages)->text` that returns a JSON string when using a server LLM.
  */
-export async function generateCallFromLibrary({ lookup, form, tone, generate }) {
+export async function generateCallFromLibrary({ lookup, form, tone, length, generate }) {
   // 1) Pull curated record (uses your existing callLibrary.js)
   const rec = await getCallScript(lookup);
 
@@ -82,7 +112,7 @@ export async function generateCallFromLibrary({ lookup, form, tone, generate }) 
   const t = canonTone(tone);
   const facts = factsFromLibrary(rec, form);
 
-  // 3) If an LLM generator is supplied, call it; else fallback rules
+  // 3) If an LLM generator is supplied, call it; otherwise use the rules
   if (typeof generate === "function") {
     const system = [
       "You are Larato’s B2B calling assistant.",
@@ -91,12 +121,14 @@ export async function generateCallFromLibrary({ lookup, form, tone, generate }) 
       "Constraints:",
       "- British English; empathy & value-first; adapt to requested tone; do NOT copy verbatim.",
       "- 2–4 sentences per step; include 1–2 short questions where helpful.",
+      `- Keep total length around ${Number(length || 100)} words (±15%).`,
       "- Use only the library facts provided; if a fact is missing, stay generic but plausible.",
       "Return JSON only: { \"stages\": {\"opening\":{\"talk_track\":\"...\"}, ...}, \"meta\": {\"tone\":\"...\",\"source\":\"generated-from-library\"} }"
     ].join("\n");
 
     const user = [
       `TONE: ${t}`,
+      `TARGET_LENGTH_WORDS: ${Number(length || 100)}`,
       `PRODUCT: ${facts.product}`,
       `BUYER TYPE: ${facts.buyerType}`,
       `SALES MODE: ${facts.salesMode}`,
@@ -118,9 +150,18 @@ export async function generateCallFromLibrary({ lookup, form, tone, generate }) 
       ]);
       const jsonStr = String(raw).replace(/```json|```/g, "").trim();
       const data = JSON.parse(jsonStr);
+
+      // Defensive normalisation: ensure each stage has talk_track
+      const stages = data?.stages || {};
+      for (const k of ["opening","buyer_pain","buyer_desire","example","objections","call_to_action"]) {
+        if (!stages[k]) stages[k] = { talk_track: "" };
+        if (typeof stages[k].talk_track !== "string") stages[k].talk_track = String(stages[k].talk_track || "");
+      }
+
       return {
-        ...data,
-        metaLine: rec.metaLine + ` · Tone: ${t} · Source: model`,
+        stages,
+        meta: { ...(data.meta || {}), tone: t, source: "generated-from-library" },
+        metaLine: `${rec.metaLine} · Tone: ${t} · Source: model`,
         baseMeta: rec.meta,
         buyerNeeds: rec.buyerNeeds,
         source: "generated-from-library"
@@ -130,10 +171,11 @@ export async function generateCallFromLibrary({ lookup, form, tone, generate }) 
     }
   }
 
-  const data = ruleBased(rec, facts, t);
+  // Rule-based synthesis
+  const data = ruleBased(rec, facts, t, length);
   return {
     ...data,
-    metaLine: rec.metaLine + ` · Tone: ${t} · Source: rules`,
+    metaLine: `${rec.metaLine} · Tone: ${t} · Source: rules`,
     baseMeta: rec.meta,
     buyerNeeds: rec.buyerNeeds,
     source: "generated-from-library"
