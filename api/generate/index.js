@@ -12,10 +12,8 @@ function loadPacks() {
   if (PACKS_CACHE) return PACKS_CACHE;
 
   const candidates = [
-    // Azure SWA runtime path (what packs-debug reported)
-    path.join(process.cwd(), "packs.json"),
-    // Local dev path (when running functions from /api)
-    path.join(__dirname, "..", "packs.json"),
+    path.join(process.cwd(), "packs.json"),        // SWA runtime
+    path.join(__dirname, "..", "packs.json"),      // local dev (/api)
   ];
 
   const tried = [];
@@ -29,8 +27,7 @@ function loadPacks() {
       tried.push(`${p}: ${e.message}`);
     }
   }
-  const msg = `packs.json not found. Tried:\n- ${tried.join("\n- ")}`;
-  throw new Error(msg);
+  throw new Error(`packs.json not found. Tried:\n- ${tried.join("\n- ")}`);
 }
 
 // ---- Simple {{token}} and {token} replacement ----
@@ -43,7 +40,7 @@ function compileTemplate(tpl, vars) {
   };
   return tpl
     .replace(/{{\s*([\w.]+)\s*}}/g, (_, key) => rep(key))
-    .replace(/{\s*([\w.]+)\s*}/g, (_, key) => rep(key));
+    .replace(/{\s*([\w.]+)\s*}/g,  (_, key) => rep(key));
 }
 
 // ---- Determine required variables for a template ----
@@ -52,7 +49,7 @@ function requiredVarsForTemplate(tplDef) {
   const src = typeof tplDef === "string" ? tplDef : String(tplDef?.prompt || "");
   const names = new Set();
   src.replace(/{{\s*([\w.]+)\s*}}/g, (_, k) => names.add(k));
-  src.replace(/{\s*([\w.]+)\s*}/g,   (_, k) => names.add(k));
+  src.replace(/{\s*([\w.]+)\s*}/g,  (_, k) => names.add(k));
   return Array.from(names);
 }
 
@@ -74,7 +71,7 @@ async function callModel({ system, prompt, temperature }) {
   // Azure OpenAI
   const azEndpoint   = process.env.AZURE_OPENAI_ENDPOINT;        // e.g. https://myres.openai.azure.com
   const azKey        = process.env.AZURE_OPENAI_API_KEY;
-  const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;      // your chat model deployment name
+  const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;      // chat model deployment name
   const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-02-15-preview";
 
   if (azEndpoint && azKey && azDeployment) {
@@ -161,53 +158,64 @@ const toProductId = (v = "") => {
   return s.replace(/[^\w]+/g, "_").replace(/_{2,}/g, "_").replace(/^_|_$/g, "");
 };
 
-function getOriginFromReq(req) {
-  const proto = req.headers["x-forwarded-proto"] || "https";
-  const host = req.headers["x-forwarded-host"] || req.headers.host || "localhost";
-  return `${proto}://${host}`;
-}
-
-async function fetchCallLibrary({ req, product, buyerType, mode }) {
+/** Robust loader that fetches the static JSON the same user could see in the browser. */
+async function fetchCallLibrary({ req, product, buyerType, mode, context, debug = false }) {
   const baseOverride = (process.env.CALL_LIB_BASE || "").replace(/\/+$/, "");
-  // Force https + the real host; avoid any odd x-forwarded-proto values
   const host = (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0];
   const origin = baseOverride || `https://${host}`;
   const url = `${origin}/content/call-library/v1/${mode}/${product}.json`;
 
-  // Forward auth context so /content can authorise us exactly like the browser
+  // Forward auth (works whether /content is public or not)
   const headers = {};
-  if (req.headers.cookie) headers["cookie"] = req.headers.cookie;
+  if (req.headers.cookie) headers.cookie = req.headers.cookie;
   if (req.headers["x-ms-client-principal"]) headers["x-ms-client-principal"] = req.headers["x-ms-client-principal"];
 
+  context.log(`[CallLib] GET ${url}`);
   const res = await fetch(url, { headers, cache: "no-store", redirect: "follow" });
+  const contentType = res.headers.get("content-type") || "";
+  context.log(`[CallLib] status ${res.status} ct=${contentType}`);
+
+  const dbg = { url, status: res.status, contentType };
+
   if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    if (debug) dbg.bodySample = body.slice(0, 300);
     const err = new Error(`Call library not found: ${mode}/${product}`);
     err.status = res.status;
+    err._debug = dbg;
     throw err;
   }
 
-  const doc = await res.json();
-  // … (rest of your existing logic unchanged)
-}
+  // Parse JSON defensively (SWA rewrites return HTML)
+  let doc;
+  try {
+    doc = await res.json();
+  } catch (e) {
+    const body = await res.text().catch(() => "");
+    const err = new Error("Call library JSON parse failed");
+    err.status = 500;
+    err._debug = { ...dbg, parseError: String(e), bodySample: body.slice(0, 300) };
+    throw err;
+  }
 
-  const doc = await res.json();
-
+  // ----- map to response shape -----
   let bt = buyerType;
-  if (!doc.buyer_types[bt]) bt = FALLBACK_ORDER.find(b => !!doc.buyer_types[b]);
+  if (!doc?.buyer_types?.[bt]) bt = FALLBACK_ORDER.find(b => !!doc?.buyer_types?.[b]);
   if (!bt) {
     const err = new Error(`No buyer_types available in ${mode}/${product}`);
     err.status = 422;
+    err._debug = dbg;
     throw err;
   }
 
-  const chosen = doc.buyer_types[bt];
-  const ppIndex  = Object.fromEntries((doc.shared.proof_points || []).map(p => [p.id, p.text]));
-  const ctaIndex = Object.fromEntries((doc.shared.ctas || []).map(c => [c.id, c.text]));
+  const chosen = doc.buyer_types[bt] || {};
+  const ppIndex  = Object.fromEntries((doc.shared?.proof_points || []).map(p => [p.id, p.text]));
+  const ctaIndex = Object.fromEntries((doc.shared?.ctas || []).map(c => [c.id, c.text]));
 
   const stageKeys = ["opening","buyer_pain","buyer_desire","example","objections","call_to_action"];
   const stages = {};
   stageKeys.forEach(k => {
-    const s = chosen.stages[k];
+    const s = (chosen.stages || {})[k] || {};
     stages[k] = {
       ...s,
       proof_points_text: (s.proof_points || []).map(id => ppIndex[id]).filter(Boolean),
@@ -215,14 +223,17 @@ async function fetchCallLibrary({ req, product, buyerType, mode }) {
     };
   });
 
-  return {
+  const result = {
     type: "call_script_v1",
     source: "larato_call_library",
     meta: doc.meta,
-    tone: doc.shared.tone,
+    tone: doc.shared?.tone,
     buyerType: bt,
     stages,
   };
+
+  if (debug) result._debug = dbg;
+  return result;
 }
 
 /* =========================
@@ -248,7 +259,7 @@ module.exports = async function (context, req) {
     return;
   }
 
-  // Require Azure SWA auth
+  // Require Azure SWA auth (SWA injects x-ms-client-principal for signed-in users)
   const principalHeader = req.headers["x-ms-client-principal"];
   if (!principalHeader) {
     context.res = { status: 401, headers: cors, body: { error: "Not authenticated" } };
@@ -267,18 +278,18 @@ module.exports = async function (context, req) {
        =================================================== */
     if (kind === "call-script") {
       try {
-        // Accept either top-level fields or inside variables (to match your form)
         const v = body.variables || body || {};
         const product   = toProductId(v.product || body.product || req.query?.product);
         const buyerType = toBuyerTypeId(v.buyerType || v.buyer_type || body.buyerType || body.buyer_type || req.query?.buyerType || req.query?.buyer_type);
         const mode      = toModeId(v.mode || v.call_type || body.mode || body.call_type || req.query?.mode || req.query?.call_type);
+        const debug     = String(req.query?.debug || body?.debug || "") === "1";
 
         if (!product || !buyerType || !mode) {
-          context.res = { status: 400, headers: cors, body: { error: "Missing product / buyerType / mode" } };
+          context.res = { status: 400, headers: { "Content-Type": "application/json", ...cors }, body: { error: "Missing product / buyerType / mode" } };
           return;
         }
 
-        const result = await fetchCallLibrary({ req, product, buyerType, mode });
+        const result = await fetchCallLibrary({ req, product, buyerType, mode, context, debug });
         context.res = {
           status: 200,
           headers: { "Content-Type": "application/json", ...cors, "Cache-Control": "no-store" },
@@ -286,9 +297,12 @@ module.exports = async function (context, req) {
         };
         return;
       } catch (e) {
-        // If you prefer an automatic fallback to your legacy generator,
-        // you can jump to the legacy path below instead of returning the error.
-        context.res = { status: e.status || 404, headers: cors, body: { error: e.message || "Call library unavailable" } };
+        context.log.error(`[CallLib] route error: ${e?.message || e}`);
+        context.res = {
+          status: e.status || 500,
+          headers: { "Content-Type": "application/json", ...cors },
+          body: { error: String(e?.message || "Call library unavailable"), _debug: e?._debug }
+        };
         return;
       }
     }
@@ -300,7 +314,7 @@ module.exports = async function (context, req) {
     if (!parsed.success) {
       context.res = {
         status: 400,
-        headers: cors,
+        headers: { "Content-Type": "application/json", ...cors },
         body: { error: "Invalid request body", details: parsed.error.flatten() },
       };
       return;
@@ -308,24 +322,20 @@ module.exports = async function (context, req) {
 
     const { pack, template, variables } = parsed.data;
 
-    // Load packs from the same place packs-debug reads
     const { packs, packPath } = loadPacks();
 
-    // Resolve pack
     const packDef = packs[pack];
     if (!packDef) {
       context.res = {
         status: 400,
-        headers: cors,
+        headers: { "Content-Type": "application/json", ...cors },
         body: { error: `Unknown pack '${pack}'`, packPath, availablePacks: Object.keys(packs || {}) }
       };
       return;
     }
 
-    // Support both shapes: nested .templates or flat
     const templates = packDef.templates || packDef;
 
-    // Resolve template (+ legacy alias support if you still need it)
     let tplDef =
       templates[template] ||
       (template === "first_call_script" ? templates["intro_builder"] : null) ||
@@ -334,17 +344,12 @@ module.exports = async function (context, req) {
     if (!tplDef) {
       context.res = {
         status: 400,
-        headers: cors,
-        body: {
-          error: `Unknown template '${template}' in pack '${pack}'`,
-          packPath,
-          availableTemplates: Object.keys(templates || {})
-        },
+        headers: { "Content-Type": "application/json", ...cors },
+        body: { error: `Unknown template '${template}' in pack '${pack}'`, packPath, availableTemplates: Object.keys(templates || {}) },
       };
       return;
     }
 
-    // Determine system/temperature/prompt (template overrides default when present)
     const defaultSys  = packDef.default?.system ?? "";
     const defaultTemp = packDef.default?.temperature ?? 0.4;
 
@@ -356,25 +361,20 @@ module.exports = async function (context, req) {
 
     const templateString = typeof tplDef === "string" ? tplDef : String(tplDef.prompt || "");
     if (!templateString) {
-      context.res = { status: 400, headers: cors, body: { error: `Template '${template}' in pack '${pack}' has no prompt`, packPath } };
+      context.res = { status: 400, headers: { "Content-Type": "application/json", ...cors }, body: { error: `Template '${template}' in pack '${pack}' has no prompt`, packPath } };
       return;
     }
 
-    // Validate required variables (treat some as optional even if present in template)
     const OPTIONAL_VARS = new Set(["call_to_action"]);
     const required = requiredVarsForTemplate(tplDef).filter((k) => !OPTIONAL_VARS.has(k));
-    const missing = required.filter(
-      (k) => !(k in variables) || variables[k] == null || String(variables[k]).trim() === ""
-    );
+    const missing = required.filter((k) => !(k in variables) || variables[k] == null || String(variables[k]).trim() === "");
     if (missing.length) {
-      context.res = { status: 400, headers: cors, body: { error: "Missing required variables", required, missing, packPath } };
+      context.res = { status: 400, headers: { "Content-Type": "application/json", ...cors }, body: { error: "Missing required variables", required, missing, packPath } };
       return;
     }
 
-    // Compile prompt
     const compiledPrompt = compileTemplate(templateString, variables);
 
-    // ---- Call GPT ----
     let llmText = "";
     try {
       const llmRes = await callModel({ system, prompt: compiledPrompt, temperature });
@@ -390,19 +390,19 @@ module.exports = async function (context, req) {
       body: {
         system,
         temperature,
-        preview: compiledPrompt,   // compiled prompt for debugging/inspection
+        preview: compiledPrompt,
         variables,
         pack,
         template,
-        packPath,                  // helpful for diagnostics
-        output: llmText || ""      // ONLY model text; never the compiled prompt
+        packPath,
+        output: llmText || ""
       },
     };
   } catch (err) {
     context.log.error("generate error", err);
     context.res = {
       status: 500,
-      headers: cors,
+      headers: { "Content-Type": "application/json", ...cors },
       body: { error: "Server error", detail: String(err?.message ?? err) },
     };
   }
