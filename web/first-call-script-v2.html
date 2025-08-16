@@ -361,7 +361,10 @@
     </li>
   </template>
 
-  <script>
+  <!-- TURN THIS SCRIPT INTO A MODULE + IMPORT THE LIBRARY -->
+  <script type="module">
+    import { getCallScript } from "./lib/callLibrary.js";
+
     (function () {
       /* =========================================================================
          Constants & element refs
@@ -636,6 +639,42 @@
       }
 
       /* =========================================================================
+         NEW: mapping helpers to library IDs
+         ========================================================================= */
+      const toModeId = (v) => (String(v).toLowerCase().startsWith('p') ? 'partner' : 'direct');
+
+      const toBuyerTypeId = (v) => {
+        const s = String(v).toLowerCase();
+        if (s.startsWith('innovator')) return 'innovators';
+        if (s.startsWith('early adopter')) return 'early_adopters';
+        if (s.startsWith('early majority')) return 'early_majority';
+        if (s.startsWith('late majority')) return 'late_majority';
+        if (s.startsWith('sceptic') || s.startsWith('skeptic')) return 'sceptics';
+        return 'early_majority';
+      };
+
+      // For products, prefer exact IDs if your <select> values match the library.
+      // Otherwise apply a light normaliser so "Connectivity (mobile & fixed)" → "connectivity".
+      const toProductId = (v) => {
+        const s = String(v).toLowerCase().trim();
+        const directMap = {
+          'connectivity (mobile & fixed)':'connectivity',
+          'connectivity':'connectivity',
+          'cybersecurity':'cybersecurity',
+          'artificial intelligence':'ai',
+          'ai':'ai',
+          'hardware/software':'hardware_software',
+          'hardware & software':'hardware_software',
+          'it solutions':'it_solutions',
+          'microsoft solutions':'microsoft_solutions',
+          'telecoms solutions':'telecoms_solutions',
+          'telecommunications solutions':'telecoms_solutions'
+        };
+        if (directMap[s]) return directMap[s];
+        return s.replace(/[^\w]+/g,'_').replace(/_{2,}/g,'_').replace(/^_|_$/g,'');
+      };
+
+      /* =========================================================================
          Event wiring (crucial for enabling the button)
          ========================================================================= */
       // CHANGED: header select & remember checkbox emit directly to validator
@@ -697,6 +736,41 @@
         setStatus('Download started.');
       });
 
+      /* =========================================================================
+         NEW: render helper to print the six stages as readable text
+         ========================================================================= */
+      function renderFromLibraryPayload(lib) {
+        const s = lib.stages;
+        const section = (title, body, extras=[]) => {
+          let out = `\n${title}\n${'-'.repeat(title.length)}\n${body}\n`;
+          extras.forEach(x => { if (Array.isArray(x) && x.length) out += `• ${x.join('\n• ')}\n`; });
+          return out;
+        };
+
+        const text =
+          section('Opening', s.opening.script) +
+          section('Buyer pain', s.buyer_pain.script) +
+          section('Buyer desire', s.buyer_desire.script) +
+          section('Example', s.example.script, [s.example.proof_points_text||[]]) +
+          section('Objections', s.objections.script, [s.objections.anticipated||[]]) +
+          section('Call to action', s.call_to_action.script, [s.call_to_action.ctas_text||[]]);
+
+        outputEl.textContent = text.trim();
+        outputMeta.textContent = `Source: Larato Call Library · ${lib.meta.product_id} · ${lib.buyerType} · ${lib.meta.sales_mode} · Updated ${lib.meta.updated_at}`;
+        copyBtn.disabled = false; downloadBtn.disabled = false;
+
+        // Fill Buyer needs from the stage summaries (short prompts for in-call)
+        setSlot('intel-priorities', s.opening.buyer_needs_summary || []);
+        setSlot('intel-pains', s.buyer_pain.buyer_needs_summary || []);
+        setSlot('intel-triggers', s.buyer_desire.buyer_needs_summary || []);
+        setSlot('intel-proof', s.example.proof_points_text?.length ? s.example.proof_points_text : (s.example.buyer_needs_summary||[]));
+        setSlot('intel-objections', s.objections.anticipated?.length ? s.objections.anticipated : (s.objections.buyer_needs_summary||[]));
+        setSlot('intel-ctas', s.call_to_action.ctas_text?.length ? s.call_to_action.ctas_text : (s.call_to_action.buyer_needs_summary||[]));
+      }
+
+      /* =========================================================================
+         SUBMIT: try Call Library first, fallback to /api/generate
+         ========================================================================= */
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
@@ -726,9 +800,42 @@
           context: fd.context || '',
           value_proposition: fd.value_proposition || ''
         };
-        const payload = { pack: 'uk_b2b_sales_core', template: 'first_call_script_v2', variables };
 
-        setBusy(true); setStatus('Generating…'); diag.open = false; diagJson.textContent = '';
+        setBusy(true); setStatus('Loading from Larato Call Library…'); diag.open = false; diagJson.textContent = '';
+
+        // 1) Try the structured library first
+        const lookup = {
+          product: toProductId(variables.product),
+          buyerType: toBuyerTypeId(variables.buyer_type),
+          mode: toModeId(variables.call_type)
+        };
+
+        try {
+          const lib = await getCallScript(lookup);
+          const previous = outputEl.textContent;
+          renderFromLibraryPayload(lib);
+
+          const delta = computeDelta(lastOutput, outputEl.textContent);
+          renderDelta(delta);
+          lastOutput = outputEl.textContent; localStorage.setItem(OUTPUT_KEY, lastOutput);
+
+          addActivity({
+            time: nowTime(),
+            product: variables.product || '—',
+            buyer_behaviour: variables.buyer_type || '—',
+            length: variables.length || '—'
+          });
+
+          setStatus('Done. (Using Larato Call Library)');
+          document.getElementById('output-title').focus();
+          return; // success path — skip API
+        } catch (libraryErr) {
+          // 2) If library file not found or malformed, fall back to your API
+          setStatus('Call Library not available for this selection — using generator…');
+        }
+
+        // Fallback: your existing generator
+        const payload = { pack: 'uk_b2b_sales_core', template: 'first_call_script_v2', variables };
 
         try {
           const res = await fetch('/api/generate', {
@@ -768,7 +875,7 @@
           renderIntel(productSel.value, buyerBehSel.value);
           if (out) injectRemindersFromScript(out);
 
-          setStatus('Done. Script ready.');
+          setStatus('Done. Script ready. (Generator fallback)');
           document.getElementById('output-title').focus();
 
         } catch (err) {
