@@ -168,16 +168,28 @@ function getOriginFromReq(req) {
 }
 
 async function fetchCallLibrary({ req, product, buyerType, mode }) {
-  const baseOverride = process.env.CALL_LIB_BASE || ""; // Optional CDN override
-  const origin = baseOverride || getOriginFromReq(req);
+  const baseOverride = (process.env.CALL_LIB_BASE || "").replace(/\/+$/, "");
+  // Force https + the real host; avoid any odd x-forwarded-proto values
+  const host = (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0];
+  const origin = baseOverride || `https://${host}`;
   const url = `${origin}/content/call-library/v1/${mode}/${product}.json`;
 
-  const res = await fetch(url, { cache: "no-store" });
+  // Forward auth context so /content can authorise us exactly like the browser
+  const headers = {};
+  if (req.headers.cookie) headers["cookie"] = req.headers.cookie;
+  if (req.headers["x-ms-client-principal"]) headers["x-ms-client-principal"] = req.headers["x-ms-client-principal"];
+
+  const res = await fetch(url, { headers, cache: "no-store", redirect: "follow" });
   if (!res.ok) {
     const err = new Error(`Call library not found: ${mode}/${product}`);
     err.status = res.status;
     throw err;
   }
+
+  const doc = await res.json();
+  // … (rest of your existing logic unchanged)
+}
+
   const doc = await res.json();
 
   let bt = buyerType;
