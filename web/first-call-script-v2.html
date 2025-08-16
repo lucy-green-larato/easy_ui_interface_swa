@@ -291,6 +291,7 @@
       const OUTPUT_KEY = 'first_call_script_v2.last_output';
       const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
       const INTEL_URL = '/src/intel.json';
+      const CALLLIB_INDEX_URL = '/content/call-library/v1/index.json';
 
       const REQUIRED = ['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
 
@@ -322,6 +323,23 @@
 
       const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
       const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      async function loadCallLibIndex() {
+       const res = await fetch(CALLLIB_INDEX_URL, { cache: 'no-store' });
+       if (!res.ok) return null;
+       return await res.json(); // { version, updated_at, products:[{id,label}], ... }
+      }
+
+      function populateProductsFromIndex(indexJson) {
+        const items = Array.isArray(indexJson?.products) ? indexJson.products : [];
+        productSel.innerHTML = '<option value="">Select…</option>';
+        for (const { id, label } of items) {
+          const opt = document.createElement('option');
+          opt.value = id;           // *** canonical ID e.g. "connectivity"
+          opt.textContent = label || id;
+          productSel.appendChild(opt);
+        }
+      }
 
       function setBusy(isBusy) {
         submitBtn.disabled = isBusy || !allRequiredFilled(form);
