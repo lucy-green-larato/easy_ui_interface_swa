@@ -282,7 +282,7 @@
 
   <!-- Module: uses lib/callLibrary.js -->
   <script type="module">
-    import { getCallScript } from "./lib/callLibrary.js";
+    import { getCallScript } from "/src/lib/callLibrary.js";
 
     (function () {
       const FORM_ID = 'script-form';
@@ -290,7 +290,7 @@
       const ACTIVITY_KEY = 'first_call_script_v2.activity';
       const OUTPUT_KEY = 'first_call_script_v2.last_output';
       const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
-      const INTEL_URL = './intel.json';
+      const INTEL_URL = '/src/intel.json';
 
       const REQUIRED = ['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
 
