@@ -1,16 +1,22 @@
 <script type="module">
-  import { getCallScript } from "/src/lib/callLibrary.js";
+  import { getIndex, getCallScript, canonical } from "/src/lib/callLibrary.js";
 
   (function () {
+    /* =========================================================================
+       Constants & element refs
+       ========================================================================= */
     const FORM_ID = 'script-form';
     const STORAGE_KEY = 'first_call_script_v2.form';
     const ACTIVITY_KEY = 'first_call_script_v2.activity';
     const OUTPUT_KEY = 'first_call_script_v2.last_output';
     const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
-    const INTEL_URL = './intel.json';                          // <-- relative keeps it simple
-    const CALLLIB_INDEX_URL = '/content/call-library/v1/index.json';
+    const INTEL_URL = '/src/intel.json'; // intel lives under /src
 
-    const REQUIRED = ['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
+    const REQUIRED = [
+      'call_type','seller_name','seller_company',
+      'prospect_name','prospect_role','prospect_company',
+      'buyer_behaviour','product'
+    ];
 
     const form = document.getElementById(FORM_ID);
     const submitBtn = document.getElementById('submit');
@@ -38,29 +44,12 @@
     let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
     let intel = null;
 
+    /* =========================================================================
+       Utilities & accessibility helpers
+       ========================================================================= */
     const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
     const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    // ---------- Call Library index ----------
-    async function loadCallLibIndex() {
-      const res = await fetch(CALLLIB_INDEX_URL, { cache: 'no-store' });
-      if (!res.ok) return null;
-      return await res.json(); // { products:[{id,label}], ... }
-    }
-    function populateProductsFromIndex(indexJson) {
-      const items = Array.isArray(indexJson?.products) ? indexJson.products : [];
-      productSel.innerHTML = '<option value="">Select…</option>';
-      for (const { id, label } of items) {
-        const opt = document.createElement('option');
-        opt.value = id;                 // canonical id (e.g., "connectivity")
-        opt.textContent = label || id;  // human label
-        productSel.appendChild(opt);
-      }
-    }
-    const getSelectedProductLabel = () =>
-      productSel.options[productSel.selectedIndex]?.text || productSel.value || '';
-
-    // ---------- UI helpers (unchanged) ----------
     function setBusy(isBusy) {
       submitBtn.disabled = isBusy || !allRequiredFilled(form);
       resetBtn.disabled = isBusy;
@@ -97,6 +86,7 @@
       else { errorEl.textContent = id==='call_type' ? 'Please choose a call type.' : 'This field is required.'; input.setAttribute('aria-invalid','true'); input.classList.add('invalid'); }
     }
 
+    // Save/restore state (include header control value)
     function saveForm() {
       const fd = Object.fromEntries(new FormData(form).entries());
       fd.call_type = callTypeSel.value || fd.call_type || '';
@@ -115,7 +105,9 @@
     }
     function clearFormState() { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
 
-    // ---------- Buyer needs helpers (unchanged) ----------
+    /* =========================================================================
+       Buyer needs helpers (unchanged)
+       ========================================================================= */
     const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
     const norm = s => String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015_\-\/]+/g,'-').replace(/[^\w\- ]+/g,'').trim();
     const BEHAVIOUR_SYNONYMS = { 'early adopter':'early-adopter','early majority':'early-majority','late majority':'late-majority','skeptic':'sceptic','sceptic':'sceptic' };
@@ -198,6 +190,11 @@
       setSlot('intel-ctas',       sections.ctas);
     }
 
+    // Use the label from the <select> (intel.json uses human names)
+    const getSelectedProductLabel = () =>
+      productSel.options[productSel.selectedIndex]?.text || productSel.value || '';
+
+    // Tiny heuristic for reminders from generated text
     function extractKeyPoints(text){
       const sentences = String(text).split(/(?<=[.!?])\s+/).map(s=>s.trim()).filter(Boolean);
       const keywords = /(reduce|save|cut|improv|increase|risk|cost|time|secure|resilien|revenue|margin|efficien|customer|cx|compliance|ml|ai|automate|protect)/i;
@@ -219,6 +216,9 @@
       setSlot('intel-triggers',   ['Keep in mind:', points[2] || '']);
     }
 
+    /* =========================================================================
+       Activity / delta log
+       ========================================================================= */
     function addActivity(entry) {
       const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
       list.unshift(entry);
@@ -252,6 +252,7 @@
       deltaLog.appendChild(a); deltaLog.appendChild(r);
     }
 
+    // Badge hydration
     async function hydrateUserBadge() {
       const el = document.getElementById('user-badge');
       try {
@@ -267,35 +268,9 @@
       }
     }
 
-    const toModeId = (v) => (String(v).toLowerCase().startsWith('p') ? 'partner' : 'direct');
-    const toBuyerTypeId = (v) => {
-      const s = String(v).toLowerCase();
-      if (s.startsWith('innovator')) return 'innovators';
-      if (s.startsWith('early adopter')) return 'early_adopters';
-      if (s.startsWith('early majority')) return 'early_majority';
-      if (s.startsWith('late majority')) return 'late_majority';
-      if (s.startsWith('sceptic') || s.startsWith('skeptic')) return 'sceptics';
-      return 'early_majority';
-    };
-    const toProductId = (v) => {
-      const s = String(v).toLowerCase().trim();
-      const map = {
-        'connectivity (mobile & fixed)':'connectivity',
-        'connectivity':'connectivity',
-        'cybersecurity':'cybersecurity',
-        'artificial intelligence':'ai',
-        'ai':'ai',
-        'hardware/software':'hardware_software',
-        'hardware & software':'hardware_software',
-        'it solutions':'it_solutions',
-        'microsoft solutions':'microsoft_solutions',
-        'telecoms solutions':'telecoms_solutions',
-        'telecommunications solutions':'telecoms_solutions'
-      };
-      return map[s] || s.replace(/[^\w]+/g,'_').replace(/_{2,}/g,'_').replace(/^_|_$/g,'');
-    };
-
-    // Events
+    /* =========================================================================
+       Events
+       ========================================================================= */
     ['change','input','blur'].forEach(evt => {
       callTypeSel.addEventListener(evt, () => {
         validateField(callTypeSel);
@@ -317,7 +292,7 @@
           refreshSubmitState();
         }
         if (e.type==='change' && (e.target === productSel || e.target === buyerBehSel)) {
-          // IMPORTANT: pass the label to intel (intel.json uses human names)
+          // intel.json expects human label
           renderIntel(getSelectedProductLabel(), buyerBehSel.value);
         }
       }, true);
@@ -354,6 +329,9 @@
       setStatus('Download started.');
     });
 
+    /* =========================================================================
+       Render helper (library payload → text + buyer needs)
+       ========================================================================= */
     function renderFromLibraryPayload(lib) {
       const s = lib.stages;
       const section = (title, body, extras=[]) => {
@@ -374,7 +352,6 @@
       outputMeta.textContent = `Source: Larato Call Library · ${lib.meta.product_id} · ${lib.buyerType} · ${lib.meta.sales_mode} · Updated ${lib.meta.updated_at}`;
       copyBtn.disabled = false; downloadBtn.disabled = false;
 
-      // Buyer-needs slots from stage summaries
       setSlot('intel-priorities', s.opening.buyer_needs_summary || []);
       setSlot('intel-pains', s.buyer_pain.buyer_needs_summary || []);
       setSlot('intel-triggers', s.buyer_desire.buyer_needs_summary || []);
@@ -383,6 +360,9 @@
       setSlot('intel-ctas', s.call_to_action.ctas_text?.length ? s.call_to_action.ctas_text : (s.call_to_action.buyer_needs_summary||[]));
     }
 
+    /* =========================================================================
+       Submit: use Call Library first; fallback to generator
+       ========================================================================= */
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (!allRequiredFilled(form)){
@@ -404,7 +384,7 @@
         prospect_company: fd.prospect_company || '',
         call_type: fd.call_type || callTypeSel.value || '',
         buyer_type: fd.buyer_behaviour || '',
-        product: fd.product || '',
+        product: fd.product || '', // canonical id from index
         tone: fd.tone || '',
         length: fd.length || '',
         call_to_action: fd.call_to_action || '',
@@ -415,9 +395,9 @@
       setBusy(true); setStatus('Loading from Larato Call Library…'); diag.open = false; diagJson.textContent = '';
 
       const lookup = {
-        product: variables.product,                         // canonical id from index
-        buyerType: toBuyerTypeId(variables.buyer_type),
-        mode: toModeId(variables.call_type)
+        product: variables.product,
+        buyerType: canonical.buyer(variables.buyer_type),
+        mode: canonical.mode(variables.call_type)
       };
 
       try {
@@ -438,7 +418,7 @@
         setStatus('Call Library not available for this selection — using generator…');
       }
 
-      // Generator fallback
+      // ---- Generator fallback (unchanged path) ----
       const payload = { pack: 'uk_b2b_sales_core', template: 'first_call_script_v2', variables };
       try {
         const res = await fetch('/api/generate', {
@@ -482,6 +462,9 @@
       }
     });
 
+    /* =========================================================================
+       Remembered call type chip
+       ========================================================================= */
     function loadCallPref() {
       try {
         const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
@@ -503,35 +486,41 @@
       mapLabel.textContent = pref?.call_type || (callTypeSel.value || 'Not set');
     }
 
+    /* =========================================================================
+       Init
+       ========================================================================= */
     (async function init(){
       hydrateUserBadge();
 
-      // intel.json (for Buyer needs)
+      // Load intel.json (for Buyer needs pane)
       try {
         const res = await fetch(INTEL_URL, { cache: 'no-store' });
         const raw = await res.json();
         intel = normaliseIntel(raw);
       } catch { intel = { products:{} }; }
 
-      // Populate products from call-library index; fallback to intel.json
+      // Populate Product select from call-library index; fallback to intel.json
       try {
-        const idx = await loadCallLibIndex();
-        if (idx && Array.isArray(idx.products) && idx.products.length) {
-          populateProductsFromIndex(idx);
-        } else {
-          throw new Error('No index products');
+        const idx = await getIndex(); // from /src/lib/callLibrary.js
+        const items = Array.isArray(idx?.products) ? idx.products : [];
+        productSel.innerHTML = '<option value="">Select…</option>';
+        for (const { id, label } of items) {
+          const opt = document.createElement('option');
+          opt.value = id;             // canonical id
+          opt.textContent = label || id;
+          productSel.appendChild(opt);
         }
       } catch {
+        // Fallback: legacy intel.json products (keys)
         productSel.innerHTML = '<option value="">Select…</option>';
         Object.keys(intel.products || {}).forEach(p => {
           const opt = document.createElement('option');
-          opt.value = p;
-          opt.textContent = p;
+          opt.value = p; opt.textContent = p;
           productSel.appendChild(opt);
         });
       }
 
-      // Restore saved state and call prefs
+      // Restore saved form state and remembered call type
       loadForm();
       loadCallPref();
 
@@ -540,8 +529,10 @@
         renderIntel(getSelectedProductLabel(), buyerBehSel.value);
       }
 
+      // Ensure button state is correct on first paint
       refreshSubmitState();
 
+      // Restore last output if present
       const last = localStorage.getItem(OUTPUT_KEY);
       if (last) { outputEl.textContent = last; copyBtn.disabled = false; downloadBtn.disabled = false; }
     })();
