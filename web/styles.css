@@ -89,6 +89,7 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 
 /* === Layout — full-width 3-column grid ============================ */
 .stage{max-width: var(--stage-max); margin-inline:auto}
+.stage { width: 100%; max-width: 100vw; }
 .layout{
   display:grid; gap:var(--gap); padding:var(--gap); align-items:start; width:100%;
   max-width: var(--stage-max);
@@ -98,7 +99,7 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
   grid-template-columns:
     minmax(0, 1.35fr)                                  /* LEFT */
     minmax(0, 2.65fr)                                  /* MIDDLE */
-    minmax(var(--right-min), clamp(14vw, 260px, 300px));/* RIGHT cap ≤300px */
+    minmax(var(--right-min), clamp(260px,14vw,300px));/* RIGHT cap ≤300px */
 }
 
 /* === Three white “windows” ======================================== */
