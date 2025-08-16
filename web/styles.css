@@ -313,3 +313,36 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   }
 }
 
+/* === Full-width 3-col layout (keep Buyer needs slim) ============== */
+
+/* 1) Kill any container max-width around the grid */
+:root { --stage-max: 100vw; }
+.stage, .layout { max-width: none !important; width: 100% !important; }
+
+/* Defensive: if your grid lives inside a generic “container”, remove caps */
+:where(.app-stage, .app-container, .container, .content, .page)
+  :where(.layout){
+  max-width: none !important;
+  width: 100% !important;
+}
+
+/* 2) Let left+middle grow; keep right rail narrow */
+.layout{
+  grid-template-columns:
+    minmax(520px, 1.35fr)           /* LEFT grows */
+    minmax(820px, 2.65fr)           /* MIDDLE grows most */
+    clamp(220px, 14vw, 300px);      /* RIGHT stays slim */
+}
+
+/* Ensure the right rail never stretches */
+.panel.right{ max-width: 300px !important; }
+
+/* 3) Ultra-wide monitors: give even more to the middle, keep rail slim */
+@media (min-width: 1800px){
+  .layout{
+    grid-template-columns:
+      minmax(560px, 1.4fr)
+      minmax(1020px, 3fr)
+      clamp(220px, 12vw, 300px);
+  }
+}
