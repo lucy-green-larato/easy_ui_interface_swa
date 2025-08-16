@@ -4,19 +4,6 @@
       "route": "/content/call-library/*",
       "allowedRoles": ["anonymous", "authenticated"],
       "headers": { "Cache-Control": "no-store" }
-    },
-    {
-      "route": "/src/*",
-      "allowedRoles": ["anonymous", "authenticated"],
-      "headers": { "Cache-Control": "no-store" }
-    },
-    {
-      "route": "/lib/*",
-      "allowedRoles": ["anonymous", "authenticated"]
-    },
-    {
-      "route": "/assets/*",
-      "allowedRoles": ["anonymous", "authenticated"]
     }
   ],
   "navigationFallback": {
@@ -24,17 +11,11 @@
     "exclude": [
       "/api/*",
       "/content/*",
-      "/src/*",
-      "/lib/*",
-      "/assets/*"
+      "/src/*"
     ]
   },
   "mimeTypes": {
     ".json": "application/json; charset=utf-8",
-    ".js": "text/javascript",
-    ".mjs": "text/javascript",
-    ".css": "text/css",
-    ".svg": "image/svg+xml"
+    ".js": "text/javascript"
   }
 }
-
