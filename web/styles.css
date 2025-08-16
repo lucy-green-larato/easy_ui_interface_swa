@@ -5,23 +5,24 @@
   --card-bg:#ffffff;
   --border:#e2e5ea;
   --text-1:#1d2129;
-  --text-2:#4a5160; /* a touch darker for contrast */
+  --text-2:#4a5160;
   --accent:#2458e6;
   --accent-pressed:#1f49be;
   --danger:#b00020;
   --ok:#0a7f2e;
 
-  /* Layout proportions that fit 1440px comfortably */
-  --left-min: 420px;
-  --middle-min: 640px;
-  --right-min: 320px;
-  --col-left: 1fr;
-  --col-middle: 1.6fr;
-  --col-right: 0.9fr;
+  /* Stage & header */
+  --stage-max: 1320px;            /* centers the app on large screens */
+  --header-h: 64px;               /* used by sticky offsets */
+
+  /* 3-col proportions */
+  --left-min: 480px;
+  --middle-min: 780px;
+  /* Right rail is intentionally slim via clamp (min / fluid / max) */
+  --right-min: 280px;
 
   /* Elevation / radii / rings */
   --radius:12px;
-  /* Use a SHADOW value for box-shadow focus rings */
   --ring-shadow: 0 0 0 2px rgba(36,88,230,.35);
   --ring-outline: 3px solid rgba(36,88,230,.8);
   --shadow:0 1px 2px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.06);
@@ -63,10 +64,14 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 *::-webkit-scrollbar-thumb{background:#cfd5e0;border-radius:999px}
 *::-webkit-scrollbar-thumb:hover{background:#b8c1d0}
 
-/* === Header ======================================================= */
+/* === Header (sticky with light elevation) ========================= */
 .app-header{
+  position: sticky; top: 0; z-index: 100;
   display:flex; align-items:center; justify-content:space-between;
-  gap:.75rem; padding:12px 24px; background:var(--card-bg); border-bottom:1px solid var(--border)
+  gap:.75rem; padding:12px 24px; background:var(--card-bg);
+  border-bottom:1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(16,24,40,.08), 0 1px 1px rgba(16,24,40,.06);
+  min-height: var(--header-h);
 }
 .header-left{display:flex; align-items:center; gap:.75rem; min-width:0; flex:1 1 auto}
 .logo{max-width:56px; max-height:56px; height:auto; width:auto; object-fit:contain}
@@ -83,15 +88,17 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 .badge svg{width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2}
 .badge.is-hidden{display:none}
 
-/* === Layout — 3-column grid (Script dominant, fits 1440px) ======== */
+/* === Layout — centered 3-column grid =============================== */
 .layout{
   display:grid; gap:var(--gap); padding:var(--gap); align-items:start; width:100%;
+  max-width: var(--stage-max);               /* centers the app */
+  margin-inline: auto;                       /* page gutters */
   grid-template-columns:
-    minmax(var(--left-min),  var(--col-left))     /* LEFT  (Form)      */
-    minmax(var(--middle-min),var(--col-middle))   /* MIDDLE (Script)   */
-    minmax(var(--right-min), var(--col-right));   /* RIGHT (Intel)     */
+    minmax(var(--left-min), 1.1fr)           /* LEFT  (Form)   */
+    minmax(var(--middle-min), 2.2fr)         /* MIDDLE (Script)*/
+    clamp(var(--right-min), 22vw, 340px);    /* RIGHT (Intel)  — slim & capped */
 }
-.panel{background:transparent; border:0; border-radius:0; padding:0}
+.panel{background:transparent; border:0; border-radius:0; padding:0; min-width:0}
 .panel.left{grid-column:1}
 .panel.middle{grid-column:2}
 .panel.right{grid-column:3}
@@ -103,8 +110,10 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
   border-radius:var(--radius);
   padding:18px;
   margin:0 0 var(--s-3);
-  box-shadow:var(--shadow)
+  box-shadow:var(--shadow);
+  transition: box-shadow .18s ease;
 }
+.card:hover{ box-shadow: 0 8px 20px rgba(16,24,40,.12); }
 /* Kill nested “double boxes” */
 .card .card{background:transparent; border:0; box-shadow:none; padding:0; margin:0}
 
@@ -156,9 +165,8 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   padding:14px; border-radius:12px; min-height:240px; outline:none; resize:vertical;
   font-variant-ligatures: contextual;
 }
-
-/* Optional: keep the script in view */
-.panel.middle .output-card{ position: sticky; top: calc(72px + 12px); }
+/* Keep the script visible under the sticky header */
+.panel.middle .output-card{ position: sticky; top: calc(var(--header-h) + 12px); z-index: 5; }
 
 /* On widescreens: What changed & Recent activity side-by-side */
 @media (min-width: 1200px){
@@ -173,7 +181,7 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
 /* === Right (Buyer needs) — single column, clean separators ========= */
 .intel .intel-head{
   display:flex; align-items:center; justify-content:space-between; gap:var(--s-2);
-  position:sticky; top:0; background:var(--card-bg); z-index:1; padding-top:6px;
+  position:sticky; top: calc(var(--header-h) + 8px); background:var(--card-bg); z-index:4; padding-top:6px;
 }
 /* FORCE one column everywhere */
 .intel-grid{ display:grid; grid-template-columns:1fr !important; gap:10px }
@@ -186,7 +194,12 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
 
 /* === Ultra-wide tuning ============================================ */
 @media (min-width: 1600px){
-  :root{ --middle-min: 720px; --col-middle: 1.8fr; --col-right: 0.9fr; }
+  .layout{
+    grid-template-columns:
+      minmax(520px, 1.1fr)
+      minmax(900px, 2.4fr)
+      clamp(280px, 20vw, 360px);
+  }
 }
 
 /* === Laptop: stack Buyer needs under Script ======================== */
@@ -235,7 +248,7 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   @page{ margin:16mm }
   body{ background:#fff; color:#000 }
   .app-header, .panel.left, .panel.right, .actions, #diagnostics, .status{ display:none !important }
-  .layout{ display:block; padding:0 }
+  .layout{ display:block; padding:0; max-width:none; }
   .output-card, .output{ box-shadow:none; border:0; padding:0; }
   #output-title{ margin:0 0 6mm; font-size:20pt }
   #output{
