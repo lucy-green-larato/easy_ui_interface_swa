@@ -1,0 +1,67 @@
+{
+  "meta": {
+    "product_id": "connectivity",
+    "sales_mode": "direct",
+    "version": "1.0.0",
+    "updated_at": "2025-08-16"
+  },
+  "shared": {
+    "tone": "Empathetic, commercially pragmatic, British English.",
+    "proof_points": [
+      {
+        "id": "pp_latency_sla",
+        "text": "Average latency reduced by 27–35% with our managed SD-WAN across 200+ UK sites.",
+        "source_id": "LARATO-RSCH-2024-CX-17"
+      },
+      {
+        "id": "pp_productivity",
+        "text": "Field teams reported 12% productivity uplift after mobile failover rollout.",
+        "source_id": "LARATO-RSCH-2025-CONN-05"
+      }
+    ],
+    "ctas": [
+      {
+        "id": "cta_low_risk_assessment",
+        "text": "Book a 20-minute bandwidth and resilience assessment — no commitment."
+      },
+      {
+        "id": "cta_pilot_site",
+        "text": "Run a two-site pilot with success criteria agreed up-front."
+      }
+    ]
+  },
+  "buyer_types": {
+    "early_majority": {
+      "guidance": "Lead with ROI, reliability, and business continuity.",
+      "stages": {
+        "opening": {
+          "script": "Appreciate your time — most teams we speak with are balancing cost control with keeping sites reliably online.",
+          "buyer_needs_summary": ["Empathy for cost pressure", "Reliability", "Operational load"]
+        },
+        "buyer_pain": {
+          "script": "Unplanned outages and sluggish apps drain productivity and service levels — and the costs are rarely visible up front.",
+          "buyer_needs_summary": ["Hidden downtime cost", "Productivity loss", "Customer impact"]
+        },
+        "buyer_desire": {
+          "script": "You’re looking for predictable performance, fewer call-outs, and clear SLAs — all within budget.",
+          "buyer_needs_summary": ["Predictable performance", "Fewer incidents", "SLA clarity", "Budget control"]
+        },
+        "example": {
+          "script": "We cut incident tickets by 22% for a 120-site operator within three months using managed failover and policy routing.",
+          "proof_points": ["pp_productivity"],
+          "buyer_needs_summary": ["Ticket reduction", "Quicker resolution", "Measurable ROI"]
+        },
+        "objections": {
+          "script": "If the concern is cost, we start with a targeted assessment to prove savings before any wider change.",
+          "anticipated": ["Budget constraints", "Change fatigue"],
+          "buyer_needs_summary": ["Cost justification", "Minimal disruption"]
+        },
+        "call_to_action": {
+          "script": "Would a 20-minute resilience assessment next week help quantify potential savings?",
+          "ctas": ["cta_low_risk_assessment"],
+          "buyer_needs_summary": ["Low-effort step", "Financial clarity"]
+        }
+      }
+    }
+  }
+}
