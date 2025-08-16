@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Tools · First Call Script (v2)</title>
-  <link rel="stylesheet" href="./styles.css?v=fix3" />
+  <link rel="stylesheet" href="./styles.css?v=fix4" />
   <style>
-    /* =============== Page-scoped CSS only (no global overrides) =============== */
+    /* Page-scoped CSS only */
     :root{
       --bg:#f7f7f9; --surface-1:#fff; --surface-2:#eef0f4; --surface-3:#e5e8ee;
       --text-1:#1d2129; --text-2:#5b6270; --accent:#2458e6; --accent-pressed:#1f49be;
@@ -17,17 +17,15 @@
     }
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:var(--text-1);font:16px/1.45 var(--font-system)}
-
-    /* Header */
     .app-header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);padding:var(--space-3) var(--space-5)}
     .header-left{display:flex;align-items:center;gap:.75rem;min-width:0;flex:1 1 auto}
-    .logo{width:clamp(44px,5vw,52px);height:auto;object-fit:contain;flex-shrink:0} /* responsive logo */
+    .logo{width:clamp(44px,5vw,52px);height:auto;object-fit:contain;flex-shrink:0}
     .brand-text{display:flex;flex-direction:column}
     .app-title{font-weight:600;margin:.25rem 0 0}
     .kicker{font-size:.875rem;color:var(--text-2);margin-top:.125rem}
     .header-right{display:flex;align-items:center;gap:.75rem;flex:0 0 auto}
 
-    /* Buttons (shared) */
+    /* Buttons */
     .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:999px;border:1px solid var(--surface-3);background:var(--surface-1);cursor:pointer;font-weight:600}
     .btn.small{padding:6px 10px;font-size:.9rem}
     .btn.primary{background:var(--accent);color:#fff;border-color:transparent}
@@ -36,11 +34,11 @@
     .btn.primary.busy .spinner{display:inline-block;animation:spin .9s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
 
-    /* (1) STYLE FIX — make the “Direct or partner sales” control look like other buttons */
+    /* Header “Direct or partner sales” – same look as other controls */
     .calltype-mini{
       display:flex;align-items:center;gap:.6rem;
       padding:6px 10px;border-radius:999px;
-      background:var(--surface-1); border:1px solid var(--surface-3);  /* CHANGED: remove green chip look */
+      background:var(--surface-1); border:1px solid var(--surface-3);
       font-size:.95rem; white-space:nowrap;
     }
     .calltype-mini .mini-label{font-weight:600}
@@ -53,15 +51,15 @@
     .badge svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
     .badge.is-hidden{display:none}
 
-    /* (1) LAYOUT & “use all screen” */
+    /* Layout */
     .layout{
       display:grid;
-      grid-template-columns: 1fr 1.15fr 1fr; /* middle slightly wider to avoid squashing */
+      grid-template-columns: 1fr 1.15fr 1fr;
       gap: var(--space-6);
       padding: var(--space-5);
       align-items:start;
       width:100%;
-      max-width:100vw;             /* fill available width */
+      max-width:100vw;
       box-sizing:border-box;
     }
     @media (max-width: 1200px){ .layout{ grid-template-columns: 1fr; } }
@@ -73,11 +71,9 @@
       box-shadow:var(--shadow);
       padding:var(--space-5);
       margin:0;
-      border:1px solid #e9ebf0;   /* single subtle border */
+      border:1px solid #e9ebf0;  /* single border */
     }
-
-    /* (1) Remove double-borders when nested */
-    .card .card{border:0; box-shadow:none; padding:0}
+    .card .card{border:0; box-shadow:none; padding:0} /* remove double borders inside */
 
     fieldset{border:0;margin:0 0 var(--space-5);padding:0}
     legend{font-weight:600;margin-bottom:var(--space-3);font-size:1.125rem}
@@ -100,21 +96,14 @@
     .status[data-kind="ok"]{color:var(--ok)}
 
     /* Script output */
-    .output{
-      white-space:pre-wrap;background:#f6f7fb;color:#1f2937;
-      border:1px solid #e5e7eb;  /* keep single border for readability */
-      padding:var(--space-4);border-radius:8px;min-height:180px;outline:none
-    }
+    .output{white-space:pre-wrap;background:#f6f7fb;color:#1f2937;border:1px solid #e5e7eb;padding:var(--space-4);border-radius:8px;min-height:180px;outline:none}
 
-    /* (1) Buyer needs as ONE column */
-    .intel-grid{display:grid;grid-template-columns:1fr;gap:var(--space-3)}   /* CHANGED: single column */
-    .intel .intel-slot{background:var(--surface-2);padding:var(--space-3);border-radius:8px;border:0} /* CHANGED: no inner border */
-
+    /* Buyer needs – single column, no inner borders */
+    .intel-grid{display:grid;grid-template-columns:1fr;gap:var(--space-3)}
+    .intel .intel-slot{background:var(--surface-2);padding:var(--space-3);border-radius:8px;border:0}
   </style>
 </head>
 <body>
-
-  <!-- HEADER -->
   <header class="app-header" role="banner">
     <div class="header-left">
       <img class="logo" src="./larato-logo.svg" alt="Larato" />
@@ -125,9 +114,9 @@
     </div>
 
     <div class="header-right">
-      <!-- (1) Restyled control (now matches other buttons) -->
       <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
         <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
+        <!-- Note the explicit form association -->
         <select id="call_type" name="call_type" form="script-form" required aria-describedby="call_type_error">
           <option value="">Select…</option>
           <option>Direct</option>
@@ -152,7 +141,6 @@
     </div>
   </header>
 
-  <!-- LAYOUT: Form | Script | Buyer needs -->
   <main id="main" class="layout" role="main">
     <!-- LEFT -->
     <section class="panel left" aria-label="Form">
@@ -166,26 +154,22 @@
               <p class="help">Shown in the opening line.</p>
               <p class="error" id="seller_name_error" role="alert" aria-live="polite"></p>
             </div>
-
             <div class="field">
               <label for="seller_company">Your company <span aria-hidden="true" class="req">*</span></label>
               <input id="seller_company" name="seller_company" required autocomplete="organization" />
               <p class="help">Organisation you represent.</p>
               <p class="error" id="seller_company_error" role="alert" aria-live="polite"></p>
             </div>
-
             <div class="field">
               <label for="prospect_name">Prospect name <span aria-hidden="true" class="req">*</span></label>
               <input id="prospect_name" name="prospect_name" required />
               <p class="error" id="prospect_name_error" role="alert" aria-live="polite"></p>
             </div>
-
             <div class="field">
               <label for="prospect_role">Prospect role <span aria-hidden="true" class="req">*</span></label>
               <input id="prospect_role" name="prospect_role" required placeholder="e.g., Finance Director" />
               <p class="error" id="prospect_role_error" role="alert" aria-live="polite"></p>
             </div>
-
             <div class="field">
               <label for="prospect_company">Prospect company <span aria-hidden="true" class="req">*</span></label>
               <input id="prospect_company" name="prospect_company" required />
@@ -246,15 +230,15 @@
             </div>
           </div>
 
-          <div class="field">
-            <label for="value_proposition">Unique Selling Points (optional)</label>
-            <textarea id="value_proposition" name="value_proposition" rows="2" placeholder="Your USPs. Leave blank if you prefer the model to infer."></textarea>
-          </div>
+            <div class="field">
+              <label for="value_proposition">Unique Selling Points (optional)</label>
+              <textarea id="value_proposition" name="value_proposition" rows="2" placeholder="Your USPs. Leave blank if you prefer the model to infer."></textarea>
+            </div>
 
-          <div class="field">
-            <label for="context">Other points to cover in the call (optional)</label>
-            <textarea id="context" name="context" rows="3" placeholder="Any additional talking points. Optional."></textarea>
-          </div>
+            <div class="field">
+              <label for="context">Other points to cover in the call (optional)</label>
+              <textarea id="context" name="context" rows="3" placeholder="Any additional talking points. Optional."></textarea>
+            </div>
         </fieldset>
 
         <div class="actions">
@@ -384,7 +368,7 @@
         ctas: document.getElementById('intel-ctas'),
       };
 
-      let intel = null;           // normalised intel
+      let intel = null;
       let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
 
       const qs = (name) => form.querySelector(`[name="${name}"]`);
@@ -392,31 +376,24 @@
       const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
       function setBusy(isBusy) {
-        submitBtn.disabled = isBusy || !form.checkValidity();
+        submitBtn.disabled = isBusy || !allRequiredFilled();      /* CHANGED */
         resetBtn.disabled = isBusy;
         const hasText = !!outputEl.textContent.trim();
         copyBtn.disabled = isBusy || !hasText;
         downloadBtn.disabled = isBusy || !hasText;
         submitBtn.classList.toggle('busy', isBusy);
       }
-      function setStatus(msg, kind='info') {
-        statusEl.textContent = msg; statusEl.dataset.kind = kind;
-      }
+      function setStatus(msg, kind='info') { statusEl.textContent = msg; statusEl.dataset.kind = kind; }
+
       function validateField(input) {
-        if (input.id === 'call_type') {
-          const errEl = document.getElementById('call_type_error');
-          if (input.validity.valid) { errEl.textContent = ''; input.classList.remove('invalid'); }
-          else { errEl.textContent = 'Please choose a call type.'; input.classList.add('invalid'); }
-          return;
-        }
-        const errorEl = document.getElementById(`${input.id}_error`);
-        if (!errorEl) return;
-        if (input.validity.valid) { errorEl.textContent = ''; input.classList.remove('invalid'); }
-        else {
-          input.classList.add('invalid');
-          errorEl.textContent = input.validity.valueMissing ? 'This field is required.' : 'Please check this value.';
+        const errorEl = document.getElementById(`${input.id}_error`) || document.getElementById(`${input.id}__error`);
+        const valid = !!String(input.value || '').trim();
+        if (errorEl) {
+          if (valid) { errorEl.textContent = ''; input.removeAttribute('aria-invalid'); }
+          else { errorEl.textContent = 'This field is required.'; input.setAttribute('aria-invalid','true'); }
         }
       }
+
       function saveForm() {
         const data = Object.fromEntries(new FormData(form).entries());
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -424,17 +401,42 @@
       function loadForm() {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return;
-        try { const data = JSON.parse(raw); Object.entries(data).forEach(([k,v]) => { const el = qs(k); if (el) el.value = v; }); } catch {}
+        try { const data = JSON.parse(raw); Object.entries(data).forEach(([k,v]) => { const el = form.querySelector(`[name="${k}"]`) || document.getElementById(k); if (el) el.value = v; }); } catch {}
       }
-      function clearFormState() {
-        localStorage.removeItem(STORAGE_KEY);
-        localStorage.removeItem(ACTIVITY_KEY);
-      }
-      function refreshSubmitState() {
-        submitBtn.disabled = !form.checkValidity();
-      }
+      function clearFormState() { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
 
-      /* ----- robust matching utils ----- */
+      /* ====== DETERMINISTIC VALIDATION (fix for disabled button) ======
+         We don't rely on form.checkValidity() here — we check each required
+         control by id/name and ensure it's non-empty. This is robust even
+         for form-associated elements (e.g., the header call_type select). */
+      function allRequiredFilled(){
+        const missing = [];
+        REQUIRED.forEach(name => {
+          const el = form.elements[name] || document.getElementById(name);   // covers header select
+          const val = (el && typeof el.value === 'string') ? el.value.trim() : '';
+          if (!val) missing.push(name);
+        });
+        // Set helpful status when incomplete
+        if (missing.length){
+          const label = {
+            call_type: 'Direct or partner sales',
+            seller_name: 'Your name',
+            seller_company: 'Your company',
+            prospect_name: 'Prospect name',
+            prospect_role: 'Prospect role',
+            prospect_company: 'Prospect company',
+            buyer_behaviour: 'Buyer behaviour',
+            product: 'Product'
+          };
+          setStatus(`Please complete: ${missing.map(k=>label[k]||k).join(', ')}.`, 'error');
+        } else {
+          setStatus('');
+        }
+        return missing.length === 0;
+      }
+      function refreshSubmitState(){ submitBtn.disabled = !allRequiredFilled(); }  /* CHANGED */
+
+      /* Matching / intel / reminders (unchanged from previous fixed version) */
       const norm = s => String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015_\-\/]+/g,'-').trim();
       const BEHAVIOUR_SYNONYMS = { 'early adopter':'early-adopter','early majority':'early-majority','late majority':'late-majority','skeptic':'sceptic','sceptic':'sceptic' };
       function getKeyInsensitive(obj, requested){
@@ -446,39 +448,19 @@
       }
       const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
       const pEl = t => { const el=document.createElement('p'); el.textContent=t; return el; };
-      const setSlot = (id, arr=[]) => {
-        const slot=document.getElementById(id);
-        const items=(arr.length?arr:['No data available for this selection.']);
-        slot.replaceChildren(...items.map(pEl));
-      };
-      const fillAll = arr => {
-        setSlot('intel-priorities', arr);
-        setSlot('intel-pains',      arr);
-        setSlot('intel-triggers',   arr);
-        setSlot('intel-proof',      arr);
-        setSlot('intel-objections', arr);
-        setSlot('intel-ctas',       arr);
-      };
+      const setSlot = (id, arr=[]) => { const slot=document.getElementById(id); const items=(arr.length?arr:['No data available for this selection.']); slot.replaceChildren(...items.map(pEl)); };
+      const fillAll = arr => { setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr); setSlot('intel-proof', arr); setSlot('intel-objections', arr); setSlot('intel-ctas', arr); };
 
-      /* ----- NEW: schema normaliser (so Script-1 or Script-2 intel.json both work) ----- */
       function normaliseIntel(raw){
         if (!raw || typeof raw !== 'object') return { products:{} };
-        if (raw.products && typeof raw.products === 'object') return raw; // already Script-2 shape
-        // Script-1 shape => convert
+        if (raw.products && typeof raw.products === 'object') return raw;
         const out = { products:{} };
         Object.entries(raw).forEach(([product, buyersObj]) => {
           const behaviours = {};
           if (buyersObj && typeof buyersObj === 'object') {
             Object.entries(buyersObj).forEach(([behaviour, arr]) => {
               const [priorities, pains, triggers, proof, objections, ctas] = Array.isArray(arr) ? arr : [];
-              behaviours[behaviour] = {
-                priorities: toArr(priorities),
-                pains: toArr(pains),
-                triggers: toArr(triggers),
-                proof: toArr(proof),
-                objections: toArr(objections),
-                ctas: toArr(ctas)
-              };
+              behaviours[behaviour] = { priorities: toArr(priorities), pains: toArr(pains), triggers: toArr(triggers), proof: toArr(proof), objections: toArr(objections), ctas: toArr(ctas) };
             });
           }
           out.products[product] = { behaviours };
@@ -488,11 +470,9 @@
 
       function renderIntel(productLabel, behaviourLabel){
         if (!intel) return;
-
         const products = intel.products || {};
         const productKey = getKeyInsensitive(products, productLabel);
         const productNode = productKey ? products[productKey] : null;
-
         if (!productNode){ fillAll([`No data available (unknown product).`]); return; }
 
         let node = null;
@@ -534,17 +514,15 @@
         setSlot('intel-ctas',       sections.ctas);
       }
 
-      /* ----- (3) NEW: Extract three key reminders FROM THE GENERATED SCRIPT ----- */
       function extractKeyPoints(text){
-        // very lightweight heuristic: split to sentences, pick strong ones by keywords/length
         const sentences = String(text).split(/(?<=[.!?])\s+/).map(s=>s.trim()).filter(Boolean);
         const keywords = /(reduce|save|cut|improv|increase|risk|cost|time|secure|resilien|revenue|margin|efficien|customer|cx|compliance|ml|ai|automate|protect)/i;
         const scored = sentences.map(s => {
           let score = 0;
-          score += (s.match(/[,;:]/g)||[]).length;     // structure
+          score += (s.match(/[,;:]/g)||[]).length;
           if (keywords.test(s)) score += 3;
-          if (s.length >= 60 && s.length <= 180) score += 2; // snackable
-          if (/we|you|your|let's/i.test(s)) score += 1;      // action oriented
+          if (s.length >= 60 && s.length <= 180) score += 2;
+          if (/we|you|your|let's/i.test(s)) score += 1;
           return { s, score };
         }).sort((a,b)=>b.score-a.score);
         const picks = (scored.length?scored:sentences).slice(0,3).map(o=>o.s);
@@ -552,13 +530,12 @@
       }
       function injectRemindersFromScript(text){
         const points = extractKeyPoints(text);
-        // Prepend “From your script:” line and show points in the first three sections as reminders
         setSlot('intel-priorities', ['From your script:', ...points.slice(0,1)]);
         setSlot('intel-pains',      ['Reminder:', ...points.slice(1,2)]);
         setSlot('intel-triggers',   ['Keep in mind:', ...points.slice(2,3)]);
       }
 
-      // Activity log helpers
+      // Activity log
       function addActivity(entry) {
         const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
         list.unshift(entry);
@@ -578,7 +555,6 @@
         });
       }
 
-      // Delta
       function computeDelta(oldText, newText) {
         const oldLines = oldText.split('\n'), newLines = newText.split('\n');
         let added = 0, removed = 0;
@@ -594,7 +570,6 @@
         deltaLog.appendChild(a); deltaLog.appendChild(r);
       }
 
-      // Badge hydration
       async function hydrateUserBadge() {
         const el = document.getElementById('user-badge');
         try {
@@ -610,31 +585,19 @@
         }
       }
 
-      /* ====================== Events ====================== */
-
-      // (2) BUG FIX — selects fire "change" (not always "input"). Always refresh submit state.
-      form.addEventListener('input', (e) => {
-        if (e.target.matches('input,select,textarea')) {
-          validateField(e.target); saveForm(); refreshSubmitState();
-        }
-      });
-      form.addEventListener('change', (e) => {
-        if (e.target.matches('input,select,textarea')) {
-          validateField(e.target); saveForm(); refreshSubmitState();   /* CHANGED */
-        }
-        if (e.target === productSel || e.target === buyerBehSel) {
-          renderIntel(productSel.value, buyerBehSel.value);
-        }
-        if (e.target === callTypeSel || e.target === rememberCallType) {
-          saveCallPrefIfRequested();
-        }
-      });
-
-      toggleIntelBtn.addEventListener('click', () => {
-        const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
-        toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
-        intelBody.hidden = expanded;
-        toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
+      /* Events */
+      ['input','change','blur'].forEach(evt => {              /* CHANGED: ensure all paths update */
+        form.addEventListener(evt, (e) => {
+          if (e.target.matches('input,select,textarea')) {
+            validateField(e.target); saveForm(); refreshSubmitState();
+          }
+          if (e.type==='change' && (e.target === productSel || e.target === buyerBehSel)) {
+            renderIntel(productSel.value, buyerBehSel.value);
+          }
+          if (e.type==='change' && (e.target === callTypeSel || e.target === rememberCallType)) {
+            saveCallPrefIfRequested();
+          }
+        }, true);
       });
 
       document.getElementById('reset').addEventListener('click', () => {
@@ -664,15 +627,15 @@
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
-        // Validate & focus first invalid
-        let firstInvalid = null;
-        [...form.elements].forEach(el => {
-          if (el.matches('input,select,textarea')) {
-            validateField(el);
-            if (!firstInvalid && !el.checkValidity()) firstInvalid = el;
-          }
-        });
-        if (firstInvalid) { setStatus('Please fix the highlighted fields.', 'error'); firstInvalid.focus(); return; }
+        if (!allRequiredFilled()){
+          const firstMissing = REQUIRED.find(n => {
+            const el = form.elements[n] || document.getElementById(n);
+            return !el || !String(el.value||'').trim();
+          });
+          const el = form.elements[firstMissing] || document.getElementById(firstMissing);
+          if (el) el.focus();
+          return;
+        }
 
         const fd = Object.fromEntries(new FormData(form).entries());
         const variables = {
@@ -722,16 +685,11 @@
           renderDelta(delta);
           lastOutput = out; localStorage.setItem(OUTPUT_KEY, out);
 
-          addActivity({
-            time: nowTime(),
-            product: variables.product || '—',
-            buyer_behaviour: variables.buyer_type || '—',
-            length: variables.length || '—'
-          });
+          addActivity({ time: nowTime(), product: variables.product || '—', buyer_behaviour: variables.buyer_type || '—', length: variables.length || '—' });
 
-          /* (3) populate Buyer needs both from intel.json and from the generated script */
-          renderIntel(productSel.value, buyerBehSel.value);   // base intel
-          if (out) injectRemindersFromScript(out);            // add 3 key reminders
+          // Update Buyer needs from intel and then overlay reminders from the generated script
+          renderIntel(productSel.value, buyerBehSel.value);
+          if (out) injectRemindersFromScript(out);
 
           setStatus('Done. Script ready.');
           document.getElementById('output-title').focus();
@@ -744,7 +702,6 @@
         }
       });
 
-      // Prefs
       function loadCallPref() {
         try {
           const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
@@ -770,17 +727,17 @@
       (async function init(){
         hydrateUserBadge();
 
-        // Load intel
+        // Load intel.json (works with Script-1 or Script-2 after normalisation)
         try {
           const res = await fetch(INTEL_URL, { cache: 'no-store' });
           const raw = await res.json();
-          intel = normaliseIntel(raw);    /* CHANGED */
+          intel = normaliseIntel(raw);
         } catch { intel = { products: {} }; }
 
         loadForm();
         loadCallPref();
 
-        // Populate products (works with both schemas after normalisation)
+        // Populate products
         const products = Object.keys(intel.products || {});
         const current = productSel.value;
         productSel.innerHTML = '<option value="">Select…</option>';
@@ -791,16 +748,11 @@
           productSel.appendChild(opt);
         });
 
-        // Initial Buyer needs render if both selected
+        // Initial needs if both chosen
         if (productSel.value && buyerBehSel.value) renderIntel(productSel.value, buyerBehSel.value);
 
-        // Validate required fields and enable button if valid
-        REQUIRED.forEach(name => { const el = qs(name); if (el) validateField(el); });
-        refreshSubmitState();  /* CHANGED: ensure button reflects current validity */
-
-        // Restore last output
-        const last = localStorage.getItem(OUTPUT_KEY);
-        if (last) { outputEl.textContent = last; copyBtn.disabled = false; downloadBtn.disabled = false; }
+        // Ensure button state reflects current data (CRITICAL FIX)
+        refreshSubmitState();
       })();
     })();
   </script>
