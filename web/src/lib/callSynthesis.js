@@ -11,14 +11,14 @@ const REPLACERS = [
   [/\bmodeling\b/gi, "modelling"],
   [/\blicense\b/gi, "licence"],
   [/\butilize\b/gi, "utilise"],
-  [/\bprogram(s)?\b/gi, "programme$1"],
+  [/\bprogram(s)?\b/gi, "programme$1"]
 ];
 
 function toUk(text = "") {
   let out = String(text);
   for (const [re, rep] of REPLACERS) out = out.replace(re, rep);
   out = out.replace(/[ ]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
-  out = out.replace(/!+/g, "."); // no shouty punctuation
+  out = out.replace(/!+/g, "."); // avoid shouty punctuation
   return out;
 }
 
@@ -38,10 +38,11 @@ function sentenceify(str = "") {
 
 function ensureCtaTwoOptions(cta = "") {
   if (!cta) return "";
-  const hasOptions = /\b(monday|tuesday|wednesday|thursday|friday)\b/i.test(cta);
-  let out = cta.trim();
-  if (!/[.?!]$/.test(out)) out += ".";
-  if (!hasOptions) out += " Would Monday or Wednesday morning suit?";
+  const outHasTerminal = /[.?!]$/.test(cta);
+  let out = cta.trim() + (outHasTerminal ? "" : ".");
+  if (!/\b(monday|tuesday|wednesday|thursday|friday)\b/i.test(out)) {
+    out += " Would Monday or Wednesday morning suit?";
+  }
   return out;
 }
 
@@ -102,15 +103,19 @@ function composeNarrativeFromStages(stages = {}, opts = {}) {
   const s = stages;
 
   const hello = greet(v, tone);
+
   const opening =
     (s.opening && (s.opening.talk_track || s.opening.script) || "").trim() ||
     "Thanks for taking the call; I will keep this brief and useful.";
+  const openingPara = /warm/i.test(tone) ? warmSofteners(opening) : opening;
 
   const observation = makeObservationLine(tone, (opts.form && opts.form.sector) || "");
 
   const pain = (s.buyer_pain && (s.buyer_pain.talk_track || s.buyer_pain.script) || "").trim();
-  const desire = (s.buyer_desire && (s.buyer_desire.talk_track || s.buyer_desire.script) || "").trim() ||
-                 "The goal is practical control—clarity on usage, simple provisioning and room to scale without extra admin.";
+
+  const desire =
+    (s.buyer_desire && (s.buyer_desire.talk_track || s.buyer_desire.script) || "").trim() ||
+    "The goal is practical control—clarity on usage, simple provisioning and room to scale without extra admin.";
 
   const example = (s.example && (s.example.talk_track || s.example.script) || "").trim();
   const proofs = (s.example && (s.example.proof_points_text || s.example.proof_points) || []);
@@ -131,20 +136,19 @@ function composeNarrativeFromStages(stages = {}, opts = {}) {
   if (!cta && ctas.length) cta = String(ctas[0]);
   cta = ensureCtaTwoOptions(cta);
 
-  const soften = /warm/i.test(tone);
   const paras = [
-    (soffen(opening, soften) => warmSofteners(opening))(opening), // inline apply when warm
+    openingPara,
     observation,
     pain,
     desire,
     exampleLine,
     lightLayer,
     objectionsLine,
-    cta,
+    cta
   ].filter(Boolean);
 
   let text = [hello + paras[0], ...paras.slice(1)]
-    .map(p => sentenceify(stripStageHeadings(soften ? warmSofteners(p) : p)))
+    .map(p => sentenceify(stripStageHeadings(/warm/i.test(tone) ? warmSofteners(p) : p)))
     .join("\n\n");
 
   text = toUk(text);
@@ -164,7 +168,7 @@ function buildSalesTips(tone = "Professional (corporate)") {
     "Ask one clear next step and offer two time options.",
     "Confirm who else should attend and what would make the session valuable.",
     "Note any benchmarks promised and send them promptly after the call.",
-    "Close politely; thank them for their time even if they decline.",
+    "Close politely; thank them for their time even if they decline."
   ];
   if (warm) {
     tips.splice(2, 0, "Use a warm, respectful tone, but remain formal and precise.");
@@ -179,21 +183,22 @@ export async function generateCallFromLibrary({
   form = {},
   tone = "Professional (corporate)", // or "Warm (professional)"
   length = 150,
-  variables = {},
+  variables = {}
 } = {}) {
   const record = await getCallScript(lookup);
 
   let script = composeNarrativeFromStages(record.stages, { variables, tone, form });
 
   if (Number.isFinite(length) && length > 0) {
-    script = trimToWords(script, Math.max(60, Math.min(800, length)));
+    // cap within sensible bounds
+    const target = Math.max(60, Math.min(800, length));
+    script = trimToWords(script, target);
   }
 
   const tips = buildSalesTips(tone);
-  const tipsBlock = [
-    "Sales tips for colleagues conducting similar calls",
-    "",
-  ].concat(tips.map(t => "- " + t)).join("\n");
+  const tipsBlock = ["Sales tips for colleagues conducting similar calls", ""]
+    .concat(tips.map(t => "- " + t))
+    .join("\n");
 
   const combined = [script.trim(), "", tipsBlock].join("\n");
 
@@ -201,6 +206,6 @@ export async function generateCallFromLibrary({
     ...record,               // { meta, stages, buyerNeeds, metaLine, source, resolution }
     script_text: script,     // narrative only
     tips_text: tipsBlock,    // tips only
-    combined_text: combined, // narrative + tips
+    combined_text: combined  // narrative + tips
   };
 }
