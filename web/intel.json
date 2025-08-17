@@ -1,5 +1,5 @@
 {
-  "version": "stub-2025-08-15",
+  "version": "2025-08-17-call-library-complete",
   "products": {
     "Connectivity": {
       "buyers": {
@@ -9,7 +9,13 @@
           "triggers": ["Office moves", "New SaaS rollouts", "Vendor contract expiry"],
           "proof": ["99.99% SLA examples", "Before/after latency figures", "Customer reference logos"],
           "objections": ["We already have fibre", "Migration risk"],
-          "ctas": ["Pilot a secondary link", "20-minute WAN review"]
+          "ctas": ["Pilot a secondary link", "20-minute WAN review"],
+          "script_text": "Hi {{prospect_name}}, this is {{seller_name}} from {{seller_company}}. I work with IT leaders like you on connectivity that scales with their business. Companies planning SaaS rollouts or office moves often find MPLS too costly and inflexible. We’ve helped others move to fibre-first strategies that provide 99.99% uptime and deeper traffic insights. I’d love to show you a before-and-after latency profile. Is a short 20-minute WAN review worth booking in?",
+          "tips_list": [
+            "Focus on network resilience and flexibility",
+            "Use customer logos and latency comparisons",
+            "Offer a safe pilot such as secondary link testing"
+          ]
         },
         "CFO": {
           "priorities": ["Predictable spend", "Cost-to-value clarity"],
@@ -17,7 +23,13 @@
           "triggers": ["Budget reforecast", "Vendor rate rise"],
           "proof": ["3-year TCO model", "Benchmark vs incumbent"],
           "objections": ["Hidden fees?"],
-          "ctas": ["Share last 2 bills for quick savings check"]
+          "ctas": ["Share last 2 bills for quick savings check"],
+          "script_text": "Hi {{prospect_name}}, I’m {{seller_name}} from {{seller_company}}. We’ve been helping finance leaders review connectivity costs against actual value. Many are seeing mid-contract rate hikes or capex-heavy renewals that no longer make sense. We provide a benchmark versus your incumbent and model out 3-year TCO, typically revealing 20%+ overspend. Would you be open to sharing the last two invoices for a fast savings check?",
+          "tips_list": [
+            "Lead with cost predictability",
+            "Reassure about transparency (no hidden fees)",
+            "Use TCO modelling to anchor conversation"
+          ]
         }
       }
     },
@@ -29,14 +41,105 @@
           "triggers": ["Audit findings", "M&A due diligence"],
           "proof": ["MTTD/MTTR improvement", "ISO 27001 alignment"],
           "objections": ["Integration complexity"],
-          "ctas": ["Schedule a controls gap scan"]
+          "ctas": ["Schedule a controls gap scan"],
+          "script_text": "Hi {{prospect_name}}, {{seller_name}} here from {{seller_company}}. I speak with CISOs navigating alert overload and tool fragmentation. After recent audits or M&A activities, many realise key controls are underperforming. Our team can run a rapid controls gap scan that maps against ISO 27001 and surfaces quick wins. Would it help to compare how others have improved MTTD without full rip-and-replace?",
+          "tips_list": [
+            "Anchor on audit triggers and control gaps",
+            "Show ISO or compliance alignment early",
+            "Offer frictionless ways to start (e.g. scan)"
+          ]
         }
       }
     },
-    "Cloud": { "buyers": { "Head of Infrastructure": { "priorities": ["Right-size spend"], "pains": ["VM sprawl"], "triggers": ["Datacentre exit"], "proof": ["10–30% rightsizing"], "objections": ["Vendor lock-in"], "ctas": ["Cost optimisation review"] } } },
-    "UC & Collaboration": { "buyers": { "Head of Operations": { "priorities": ["Agent productivity"], "pains": ["Missed calls"], "triggers": ["Contact centre refresh"], "proof": ["AHT reduction"], "objections": ["Change management"], "ctas": ["Sandbox demo"] } } },
-    "Contact Centre": { "buyers": { "CX Leader": { "priorities": ["CSAT/ESAT"], "pains": ["Channel silos"], "triggers": ["Peak season"], "proof": ["NPS uplift"], "objections": ["Data migration"], "ctas": ["Data-light pilot"] } } },
-    "Managed Services": { "buyers": { "Operations Director": { "priorities": ["Coverage & SLA"], "pains": ["Skills gaps"], "triggers": ["Talent churn"], "proof": ["SLA adherence"], "objections": ["Loss of control"], "ctas": ["Runbook workshop"] } } },
-    "Devices": { "buyers": { "Procurement Lead": { "priorities": ["Lifecycle value"], "pains": ["Warranty admin"], "triggers": ["Hardware refresh"], "proof": ["DOA rates"], "objections": ["Compatibility"], "ctas": ["Bundle quote"] } } }
+    "Cloud": {
+      "buyers": {
+        "Head of Infrastructure": {
+          "priorities": ["Right-size spend"],
+          "pains": ["VM sprawl"],
+          "triggers": ["Datacentre exit"],
+          "proof": ["10–30% rightsizing"],
+          "objections": ["Vendor lock-in"],
+          "ctas": ["Cost optimisation review"],
+          "script_text": "Hi {{prospect_name}}, I’m {{seller_name}} from {{seller_company}}. Teams planning datacentre exits often uncover underused VMs and creeping cloud costs. We specialise in rightsizing strategies—showing where you can reclaim 10–30% spend. Our tooling is cloud-neutral and avoids vendor lock-in. Would it be useful to start with a no-commitment cost optimisation review?",
+          "tips_list": [
+            "Lead with cost and VM sprawl pain points",
+            "Offer neutral tooling to ease vendor concerns",
+            "Quantify typical savings (10–30%)"
+          ]
+        }
+      }
+    },
+    "UC & Collaboration": {
+      "buyers": {
+        "Head of Operations": {
+          "priorities": ["Agent productivity"],
+          "pains": ["Missed calls"],
+          "triggers": ["Contact centre refresh"],
+          "proof": ["AHT reduction"],
+          "objections": ["Change management"],
+          "ctas": ["Sandbox demo"],
+          "script_text": "Hi {{prospect_name}}, {{seller_name}} from {{seller_company}}. I help ops leaders get visibility into agent workflows. Missed calls and poor handoffs are common during contact centre refresh cycles. We've seen average handling time drop by 20% with the right UC overlay. Would you be open to testing this in a sandbox before committing further?",
+          "tips_list": [
+            "Use operational KPIs like AHT and call volume",
+            "Mention sandbox option to lower friction",
+            "Anticipate change management concerns"
+          ]
+        }
+      }
+    },
+    "Contact Centre": {
+      "buyers": {
+        "CX Leader": {
+          "priorities": ["CSAT/ESAT"],
+          "pains": ["Channel silos"],
+          "triggers": ["Peak season"],
+          "proof": ["NPS uplift"],
+          "objections": ["Data migration"],
+          "ctas": ["Data-light pilot"],
+          "script_text": "Hi {{prospect_name}}, this is {{seller_name}} from {{seller_company}}. I work with CX teams dealing with channel fragmentation—especially around peak seasons. We've delivered 18-point NPS uplifts by unifying chat, voice, and email. It starts with a simple data-light pilot. Would that be worth a look this quarter?",
+          "tips_list": [
+            "Start with seasonal or scale trigger (e.g. peak)",
+            "Quantify results (e.g. NPS uplift)",
+            "Remove friction via pilot framing"
+          ]
+        }
+      }
+    },
+    "Managed Services": {
+      "buyers": {
+        "Operations Director": {
+          "priorities": ["Coverage & SLA"],
+          "pains": ["Skills gaps"],
+          "triggers": ["Talent churn"],
+          "proof": ["SLA adherence"],
+          "objections": ["Loss of control"],
+          "ctas": ["Runbook workshop"],
+          "script_text": "Hi {{prospect_name}}, {{seller_name}} here from {{seller_company}}. We’re working with ops leaders facing rising churn and gaps in specialist coverage. Instead of just plugging holes, we align support models with your runbooks and SLA targets. Would you find value in a short runbook workshop to test alignment?",
+          "tips_list": [
+            "Connect talent churn to service risks",
+            "Reassure with SLA alignment",
+            "Offer a collaborative workshop, not a pitch"
+          ]
+        }
+      }
+    },
+    "Devices": {
+      "buyers": {
+        "Procurement Lead": {
+          "priorities": ["Lifecycle value"],
+          "pains": ["Warranty admin"],
+          "triggers": ["Hardware refresh"],
+          "proof": ["DOA rates"],
+          "objections": ["Compatibility"],
+          "ctas": ["Bundle quote"],
+          "script_text": "Hi {{prospect_name}}, I’m {{seller_name}} from {{seller_company}}. I speak with procurement leads planning hardware refreshes. Warranty admin, DOA rates, and compatibility headaches often slow everything down. We build bundled quotes aligned to your estate and can show how others have extended lifecycle value. Want to see a quick quote to compare?",
+          "tips_list": [
+            "Call out refresh cycle pressures",
+            "Mention lifecycle stats and bundling",
+            "Ease into pricing with quick quote offer"
+          ]
+        }
+      }
+    }
   }
 }
