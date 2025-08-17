@@ -1,222 +1,174 @@
-// /src/lib/callLibrary.js
-// Minimal, dependency-light. Works with your current layout AND the normalised v1 shape.
+// /src/lib/callSynthesis.js
+import { getCallScript } from "./callLibrary.js";
 
-const BASE = "/content/call-library/v1"; // adjust if you serve from a different public path
-
-// Additional index candidates to avoid "Loading…" when primary index is missing/empty.
-const INDEX_CANDIDATES = [
-  `${BASE}/index.json`,
-  "/content/call-library/index.json",
-  "/web/index.json",
+/* ---------- Tone & language utilities (formal UK) ---------- */
+const REPLACERS = [
+  [/\borganization(s)?\b/gi, "organisation$1"],
+  [/\borganize(d|s|r|ing)?\b/gi, "organise$1"],
+  [/\boptimization\b/gi, "optimisation"],
+  [/\boptimi(z|s)e\b/gi, "optimise"],
+  [/\bcenter(s)?\b/gi, "centre$1"],
+  [/\bmodeling\b/gi, "modelling"],
+  [/\blicense\b/gi, "licence"],
+  [/\butilize\b/gi, "utilise"],
+  [/\bprogram(s)?\b/gi, "programme$1"],
+  [/\brobust\b/gi, "reliable"],
+  [/\brollout\b/gi, "roll-out"],
+  [/\blocked in\b/gi, "locked-in"],
+  [/\bplay out\b/gi, "unfold"],
+  [/\bpile-?up\b/gi, "backlog"],
+  [/\bflex\b/gi, "adjust"],
+  [/\bguys\b/gi, "team"],
 ];
 
-export const canonical = {
-  buyer(input) {
-    const x = String(input).trim().toLowerCase();
-    if (["innovator", "innovators"].includes(x)) return "innovator";
-    if (["early adopter", "early adopters", "ea", "early-adopter"].includes(x)) return "early-adopter";
-    if (["early majority", "early-majority", "em"].includes(x)) return "early-majority";
-    if (["late majority", "late-majority", "lm"].includes(x)) return "late-majority";
-    if (["sceptic", "sceptics", "skeptic", "skeptics"].includes(x)) return "sceptic";
-    throw new Error(`Unknown buyer type: ${input}`);
-  },
-  mode(input) {
-    const x = String(input).trim().toLowerCase();
-    if (["partner", "channel"].includes(x)) return "partner";
-    if (["direct"].includes(x)) return "direct";
-    throw new Error(`Unknown sales mode: ${input}`);
-  },
-  id(input = "") {
-    return String(input)
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, "-")
-      .replace(/[^\w\-]+/g, "");
-  },
-};
-
-// Accept absolute (starts with "/") or relative (joined to BASE)
-async function loadJson(relOrAbs) {
-  const url = relOrAbs.startsWith("/")
-    ? relOrAbs
-    : `${BASE}/${relOrAbs}`.replace(/\/+/g, "/");
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    const err = new Error(`HTTP ${res.status} for ${url}`);
-    err.status = res.status;
-    err.url = url;
-    throw err;
-  }
-  return res.json();
+function toUk(text = "") {
+  let out = String(text);
+  for (const [re, rep] of REPLACERS) out = out.replace(re, rep);
+  // tidy whitespace & spacing
+  out = out.replace(/[ ]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  // remove shouty punctuation
+  out = out.replace(/!+/g, ".");
+  return out;
 }
 
-function zeroCountsFor(products) {
-  const zeroBT = { "innovator":0,"early-adopter":0,"early-majority":0,"late-majority":0,"sceptic":0 };
-  const counts = {};
-  for (const p of products) {
-    counts[p.id] = { direct: { ...zeroBT }, partner: { ...zeroBT } };
-  }
-  return counts;
+function stripStageHeadings(text = "") {
+  const re = /^(Opening|Buyer pain|Buyer desire|Example|Objections|Call to action)\s*[-–—]*\s*$/gim;
+  return text.replace(re, "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+function sentenceify(str = "") {
+  return str
+    .replace(/\s+([.,;:?!])/g, "$1")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function ensureCtaTwoOptions(cta = "") {
+  if (!cta) return "";
+  // If no day/time already present, add the two options
+  const hasOptions = /\b(monday|tuesday|wednesday|thursday|friday)\b/i.test(cta);
+  let out = cta.trim();
+  if (!/[.?!]$/.test(out)) out += ".";
+  if (!hasOptions) out += " Would Monday or Wednesday morning suit?";
+  return out;
+}
+
+// Gentle length limiter (keeps whole sentences)
+function trimToWords(text = "", target = 0) {
+  if (!target || target < 1) return text;
+  const words = text.split(/\s+/);
+  if (words.length <= target * 1.15) return text; // small buffer
+  // cut by sentences until under target
+  const sentences = text.split(/(?<=[.?!])\s+/);
+  const kept = [];
+  let count = 0;
+  for (const s of sentences) {
+    const w = s.trim().split(/\s+/).filter(Boolean).length;
+    if (count + w > target) break;
+    kept.push(s);
+    count += w;
+  }
+  return kept.join(" ").trim() || text;
+}
+
+/* ---------- Narrative composer (no headings, formal UK) ---------- */
+function composeNarrativeFromStages(stages = {}, opts = {}) {
+  const v = opts.variables || {}; // may include seller_name, seller_company, prospect_name
+  const s = stages;
+
+  // Greeting with names if passed by the UI; otherwise neutral
+  const hello = (() => {
+    const p = (v.prospect_name || "").trim();
+    const seller = (v.seller_name || "").trim();
+    const co = (v.seller_company || "").trim();
+    if (p || seller || co) {
+      const who = [seller || "a colleague", co && `from ${co}`].filter(Boolean).join(" ");
+      return p ? `Hi ${p}, it’s ${who}. ` : `Hi, it’s ${who}. `;
+    }
+    return "Hello, thanks for taking the call. ";
+  })();
+
+  const opening =
+    (s.opening?.talk_track || s.opening?.script || "").trim() ||
+    "I’ll keep this brief and useful.";
+
+  const pain = (s.buyer_pain?.talk_track || s.buyer_pain?.script || "").trim();
+  const desire = (s.buyer_desire?.talk_track || s.buyer_desire?.script || "").trim();
+
+  const example = (s.example?.talk_track || s.example?.script || "").trim();
+  const proofs = (s.example?.proof_points_text || s.example?.proof_points || []);
+  const exampleLine = [example, proofs.length ? `For example: ${proofs.join("; ")}.` : ""]
+    .filter(Boolean)
+    .join(" ");
+
+  const objections = (s.objections?.talk_track || s.objections?.script || "").trim();
+  const anticipated = (s.objections?.anticipated || []);
+  const objectionsLine = [objections, anticipated.length ? `Common concerns we handle: ${anticipated.join("; ")}.` : ""]
+    .filter(Boolean)
+    .join(" ");
+
+  let cta = (s.call_to_action?.talk_track || s.call_to_action?.script || "").trim();
+  const ctas = (s.call_to_action?.ctas_text || s.call_to_action?.ctas || []);
+  if (!cta && ctas.length) cta = String(ctas[0]);
+  cta = ensureCtaTwoOptions(cta);
+
+  // Join paragraphs
+  const paras = [
+    hello + opening,
+    pain,
+    desire,
+    exampleLine,
+    objectionsLine,
+    cta,
+  ].filter(Boolean);
+
+  // Clean up, UK normalise, de-heading, sentence tidy
+  let text = paras.map(p => sentenceify(stripStageHeadings(p))).join("\n\n");
+  text = toUk(text);
+  return text;
+}
+
+/* ---------- Public API ---------- */
 /**
- * getIndex() tries several locations and THROWS if empty,
- * so your page reliably falls back to intel.json in the catch {}.
+ * generateCallFromLibrary
+ * @param {Object} options
+ * @param {Object} options.lookup  { product, buyerType, mode }
+ * @param {Object} [options.form]  { company, role, scenario, meeting_type }  // optional context
+ * @param {string} [options.tone]  "Professional (corporate)" | "Warm (relaxed)" | ""
+ * @param {number} [options.length] soft word target (e.g., 100)
+ * @param {Object} [options.variables] optional names for greeting { seller_name, seller_company, prospect_name }
+ * @returns {Promise<{stages, metaLine, buyerNeeds, script_text, source, resolution}>}
  */
-export async function getIndex() {
-  let lastErr = null;
+export async function generateCallFromLibrary({
+  lookup,
+  form = {},
+  tone = "Professional (corporate)",
+  length = 120,
+  variables = {},
+} = {}) {
+  // Pull the canonical library record (with meta, stages and buyerNeeds)
+  const record = await getCallScript(lookup);
 
-  for (const url of INDEX_CANDIDATES) {
-    try {
-      const raw = await loadJson(url);             // absolute or relative both work
-      const products = raw.products || [];
-      const counts = raw.counts || zeroCountsFor(products);
-      const version = raw.version || "1.0.0";
-      const updated_at = raw.updated_at || new Date().toISOString().slice(0,10);
+  // Compose a narrative in the requested tone (rules-based, no headings)
+  let script = composeNarrativeFromStages(record.stages, { variables, tone });
 
-      if (!Array.isArray(products) || products.length === 0) {
-        throw new Error(`Empty index at ${url}`);
-      }
-
-      console.info(`[CallLibrary] Index hit: ${url}`);
-      return { version, updated_at, products, counts, __from: url };
-    } catch (e) {
-      lastErr = e;
-    }
+  // Formal tone is default; for "Warm" we make minimal softeners
+  if (/warm/i.test(tone)) {
+    script = script
+      .replace(/\bI will\b/g, "I’ll")
+      .replace(/\bwe will\b/gi, "we’ll")
+      .replace(/\bdo not\b/gi, "don’t");
   }
 
-  console.warn("[CallLibrary] Index miss across candidates:", INDEX_CANDIDATES);
-  throw lastErr || new Error("INDEX_NOT_FOUND");
-}
-
-function formatMetaLine(meta) {
-  const label = meta.product_label || meta.product_id;
-  return `Source: Larato Call Library · ${label} · ${meta.buyerType} · ${meta.sales_mode} · Updated ${meta.updated_at}`;
-}
-
-function toBuyerNeedsSlots(rec) {
-  const s = rec.stages;
-  const proof = (s.example && (s.example.proof_points_text || s.example.proof_points)) || [];
-  const ctas  = (s.call_to_action && (s.call_to_action.ctas_text || s.call_to_action.ctas)) || [];
-  return {
-    "intel-priorities": (s.buyer_desire && s.buyer_desire.buyer_needs_summary) || [],
-    "intel-pains": (s.buyer_pain && s.buyer_pain.buyer_needs_summary) || [],
-    "intel-proof-points": proof,
-    "intel-objections": (s.objections && (s.objections.anticipated || s.objections.buyer_needs_summary)) || [],
-    "intel-ctas": ctas,
-  };
-}
-
-/** Build a v1-shaped record from your legacy per-product file with buyer_types */
-function coerceFromLegacy(raw, { product_id, mode, buyerType, sourcePath }) {
-  // Map legacy buyer_types keys to canonical buyerType
-  const keyMap = {
-    "innovator":"innovators",
-    "early-adopter":"early_adopters",
-    "early-majority":"early_majority",
-    "late-majority":"late_majority",
-    "sceptic":"sceptics",
-  };
-  const btKey = keyMap[buyerType] || buyerType;
-
-  const node = raw?.buyer_types?.[btKey];
-  if (!node?.stages) return null;
-
-  const meta = {
-    product_id: raw?.meta?.product_id || product_id,
-    product_label: raw?.meta?.product_label,
-    sales_mode: raw?.meta?.sales_mode || mode,
-    buyerType,
-    version: raw?.meta?.version || "1.0.0",
-    updated_at: raw?.meta?.updated_at || new Date().toISOString().slice(0,10),
-    source_url: raw?.meta?.source_url || `${BASE}/${sourcePath}`,
-  };
-
-  // Normalise example/cta optional arrays to *_text fields
-  const stages = {
-    opening: node.stages.opening,
-    buyer_pain: node.stages.buyer_pain,
-    buyer_desire: node.stages.buyer_desire,
-    example: {
-      ...node.stages.example,
-      proof_points_text: node.stages.example?.proof_points || node.stages.example?.proof_points_text || [],
-      buyer_needs_summary: node.stages.example?.buyer_needs_summary || [],
-    },
-    objections: {
-      ...node.stages.objections,
-      buyer_needs_summary: node.stages.objections?.buyer_needs_summary || [],
-    },
-    call_to_action: {
-      ...node.stages.call_to_action,
-      ctas_text: node.stages.call_to_action?.ctas || node.stages.call_to_action?.ctas_text || [],
-      buyer_needs_summary: node.stages.call_to_action?.buyer_needs_summary || [],
-    },
-  };
-
-  return { meta, stages };
-}
-
-export async function getCallScript({ product, buyerType, mode }) {
-  const product_id = String(product).trim().toLowerCase();
-  const bt = canonical.buyer(buyerType);
-  const m  = canonical.mode(mode);
-
-  const attempts = [];
-  const tryLoad = async (rel) => {
-    attempts.push(rel);
-    try { return await loadJson(rel); }
-    catch (e) { if (e && typeof e.status === "number" && e.status === 404) return null; throw e; }
-  };
-
-  // 1) Preferred normalised v1 locations
-  let raw = await tryLoad(`${product_id}/${m}/${bt}.json`);
-  let usedFallback = false;
-
-  if (!raw) { raw = await tryLoad(`${product_id}/${m}/early-majority.json`); usedFallback = !!raw; }
-  if (!raw) { raw = await tryLoad(`${product_id}/direct/early-majority.json`); usedFallback = !!raw || usedFallback; }
-
-  // 2) Legacy per-product files (your current structure)
-  if (!raw) {
-    // Try mode/<product>.json then <product>.json
-    const legacyPaths = [`${m}/${product_id}.json`, `${product_id}.json`];
-    for (const rel of legacyPaths) {
-      const legacy = await tryLoad(rel);
-      if (legacy) {
-        const rec = coerceFromLegacy(legacy, { product_id, mode: m, buyerType: bt, sourcePath: rel });
-        if (rec) {
-          raw = rec;
-          usedFallback = true;
-          break;
-        }
-      }
-    }
+  // Respect requested length as a soft limit
+  if (Number.isFinite(length) && length > 0) {
+    script = trimToWords(script, Math.max(40, Math.min(600, length)));
   }
 
-  if (!raw) {
-    console.warn(`[CallLibrary] Miss: ${attempts.join(" -> ")}`);
-    const err = new Error("No library script found with fallback chain.");
-    err.resolution = { attempts, hit: null, fallbackUsed: false };
-    throw err;
-  }
-
-  const rec = raw.meta && raw.stages ? raw : { meta: raw.meta, stages: raw.stages };
-  const metaLine = formatMetaLine(rec.meta);
-  const buyerNeeds = toBuyerNeedsSlots(rec);
-
-  console.info(`[CallLibrary] Hit: ${attempts[attempts.length - 1]} (fallback: ${usedFallback ? "yes" : "no"})`);
-
   return {
-    ...rec,
-    resolution: { attempts, hit: attempts[attempts.length - 1], fallbackUsed: usedFallback },
-    metaLine,
-    buyerNeeds,
-    source: "library",
-  };
-}
-
-export function diagnostic(result) {
-  return {
-    usedLibrary: result?.source === "library",
-    resolution: result?.resolution ?? null,
+    ...record,                 // { meta, stages, buyerNeeds, metaLine, source, resolution }
+    script_text: script,       // ready-to-render narrative (no headings)
   };
 }
