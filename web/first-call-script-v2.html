@@ -4,8 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Tools · First Call Script (v2)</title>
-  <link rel="stylesheet" href="./styles.css?v=fix5" />
+  <link rel="stylesheet" href="./styles.css?v=fix4" />
   <style>
+    /* =============== Page-scoped CSS only (no global overrides) =============== */
     :root{
       --bg:#f7f7f9; --surface-1:#fff; --surface-2:#eef0f4; --surface-3:#e5e8ee;
       --text-1:#1d2129; --text-2:#5b6270; --accent:#2458e6; --accent-pressed:#1f49be;
@@ -13,11 +14,14 @@
       --shadow:0 1px 2px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.06);
       --radius:10px; --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px; --space-6:32px;
       --font-system:ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-      --right-min:280px;
+
+      /* Keep Buyer Needs column narrow on widescreens */
+      --right-min: 280px;
     }
     html,body{height:100%}
     body{margin:0;background:var(--bg);color:var(--text-1);font:16px/1.45 var(--font-system)}
 
+    /* Header */
     .app-header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);padding:var(--space-3) var(--space-5)}
     .header-left{display:flex;align-items:center;gap:.75rem;min-width:0;flex:1 1 auto}
     .logo{width:clamp(44px,5vw,52px);height:auto;object-fit:contain;flex-shrink:0}
@@ -26,15 +30,23 @@
     .kicker{font-size:.875rem;color:var(--text-2);margin-top:.125rem}
     .header-right{display:flex;align-items:center;gap:.75rem;flex:0 0 auto}
 
+    /* Buttons (shared) */
     .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:999px;border:1px solid var(--surface-3);background:var(--surface-1);cursor:pointer;font-weight:600}
     .btn.small{padding:6px 10px;font-size:.9rem}
     .btn.primary{background:var(--accent);color:#fff;border-color:transparent}
     .btn.primary:hover{background:var(--accent-pressed)}
+    .btn[disabled]{opacity:.55;cursor:not-allowed}
     .spinner{width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;display:none}
     .btn.primary.busy .spinner{display:inline-block;animation:spin .9s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
 
-    .calltype-mini{display:flex;align-items:center;gap:.6rem;padding:6px 10px;border-radius:999px;background:var(--surface-1);border:1px solid var(--surface-3);font-size:.95rem;white-space:nowrap}
+    /* Sales model chip */
+    .calltype-mini{
+      display:flex;align-items:center;gap:.6rem;
+      padding:6px 10px;border-radius:999px;
+      background:var(--surface-1); border:1px solid var(--surface-3);
+      font-size:.95rem; white-space:nowrap;
+    }
     .calltype-mini .mini-label{font-weight:600}
     .calltype-mini select{padding:6px 10px;border-radius:8px;border:1px solid var(--surface-3);background:#fff}
     .calltype-mini .remember{display:flex;align-items:center;gap:.35rem;color:var(--text-2)}
@@ -45,21 +57,36 @@
     .badge svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
     .badge.is-hidden{display:none}
 
-    .layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,2.65fr) minmax(var(--right-min),clamp(260px,14vw,300px));gap:var(--space-6);padding:var(--space-5);align-items:start;box-sizing:border-box}
-    @media (max-width:1200px){.layout{grid-template-columns:1fr}}
+    /* Layout */
+    .layout{
+      display:grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(0, 2.65fr) minmax(var(--right-min), clamp(260px, 14vw, 300px));
+      gap: var(--space-6);
+      padding: var(--space-5);
+      align-items:start;
+      width:100%;
+      max-width:100vw;
+      box-sizing:border-box;
+    }
+    @media (max-width: 1200px){ .layout{ grid-template-columns: 1fr; } }
 
     .panel{display:block}
     .card{background:transparent;border:0;box-shadow:none;padding:0}
-    .card .card{border:0;box-shadow:none;padding:0}
+    .card .card{border:0; box-shadow:none; padding:0}
+
     fieldset{border:0;margin:0 0 var(--space-5);padding:0}
     legend{font-weight:600;margin-bottom:var(--space-3);font-size:1.125rem}
 
     .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)}
-    @media (max-width:800px){.grid-2{grid-template-columns:1fr}}
+    @media (max-width: 800px){ .grid-2{grid-template-columns:1fr} }
 
     label{display:block;margin-bottom:6px;font-weight:600}
-    input,select,textarea{width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--surface-3);background:#fff;outline:none;transition: box-shadow .15s ease, border-color .15s ease}
+    input,select,textarea{
+      width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--surface-3);background:#fff;
+      outline:none;transition: box-shadow .15s ease, border-color .15s ease;
+    }
     input:focus,select:focus,textarea:focus{ box-shadow: var(--ring); border-color: var(--accent); }
+    textarea{resize:vertical}
     .help{margin:.25rem 0 0;color:var(--text-2);font-size:.9rem}
     .error{min-height:1.25rem;color:var(--danger);font-size:.9rem;margin:.25rem 0 0}
 
@@ -68,10 +95,17 @@
     .status[data-kind="error"]{color:var(--danger)}
     .status[data-kind="ok"]{color:var(--ok)}
 
-    .output{white-space:pre-wrap;background:#f6f7fb;color:#1f2937;border:1px solid #e5e7eb;padding:var(--space-4);border-radius:8px;min-height:180px;outline:none}
+    .output{
+      white-space:pre-wrap;background:#f6f7fb;color:#1f2937;
+      border:1px solid #e5e7eb;
+      padding:var(--space-4);border-radius:8px;min-height:180px;outline:none
+    }
 
+    /* Buyer Needs: single narrow column */
     .intel-grid{display:grid;grid-template-columns:1fr !important;gap:var(--space-3)}
     .intel .intel-slot{background:transparent;border:0}
+
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
@@ -190,33 +224,32 @@
               <label for="tone">Tone</label>
               <select id="tone" name="tone">
                 <option value="">(No preference)</option>
-                <option>Professional (corporate)</option>
+                <option selected>Professional (corporate)</option>
                 <option>Warm (relaxed)</option>
               </select>
-              <p class="help">Optional style guidance.</p>
+              <p class="help">Optional style guidance. “Professional (corporate)” produces the formal UK narrative.</p>
             </div>
 
             <div class="field">
               <label for="length">Length</label>
               <select id="length" name="length">
-                <option>~50 words (≈30–45 sec)</option>
-                <option selected>~100 words (≈1 min)</option>
-                <option>~150 words (≈1.5–2 min)</option>
+                <option>~100 words (≈1 min)</option>
+                <option selected>~200 words (≈2 min)</option>
+                <option>~350 words (≈3–4 min)</option>
+                <option>~650 words (≈5 min)</option>
               </select>
-              <p class="help">Approximate spoken duration is shown.</p>
+              <p class="help">Approximate spoken duration.</p>
             </div>
           </div>
 
-          <!-- Restored fields -->
           <div class="field">
-            <label for="value_proposition">Unique selling points (optional)</label>
-            <textarea id="value_proposition" name="value_proposition" rows="2" placeholder="e.g., UK-wide NNI, 24/7 NOC, migration support"></textarea>
-            <p class="help">Leave blank if you prefer the model to infer from playbooks.</p>
+            <label for="value_proposition">Unique Selling Points (optional)</label>
+            <textarea id="value_proposition" name="value_proposition" rows="2" placeholder="Your USPs. Leave blank to use library defaults."></textarea>
           </div>
 
           <div class="field">
             <label for="context">Other points to cover in the call (optional)</label>
-            <textarea id="context" name="context" rows="3" placeholder="Any additional talking points, sensitivities or goals."></textarea>
+            <textarea id="context" name="context" rows="3" placeholder="Any additional talking points. Optional."></textarea>
           </div>
         </fieldset>
 
@@ -309,8 +342,9 @@
 
   <!-- === MODULE: synthesise a CALL SCRIPT from curated library === -->
   <script type="module">
-    import { getIndex, canonical } from "/src/lib/callLibrary.js";
-    import { generateCallFromLibrary } from "/src/lib/callSynthesis.js";
+    /* IMPORTANT: use RELATIVE imports so /content loads in your static host */
+    import { getIndex, canonical } from "./src/lib/callLibrary.js";
+    import { generateCallFromLibrary } from "./src/lib/callSynthesis.js";
 
     (function () {
       const FORM_ID = 'script-form';
@@ -362,34 +396,18 @@
       }
       function setStatus(msg, kind='info'){ if (statusEl){ statusEl.textContent = msg; statusEl.dataset.kind = kind; } }
 
-      // === Validation helpers
-      function valueOr(el){ return (el && typeof el.value === 'string') ? el.value.trim() : ''; }
-      function currentCallType(){
-        const sel = valueOr(callTypeSel);
-        if (sel) return sel;
-        try {
-          const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY)||'null');
-          if (pref?.call_type) return String(pref.call_type);
-        } catch {}
-        return '';
-      }
       function allRequiredFilled(formEl){
         if (!formEl) return false;
         const labels = { call_type:'Direct or partner sales', seller_name:'Your name', seller_company:'Your company',
           prospect_name:'Prospect name', prospect_role:'Prospect role', prospect_company:'Prospect company',
           buyer_behaviour:'Buyer behaviour', product:'Product' };
-
         const missing = [];
-        // special-case call_type: allow derived value
-        if (!currentCallType()) missing.push(labels.call_type);
-        // normal fields
         for (const name of REQUIRED){
-          if (name === 'call_type') continue;
           const el = formEl.elements[name] || document.getElementById(name);
-          const val = valueOr(el);
-          if (!val || (name==='product' && /loading/i.test(val))) missing.push(labels[name] || name);
+          const val = (el && typeof el.value === 'string') ? el.value.trim() : '';
+          if (!val) missing.push(labels[name] || name);
         }
-        if (missing.length) setStatus(`Please complete: ${missing.join(', ')}.`, 'error'); else setStatus('');
+        if (missing.length) setStatus(\`Please complete: \${missing.join(', ')}.\`, 'error'); else setStatus('');
         return missing.length === 0;
       }
       function refreshSubmitState(){ submitBtn && (submitBtn.disabled = !allRequiredFilled(form)); }
@@ -397,8 +415,8 @@
       function validateField(input) {
         if (!input) return;
         const id = input.id;
-        const errorEl = document.getElementById(`${id}_error`) || (id==='call_type' ? document.getElementById('call_type_error') : null);
-        const valid = id==='call_type' ? !!currentCallType() : !!valueOr(input);
+        const errorEl = document.getElementById(\`\${id}_error\`) || (id==='call_type' ? document.getElementById('call_type_error') : null);
+        const valid = !!String(input.value || '').trim();
         if (!errorEl) return;
         if (valid) { errorEl.textContent=''; input.removeAttribute('aria-invalid'); input.classList.remove('invalid'); }
         else { errorEl.textContent = id==='call_type' ? 'Please choose a call type.' : 'This field is required.'; input.setAttribute('aria-invalid','true'); input.classList.add('invalid'); }
@@ -407,8 +425,6 @@
       function saveForm(){
         if (!form) return;
         const fd = Object.fromEntries(new FormData(form).entries());
-        // persist derived call_type too
-        fd.call_type = currentCallType() || fd.call_type || '';
         localStorage.setItem(STORAGE_KEY, JSON.stringify(fd));
       }
       function loadForm(){
@@ -419,13 +435,13 @@
           const data = JSON.parse(raw);
           Object.entries(data).forEach(([k,v]) => {
             const el = form.elements[k] || document.getElementById(k);
-            if (el && k!=='call_type') el.value = v;
+            if (el) el.value = v;
           });
         } catch {}
       }
       function clearFormState(){ localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
 
-      // === Buyer needs helpers
+      // ---------- Buyer needs helpers ----------
       const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
       const norm = s => String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015_\-\/]+/g,'-').replace(/[^\w\- ]+/g,'').trim();
       const BEHAVIOUR_SYNONYMS = { 'early adopter':'early-adopter','early majority':'early-majority','late majority':'late-majority','skeptic':'sceptic','sceptic':'sceptic' };
@@ -441,10 +457,6 @@
         const slot=document.getElementById(id);
         const items=(arr.length?arr:['No data available for this selection.']);
         slot && slot.replaceChildren(...items.map(pEl));
-      };
-      const fillAll = arr => {
-        setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr);
-        setSlot('intel-proof', arr); setSlot('intel-objections', arr); setSlot('intel-ctas', arr);
       };
 
       function normaliseIntel(raw){
@@ -469,7 +481,7 @@
         const products = intel.products || {};
         const productKey = getKeyInsensitive(products, productLabel);
         const productNode = productKey ? products[productKey] : null;
-        if (!productNode){ fillAll([`No data available (unknown product).`]); return; }
+        if (!productNode){ ['intel-priorities','intel-pains','intel-triggers','intel-proof','intel-objections','intel-ctas'].forEach(id=>setSlot(id,[])); return; }
 
         let node = null;
         if (productNode.behaviours){
@@ -484,33 +496,24 @@
         }
         if (!node && productNode.needs) node = productNode.needs;
 
-        if (!node){
-          const behavioursList = [...Object.keys(productNode.behaviours || {}), ...Object.keys(productNode.buyers || {})].join(', ') || '—';
-          fillAll([`No data for this behaviour. Available: ${behavioursList}`]);
-          return;
-        }
-
-        const sections = {
+        const sections = node ? {
           priorities: toArr(node?.priorities ?? node?.Priorities),
           pains:      toArr(node?.pains      ?? node?.Pains),
           triggers:   toArr(node?.triggers   ?? node?.Triggers),
           proof:      toArr(node?.proof      ?? node?.Proof ?? node?.value ?? node?.Value),
           objections: toArr(node?.objections ?? node?.Objections),
           ctas:       toArr(node?.ctas       ?? node?.CTAs  ?? node?.callsToAction ?? node?.CallsToAction)
-        };
-
-        const allEmpty = Object.values(sections).every(a => a.length === 0);
-        if (allEmpty){ fillAll(['No data available for this selection.']); return; }
+        } : { priorities:[],pains:[],triggers:[],proof:[],objections:[],ctas:[] };
 
         setSlot('intel-priorities', sections.priorities);
         setSlot('intel-pains',      sections.pains);
-        setSlot('intel-triggers',   sections.triggers);
+        setSlot('intel-triggers',   sections.priorities.length ? sections.priorities : sections.triggers);
         setSlot('intel-proof',      sections.proof);
         setSlot('intel-objections', sections.objections);
         setSlot('intel-ctas',       sections.ctas);
       }
 
-      // === UK narrative helpers
+      // ---------- UK narrative helpers ----------
       function toUkEnglish(text){
         if (!text) return '';
         const map = [
@@ -522,78 +525,111 @@
           [/modeling/gi, 'modelling'],
           [/license/gi, 'licence'],
           [/utilize/gi, 'utilise'],
-          [/program(s)?/gi, 'programme$1']
+          [/program(s)?/gi, 'programme$1'],
+          [/roll ?out/gi, 'deployment'],
+          [/blocker(s)?/gi, 'impediment$1'],
+          [/play out/gi, 'develop'],
+          [/locked in/gi, 'tied into']
         ];
         let out = text;
         for (const [re, rep] of map) out = out.replace(re, rep);
         return out;
       }
-      function ensureGreeting(text, v){
-        const p = (v?.prospect_name||'').trim();
-        const s = (v?.seller_name||'').trim();
-        const hello = p ? `Hi ${p}, ` : 'Hi, ';
-        const intro = (s || v?.seller_company)
-          ? `${hello}it’s ${s || 'a colleague'}${v?.seller_company ? ` from ${v.seller_company}` : ''}. `
-          : hello;
-        if (text.startsWith('Hi ')) return text; // already ok
-        return `${intro}${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+      function stripStageHeadings(text){
+        if (!text) return '';
+        const head = /^(Opening|Buyer pain|Buyer desire|Example|Objections|Call to action)\s*[-–—]*\s*$/gim;
+        return text.replace(head, '').replace(/\n{3,}/g, '\n\n').trim();
+      }
+      function nextTwoWorkingMornings(){
+        const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+        const d = new Date();
+        const options = [];
+        while (options.length < 2) {
+          d.setDate(d.getDate()+1);
+          const dow = d.getDay();
+          if (dow !== 0 && dow !== 6) options.push(days[dow] + ' morning');
+        }
+        return options;
       }
       const asInline = (arr) => Array.isArray(arr) && arr.length ? arr.join('; ') : '';
 
-      function composeNarrativeFromStages(stages, variables){
+      function composeNarrativeFromStages(stages, v, tone){
         const s = stages || {};
-        const v = variables || {};
         const parts = [];
 
-        // Empathetic opening with names
+        // 1) Measured opening with observed patterns (no assumptions)
         {
+          const observed = (s.opening?.talk_track || s.opening?.script || '').trim();
           const nameLine = v.prospect_name
             ? `Hi ${v.prospect_name}, it’s ${v.seller_name || 'a colleague'}${v.seller_company ? ` from ${v.seller_company}` : ''}. `
             : `Hi, it’s ${v.seller_name || 'a colleague'}${v.seller_company ? ` from ${v.seller_company}` : ''}. `;
-          const body = (s.opening?.talk_track || s.opening?.script || '').trim();
-          parts.push(`${nameLine}${body || 'Thanks for taking my call—I’ll keep this brief and useful.'}`);
+          const preface = `Across similar UK organisations a consistent pattern has emerged in ${v.product || 'this area'}: `;
+          const caveat = ` I don’t know whether this applies in your organisation, but it may be useful context.`;
+          parts.push((nameLine + (observed ? (preface + observed + caveat) : `${nameLine}Thanks for taking the call — I’ll keep this brief and useful.`)).trim());
         }
 
-        // Pain → Desire
+        // 2) Frame offer as operational enhancement (not a rebuild)
         {
           const pain = (s.buyer_pain?.talk_track || s.buyer_pain?.script || '').trim();
-          if (pain) parts.push(pain);
           const desire = (s.buyer_desire?.talk_track || s.buyer_desire?.script || '').trim();
-          if (desire) parts.push(desire);
+          const enhancement = `The most effective path we see is a light-touch operational layer that sits above your current set-up. It consolidates administration, reduces waste, and lets you respond at the pace of the business without a change programme.`;
+          parts.push([pain, desire, enhancement].filter(Boolean).join('\n\n'));
         }
 
-        // Example + proof
+        // 3) One specific example with quantified outcomes
         {
           const ex = (s.example?.talk_track || s.example?.script || '').trim();
           const proofs = asInline(s.example?.proof_points_text || s.example?.proof_points || []);
-          const line = [ex, proofs && `For example: ${proofs}.`].filter(Boolean).join(' ');
+          const line = [ex, proofs && `In the first phase, outcomes included ${proofs}.`].filter(Boolean).join(' ');
           if (line) parts.push(line);
         }
 
-        // Objections as reassurance
+        // 4) Objections handled calmly, factually
         {
           const obj = (s.objections?.talk_track || s.objections?.script || '').trim();
           const anticipated = asInline(s.objections?.anticipated || []);
-          const line = [obj, anticipated && `Common concerns we handle: ${anticipated}.`].filter(Boolean).join(' ');
+          const line = [obj, anticipated && `Common concerns we address: ${anticipated}.`].filter(Boolean).join(' ');
           if (line) parts.push(line);
         }
 
-        // CTA last and only
+        // 5) Close with confident CTA, two time options
         {
+          const [opt1,opt2] = nextTwoWorkingMornings();
           let cta = (s.call_to_action?.talk_track || s.call_to_action?.script || '').trim();
-          const ctas = s.call_to_action?.ctas_text || s.call_to_action?.ctas || [];
-          if (!cta && Array.isArray(ctas) && ctas.length) cta = String(ctas[0]);
+          if (!cta) cta = `The most useful next step is a structured 45-minute review with your IT and operations leads to produce a usage and cost heat-map, a short list of savings without disruption, and a pilot plan that proves ROI within a quarter. Would ${opt1} suit, or would ${opt2} be better?`;
           if (cta && !/[.?!]$/.test(cta)) cta += '?';
-          if (cta) parts.push(cta);
+          parts.push(cta);
         }
 
         let text = parts.filter(Boolean).join('\n\n').trim();
+        text = stripStageHeadings(text);
         text = toUkEnglish(text);
-        text = ensureGreeting(text, v);
+
+        // Professional tone: tighten hedging, keep formal register
+        if ((tone || '').toLowerCase().includes('professional')) {
+          text = text.replace(/\bkind of\b/gi,'').replace(/\bsort of\b/gi,'').replace(/\bpretty\b/gi,'').replace(/\breally\b/gi,'');
+        }
         return text;
       }
 
-      // === Activity / delta
+      function salesTipsBlock(){
+        const tips = [
+          'Prepare two sector-relevant patterns and state them as observations; invite the prospect to confirm or correct.',
+          'Introduce yourself and relevance in one sentence; then move quickly to the value of the conversation.',
+          'Avoid assumptions about growth, problems or budgets; use “in similar organisations we’ve seen…”.',
+          'Frame the offer as an operational enhancement above the current estate; emphasise continuity and low disruption.',
+          'Quote one specific client example with two to four quantified results and a credible time frame.',
+          'Handle objections factually and briefly: contracts (phase in at renewal), change (orchestration layer), scale (smaller teams benefit).',
+          'Maintain a formal, courteous tone; avoid slang and Americanisms; prefer UK spelling and terms.',
+          'Close with a clear double alternative: offer two morning time options and restate the deliverables of the session.',
+          'Agree attendees while on the call (IT and operations/finance) and confirm by email with a short agenda.',
+          'If not ready, send the toolkit and a two-line summary, and propose a light follow-up date.'
+        ];
+        return '\\n\\nSales tips for colleagues conducting similar calls\\n' +
+               tips.map((t,i)=>`${i+1}. ${t}`).join('\\n');
+      }
+
+      // ---------- Activity / delta ----------
       function addActivity(entry) {
         const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
         list.unshift(entry);
@@ -624,16 +660,16 @@
       function renderDelta(delta) {
         if (!deltaLog) return;
         deltaLog.innerHTML = '';
-        const a = document.createElement('li'); a.textContent = `+${delta.added} new line${delta.added===1?'':'s'}`;
-        const r = document.createElement('li'); r.textContent = `−${delta.removed} removed line${delta.removed===1?'':'s'}`;
+        const a = document.createElement('li'); a.textContent = \`+\${delta.added} new line\${delta.added===1?'':'s'}\`;
+        const r = document.createElement('li'); r.textContent = \`−\${delta.removed} removed line\${delta.removed===1?'':'s'}\`;
         deltaLog.appendChild(a); deltaLog.appendChild(r);
       }
 
-      // === Header chip (remembered call type)
+      // ---------- Header chip (remembered call type) ----------
       function loadCallPref() {
         try {
           const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
-          if (pref?.call_type && callTypeSel && !callTypeSel.value) callTypeSel.value = pref.call_type;
+        if (pref?.call_type && callTypeSel && !callTypeSel.value) callTypeSel.value = pref.call_type;
           if (pref?.remember === true && rememberCallType) rememberCallType.checked = true;
         } catch {}
         updateMapIndicator();
@@ -651,7 +687,7 @@
         if (mapLabel) mapLabel.textContent = pref?.call_type || (callTypeSel?.value || 'Not set');
       }
 
-      // === Events
+      // ---------- Events ----------
       on(callTypeSel, ['change','input','blur'], () => {
         validateField(callTypeSel); saveForm(); updateMapIndicator(); refreshSubmitState();
       });
@@ -678,9 +714,6 @@
       resetBtn && resetBtn.addEventListener('click', () => {
         if (!form) return;
         form.reset(); clearFormState(); loadCallPref();
-        // default call type back to Direct on reset
-        if (callTypeSel && !callTypeSel.value) callTypeSel.value = 'Direct';
-        saveCallPrefIfRequested(); updateMapIndicator();
         renderIntel(productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '', buyerBehSel?.value || '');
         renderActivity(); refreshSubmitState();
         setStatus('Form reset. Stored values cleared.');
@@ -698,23 +731,22 @@
         const blob = new Blob([txt], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = `first-call-script_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
+        a.href = url; a.download = \`first-call-script_\${new Date().toISOString().replace(/[:.]/g,'-')}.txt\`;
         document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
         setStatus('Download started.');
       });
 
-      // === Submit: generate from Library
+      // ---------- Submit: synthesise from library ----------
       form && form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
+        // focus first missing
         for (const name of REQUIRED){
-          if (name==='call_type') continue;
           const el = form.elements[name] || document.getElementById(name);
-          if (!el || !valueOr(el)){
+          if (!el || !String(el.value||'').trim()){
             validateField(el); el?.focus(); setStatus('Please complete required fields.', 'error'); return;
           }
         }
-        if (!currentCallType()){ validateField(callTypeSel); callTypeSel?.focus(); setStatus('Please choose Direct or Partner.', 'error'); return; }
 
         const fd = Object.fromEntries(new FormData(form).entries());
         const variables = {
@@ -723,13 +755,13 @@
           prospect_name: fd.prospect_name || '',
           prospect_role: fd.prospect_role || '',
           prospect_company: fd.prospect_company || '',
-          call_type: currentCallType() || fd.call_type || '',
+          call_type: fd.call_type || '',
           buyer_type: fd.buyer_behaviour || '',
           product: fd.product || '',
           tone: fd.tone || '',
           length: fd.length || '',
-          value_proposition: fd.value_proposition || '',
-          context: fd.context || ''
+          context: fd.context || '',
+          value_proposition: fd.value_proposition || ''
         };
 
         setBusy(true); setStatus('Synthesising call script from Library…'); diag && (diag.open = false); diagJson && (diagJson.textContent = '');
@@ -745,11 +777,11 @@
           role:          variables.prospect_role,
           sector:        '',
           company_size:  '',
-          scenario:      [variables.context, variables.value_proposition].filter(Boolean).join(' · '),
+          scenario:      variables.context || variables.value_proposition || '',
           meeting_type:  'first call'
         };
 
-        const lengthHint = /\d+/.exec(variables.length || "")?.[0] || "100";
+        const lengthHint = (/\d+/.exec(variables.length || "")?.[0] || "200");
 
         try {
           const result = await generateCallFromLibrary({
@@ -759,24 +791,27 @@
             length: Number(lengthHint)
           });
 
-          const text = composeNarrativeFromStages(result.stages, variables);
+          // Compose Professional UK narrative (no headings) + tips block
+          const script = composeNarrativeFromStages(result.stages, variables, variables.tone);
+          const fullText = script.trim() + salesTipsBlock();
 
-          outputEl.textContent = text.trim();
-          outputMeta.textContent = result.metaLine || `Library · ${lookup.product || '—'} · ${variables.buyer_type || '—'} · ${variables.call_type || '—'}`;
-          copyBtn && (copyBtn.disabled = !text); downloadBtn && (downloadBtn.disabled = !text);
+          outputEl.textContent = fullText;
+          outputMeta.textContent = result.metaLine || \`Library · \${lookup.product || '—'} · \${variables.buyer_type || '—'} · \${variables.call_type || '—'}\`;
+          copyBtn && (copyBtn.disabled = !fullText); downloadBtn && (downloadBtn.disabled = !fullText);
 
           // Buyer Needs (right column)
-          setSlot('intel-priorities',   result.buyerNeeds['intel-priorities'] || []);
-          setSlot('intel-pains',        result.buyerNeeds['intel-pains'] || []);
-          setSlot('intel-triggers',     result.buyerNeeds['intel-priorities'] || []);
-          setSlot('intel-proof',        result.buyerNeeds['intel-proof-points'] || []);
-          setSlot('intel-objections',   result.buyerNeeds['intel-objections'] || []);
-          setSlot('intel-ctas',         result.buyerNeeds['intel-ctas'] || []);
+          setSlot('intel-priorities',   result.buyerNeeds?.['intel-priorities'] || []);
+          setSlot('intel-pains',        result.buyerNeeds?.['intel-pains'] || []);
+          setSlot('intel-triggers',     result.buyerNeeds?.['intel-priorities'] || []);
+          setSlot('intel-proof',        result.buyerNeeds?.['intel-proof-points'] || []);
+          setSlot('intel-objections',   result.buyerNeeds?.['intel-objections'] || []);
+          setSlot('intel-ctas',         result.buyerNeeds?.['intel-ctas'] || []);
 
           const delta = computeDelta(lastOutput, outputEl.textContent);
           renderDelta(delta);
           lastOutput = outputEl.textContent; localStorage.setItem(OUTPUT_KEY, lastOutput);
 
+          // Activity log
           addActivity({ time: nowTime(), product: variables.product || '—', buyer_behaviour: variables.buyer_type || '—', length: variables.length || '—' });
 
           setStatus('Done. (Generated from curated Library)');
@@ -789,9 +824,9 @@
         }
       });
 
-      // === Init
+      // ---------- Init ----------
       (async function init(){
-        // user badge (best effort)
+        // badge (best effort)
         (async () => {
           const el = document.getElementById('user-badge'); if (!el) return;
           try {
@@ -807,57 +842,43 @@
           }
         })();
 
-        // Load intel for right pane
+        // Load intel (fallback for Buyer Needs and Product list)
         try {
           const res = await fetch(INTEL_URL, { cache: 'no-store' });
           const raw = await res.json();
           intel = normaliseIntel(raw);
         } catch { intel = { products:{} }; }
 
-        // Populate Products (layered; never leaves "Loading…")
-        const BACKUP_PRODUCTS = [
-          {id:'connectivity',label:'Connectivity (mobile & fixed)'},
-          {id:'cybersecurity',label:'Cybersecurity'},
-          {id:'ai',label:'Artificial Intelligence'},
-          {id:'hardware_software',label:'Hardware/software'},
-          {id:'it_solutions',label:'IT solutions'},
-          {id:'microsoft_solutions',label:'Microsoft solutions'},
-          {id:'telecoms_solutions',label:'Telecoms solutions'}
-        ];
-        function setProductOptions(list){
-          if (!productSel) return;
-          productSel.innerHTML = '<option value="">Select…</option>';
-          list.forEach(({id,label}) => {
-            const opt = document.createElement('option');
-            opt.value = id; opt.textContent = label || id;
-            productSel.appendChild(opt);
-          });
-        }
-
-        let populated = false;
+        // Populate Product from call-library index; fallback to intel.json keys
         try {
-          const idx = await getIndex();                 // /content/call-library/v1/index.json
+          const idx = await getIndex();            // ./content/call-library/v1/index.json via library
           const items = Array.isArray(idx?.products) ? idx.products : [];
-          if (items.length){ setProductOptions(items); populated = true; }
-        } catch {}
-        if (!populated){
-          const intelProducts = Object.keys(intel.products || {}).map(p => ({id:p,label:p}));
-          if (intelProducts.length){ setProductOptions(intelProducts); populated = true; }
+          if (!items.length) throw new Error('Index empty');
+          if (productSel) {
+            productSel.innerHTML = '<option value="">Select…</option>';
+            for (const { id, label } of items) {
+              const opt = document.createElement('option');
+              opt.value = id; opt.textContent = label || id;
+              productSel.appendChild(opt);
+            }
+          }
+        } catch (e) {
+          if (productSel) {
+            productSel.innerHTML = '<option value="">Select…</option>';
+            Object.keys(intel.products || {}).forEach(p => {
+              const opt = document.createElement('option');
+              opt.value = p; opt.textContent = p;
+              productSel.appendChild(opt);
+            });
+          }
+          if (diagJson) { diag.open = true; diagJson.textContent = 'Product index fallback in use. (' + e + ')'; }
         }
-        if (!populated){ setProductOptions(BACKUP_PRODUCTS); }
 
-        // Default call type to Direct if empty
-        if (callTypeSel && !callTypeSel.value){
-          callTypeSel.value = 'Direct';
-          if (rememberCallType) rememberCallType.checked = true;
-          saveCallPrefIfRequested();
-        }
-        updateMapIndicator();
-
-        // Restore saved form (except call_type – we already enforced default above)
+        // Restore saved form state and remembered call type
         loadForm();
+        loadCallPref();
 
-        // Initial Buyer needs preview
+        // Initial Buyer needs
         if (productSel?.value && buyerBehSel?.value) {
           renderIntel(productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '', buyerBehSel.value);
         }
