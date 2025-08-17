@@ -30,11 +30,24 @@ Using the sales pitch below, generate a cold call script that:
 - Ends with a confident, specific call to action using the following wording:
 "${cta}"
 
+Adjust the tone and style based on the following setting:
+
+Tone: ${toneDescriptor}
+
+If tone is "warm and professional":
+- Use natural phrasing and a more conversational rhythm
+- Soften transitions and remove overly formal connectors
+- Prioritise clarity and rapport over technical density
+
+If tone is "formal and corporate":
+- Use precise, structured business language
+- Maintain professional distance and clear articulation
+- Avoid any casual phrasing or implied familiarity
+
 Then write a short section titled:
 **Sales tips for colleagues conducting similar calls**
 Provide exactly 3 practical tips in a warm, instructional tone for less experienced colleagues.
 
-Tone: ${toneDescriptor}
 Role being called: ${buyerType}
 
 Sales pitch:
