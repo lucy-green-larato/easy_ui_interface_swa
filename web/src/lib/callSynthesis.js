@@ -19,7 +19,6 @@ function toUk(text = "") {
   for (const [re, rep] of REPLACERS) out = out.replace(re, rep);
   return out.replace(/[ ]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").replace(/!+/g, ".").trim();
 }
-
 function warm(text = "") {
   return text
     .replace(/\bI will\b/g, "I’ll")
@@ -28,7 +27,6 @@ function warm(text = "") {
     .replace(/\bit is\b/gi, "it’s")
     .replace(/\bwe are\b/gi, "we’re");
 }
-
 function sentenceify(str = "") {
   return (str || "")
     .replace(/\s+([.,;:?!])/g, "$1")
@@ -37,25 +35,17 @@ function sentenceify(str = "") {
     .replace(/\s{2,}/g, " ")
     .trim();
 }
-
 function humanList(items = []) {
   const a = (items || []).filter(Boolean);
   if (!a.length) return "";
   if (a.length === 1) return a[0];
   return a.slice(0, -1).join(", ") + " and " + a[a.length - 1];
 }
-
-// Split text by newlines / semicolons / commas, dedupe (case-insensitive)
 function normaliseList(text = "") {
-  const parts = String(text)
-    .split(/\r?\n|;|,/)
-    .map(s => s.trim())
-    .filter(Boolean);
+  const parts = String(text).split(/\r?\n|;|,/).map(s => s.trim()).filter(Boolean);
   const seen = new Set();
   return parts.filter(p => (seen.has(p.toLowerCase()) ? false : (seen.add(p.toLowerCase()), true)));
 }
-
-// Turn opaque proof codes into readable claims; pass through plain text
 function normaliseProofPoint(p = "") {
   const s = String(p || "").trim();
   const m = s.toLowerCase();
@@ -63,18 +53,13 @@ function normaliseProofPoint(p = "") {
   if (m.includes("pp_new_sites_under_7d")) return "new locations were connected in under seven days";
   if (m.includes("pp_control_no_headcount")) return "IT regained control without adding headcount";
   if (m.includes("pp_sla_tickets_down_41")) return "SLA tickets fell by 41 per cent";
-  return s; // keep as-is if it already reads well
+  return s;
 }
-
-function mapProofPoints(arr = []) {
-  return (arr || []).map(normaliseProofPoint).filter(Boolean);
-}
-
-// Trim by sentence to an approximate word target (keeps coherence)
+function mapProofPoints(arr = []) { return (arr || []).map(normaliseProofPoint).filter(Boolean); }
 function trimToWords(text = "", target = 0) {
   if (!target || target < 1) return text;
   const words = text.trim().split(/\s+/);
-  if (words.length <= target * 1.15) return text; // small buffer
+  if (words.length <= target * 1.15) return text;
   const sentences = text.split(/(?<=[.?!])\s+/);
   const kept = [];
   let count = 0;
@@ -86,7 +71,6 @@ function trimToWords(text = "", target = 0) {
   }
   return kept.join(" ").trim() || text;
 }
-
 function ensureCtaOptions(cta = "", fallbackDayPair = "Monday or Wednesday") {
   let out = String(cta || "").trim();
   if (!out) return "";
@@ -97,22 +81,12 @@ function ensureCtaOptions(cta = "", fallbackDayPair = "Monday or Wednesday") {
   return out;
 }
 
-/* ================== Content extraction helpers ================== */
-function getStage(s, key) {
-  const node = s && s[key];
-  return (node && (node.talk_track || node.script || "") || "").trim();
-}
-function getArrayish(node, ...keys) {
-  for (const k of keys) {
-    const v = node && node[k];
-    if (Array.isArray(v) && v.length) return v;
-  }
-  return [];
-}
+/* ================== Content extraction ================== */
+function getStage(s, key) { return (s && s[key] && (s[key].talk_track || s[key].script) || "").trim(); }
+function getArrayish(node, ...keys) { for (const k of keys) { const v = node && node[k]; if (Array.isArray(v) && v.length) return v; } return []; }
 function extractPains(s) {
   const fromSummary = getArrayish(s?.buyer_pain, "buyer_needs_summary", "bullets");
   if (fromSummary.length) return fromSummary;
-  // fall back: attempt to split the talk track into clauses
   const raw = getStage(s, "buyer_pain");
   return raw ? raw.split(/[.;•]\s+/).map(t => t.trim()).filter(Boolean) : [];
 }
@@ -138,8 +112,38 @@ function extractCta(s) {
   return txt || (ctas[0] || "");
 }
 
+/* ================== Heuristics driven by optional inputs ================== */
+const HINTS = [
+  { key: /contract|term|renewal|migration|port/i, reassure: "We phase improvements in at natural renewals and port numbers cleanly, so nothing is wasted.", focus: "contract timing and migration risk" },
+  { key: /cost|budget|overspend|finance|roi|saving/i, reassure: "Costs stay predictable — pooled policies and usage alerts keep Finance clear on spend.", focus: "cost control and measurable ROI" },
+  { key: /security|secure|iso|gdpr|compliance|risk/i, reassure: "Controls align with UK regulatory and ISO practices; changes are auditable.", focus: "governance and compliance" },
+  { key: /esim|provision|onboard|field/i, reassure: "Provisioning is same-day for most profiles; field teams are handled with pooled rules.", focus: "faster provisioning for teams" },
+  { key: /report|visibility|dashboard|data/i, reassure: "Reporting is real-time and readable; IT and Finance see the same numbers.", focus: "shared reporting and visibility" }
+];
+function tailorByInputs(usps = [], other = []) {
+  const notes = new Set();
+  const reassures = new Set();
+  const agenda = new Set();
+
+  const hay = [ ...usps, ...other ].map(s => s.toLowerCase());
+  for (const h of HINTS) {
+    if (hay.some(t => h.key.test(t))) {
+      if (h.reassure) reassures.add(h.reassure);
+      if (h.focus) agenda.add(h.focus);
+    }
+  }
+  if (usps.length) notes.add(`From our side, the areas most likely to add value are ${humanList(usps.slice(0,3))}.`);
+  if (other.length) notes.add(`If useful, we can also touch on ${humanList(other.slice(0,3))}; otherwise we’ll keep strictly to priority items.`);
+
+  return {
+    weaveEarly: Array.from(notes).join(" "),
+    extraReassurance: Array.from(reassures),
+    agendaFocus: Array.from(agenda)
+  };
+}
+
 /* ================== Narrative composer ================== */
-function composeNarrative({ record, variables, tone, form, lengthTarget }) {
+function composeNarrative({ record, variables, tone, form, lengthTarget, withLabels = true }) {
   const s = record.stages || {};
   const meta = record.meta || {};
   const productLabel = meta.product_label || meta.product_id || (variables.product || "this area");
@@ -148,74 +152,75 @@ function composeNarrative({ record, variables, tone, form, lengthTarget }) {
   const seller = (v.seller_name || "").trim();
   const sellerCo = (v.seller_company || "").trim();
 
-  // 1) Greeting (human, name-led)
+  // Greeting
   let greet = pName ? `Hi ${pName}, it’s ${seller || "a colleague"}${sellerCo ? ` from ${sellerCo}` : ""}. `
                     : `Hi, it’s ${seller || "a colleague"}${sellerCo ? ` from ${sellerCo}` : ""}. `;
   if (/warm/i.test(tone)) greet = warm(greet);
 
-  // 2) Observations drawn from pains (no assumptions about their current state)
+  // Observations (from pains)
   const pains = extractPains(s).slice(0, 3).map(sentenceify);
   const obs = pains.length
-    ? `I’m calling because, speaking with similar organisations, we’re seeing ${humanList(pains)}—typically without changing what already works.`
-    : `I’m calling because similar organisations are tightening control of mobile and fixed estates to reduce overspend and delays without reworking what already functions.`;
+    ? `Speaking with similar organisations, we’re seeing ${humanList(pains)} — typically without changing what already works.`
+    : `Similar organisations are tightening control of mobile and fixed estates to reduce overspend and delays without reworking what already functions.`;
 
-  // 3) Desired outcomes
+  // Desired outcomes
   const desires = extractDesires(s).slice(0, 3).map(sentenceify);
   const desireLine = desires.length
     ? `Where teams are landing successfully is ${humanList(desires)}.`
-    : `The aim is practical control—clarity on usage, simple provisioning and room to scale without extra admin.`;
+    : `The aim is practical control — clarity on usage, simple provisioning and headroom to grow.`;
 
-  // 4) Weave USPs and “Other points” early so it feels tailored
+  // Optional inputs
   const usps = normaliseList(v.value_proposition || "");
   const other = normaliseList(v.context || "");
-  const weaveEarly = [
-    usps.length ? `From our side, the focus areas likely to add value are ${humanList(usps)}.` : "",
-    other.length ? `If helpful, we can also touch on ${humanList(other)}; otherwise I’ll keep this to immediate priorities.` : ""
-  ].filter(Boolean).join(" ");
+  const { weaveEarly, extraReassurance, agendaFocus } = tailorByInputs(usps, other);
 
-  // 5) Positioning: light enhancement (not a rebuild)
-  let lightLayer = `This is a light operational layer above your current services—you keep what works and adjust only what doesn’t.`;
+  // Positioning
+  let lightLayer = `This is a light operational layer above your current services — you keep what works and adjust only what doesn’t.`;
   if (/warm/i.test(tone)) lightLayer = warm(lightLayer);
 
-  // 6) Example + proofs
+  // Example & proofs
   const { example, proofs } = extractExampleAndProofs(s);
   const exLine = (example || "").trim();
   const proofsLine = proofs.length ? `In the first phase we saw ${humanList(proofs)}.` : "";
+  const proofsAlreadySaid = proofs.length && exLine && proofs.every(p => exLine.toLowerCase().includes(p.toLowerCase()));
 
-  // 7) Objections handled calmly
+  // Objections
   const { objections, anticipated } = extractObjections(s);
-  const objLine = objections
-    ? objections
-    : `If you have existing contracts or limited capacity for change, we phase in improvements as renewals arise and avoid wasted spend.`;
-  const anticipatedLine = anticipated.length ? `Typical concerns we address: ${humanList(anticipated)}.` : "";
+  const objLine = objections || `If you have existing contracts or limited capacity for change, we phase improvements in at renewals to avoid wasted spend.`;
+  const anticipatedLine = anticipated.length ? `Typical concerns we handle: ${humanList(anticipated)}.` : "";
+  const extraReassuranceLine = extraReassurance.length ? humanList(extraReassurance) + "." : "";
 
-  // 8) CTA with two options
-  let cta = ensureCtaOptions(extractCta(s) ||
-    `A short ${productLabel} review tends to surface quick wins without disruption—shall we line that up?`, "Monday or Wednesday");
+  // CTA (focused by agenda where possible)
+  let ctaBase = extractCta(s) || `A short ${productLabel} review tends to surface quick wins without disruption — shall we line that up?`;
+  if (agendaFocus.length) {
+    ctaBase = `We can focus the review on ${humanList(agendaFocus)} and quantify impact quickly.`;
+  }
+  let cta = ensureCtaOptions(ctaBase, "Monday or Wednesday");
 
-  // Build paragraphs (no headings; conversational flow)
-  let paragraphs = [
-    greet + `Thanks for taking the call—I'll be brief and make this useful.`,
-    obs,
-    desireLine,
-    weaveEarly,
-    exLine,
-    proofsLine,
-    lightLayer,
-    objLine,
-    anticipatedLine,
-    cta
-  ].filter(Boolean).map(sentenceify);
+  // Assemble (with discreet labels)
+  const blocks = [
+    ["Opening", greet + "Thanks for taking the call — I’ll keep this useful and brief."],
+    ["Market patterns", obs],
+    ["Outcomes", desireLine],
+    ["Tailoring notes", weaveEarly],
+    ["Example", exLine],
+    ["Results", proofsAlreadySaid ? "" : proofsLine],
+    ["How it works", lightLayer],
+    ["Reassurance", objLine],
+    ["Likely concerns", anticipatedLine || extraReassuranceLine],
+    ["Next step", cta]
+  ].filter(([, txt]) => (txt && txt.trim().length));
 
-  // Tone & language polish
-  let text = paragraphs.join("\n\n");
-  text = toUk(/warm/i.test(tone) ? warm(text) : text);
+  const textNoLabels = blocks.map(([, txt]) => sentenceify(txt)).join("\n\n");
+  const labeled = blocks.map(([label, txt]) => `— ${label} —\n${sentenceify(txt)}`).join("\n\n");
 
-  // Length control (150–650)
+  // Tone & length
+  let out = withLabels ? labeled : textNoLabels;
+  out = toUk(/warm/i.test(tone) ? warm(out) : out);
   const target = Math.max(150, Math.min(650, Number(lengthTarget || 300)));
-  text = trimToWords(text, target);
+  out = trimToWords(out, target);
 
-  return text;
+  return { scriptPlain: textNoLabels, scriptLabeled: out };
 }
 
 /* ================== Tips ================== */
@@ -232,15 +237,12 @@ const TIPS_POOL = [
   "Keep the CTA practical and time-bounded. Propose a clear, valuable next step.",
   "Tone matters. Speak in clear, confident British English, and adapt warmth and pace to the prospect."
 ];
-
-// Always include three anchor tips you specified
 function pickTips() {
-  const anchors = [
+  return [
     "Be concise. In the UK, long introductions lose people. Lead with why you are calling.",
     "Use relatable UK cases. A story about a firm across five UK cities lands better than a generic global example.",
     "End with a clear, polite next step. Suggest specific times rather than leaving it open-ended."
   ];
-  return anchors.slice(0, 3);
 }
 
 /* ================== Public API ================== */
@@ -249,27 +251,27 @@ export async function generateCallFromLibrary({
   form = {},
   tone = "Professional (corporate)",  // or "Warm (professional)"
   length = 300,
-  variables = {}
+  variables = {},
+  withLabels = true
 } = {}) {
-  // 1) Fetch the curated record (but we will not echo its prose verbatim)
   const record = await getCallScript(lookup);
 
-  // 2) Compose fresh narrative using library as source material
-  let script = composeNarrative({
+  const composed = composeNarrative({
     record,
     variables,
     tone,
     form,
-    lengthTarget: length
+    lengthTarget: length,
+    withLabels
   });
 
-  // 3) Build tips block
   const tips = pickTips();
   const tipsBlock = ["Helpful tips", ""].concat(tips.map(t => "- " + t)).join("\n");
 
   return {
-    ...record,           // meta, stages, buyerNeeds, metaLine, resolution, etc.
-    script_text: script, // final narrative (no headings)
+    ...record,
+    script_text: composed.scriptPlain,
+    script_text_labeled: composed.scriptLabeled,
     tips_text: tipsBlock,
     tips_list: tips
   };
