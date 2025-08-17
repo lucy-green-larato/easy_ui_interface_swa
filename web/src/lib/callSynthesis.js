@@ -96,6 +96,35 @@ function greet(variables = {}, tone = "Professional") {
   return line;
 }
 
+/* ---------- Helpers to use USPs and “Other points” naturally ---------- */
+function normaliseList(text = "") {
+  // split by newlines, semicolons, or commas; keep short items
+  const parts = String(text)
+    .split(/\r?\n|;|,/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  // dedupe while preserving order
+  const seen = new Set();
+  return parts.filter(p => (seen.has(p.toLowerCase()) ? false : (seen.add(p.toLowerCase()), true)));
+}
+
+function weaveUserInputs({ usps = [], other = [] }, tone = "Professional") {
+  const lines = [];
+  if (usps.length) {
+    const lead = "From our side, the areas we are confident add value are";
+    const content = usps.join("; ");
+    lines.push(lead + ": " + content + ".");
+  }
+  if (other.length) {
+    const lead = "If it is useful, we can also touch on";
+    const content = other.join("; ");
+    lines.push(lead + " " + content + "; otherwise, we can keep this strictly to immediate priorities.");
+  }
+  let out = lines.join(" ");
+  if (/warm/i.test(tone)) out = warmSofteners(out);
+  return out;
+}
+
 /* ---------- Narrative composer (no headings; UK) ---------- */
 function composeNarrativeFromStages(stages = {}, opts = {}) {
   const v = opts.variables || {};
@@ -116,6 +145,11 @@ function composeNarrativeFromStages(stages = {}, opts = {}) {
   const desire =
     (s.buyer_desire && (s.buyer_desire.talk_track || s.buyer_desire.script) || "").trim() ||
     "The goal is practical control—clarity on usage, simple provisioning and room to scale without extra admin.";
+
+  // Weave USPs and “Other points to cover”
+  const usps = normaliseList(v.value_proposition || "");
+  const other = normaliseList(v.context || "");
+  const weave = weaveUserInputs({ usps, other }, tone);
 
   const example = (s.example && (s.example.talk_track || s.example.script) || "").trim();
   const proofs = (s.example && (s.example.proof_points_text || s.example.proof_points) || []);
@@ -141,6 +175,7 @@ function composeNarrativeFromStages(stages = {}, opts = {}) {
     observation,
     pain,
     desire,
+    weave,         // ← user-provided USPs / other points folded in naturally
     exampleLine,
     lightLayer,
     objectionsLine,
@@ -155,26 +190,33 @@ function composeNarrativeFromStages(stages = {}, opts = {}) {
   return text;
 }
 
-/* ---------- Tips (8–10 practical points) ---------- */
-function buildSalesTips(tone = "Professional (corporate)") {
-  const warm = /warm/i.test(tone);
-  const tips = [
-    "Open with observed market patterns, not assumptions about their situation.",
-    "State relevance in plain language; avoid jargon and US idiom.",
-    "Keep sentences concise; allow short pauses for the listener to respond.",
-    "Frame your offer as an operational enhancement that preserves what already works.",
-    "Use one specific example with clear, measurable outcomes.",
-    "Address likely objections calmly and factually; avoid pressure language.",
-    "Ask one clear next step and offer two time options.",
-    "Confirm who else should attend and what would make the session valuable.",
-    "Note any benchmarks promised and send them promptly after the call.",
-    "Close politely; thank them for their time even if they decline."
+/* ---------- Tips (3 items from your preferred list) ---------- */
+const TIPS_POOL = [
+  "Your call opener is critical. Be concise. Lead with why you are calling. Focus on the value for the prospect.",
+  "Do not oversell. Understatement carries credibility; let facts and examples do the work.",
+  "Use relatable UK cases. A story about a firm across five UK cities lands better than a generic global example.",
+  "Match their pace. If the prospect is brisk, keep tight. If they are more conversational, give space.",
+  "End with a clear, polite next step. Suggest specific times rather than leaving it open-ended.",
+  "Open with value, not features. Busy decision-makers will only stay engaged if you show you understand their reality.",
+  "Use credible stats sparingly. One or two strong numbers build authority — a flood of data feels like a lecture.",
+  "Always anchor with a story. Prospects remember relatable examples more than abstract claims.",
+  "Anticipate objections before they are raised. It shows confidence and saves time.",
+  "Keep the CTA practical and time-bounded. Propose a clear, valuable next step.",
+  "Tone matters. Speak in clear, confident British English, and adapt warmth and pace to the prospect."
+];
+
+function pickTips(count = 3) {
+  // deterministic pick that includes at least one of your “lead with why” / “UK cases” / “clear next step”
+  const anchors = [
+    "Your call opener is critical. Be concise. Lead with why you are calling. Focus on the value for the prospect.",
+    "Use relatable UK cases. A story about a firm across five UK cities lands better than a generic global example.",
+    "End with a clear, polite next step. Suggest specific times rather than leaving it open-ended."
   ];
-  if (warm) {
-    tips.splice(2, 0, "Use a warm, respectful tone, but remain formal and precise.");
-    tips.splice(7, 0, "Invite brief input such as: \"Does that reflect what you see your side?\"");
-  }
-  return tips.slice(0, 10);
+  const rest = TIPS_POOL.filter(t => !anchors.includes(t));
+  const picked = [anchors[0], anchors[1]]; // first two anchors
+  // add one more either the third anchor or from rest
+  picked.push(anchors[2]);
+  return picked.slice(0, count);
 }
 
 /* ---------- Public API ---------- */
@@ -182,7 +224,7 @@ export async function generateCallFromLibrary({
   lookup,
   form = {},
   tone = "Professional (corporate)", // or "Warm (professional)"
-  length = 150,
+  length = 300,
   variables = {}
 } = {}) {
   const record = await getCallScript(lookup);
@@ -190,22 +232,18 @@ export async function generateCallFromLibrary({
   let script = composeNarrativeFromStages(record.stages, { variables, tone, form });
 
   if (Number.isFinite(length) && length > 0) {
-    // cap within sensible bounds
-    const target = Math.max(60, Math.min(800, length));
+    // clamp 150–650 hard to reflect the UI
+    const target = Math.max(150, Math.min(650, length));
     script = trimToWords(script, target);
   }
 
-  const tips = buildSalesTips(tone);
-  const tipsBlock = ["Sales tips for colleagues conducting similar calls", ""]
-    .concat(tips.map(t => "- " + t))
-    .join("\n");
-
-  const combined = [script.trim(), "", tipsBlock].join("\n");
+  const tips = pickTips(3);
+  const tipsBlock = ["Helpful tips", ""].concat(tips.map(t => "- " + t)).join("\n");
 
   return {
-    ...record,               // { meta, stages, buyerNeeds, metaLine, source, resolution }
-    script_text: script,     // narrative only
-    tips_text: tipsBlock,    // tips only
-    combined_text: combined  // narrative + tips
+    ...record,                 // { meta, stages, buyerNeeds, metaLine, source, resolution }
+    script_text: script,       // narrative only
+    tips_text: tipsBlock,      // tips markdown block
+    tips_list: tips,           // array for UI list
   };
 }
