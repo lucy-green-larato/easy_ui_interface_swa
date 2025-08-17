@@ -1,203 +1,267 @@
 // /src/lib/callSynthesis.js
-// Compose a natural UK B2B cold-call narrative from the curated library.
-// Produces: { stages, metaLine, buyerNeeds, script_text, tips_list, source: "library" }
+// Synthesis that turns library stages + form variables into a UK-ready talk track.
 
 import { getCallScript } from "./callLibrary.js";
 
-// ------- Utilities (lightweight, deterministic) -------
+/* ------------------------------ Utilities ------------------------------ */
 
-const ukSpelling = (text="") => {
+const toArray = (v) => {
+  if (!v) return [];
+  if (Array.isArray(v)) return v.map(String).map(s => s.trim()).filter(Boolean);
+  return String(v)
+    .split(/\r?\n|[;,]/g)
+    .map(s => s.trim())
+    .filter(Boolean);
+};
+
+const joinNatural = (arr) => {
+  const a = toArray(arr);
+  if (a.length === 0) return "";
+  if (a.length === 1) return a[0];
+  if (a.length === 2) return `${a[0]} and ${a[1]}`;
+  return `${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}`;
+};
+
+function toUkEnglish(text) {
+  if (!text) return "";
   const map = [
-    [/organization(s)?/gi, "organisation$1"],
-    [/organize(d|s|r|ing)?/gi, "organise$1"],
-    [/optimization/gi, "optimisation"],
-    [/optimi(z|s)e(?!d|r|s|ing)/gi, "optimise"],
-    [/center(s)?/gi, "centre$1"],
-    [/modeling/gi, "modelling"],
-    [/license/gi, "licence"],
-    [/utilize/gi, "utilise"],
-    [/program(s)?/gi, "programme$1"],
-    [/behavior/gi, "behaviour"],
-    [/advisor(s)?/gi, "adviser$1"],
-    [/color/gi, "colour"],
-    [/meter(s)?/gi, "metre$1"]
+    [/\borganization(s)?\b/gi, "organisation$1"],
+    [/\borganize(d|s|r|ing)?\b/gi, "organise$1"],
+    [/\boptimization(s)?\b/gi, "optimisation$1"],
+    [/\boptimi(z|s)e\b/gi, "optimise"],
+    [/\bcenter(s)?\b/gi, "centre$1"],
+    [/\bmodeling\b/gi, "modelling"],
+    [/\blicense(s|d|r)?\b/gi, "licence$1"],
+    [/\bprogram(me)?\b/gi, "programme"],
+    [/\bblocker(s)?\b/gi, "impediment$1"],
+    [/\broll ?out(s|ed|ing)?\b/gi, "deployment$1"],
+    [/\bplay out\b/gi, "develop"],
+    [/\bpile-?up(s)?\b/gi, "backlog$1"],
+    [/\bflex\b/gi, "adapt"],
   ];
-  return map.reduce((t, [re, rep]) => t.replace(re, rep), String(text || ""));
-};
+  let out = text;
+  for (const [re, rep] of map) out = out.replace(re, rep);
+  return out;
+}
 
-const clean = (s="") => ukSpelling(String(s).replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim());
+function sentenceClean(s) {
+  return String(s || "").replace(/\s+/g, " ").trim();
+}
 
-const clipToWords = (text="", target=300) => {
-  const hardMin = Math.max(120, Math.floor(target * 0.6));
-  const hardMax = Math.max(target, Math.floor(target * 1.15));
-  const words = text.trim().split(/\s+/);
-  if (words.length <= hardMax) return text.trim();
-  // Prefer sentence boundary clipping
-  const sentences = text.split(/(?<=\.)\s+/);
-  let out = "";
-  for (const s of sentences) {
-    if ((out + " " + s).trim().split(/\s+/).length > hardMax) break;
-    out = (out ? out + " " : "") + s;
+function sentencesFrom(text) {
+  // Split on sentence boundaries but keep initials, numbers etc. simple.
+  return String(text || "")
+    .replace(/\n{2,}/g, "\n")
+    .split(/(?<=[.!?])\s+(?=[A-Z0-9“"])/)
+    .map(sentenceClean)
+    .filter(Boolean);
+}
+
+function clipToWords(text, targetWords) {
+  const sents = sentencesFrom(text);
+  if (!targetWords || targetWords <= 0) return sents.join(" ");
+  const tgt = Math.max(60, Number(targetWords));
+  const out = [];
+  let count = 0;
+  for (const s of sents) {
+    const words = s.split(/\s+/).filter(Boolean).length;
+    if (count && count + words > tgt * 1.15) break; // soft cap ~+15%
+    out.push(s);
+    count += words;
   }
-  if (out.split(/\s+/).length >= hardMin) return out.trim();
-  // Fallback: hard word trim
-  return words.slice(0, hardMax).join(" ").trim();
-};
-
-const asInline = (arr) => Array.isArray(arr) ? arr.filter(Boolean).map(String).join("; ") : "";
-
-const sentence = (s) => {
-  const t = String(s || "").trim();
-  if (!t) return "";
-  return /[.?!]$/.test(t) ? t : `${t}.`;
-};
-
-// Subtle, non-salesy weaving of USPs / extra points
-function weaveTailoring({ usps="", extras="" }) {
-  const usp = String(usps || "").trim();
-  const ext = String(extras || "").trim();
-  const bits = [];
-  if (usp) bits.push(`In practice we focus on the elements that reduce friction fastest — ${usp.replace(/[;,\n]+/g, ", ").replace(/\s+/g, " ")}`);
-  if (ext) bits.push(`If it is useful, we can also touch briefly on ${ext.toLowerCase().replace(/[;,\n]+/g, ", ").replace(/\s+/g, " ")}`);
-  return bits.length ? bits.map(sentence).join(" ") : "";
+  return out.join(" ");
 }
 
-// ------- Tips (corporate + warm) -------
+/* ------------------------------ Tips ------------------------------ */
 
-const TIPS_CORPORATE = [
-  "Prepare two sector-relevant patterns you have observed and state them as observations, not diagnoses; invite the prospect to confirm or correct.",
-  "Use the prospect’s time carefully: one sentence to introduce yourself and relevance, then move to the value of the conversation.",
-  "Avoid assumptions about growth, problems or budgets; use phrases such as “in similar organisations we’ve seen…” and “you may recognise some of this”.",
-  "Frame the offer as an operational enhancement that sits above the current estate; emphasise continuity and low disruption before features.",
-  "Quote one specific client example with two to four quantified results and a credible time frame; keep the story under thirty seconds.",
-  "Handle objections factually and briefly: contracts (phase in at renewal), change (orchestration layer, not a rebuild), and scale (smaller teams benefit from automation).",
-  "Maintain a formal, courteous tone; avoid slang and Americanisms; prefer “organisation”, “programme”, “licence”, “tied into”, “deployment”, and “impediment”.",
-  "Close with a clear double alternative: offer two precise time options and anchor the value of the session before asking.",
-  "Agree attendees while on the call (IT and operations/finance), then email a one-paragraph summary, the agreed option, and the short agenda.",
-  "If the prospect is not ready, offer a short toolkit and a two-line summary, and propose a light follow-up date; remain helpful, not insistent."
+// Prioritised tips (we will guarantee at least one of the first three appears)
+const TIPS_PRIORITY = [
+  "Be concise. In the UK, long introductions lose people. Lead with why you are calling.",
+  "Do not oversell. Understatement carries credibility; let facts and examples do the work.",
+  "Use relatable UK cases. A story about a firm across five UK cities lands better than a generic global example.",
 ];
 
-const TIPS_WARM = [
-  "Open with one concise observation from similar UK organisations; invite the prospect to react.",
-  "Keep language clear, plain and courteous; avoid slang and Americanisms.",
-  "Position the offer as a small operational lift above what already works; continuity first, features later.",
-  "Use one relatable UK example with measurable outcomes; keep it tight.",
-  "Acknowledge common concerns calmly — contracts, change, and team size.",
-  "Suggest a practical next step with two time options; confirm attendees.",
-  "Follow up with a short note and a useful attachment; keep momentum without pressure.",
-  "Match their pace — brisk for brisk, more spacious if they are reflective."
+const TIPS_EXTRA = [
+  "Match their pace. If the prospect is brisk, keep tight. If they are more conversational, give space.",
+  "End with a clear, polite next step. Suggest specific times rather than leaving it open-ended.",
+  "Open with value, not features. Busy decision-makers stay engaged when you show you understand their reality.",
+  "Use credible stats sparingly. One or two strong numbers build authority — a flood of data feels like a lecture.",
+  "Always anchor with a story. Prospects remember relatable examples more than abstract claims.",
+  "Anticipate objections before they are raised; it shows confidence and saves time.",
+  "Keep the CTA practical and time-bounded; propose a clear, valuable next step.",
+  "Tone matters. Use clear, confident British English; adjust warmth and pace to the prospect’s energy.",
 ];
 
-// ------- Narrative composer (matches your “good output”) -------
-
-function composeCorporateNarrative(stages, vars) {
-  const s = stages || {};
-  const pain = clean(s.buyer_pain?.talk_track || s.buyer_pain?.script || "");
-  const desire = clean(s.buyer_desire?.talk_track || s.buyer_desire?.script || "");
-  const opening = clean(
-    "When we speak with operations and technology leaders across the UK, a consistent pattern appears: " +
-    (pain || "the pace of change often outstrips what estates were designed to handle.")
-  );
-
-  const approachCore = clean(
-    "The most effective approach we see is a light-touch management layer that sits across the current mobile and fixed estate. " +
-    (desire || "It consolidates administration, brings pooled data to reduce waste, allows bandwidth to flex with demand, and keeps reporting usable for Finance without exporting spreadsheets.") +
-    " In practice this is an operational enhancement rather than a change programme: you retain what is working and only adjust what is holding you back."
-  );
-
-  const tailoring = weaveTailoring({ usps: vars?.value_proposition, extras: vars?.context });
-
-  const exampleBody = clean(
-    s.example?.talk_track || s.example?.script || ""
-  );
-  const proof = asInline(s.example?.proof_points_text || s.example?.proof_points || []);
-  const examplePara = [exampleBody, proof && `In the first ninety days, ${proof}.`]
-    .filter(Boolean).map(sentence).join(" ");
-
-  const objections = clean(
-    s.objections?.talk_track || s.objections?.script || ""
-  );
-
-  const ctaBase = clean(
-    s.call_to_action?.talk_track || s.call_to_action?.script || 
-    "If the above aligns with the improvements you are seeking, the most useful next step is a short, structured review. We run a forty-five-minute Connectivity Review with your IT and operations leads to produce a usage and cost heat-map, a concise list of savings that can be achieved without disruption, and a tailored pilot that proves return within a quarter."
-  );
-  const ctaClose = "Would Monday morning suit, or would Wednesday morning be better?";
-
-  // Assemble in the same cadence as your “good output”
-  const paragraphs = [
-    opening + " " + "I do not know whether any of this applies in your organisation, but it may be useful to share what peers are doing to keep control without rebuilding anything.",
-    approachCore + (tailoring ? " " + tailoring : ""),
-    examplePara,
-    objections,
-    ctaBase + " " + (vars?.context ? sentence(`We can include ${String(vars.context).toLowerCase()} if that is a current theme`) : "") + " " + ctaClose
-  ];
-
-  return paragraphs.filter(Boolean).join("\n\n").trim();
+function pickTips(isWarm) {
+  // Ensure at least one priority tip, then fill to 3 total.
+  const out = [];
+  // 1 from priority
+  out.push(TIPS_PRIORITY[0]);
+  // 2 from the remaining pool (shuffle-light)
+  const pool = [...TIPS_PRIORITY.slice(1), ...TIPS_EXTRA];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0; [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  for (const tip of pool) {
+    if (out.length >= 3) break;
+    if (!out.includes(tip)) out.push(tip);
+  }
+  return out.slice(0, 3);
 }
 
-function composeWarmNarrative(stages, vars) {
-  // Same structure, a touch more human warmth, but still formal
-  const s = stages || {};
-  const pain = clean(s.buyer_pain?.talk_track || s.buyer_pain?.script || "");
-  const desire = clean(s.buyer_desire?.talk_track || s.buyer_desire?.script || "");
-  const opening = clean(
-    "Speaking with similar UK organisations, we’re seeing a familiar pattern: " +
-    (pain || "the estate hasn’t kept pace with the business.")
-  );
-  const approachCore = clean(
-    "What tends to work best is a light management layer across what you already run. " +
-    (desire || "It brings pooled data to cut waste, lets bandwidth scale when needed, and keeps reporting straightforward for Finance.") +
-    " It is an operational enhancement, not a rebuild."
-  );
-  const tailoring = weaveTailoring({ usps: vars?.value_proposition, extras: vars?.context });
-  const exampleBody = clean(s.example?.talk_track || s.example?.script || "");
-  const proof = asInline(s.example?.proof_points_text || s.example?.proof_points || []);
-  const examplePara = [exampleBody, proof && `In the first ninety days, ${proof}.`]
-    .filter(Boolean).map(sentence).join(" ");
-  const objections = clean(s.objections?.talk_track || s.objections?.script || "");
-  const ctaBase = clean(
-    s.call_to_action?.talk_track || s.call_to_action?.script ||
-    "If that sounds useful, the next step is a forty-five-minute Connectivity Review with IT and operations: usage and cost heat-map, immediate saving opportunities, and a small pilot to prove value."
-  );
-  const ctaClose = "Would Monday morning work, or would Wednesday be better?";
+/* ------------------------------ Composition helpers ------------------------------ */
 
-  const paragraphs = [
-    opening + " " + "I can’t speak for your set-up, so treat this as context rather than a diagnosis.",
-    approachCore + (tailoring ? " " + tailoring : ""),
-    examplePara,
-    objections,
-    ctaBase + " " + (vars?.context ? sentence(`We can include ${String(vars.context).toLowerCase()} if that is timely`) : "") + " " + ctaClose
-  ];
-  return paragraphs.filter(Boolean).join("\n\n").trim();
+function marketPatterns(painsArr) {
+  const pains = toArray(painsArr);
+  if (pains.length === 0) return "";
+  const some = pains.slice(0, 3);
+  return `In similar organisations we are seeing issues such as ${joinNatural(some).toLowerCase()}—usually without changing what already works.`;
 }
 
-// ------- Public API -------
+function exampleLine(exampleStage) {
+  const ex = sentenceClean(exampleStage?.talk_track || exampleStage?.script || "");
+  const proofs = toArray(exampleStage?.proof_points_text || exampleStage?.proof_points);
+  if (!ex && proofs.length === 0) return "";
+  const proofClause = proofs.length ? ` In the first ninety days: ${joinNatural(proofs).replace(/%/g, " per cent")}.` : "";
+  return `${ex}${proofClause}`;
+}
 
-export async function generateCallFromLibrary({ lookup, form, tone="", length=300, variables={} }) {
-  // 1) Get the curated record (resolves normalised + legacy paths)
+function objectionsLine(objectionsStage) {
+  const base = sentenceClean(objectionsStage?.talk_track || objectionsStage?.script || "");
+  const anticip = toArray(objectionsStage?.anticipated);
+  const extra = anticip.length ? ` Common concerns we handle include ${joinNatural(anticip).toLowerCase()}.` : "";
+  return `${base}${extra}`;
+}
+
+function buildGreeting(v) {
+  const prospect = (v.prospect_name || "").trim();
+  const seller = (v.seller_name || "").trim();
+  const company = (v.seller_company || "").trim();
+
+  // Gentle contextual nods (e.g., "back from holiday")
+  const ctx = toArray(v.context).map(s => s.toLowerCase());
+  const holiday = ctx.find(x => x.includes("back from holiday") || x.includes("holiday"));
+
+  const who = seller ? (company ? `${seller} from ${company}` : seller) : (company ? `a colleague from ${company}` : "a colleague");
+  const greet = prospect ? `Hi ${prospect}, it’s ${who}.` : `Hi, it’s ${who}.`;
+  const grace = holiday ? " I hope the return from holiday has not left you with too much to catch up on." : "";
+
+  return `${greet}${grace} Thanks for taking the call — I will keep this brief and useful.`;
+}
+
+function tailoringNotes(v) {
+  const usps = toArray(v.value_proposition);
+  const ctx = toArray(v.context);
+  const left = usps.length ? `From our side, the areas most likely to add value are ${joinNatural(usps).toLowerCase()}.` : "";
+  const right = ctx.length ? ` If useful, we can also touch on ${joinNatural(ctx).toLowerCase()}; otherwise I will keep to immediate priorities.` : "";
+  return (left || right) ? (left + right).trim() : "";
+}
+
+/* ------------------------------ Corporate (formal) ------------------------------ */
+
+function composeCorporateNarrative(stages, v) {
+  const s = stages || {};
+  const intro = buildGreeting(v);
+
+  const patterns = marketPatterns(s.buyer_pain?.buyer_needs_summary || [
+    "ad-hoc SIM spend without central oversight",
+    "long fixed-term lines",
+    "provisioning delays across deployments",
+    "multiple suppliers with differing SLAs",
+  ]);
+
+  const relevance = "I do not know whether any of that applies in your organisation; it may be useful to share how peers are keeping control without rebuilding anything.";
+  const desire = sentenceClean(s.buyer_desire?.talk_track || s.buyer_desire?.script ||
+    "A light management layer sits across the current mobile and fixed estate, consolidates administration, enables pooled mobile data, and allows bandwidth to scale on demand. Reporting is clear enough for Finance to use without exporting spreadsheets. This is an operational enhancement rather than a change programme: you retain what works and adjust only what does not.");
+  const tailor = tailoringNotes(v);
+  const example = exampleLine(s.example);
+  const objections = objectionsLine(s.objections);
+  const cta = sentenceClean(
+    s.call_to_action?.talk_track ||
+    s.call_to_action?.script ||
+    "If the above aligns with what you are seeking, the practical next step is a forty-five-minute Connectivity Review with your IT and operations leads. Would Monday morning suit, or would Wednesday morning be better?"
+  );
+
+  const blocks = [intro, patterns, relevance, desire, tailor, example, objections, cta]
+    .map(toUkEnglish)
+    .filter(Boolean);
+
+  // Optional discreet section markers for readability in the UI
+  const labelled = [
+    ["— Opening —", blocks[0]],
+    ["— Market patterns —", blocks[1]],
+    ["— Relevance —", blocks[2]],
+    ["— Approach —", blocks[3]],
+    tailor && ["— Tailoring notes —", blocks[4]],
+    ["— Example —", example ? toUkEnglish(example) : ""],
+    ["— Reassurance —", objections ? toUkEnglish(objections) : ""],
+    ["— Next step —", toUkEnglish(cta)],
+  ].filter(Boolean).map(([h, t]) => `${h}\n${t}`);
+
+  return labelled.join("\n\n");
+}
+
+/* ------------------------------ Warm (professional, human) ------------------------------ */
+
+function composeWarmNarrative(stages, v) {
+  const s = stages || {};
+  const intro = buildGreeting(v);
+
+  const patterns = marketPatterns(s.buyer_pain?.buyer_needs_summary || [
+    "ad-hoc SIM spend",
+    "fixed contracts that are slow to change",
+    "delays in provisioning that hold up teams",
+  ]);
+
+  const relevance = "None of this may be live for you; I can share briefly what has helped similar teams keep things moving without disruption.";
+  const desire = sentenceClean(s.buyer_desire?.talk_track || s.buyer_desire?.script ||
+    "A light layer over the current mobile and fixed services brings pooled data, simpler changes, and reporting that Finance and IT can both use. It is about pace and control rather than a rebuild.");
+  const tailor = tailoringNotes(v);
+  const example = exampleLine(s.example);
+  const objections = objectionsLine(s.objections);
+  const cta = "If that sounds useful, the next step is a short, structured review with your IT and ops leads — forty-five minutes. Would Monday or Wednesday morning work best?";
+
+  const blocks = [intro, patterns, relevance, desire, tailor, example, objections, cta]
+    .map(toUkEnglish)
+    .filter(Boolean);
+
+  const labelled = [
+    ["— Opening —", blocks[0]],
+    ["— Market patterns —", blocks[1]],
+    ["— Relevance —", blocks[2]],
+    ["— Approach —", blocks[3]],
+    tailor && ["— Tailoring notes —", blocks[4]],
+    ["— Example —", example ? toUkEnglish(example) : ""],
+    ["— Reassurance —", objections ? toUkEnglish(objections) : ""],
+    ["— Next step —", toUkEnglish(cta)],
+  ].filter(Boolean).map(([h, t]) => `${h}\n${t}`);
+
+  return labelled.join("\n\n");
+}
+
+/* ------------------------------ Main entry ------------------------------ */
+
+export async function generateCallFromLibrary({ lookup, form, tone, length, variables }) {
+  // 1) Resolve library content
   const lib = await getCallScript(lookup);
 
   // 2) Compose narrative in the requested tone
-const t = String(tone || "").toLowerCase();
-const isWarm = t.includes("warm"); // explicit "warm" takes priority
-const body = isWarm
-  ? composeWarmNarrative(lib.stages, variables)
-  : composeCorporateNarrative(lib.stages, variables);
+  const t = String(tone || "").toLowerCase();
+  const isWarm = t.includes("warm"); // anything else -> corporate
+  const body = isWarm
+    ? composeWarmNarrative(lib.stages, variables || {})
+    : composeCorporateNarrative(lib.stages, variables || {});
 
-// 3) Length management (soft cap, keeps sentences intact)
-const target = Number(length) || 300;
-const script_text = clipToWords(body, target);
+  // 3) Length management
+  const target = Number(length) || 300;
+  const script_text = clipToWords(body, target);
 
-// 4) Tips pool
-const tips_list = (isWarm ? TIPS_WARM : TIPS_CORPORATE).slice();
+  // 4) Tips (exactly three)
+  const tips_list = pickTips(isWarm);
 
   return {
-    stages: lib.stages,
-    metaLine: lib.metaLine,
-    buyerNeeds: lib.buyerNeeds,
     script_text,
     tips_list,
-    source: "library"
-  };
-}
+    stages: lib.stages,
+    metaLine: lib.metaLine,
+    buyerNeeds: lib.buyerNeeds || {},
