@@ -6,19 +6,24 @@ Dual-mode converter:
 
 Usage (from repo root):
 
-DOCX mode:
-  python scripts/convert_scripts.py --docx "script_doc_inputs/*.docx" --out web/content/call-library/v1/direct/connectivity
-  # or a single file:
-  python scripts/convert_scripts.py --docx script_doc_inputs/connectivity-early-adopters.docx --out web/content/call-library/v1/direct/connectivity
+DOCX mode (single file or glob):
+  python scripts/convert_scripts.py --docx script_doc_inputs/connectivity-early-adopters.docx \
+    --out web/content/call-library/v1/direct/connectivity
+
+Force buyer if detection is fussy:
+  python scripts/convert_scripts.py --docx script_doc_inputs/connectivity-early-adopters.docx \
+    --buyer early-adopter \
+    --out web/content/call-library/v1/direct/connectivity
 
 URL mode:
-  python scripts/convert_scripts.py --url "https://info.larato.co.uk/xxx-sales-script" --out web/content/call-library/v1/direct/connectivity
+  python scripts/convert_scripts.py --url "https://info.larato.co.uk/xxx-sales-script" \
+    --out web/content/call-library/v1/direct/connectivity
 """
 
 import argparse, glob, os, re, sys, urllib.request, html as htmllib
 from pathlib import Path
 
-# ---- optional for URL mode (install once: pip install beautifulsoup4 html5lib) ----
+# Optional (URL mode): pip install beautifulsoup4 html5lib
 try:
     from bs4 import BeautifulSoup  # noqa: F401
     HAVE_BS = True
@@ -28,25 +33,34 @@ except Exception:
 parser = argparse.ArgumentParser(description="Convert sales scripts (URL or DOCX) to Markdown library files.")
 parser.add_argument("--url", help="Source page containing all buyer sections")
 parser.add_argument("--docx", help="Glob path OR exact .docx file path (requires mammoth)")
+parser.add_argument("--buyer", help="Force buyer id (innovator|early-adopter|early-majority|late-majority|sceptic)")
 parser.add_argument("--out", required=True, help="Output dir, e.g. web/content/call-library/v1/direct/connectivity")
 args = parser.parse_args()
 
 OUT_DIR = Path(args.out)
 
-# ---------- canonical mapping ----------
+# Canonical mapping & sets
 BUYER_MAP = {
     "innovators": "innovator",
     "innovator": "innovator",
+
     "early adopters": "early-adopter",
     "early adopter": "early-adopter",
-    "early_adopters": "early-adopter",   # alias
-    "early-adopters": "early-adopter",   # alias
+    "early_adopters": "early-adopter",   # aliases
+    "early-adopters": "early-adopter",
+
     "early majority": "early-majority",
+    "early_majority": "early-majority",
+    "early-majority": "early-majority",
+
     "late majority": "late-majority",
-    "sceptic": "sceptic",
+    "late_majority": "late-majority",
+    "late-majority": "late-majority",
+
     "sceptics": "sceptic",
-    "skeptic": "sceptic",
+    "sceptic": "sceptic",
     "skeptics": "sceptic",
+    "skeptic": "sceptic",
 }
 VALID_BUYERS = {"innovator","early-adopter","early-majority","late-majority","sceptic"}
 
@@ -136,7 +150,6 @@ def run_url_mode(url: str):
         raw_html = resp.read().decode("utf-8", errors="ignore")
     soup = BeautifulSoup(raw_html, "html5lib")
 
-    # find anchors for each buyer type (by text, id, class)
     anchors = []
     for tag in soup.find_all(True):
         txt = (tag.get_text(" ", strip=True) or "").lower()
@@ -171,7 +184,7 @@ def run_url_mode(url: str):
         write_md(buyer, md)
 
 # ---------- DOCX MODE ----------
-def run_docx_mode(pattern: str):
+def run_docx_mode(pattern: str, buyer_override: str | None):
     try:
         import mammoth
     except ImportError:
@@ -194,37 +207,39 @@ def run_docx_mode(pattern: str):
             result = mammoth.convert_to_html(fh)
             html = result.value or ""
 
-        # robust buyer detection: filename OR document body
-        nf = _norm(os.path.basename(f))   # e.g. connectivity-early-adopters.docx
-        nh = _norm(html)
-        buyer = None
-        matched_key = None
+        buyer = buyer_override
+        matched_key = "(forced)" if buyer_override else None
 
-        # Primary mapping
-        for key, val in BUYER_MAP.items():
-            nk = _norm(key)               # e.g. early-adopters
-            if nk in nf or nk in nh:
-                buyer = val
-                matched_key = key
-                break
-
-        # Fallback tokens if needed
         if not buyer:
-            tokens = set(re.split(r"[^a-z0-9]+", nf)) | set(re.split(r"[^a-z0-9]+", nh))
-            tokens = {t for t in tokens if t}
-            def has(*words): return all(w in tokens for w in words)
-            if has("innovators") or has("innovator"):
-                buyer, matched_key = "innovator", "innovators*"
-            elif has("early","adopters") or has("early","adopter"):
-                buyer, matched_key = "early-adopter", "early adopters*"
-            elif has("early","majority"):
-                buyer, matched_key = "early-majority", "early majority*"
-            elif has("late","majority"):
-                buyer, matched_key = "late-majority", "late majority*"
-            elif any(has(x) for x in [["sceptics"],["sceptic"],["skeptics"],["skeptic"]]):
-                buyer, matched_key = "sceptic", "sceptics*"
+            # robust buyer detection: filename OR document body
+            nf = _norm(os.path.basename(f))   # e.g. connectivity-early-adopters.docx
+            nh = _norm(html)
 
-        print(f"  · detect -> file='{os.path.basename(f)}' nf='{nf}' | match='{matched_key}' => buyer='{buyer}'")
+            # Primary mapping
+            for key, val in BUYER_MAP.items():
+                nk = _norm(key)               # e.g. early-adopters
+                if nk in nf or nk in nh:
+                    buyer = val
+                    matched_key = key
+                    break
+
+            # Fallback tokens if needed
+            if not buyer:
+                tokens = set(re.split(r"[^a-z0-9]+", nf)) | set(re.split(r"[^a-z0-9]+", nh))
+                tokens = {t for t in tokens if t}
+                def has(*words): return all(w in tokens for w in words)
+                if has("innovators") or has("innovator"):
+                    buyer, matched_key = "innovator", "innovators*"
+                elif has("early","adopters") or has("early","adopter"):
+                    buyer, matched_key = "early-adopter", "early adopters*"
+                elif has("early","majority"):
+                    buyer, matched_key = "early-majority", "early majority*"
+                elif has("late","majority"):
+                    buyer, matched_key = "late-majority", "late majority*"
+                elif any(has(x) for x in [["sceptics"],["sceptic"],["skeptics"],["skeptic"]]):
+                    buyer, matched_key = "sceptic", "sceptics*"
+
+            print(f"  · detect -> file='{os.path.basename(f)}' | match='{matched_key}' => buyer='{buyer}'")
 
         if not buyer or buyer not in VALID_BUYERS:
             print(f"  ! Skipping (buyer not recognised): {f}")
@@ -240,10 +255,11 @@ def main():
     if not args.url and not args.docx:
         print("Provide either --url or --docx")
         sys.exit(1)
+
     if args.url:
         run_url_mode(args.url)
     if args.docx:
-        run_docx_mode(args.docx)
+        run_docx_mode(args.docx, args.buyer)
     print("Done.")
 
 if __name__ == "__main__":
