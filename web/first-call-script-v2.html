@@ -592,9 +592,9 @@
         saveCallPrefIfRequested(); refreshSubmitState();
       });
       on(toggleTipsBtn, ['click'], () => {
-        const currentlyExpanded = toggleTipsBtn.getAttribute('aria-expanded') === 'true';
-        const currentlyExpanded = toggleTipsBtn.getAttribute('aria-expanded') === 'true';
-        localStorage.setItem(TIPS_HIDDEN_KEY, hidden ? '0':'1'); // will be flipped in apply
+        const expanded = toggleTipsBtn.getAttribute('aria-expanded') === 'true';
+        const willHide = expanded;                           // clicking hides when currently expanded
+        localStorage.setItem(TIPS_HIDDEN_KEY, willHide ? '1' : '0');
         applyTipsVisibility();
       });
       on(saveNotesBtn, ['click'], saveNotes);
