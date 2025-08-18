@@ -18,14 +18,15 @@ DOCX mode (optional, requires: pip install mammoth):
     --out web/content/call-library/v1/direct/connectivity
 """
 
-import argparse
-import glob
-import os
-import re
-import sys
-import urllib.request
-import html as htmllib
+import argparse, glob, os, re, sys, urllib.request, html as htmllib
 from pathlib import Path
+
+# ---- extra imports for robust HubSpot parsing ----
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    print("Please install BeautifulSoup for URL mode:\n  pip install beautifulsoup4 html5lib")
+    sys.exit(1)
 
 # ---------- CLI ----------
 parser = argparse.ArgumentParser(description="Convert sales scripts (URL or DOCX) to Markdown library files.")
@@ -36,6 +37,7 @@ args = parser.parse_args()
 
 OUT_DIR = Path(args.out)
 
+# ---------- canonical mapping ----------
 BUYER_MAP = {
     "innovators": "innovator",
     "innovator": "innovator",
@@ -48,45 +50,34 @@ BUYER_MAP = {
     "skeptic": "sceptic",
     "skeptics": "sceptic",
 }
+VALID_BUYERS = {"innovator","early-adopter","early-majority","late-majority","sceptic"}
 
 SECTION_RULES = [
     (re.compile(r"^\s*(opening|opener)\b", re.I), "Opener", False),
     (re.compile(r"^\s*(buyer\s+pain|pain)\b", re.I), "Context bridge", False),
     (re.compile(r"^\s*(buyer\s+desire|desire)\b", re.I), "Value moment", False),
-    (re.compile(r"^\s*example", re.I), "Value moment", True),  # append into Value moment
+    (re.compile(r"^\s*example", re.I), "Value moment", True),
     (re.compile(r"^\s*(handling\s+objections|objections)\b", re.I), "Objections", False),
     (re.compile(r"^\s*(call\s+to\s+action|next\s*steps?)\b", re.I), "Next step", False),
     (re.compile(r"^\s*(exploration|discovery|questions?)\b", re.I), "Exploration nudge", False),
 ]
 
-VALID_BUYERS = {"innovator","early-adopter","early-majority","late-majority","sceptic"}
-
 # ---------- helpers ----------
 def ensure_out():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-def norm_space(s: str) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
-
 def html_to_text(html: str) -> str:
-    """Very light HTML → text; handle <li>, <br>, <p>, strip tags."""
     if not html:
         return ""
-    # list items -> "- ..."
     html = re.sub(r"(?is)<li[^>]*>\s*", "\n- ", html)
-    # <br> -> newline
     html = re.sub(r"(?is)<br\s*/?>", "\n", html)
-    # close p/div/section -> double newline
     html = re.sub(r"(?is)</(p|div|section|ul|ol|h[1-6])>", "\n\n", html)
-    # remove all other tags
     html = re.sub(r"(?is)<[^>]+>", "", html)
     text = htmllib.unescape(html)
-    # compress multiple blank lines
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 def compose_markdown(sections: dict) -> str:
-    # ensure all standard sections, and include tokens
     out = {
         "Opener": sections.get("Opener", "").strip(),
         "Context bridge": sections.get("Context bridge", "").strip(),
@@ -96,23 +87,17 @@ def compose_markdown(sections: dict) -> str:
         "Next step (salesperson-chosen)": "{{next_step}}",
         "Close": "Thank you for your time.",
     }
-    # if CTA text existed, keep it before the token
     if sections.get("Next step"):
         pre = sections["Next step"].strip()
         if pre:
             out["Next step (salesperson-chosen)"] = pre + "\n\n{{next_step}}"
-    # ensure value proposition token appears
     if out["Value moment"]:
         out["Value moment"] += "\n\n{{value_proposition}}"
     else:
         out["Value moment"] = "{{value_proposition}}"
 
     order = ["Opener","Context bridge","Value moment","Exploration nudge","Objections","Next step (salesperson-chosen)","Close"]
-    blocks = []
-    for h in order:
-        body = out[h].rstrip()
-        blocks.append(f"# {h}\n{body}" if body else f"# {h}\n")
-    return "\n\n".join(blocks).strip() + "\n"
+    return "\n\n".join(f"# {h}\n{out[h].rstrip()}" for h in order).strip() + "\n"
 
 def write_md(buyer_id: str, md: str):
     ensure_out()
@@ -120,123 +105,90 @@ def write_md(buyer_id: str, md: str):
     file_path.write_text(md, encoding="utf-8")
     print(f"✓ Wrote {file_path}")
 
-def pick_buyer_from_str(s: str) -> str | None:
-    s = (s or "").lower()
-    for key, val in BUYER_MAP.items():
-        if key in s:
-            return val
-    return None
-
-def split_by_buyer_sections(html: str):
-    """Return list of (buyer_id, html_segment) in order of appearance."""
-    # Build a list of (start_index, buyer_id)
-    hits = []
-    lower = html.lower()
-    # Find headings mentioning buyer groups, e.g. <h2>Innovators</h2>
-    for key in BUYER_MAP.keys():
-        pattern = re.compile(rf"<h[1-6][^>]*>[^<]*{re.escape(key)}[^<]*</h[1-6]>", re.I)
-        for m in pattern.finditer(lower):
-            hits.append((m.start(), BUYER_MAP[key]))
-    if not hits:
-        # fallback: anchors like id="innovators"
-        for key in BUYER_MAP.keys():
-            pattern = re.compile(rf'id="[^"]*{re.escape(key)}[^"]*"', re.I)
-            for m in pattern.finditer(lower):
-                hits.append((m.start(), BUYER_MAP[key]))
-    hits.sort(key=lambda x: x[0])
-    if not hits:
-        return []
-
-    segments = []
-    for i, (pos, buyer) in enumerate(hits):
-        end = hits[i+1][0] if i+1 < len(hits) else len(html)
-        segments.append((buyer, html[pos:end]))
-    # De-dup in case multiple matches for same section header
-    seen = set()
-    uniq = []
-    for buyer, seg in segments:
-        if buyer in seen:
-            continue
-        seen.add(buyer)
-        uniq.append((buyer, seg))
-    return uniq
-
 def map_inner_sections_to_canonical(text: str) -> dict:
-    """
-    Given plain text of a buyer segment, map its internal headings to our canonical sections.
-    Returns dict: { 'Opener': '...', 'Context bridge':'...', ... }
-    """
     lines = [l.rstrip() for l in text.splitlines()]
-    buckets = {}
-    current = "Opener"
+    buckets, current = {}, "Opener"
     buckets[current] = ""
-
-    def push(line):
-        buckets[current] = (buckets.get(current, "") + ("\n" if buckets.get(current) else "") + line).strip()
-
+    def push(line): buckets[current] = (buckets.get(current, "") + ("\n" if buckets.get(current) else "") + line).strip()
     for raw in lines:
         line = raw.strip()
-        if not line:
-            continue
+        if not line: continue
         matched = False
         for pattern, target, append in SECTION_RULES:
             if pattern.match(line):
-                # switch bucket
                 current = target
-                buckets.setdefault(current, "")
+                if not append: buckets.setdefault(current, "")
                 matched = True
                 break
-        if matched:
-            continue
-        # otherwise accumulate
-        push(line)
-
+        if not matched: push(line)
     return buckets
 
 # ---------- URL MODE ----------
 def run_url_mode(url: str):
     print(f"Fetching: {url}")
-    with urllib.request.urlopen(url) as resp:
-        html = resp.read().decode("utf-8", errors="ignore")
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req) as resp:
+        raw_html = resp.read().decode("utf-8", errors="ignore")
+    soup = BeautifulSoup(raw_html, "html5lib")
 
-    segments = split_by_buyer_sections(html)
-    if not segments:
+    # find anchors for each buyer type
+    anchors = []
+    for tag in soup.find_all(True):
+        txt = (tag.get_text(" ", strip=True) or "").lower()
+        ident = " ".join([tag.get("id",""), " ".join(tag.get("class") or [])]).lower()
+        candidate = txt + " " + ident
+        for key, val in BUYER_MAP.items():
+            if key in candidate:
+                anchors.append((val, tag))
+    if not anchors:
         print("✗ Could not detect buyer sections on the page.")
         sys.exit(1)
 
-    for buyer, seg_html in segments:
-        if buyer not in VALID_BUYERS:
+    seen, anchors_ordered = set(), []
+    for val, el in anchors:
+        if val not in seen and val in VALID_BUYERS:
+            seen.add(val)
+            anchors_ordered.append((val, el))
+
+    for i, (buyer, el) in enumerate(anchors_ordered):
+        stop_set = {id(x[1]) for x in anchors_ordered[i+1:]}
+        parts, cur = [], el.find_next_sibling()
+        while cur is not None and id(cur) not in stop_set:
+            parts.append(str(cur))
+            cur = cur.find_next_sibling()
+        seg_html = "".join(parts)
+        if not seg_html.strip():
+            print(f"! Buyer '{buyer}' found but segment empty.")
             continue
         text = html_to_text(seg_html)
         sections = map_inner_sections_to_canonical(text)
         md = compose_markdown(sections)
         write_md(buyer, md)
 
-# ---------- DOCX MODE (optional) ----------
+# ---------- DOCX MODE ----------
 def run_docx_mode(pattern: str):
     try:
-        import mammoth  # lazy import, only needed for DOCX mode
+        import mammoth
     except ImportError:
         print("Please install mammoth for DOCX mode: pip install mammoth")
         sys.exit(1)
-
     files = sorted(glob.glob(pattern))
     if not files:
         print("✗ No .docx files matched.")
         sys.exit(1)
-
     for f in files:
         print(f"Reading {f}")
         with open(f, "rb") as fh:
             result = mammoth.convert_to_html(fh)
-            html = result.value  # HTML string
-
-        # guess buyer from content or filename
-        buyer = pick_buyer_from_str(html) or pick_buyer_from_str(os.path.basename(f))
+            html = result.value
+        buyer = None
+        for key, val in BUYER_MAP.items():
+            if key in f.lower() or key in html.lower():
+                buyer = val
+                break
         if not buyer or buyer not in VALID_BUYERS:
             print(f"  ! Skipping (buyer not recognised): {f}")
             continue
-
         text = html_to_text(html)
         sections = map_inner_sections_to_canonical(text)
         md = compose_markdown(sections)
@@ -247,13 +199,8 @@ def main():
     if not args.url and not args.docx:
         print("Provide either --url or --docx")
         sys.exit(1)
-
-    if args.url:
-        run_url_mode(args.url)
-
-    if args.docx:
-        run_docx_mode(args.docx)
-
+    if args.url: run_url_mode(args.url)
+    if args.docx: run_docx_mode(args.docx)
     print("Done.")
 
 if __name__ == "__main__":
