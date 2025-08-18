@@ -40,7 +40,6 @@
     .tips-card ul li{ margin:.25rem 0 }
 
     .panel .card h3{ margin: 0 0 .5rem 0 }
-
     .intel-grid{ display:grid; grid-template-columns:1fr !important; gap:var(--space-3) }
 
     input,select,textarea{
@@ -54,7 +53,7 @@
     .btn.inline{ padding:.35rem .6rem; font-size:.9rem }
     .muted{ color:var(--text-2) }
 
-    /* make sure header is correct*/  
+    /* header (matches your screenshot) */  
     .app-header{ 
       display:flex; align-items:center; justify-content:space-between;
       padding:10px 16px; background:#fff; border-bottom:1px solid #e5e7eb;
@@ -66,7 +65,6 @@
     .app-header .kicker{ margin:0; color:#6b7280; font-size:.85rem; }
 
     .app-header .header-right{ display:flex; align-items:center; gap:12px; }
-
     .calltype-mini{
       display:flex; align-items:center; gap:8px;
       padding:4px 8px; border:1px solid #e5e7eb; border-radius:999px; background:#fff;
@@ -220,7 +218,7 @@
 
           <!-- NEW: Next step (salesperson-chosen) -->
           <div class="field">
-            <label for="next_step">Your desired next step (shown verbatim in the script)</label>
+            <label for="next_step">Your desired next step</label>
             <input id="next_step" name="next_step" placeholder="e.g., I’ll send a 1-page summary and we can pick it up from there." />
           </div>
         </fieldset>
@@ -322,9 +320,14 @@
 
   <!-- === SCRIPT: glue UI to library (prompt-based) === -->
   <script type="module">
-    /* IMPORTANT: relative import so it works under sub-paths */
-    import { getIndex, canonical } from "./src/lib/callLibrary.js";
+    /* Relative imports so it works under SWA sub-paths */
+    import { getIndex, loadTemplate, canonical } from "./src/lib/callLibrary.js";
     import { generatePromptBasedCallScript } from "./src/lib/callPromptEngine.js";
+    const canonicaliseBuyerId = (value) => canonical.buyer(value);
+    const INDEX_CACHE = new Map(); // mode -> index json
+    const modeFromCallType = (v) => canonical.mode(v);
+    const buyerCanon       = (v) => canonical.buyer(v);
+
 
     (function () {
       const FORM_ID = 'script-form';
@@ -335,7 +338,6 @@
       const TIPS_HIDDEN_KEY = 'first_call_script_v2.tips_hidden';
       const NOTES_KEY_PREFIX = 'first_call_script_v2.notes';
       const INTEL_URL = './intel.json';
-      const RESTORE_LAST = false;
 
       const REQUIRED = ['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
 
@@ -345,7 +347,6 @@
       const copyBtn = document.getElementById('copy');
       const downloadBtn = document.getElementById('download');
       const outputEl = document.getElementById('output');
-      const tipsCard = document.querySelector('.tips-card');
       const tipsList = document.getElementById('tips-list');
       const toggleTipsBtn = document.getElementById('toggle-tips');
       const popoutBtn = document.getElementById('popout');
@@ -375,6 +376,9 @@
       const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
       const on = (el, evts, h, opt) => { if (el) evts.forEach(e => el.addEventListener(e, h, opt)); };
 
+      // ---------- utilities ----------
+      const norm = s => String(s||'').toLowerCase().trim();
+
       function setBusy(isBusy) {
         submitBtn && (submitBtn.disabled = isBusy || !allRequiredFilled(form));
         resetBtn && (resetBtn.disabled = isBusy);
@@ -385,31 +389,108 @@
       }
       function setStatus(msg, kind='info'){ if (statusEl){ statusEl.textContent = msg; statusEl.dataset.kind = kind; } }
 
-      function allRequiredFilled(formEl){
-        if (!formEl) return false;
-        const labels = { call_type:'Direct or partner sales', seller_name:'Your name', seller_company:'Your company',
-          prospect_name:'Prospect name', prospect_role:'Prospect role', prospect_company:'Prospect company',
-          buyer_behaviour:'Buyer behaviour', product:'Product' };
+      function allRequiredFilled(formEl) {
+       if (!formEl) return false;
+
+        // Labels for friendly status text
+       const labels = {
+          call_type: 'Direct or partner sales',
+          seller_name: 'Your name',
+          seller_company: 'Your company',
+          prospect_name: 'Prospect name',
+          prospect_role: 'Prospect role',
+          prospect_company: 'Prospect company',
+          buyer_behaviour: 'Buyer behaviour',
+          product: 'Product'
+        };
+
         const missing = [];
-        for (const name of REQUIRED){
-          const el = formEl.elements[name] || document.getElementById(name);
-          const val = (el && typeof el.value === 'string') ? el.value.trim() : '';
+
+       // Helper to get current value robustly
+        const getVal = (name) => {
+         if (name === 'product') {
+            return (productSel && typeof productSel.value === 'string')
+              ? productSel.value.trim()
+              : (formEl.elements[name]?.value || '').trim();
+          }
+          if (name === 'buyer_behaviour') {
+           return (buyerBehSel && typeof buyerBehSel.value === 'string')
+             ? buyerBehSel.value.trim()
+              : (formEl.elements[name]?.value || '').trim();
+          }
+          if (name === 'call_type') {
+            return (callTypeSel && typeof callTypeSel.value === 'string')
+              ? callTypeSel.value.trim()
+             : (formEl.elements[name]?.value || '').trim();
+          }
+          return (formEl.elements[name]?.value || '').trim();
+        };
+
+        for (const name of REQUIRED) {
+          const val = getVal(name);
           if (!val) missing.push(labels[name] || name);
         }
-        if (missing.length) setStatus(`Please complete: ${missing.join(', ')}.`, 'error'); else setStatus('');
+
+        // DEBUG: show what the code sees for Product at validation time
+      try {
+        if (diagJson) {
+          const snap = {
+            where: 'allRequiredFilled',
+            productSel_value: productSel?.value ?? null,
+            form_product: formEl.elements?.product?.value ?? null,
+            options: productSel ? [...productSel.options].map(o => ({
+              value: o.value, text: o.textContent, selected: o.selected
+            })) : []
+          };
+          diagJson.textContent = JSON.stringify(snap, null, 2);
+        }
+      } catch {}
+
+
+        if (missing.length) {
+          setStatus(`Please complete: ${missing.join(', ')}.`, 'error');
+        } else {
+         setStatus('');
+        }
+
         return missing.length === 0;
       }
+
       function refreshSubmitState(){ submitBtn && (submitBtn.disabled = !allRequiredFilled(form)); }
 
       function validateField(input) {
         if (!input) return;
-        const id = input.id;
-        const errorEl = document.getElementById(`${id}_error`) || (id==='call_type' ? document.getElementById('call_type_error') : null);
-        const valid = !!String(input.value || '').trim();
+
+          // Allow callers to pass the logical field name (string) too
+        const el = (typeof input === 'string') ? (form.elements[input] || document.getElementById(input)) : input;
+        if (!el) return;
+
+        const id = el.id || el.name || '';
+        const errorEl =
+          document.getElementById(`${id}_error`) ||
+          (id === 'call_type' ? document.getElementById('call_type_error') : null);
+
+        // Robust current value for selects we care about
+        let value = '';
+        if (el === productSel) value = (productSel.value || '').trim();
+        else if (el === buyerBehSel) value = (buyerBehSel.value || '').trim();
+        else if (id === 'call_type') value = (callTypeSel?.value || '').trim();
+        else value = (el.value || '').trim();
+
+        const valid = !!value;
+
         if (!errorEl) return;
-        if (valid) { errorEl.textContent=''; input.removeAttribute('aria-invalid'); input.classList.remove('invalid'); }
-        else { errorEl.textContent = id==='call_type' ? 'Please choose a call type.' : 'This field is required.'; input.setAttribute('aria-invalid','true'); input.classList.add('invalid'); }
+        if (valid) {
+          errorEl.textContent = '';
+          el.removeAttribute('aria-invalid');
+          el.classList.remove('invalid');
+        } else {
+          errorEl.textContent = id === 'call_type' ? 'Please choose a call type.' : 'This field is required.';
+          el.setAttribute('aria-invalid','true');
+          el.classList.add('invalid');
+        }
       }
+
 
       function saveForm(){
         if (!form) return;
@@ -435,15 +516,13 @@
 
       // ---------- Buyer needs helpers ----------
       const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
-      const norm = s => String(s || '').toLowerCase().replace(/\s+/g,' ').replace(/[\u2010-\u2015_\-\/]+/g,'-').replace(/[^\w\- ]+/g,'').trim();
-      const BEHAVIOUR_SYNONYMS = { 'early adopter':'early-adopter','early majority':'early-majority','late majority':'late-majority','skeptic':'sceptic','sceptic':'sceptic' };
-      function getKeyInsensitive(obj, requested){
+      const getKeyInsensitive = (obj, requested) => {
         if (!obj || typeof obj !== 'object') return null;
-        const want = norm(requested);
-        for (const k of Object.keys(obj)) if (norm(k) === want) return k;
-        for (const k of Object.keys(obj)) if (norm(k).includes(want)) return k;
+        const want = norm(requested).replace(/\s+/g,'-');
+        for (const k of Object.keys(obj)) if (norm(k).replace(/\s+/g,'-') === want) return k;
+        for (const k of Object.keys(obj)) if (norm(k).includes(norm(requested))) return k;
         return null;
-      }
+      };
       const pEl = t => { const el=document.createElement('p'); el.textContent=t; return el; };
       const setSlot = (id, arr=[]) => {
         const slot=document.getElementById(id);
@@ -473,30 +552,60 @@
       }
 
       function renderIntel(productLabel, behaviourLabel){
-        if (!intel) return;
+              if (!intel) return;
+
         const products = intel.products || {};
-        const productKey = getKeyInsensitive(products, productLabel);
-        const productNode = productKey ? products[productKey] : null;
+        const norm = s => String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
+        const keyEq  = (obj, want) => Object.keys(obj||{}).find(k => norm(k) === norm(want));
+        const keyLike= (obj, want) => Object.keys(obj||{}).find(k => norm(k).includes(norm(want)));
+
+        const setSlot = (id, arr=[]) => {
+        const slot=document.getElementById(id);
+          const items=(arr.length?arr:['No data available for this selection.']);
+          if (slot) slot.replaceChildren(...items.map(t => { const p=document.createElement('p'); p.textContent=t; return p; }));
+        };
+        const fillAll = arr => {
+          setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr);
+          setSlot('intel-proof', arr);      setSlot('intel-objections', arr); setSlot('intel-ctas', arr);
+        };
+
+        // 1) find product
+        const pKey = keyEq(products, productLabel) || keyLike(products, productLabel);
+        const productNode = pKey ? products[pKey] : null;
         if (!productNode){ fillAll([`No data available (unknown product).`]); return; }
 
-        let node = null;
-        if (productNode.behaviours){
-          let key = getKeyInsensitive(productNode.behaviours, behaviourLabel);
-          if (!key){ const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.behaviours, syn); }
-          if (key) node = productNode.behaviours[key];
-        }
-        if (!node && productNode.buyers){
-          let key = getKeyInsensitive(productNode.buyers, behaviourLabel);
-          if (!key){ const syn = BEHAVIOUR_SYNONYMS[norm(behaviourLabel)]; if (syn) key = getKeyInsensitive(productNode.buyers, syn); }
-          if (key) node = productNode.buyers[key];
-        }
-        if (!node && productNode.needs) node = productNode.needs;
+        // 2) try behaviour-specific
+        const pool = productNode.behaviours || productNode.buyers || {};
+        const bKey = keyEq(pool, behaviourLabel) || keyLike(pool, behaviourLabel);
+        const node = bKey ? pool[bKey] : null;
 
-        if (!node){
-          const behavioursList = [...Object.keys(productNode.behaviours || {}), ...Object.keys(productNode.buyers || {})].join(', ') || '—';
-          fillAll([`No data for this behaviour. Available: ${behavioursList}`]);
+        // 3) choose source: behaviour node OR product defaults
+        const source = node || productNode.needs || {};
+        const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
+
+        const sections = {
+          priorities: toArr(source.priorities ?? source.Priorities),
+          pains:      toArr(source.pains      ?? source.Pains),
+          triggers:   toArr(source.triggers   ?? source.Triggers),
+          proof:      toArr(source.proof      ?? source.Proof ?? source.value ?? source.Value),
+          objections: toArr(source.objections ?? source.Objections),
+          ctas:       toArr(source.ctas       ?? source.CTAs  ?? source.callsToAction ?? source.CallsToAction),
+        };
+
+        const allEmpty = Object.values(sections).every(a => a.length === 0);
+        if (allEmpty){
+          const available = Object.keys(pool).join(', ') || '—';
+          fillAll([`No data for this behaviour. Showing general product needs. Available: ${available}`]);
           return;
         }
+        setSlot('intel-priorities', sections.priorities);
+        setSlot('intel-pains',      sections.pains);
+        setSlot('intel-triggers',   sections.triggers);
+        setSlot('intel-proof',      sections.proof);
+        setSlot('intel-objections', sections.objections);
+        setSlot('intel-ctas',       sections.ctas);
+      }
+
 
         const sections = {
           priorities: toArr(node?.priorities ?? node?.Priorities),
@@ -600,72 +709,113 @@
         document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       }
 
-      // ---------- Events ----------
-      on(callTypeSel, ['change','input','blur'], () => {
-        validateField(callTypeSel); saveForm(); updateMapIndicator(); refreshSubmitState();
+      // ---------- product registry ----------
+      async function populateProductsForMode(mode) {
+        try {
+          const idx = await getIndex(mode);   // loads ./content/call-library/v1/index.json (combined)
+          const items = Array.isArray(idx?.products) ? idx.products : [];
+
+          if (productSel) {
+            // Try to restore a saved selection (from localStorage / previous run)
+            const savedRaw = (form?.elements?.product?.value || '').trim();
+            const desired = savedRaw ? savedRaw.toLowerCase() : '';
+
+            productSel.innerHTML = '<option value="">Select…</option>';
+
+            for (const { id, label } of items) {
+              const opt = document.createElement('option');
+              const val = String(id || '').toLowerCase();
+              opt.value = val;
+              opt.textContent = label || id;
+
+              // Preselect if it matches a previously saved value or label
+              if (desired && (desired === val || desired === String(label || '').toLowerCase())) {
+                opt.selected = true;
+              }
+              productSel.appendChild(opt);
+            }
+
+            // ✅ Only clear “required” if a real value exists
+            if (productSel.value) validateField(productSel);
+
+            // Re-render Buyer Needs if both product and buyer are present
+            if (productSel.value && buyerBehSel?.value) {
+              const label =
+                productSel.options?.[productSel.selectedIndex]?.text ||
+                productSel.value ||
+                '';
+              renderIntel(label, buyerBehSel.value);
+            }
+          }
+        } catch (e) {
+          console.error('[Product] Failed to load index for mode', mode, e);
+          if (productSel) productSel.innerHTML = '<option value="">Select…</option>';
+        }
+      }
+
+      // ---------- events ----------
+      const onChangeRecalcIntel = () => {
+        const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
+        renderIntel(label, buyerBehSel?.value || '');
+      };
+
+      callTypeSel?.addEventListener('change', async () => {
+        validateField(callTypeSel);
+        saveForm();
+        updateMapIndicator();
+        refreshSubmitState();
+
+        const mode = modeFromCallType(callTypeSel.value) || "direct";
+        await populateProductsForMode(mode);
+        validateField('product');
       });
-      on(rememberCallType, ['change','input','blur'], () => {
-        saveCallPrefIfRequested(); refreshSubmitState();
+
+      productSel?.addEventListener('change', () => {
+        validateField('product');        // clears any stale “required”
+        onChangeRecalcIntel();
+        saveForm();
+        refreshSubmitState();
       });
-      on(toggleTipsBtn, ['click'], () => {
+      buyerBehSel?.addEventListener('change', onChangeRecalcIntel);
+
+      toggleTipsBtn?.addEventListener('click', () => {
         const expanded = toggleTipsBtn.getAttribute('aria-expanded') === 'true';
-        const willHide = expanded;                           // clicking hides when currently expanded
+        const willHide = expanded;
         localStorage.setItem(TIPS_HIDDEN_KEY, willHide ? '1' : '0');
         applyTipsVisibility();
       });
-      on(saveNotesBtn, ['click'], saveNotes);
-      on(downloadNotesBtn, ['click'], () => {
-        const who = (form?.elements?.prospect_name?.value || 'prospect').trim().replace(/\s+/g,'-');
-        downloadText(`call-notes_${who}_${new Date().toISOString().slice(0,10)}.txt`, notesArea.value || '');
-      });
 
-      on(form, ['input','change','blur'], (e) => {
-        if (e.target.matches('input,select,textarea')) {
-          validateField(e.target); saveForm(); refreshSubmitState();
-        }
-        if (e.type==='change' && (e.target === productSel || e.target === buyerBehSel)) {
-          const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
-          renderIntel(label, buyerBehSel?.value || '');
-        }
-        if (e.target === form?.elements?.prospect_name || e.target === form?.elements?.prospect_company) {
-          loadNotes(); // switch notes bucket when identity fields change
-        }
-      }, true);
-
-      toggleIntelBtn && toggleIntelBtn.addEventListener('click', () => {
-        const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
-        toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
-        if (intelBody) intelBody.hidden = expanded;
-        toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
-      });
-
-      resetBtn && resetBtn.addEventListener('click', () => {
-        if (!form) return;
-        form.reset(); clearFormState(); loadCallPref();
-        const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
-        renderIntel(label, buyerBehSel?.value || '');
-        renderActivity(); refreshSubmitState(); setStatus('Form reset. Stored values cleared.');
-        form.querySelector('input, select, textarea')?.focus();
-        loadNotes();
-      });
-
-      copyBtn && copyBtn.addEventListener('click', async () => {
-        const txt = outputEl?.textContent || ''; if (!txt.trim()) return;
-        await navigator.clipboard.writeText(txt);
-        setStatus('Copied to clipboard.');
-      });
-
-      downloadBtn && downloadBtn.addEventListener('click', () => {
-        const txt = outputEl?.textContent || ''; if (!txt.trim()) return;
+      downloadBtn?.addEventListener('click', () => {
+        const txt = (outputEl?.textContent || '').trim();
+        if (!txt) { setStatus('No script to download yet.', 'error'); return; }
         const blob = new Blob([txt], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = `first-call-script_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
+        a.href = url;
+        a.download = `first-call-script_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
         document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
         setStatus('Download started.');
       });
 
-      popoutBtn && popoutBtn.addEventListener('click', () => {
+      saveNotesBtn?.addEventListener('click', saveNotes);
+      downloadNotesBtn?.addEventListener('click', () => {
+        const who = (form?.elements?.prospect_name?.value || 'prospect').trim().replace(/\s+/g,'-');
+        downloadText(`call-notes_${who}_${new Date().toISOString().slice(0,10)}.txt`, notesArea.value || '');
+      });
+
+      document.getElementById('reset')?.addEventListener('click', async () => {
+        form?.reset(); clearFormState(); loadCallPref();
+        onChangeRecalcIntel(); renderActivity(); refreshSubmitState();
+        setStatus('Form reset. Stored values cleared.'); loadNotes();
+        await populateProductsForMode(modeFromCallType(callTypeSel.value));
+      });
+
+      copyBtn?.addEventListener('click', async () => {
+        const txt = outputEl?.textContent || ''; if (!txt.trim()) return;
+        await navigator.clipboard.writeText(txt); setStatus('Copied to clipboard.');
+      });
+
+      popoutBtn?.addEventListener('click', () => {
         const txt = (outputEl?.textContent || '').trim();
         if (!txt) { setStatus('No script to pop out yet.', 'error'); return; }
         const meta = (outputMeta?.textContent || '').trim();
@@ -685,7 +835,7 @@
         w.document.close();
       });
 
-      // ---------- Submit ----------
+      // ---------- submit: LIBRARY FLOW ----------
       form && form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
@@ -697,51 +847,57 @@
         }
 
         const fd = Object.fromEntries(new FormData(form).entries());
-        const variables = {
-          seller_name: fd.seller_name || '',
-          seller_company: fd.seller_company || '',
-          prospect_name: fd.prospect_name || '',
-          prospect_role: fd.prospect_role || '',
-          prospect_company: fd.prospect_company || '',
-          call_type: fd.call_type || '',
-          buyer_type: fd.buyer_behaviour || '',
-          product: fd.product || '',
-          tone: fd.tone || '',
-          length: fd.length || '',
-          value_proposition: fd.value_proposition || '',
-          context: fd.context || '',
-          next_step: fd.next_step || ''
-        };
+        const productId = (productSel?.value || fd.product || '').toLowerCase().trim();
+        const mode = modeFromCallType(fd.call_type);
+        const buyerId = buyerCanon(fd.buyer_behaviour);
 
-        setBusy(true); setStatus('Generating call script…'); diag && (diag.open = false); diagJson && (diagJson.textContent = '');
-
-        const lookup = {
-          product: variables.product,
-          buyerType: canonical.buyer(variables.buyer_type),
-          mode: canonical.mode(variables.call_type)
-        };
-
-        const lengthHint = /\d+/.exec(variables.length || "")?.[0] || "300";
+        setBusy(true);
+        setStatus('Generating call script…'); if (diag) diag.open = false; if (diagJson) diagJson.textContent='';
 
         try {
-          const result = await generatePromptBasedCallScript({
-            input: variables,
-            tone: variables.tone,
-            lengthHint: Number(lengthHint),
-            lookup
+          // 1) Load index to confirm product & label (for meta line)
+          const idx = await getIndex(mode);
+          const productObj = (idx?.products || []).find(p => String(p.id).toLowerCase() === productId);
+          const productLabel = productObj?.label || productId;
+
+          // 2) Load markdown template
+          const { path, text: template_text } = await loadTemplate({ mode, productId, buyerId, indexJson: idx });
+
+          if (!template_text) {
+            throw new Error(`No template found for product=${productId}, buyerType=${buyerId} (path tried: ${path || 'n/a'})`);
+          }
+
+          // 3) Build engine input
+          const engineInput = {
+            mode,
+            product: { id: productId, label: productLabel },
+            buyer: buyerId,
+            seller: { name: fd.seller_name, company: fd.seller_company },
+            prospect: { name: fd.prospect_name, role: fd.prospect_role, company: fd.prospect_company },
+            value_proposition: fd.value_proposition || '',
+            next_step: fd.next_step || '',
+            template_text
+          };
+
+          const tone = /warm/i.test(fd.tone || '') ? 'warm' : 'consultative';
+          const lengthHint = Number(/\~?(\d+)/.exec(fd.length || '')?.[1] || 300);
+
+          // 4) Generate script from prompt engine
+          const { script_text_labeled, metaLine, tips_list } = generatePromptBasedCallScript({
+            input: engineInput,
+            tone,
+            lengthHint
           });
 
-          const text = (result.script || '').trim();
-          outputEl.textContent = text;
-          outputMeta.textContent = result.meta || `Library · ${lookup.product || '—'} · ${variables.buyer_type || '—'} · ${variables.call_type || '—'}`;
+          const script = String(script_text_labeled || '').trim();
+          outputEl.textContent = script;
+          outputMeta.textContent = metaLine || `Library · ${productLabel} · ${fd.buyer_behaviour || '—'} · ${fd.call_type || '—'}`;
 
-          // Helpful tips (exactly 3 from engine)
+          // Tips (always 3)
           if (tipsList) {
             tipsList.innerHTML = '';
-            (result.tips || []).forEach(t => {
-              const li = document.createElement('li');
-              li.textContent = t;
-              tipsList.appendChild(li);
+            (tips_list || []).forEach(t => {
+              const li = document.createElement('li'); li.textContent = t; tipsList.appendChild(li);
             });
           }
 
@@ -749,56 +905,52 @@
           renderDelta(delta);
           lastOutput = outputEl.textContent; localStorage.setItem(OUTPUT_KEY, lastOutput);
 
-          addActivity({ time: nowTime(), product: variables.product || '—', buyer_behaviour: variables.buyer_type || '—', length: variables.length || '—' });
+          addActivity({ time: nowTime(), product: productLabel, buyer_behaviour: fd.buyer_behaviour || '—', length: fd.length || '—' });
 
           setStatus('Done. (Generated from curated Library)');
           setBusy(false);
           document.getElementById('output-title')?.focus();
+
         } catch (err) {
-          setStatus('Could not generate a call script. Please check content paths.', 'error');
-          if (diag) { diag.open = true; diagJson.textContent = String(err); }
+          setStatus('Could not generate a call script. See Diagnostics for details.', 'error');
+          if (diag) { diag.open = true; diagJson.textContent = String(err?.message || err); }
           setBusy(false);
         }
       });
 
       // ---------- Init ----------
       (async function init(){
-        // Buyer needs preload (fallback)
+        // Buyer needs preload
         try {
           const res = await fetch(INTEL_URL, { cache: 'no-store' });
           const raw = await res.json();
           intel = normaliseIntel(raw);
         } catch { intel = { products:{} }; }
 
-        // Populate Product from index (safe populate)
-        try {
-          const idx = await getIndex();                      // reads ./content/call-library/v1/index.json
-          const items = Array.isArray(idx?.products) ? idx.products : [];
-          if (productSel) {
-            productSel.innerHTML = '<option value="">Select…</option>';
-            for (const { id, label } of items) {
-              const opt = document.createElement('option');
-              opt.value = id; opt.textContent = label || id;
-              productSel.appendChild(opt);
-            }
-          }
-        } catch (e) {
-          console.error('[Product] Failed to load index.json', e);
-          if (productSel) productSel.innerHTML = '<option value="">Select…</option>';
-        }
+        // Load remembered call type & populate products accordingly
+        loadForm(); loadCallPref();
+        const currentMode = modeFromCallType(callTypeSel?.value || 'direct');
+        await populateProductsForMode(currentMode);
 
-        loadForm();
-        loadNotes();
-        loadCallPref();
-        applyTipsVisibility();
-
-        // First render of Buyer needs if selections exist
+        // Initial buyer needs render if selections exist
         if (productSel?.value && buyerBehSel?.value) {
           const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
           renderIntel(label, buyerBehSel.value);
         }
 
-        refreshSubmitState();
+        // Tips visibility
+        const hidden = localStorage.getItem(TIPS_HIDDEN_KEY) === '1';
+        tipsList.hidden = hidden; toggleTipsBtn?.setAttribute('aria-expanded', String(!hidden));
+        toggleTipsBtn && (toggleTipsBtn.textContent = hidden ? 'Show tips' : 'Hide tips');
+
+        // Enable/disable buttons correctly
+        const hasText = !!(outputEl?.textContent?.trim());
+        copyBtn && (copyBtn.disabled = !hasText);
+        downloadBtn && (downloadBtn.disabled = !hasText);
+        submitBtn && (submitBtn.disabled = !allRequiredFilled(form));
+
+        // Notes
+        loadNotes();
       })();
     })();
   </script>

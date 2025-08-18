@@ -104,22 +104,14 @@ BUYER_MAP = {
 VALID_BUYERS = {"innovator", "early-adopter", "early-majority", "late-majority", "sceptic"}
 
 # Flexible input → canonical section mapping
-SECTION_RULES: List[Tuple[re.Pattern, str, bool]] = [
-    (re.compile(r"^\s*(opening|opener)\b", re.I), "Opener", False),
-    (re.compile(r"^\s*(buyer\s+pain|pain)\b", re.I), "Context bridge", False),
-    (re.compile(r"^\s*(buyer\s+desire|desire)\b", re.I), "Value moment", False),
-    (re.compile(r"^\s*example", re.I), "Value moment", True),
-    (re.compile(r"^\s*(handling\s+objections|objections)\b", re.I), "Objections", False),
-    (re.compile(r"^\s*(call\s+to\s+action|next\s*steps?)\b", re.I), "Next step (salesperson-chosen)", False),
-    (re.compile(r"^\s*(exploration|discovery|questions?)\b", re.I), "Exploration nudge", False),
-    # Accept exact headings if already present
-    (re.compile(r"^\s*#?\s*opener\s*$", re.I), "Opener", False),
-    (re.compile(r"^\s*#?\s*context\s*bridge\s*$", re.I), "Context bridge", False),
-    (re.compile(r"^\s*#?\s*value\s*moment\s*$", re.I), "Value moment", False),
-    (re.compile(r"^\s*#?\s*exploration\s*nudge\s*$", re.I), "Exploration nudge", False),
-    (re.compile(r"^\s*#?\s*objections\s*$", re.I), "Objections", False),
-    (re.compile(r"^\s*#?\s*next\s*step\s*\(salesperson-chosen\)\s*$", re.I), "Next step (salesperson-chosen)", False),
-    (re.compile(r"^\s*#?\s*close\s*$", re.I), "Close", False),
+SECTION_RULES = [
+    (re.compile(r"^\s*(\d+\s*\|\s*)?(opening|opener)\b", re.I), "Opener", False),
+    (re.compile(r"^\s*(\d+\s*\|\s*)?(buyer\s+pain|pain)\b", re.I), "Context bridge", False),
+    (re.compile(r"^\s*(\d+\s*\|\s*)?(buyer\s+desire|desire)\b", re.I), "Value moment", False),
+    (re.compile(r"^\s*(\d+\s*\|\s*)?example", re.I), "Value moment", True),
+    (re.compile(r"^\s*(\d+\s*\|\s*)?(handling\s+objections|objections)\b", re.I), "Objections", False),
+    (re.compile(r"^\s*(\d+\s*\|\s*)?(call\s+to\s+action|next\s*steps?)\b", re.I), "Next step", False),
+    (re.compile(r"^\s*(\d+\s*\|\s*)?(exploration|discovery|questions?)\b", re.I), "Exploration nudge", False),
 ]
 
 # ------------- Utilities -------------
