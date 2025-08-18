@@ -8,11 +8,11 @@
         "label": "Connectivity",
         "path": "content/call-library/v1/direct/connectivity",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       },
       {
@@ -20,11 +20,11 @@
         "label": "Cybersecurity",
         "path": "content/call-library/v1/direct/cybersecurity",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       },
       {
@@ -32,11 +32,11 @@
         "label": "Artificial Intelligence",
         "path": "content/call-library/v1/direct/ai",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       },
       {
@@ -44,11 +44,11 @@
         "label": "Hardware/Software",
         "path": "content/call-library/v1/direct/hardware_software",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       },
       {
@@ -56,11 +56,11 @@
         "label": "IT Solutions",
         "path": "content/call-library/v1/direct/it_solutions",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       },
       {
@@ -68,11 +68,11 @@
         "label": "Microsoft Solutions",
         "path": "content/call-library/v1/direct/microsoft_solutions",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       },
       {
@@ -80,11 +80,11 @@
         "label": "Telecoms Solutions",
         "path": "content/call-library/v1/direct/telecoms_solutions",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       }
     ],
@@ -94,11 +94,11 @@
         "label": "Connectivity",
         "path": "content/call-library/v1/partner/connectivity",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       },
       {
@@ -106,11 +106,11 @@
         "label": "Cybersecurity",
         "path": "content/call-library/v1/partner/cybersecurity",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       },
       {
@@ -118,11 +118,11 @@
         "label": "Artificial Intelligence",
         "path": "content/call-library/v1/partner/ai",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       },
       {
@@ -130,11 +130,11 @@
         "label": "Hardware/Software",
         "path": "content/call-library/v1/partner/hardware_software",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       },
       {
@@ -142,11 +142,11 @@
         "label": "IT Solutions",
         "path": "content/call-library/v1/partner/it_solutions",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       },
       {
@@ -154,11 +154,11 @@
         "label": "Microsoft Solutions",
         "path": "content/call-library/v1/partner/microsoft_solutions",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       },
       {
@@ -166,24 +166,24 @@
         "label": "Telecoms Solutions",
         "path": "content/call-library/v1/partner/telecoms_solutions",
         "buyers": [
-          { "id": "innovators", "label": "Innovators" },
-          { "id": "early_adopters", "label": "Early Adopters" },
-          { "id": "early_majority", "label": "Early Majority" },
-          { "id": "late_majority", "label": "Late Majority" },
-          { "id": "sceptics", "label": "Sceptics" }
+          { "id": "innovator",       "label": "Innovator" },
+          { "id": "early-adopter",   "label": "Early Adopter" },
+          { "id": "early-majority",  "label": "Early Majority" },
+          { "id": "late-majority",   "label": "Late Majority" },
+          { "id": "sceptic",         "label": "Sceptic" }
         ]
       }
     ]
   },
   "buyer_types": [
-    { "id": "innovators", "label": "Innovators" },
-    { "id": "early_adopters", "label": "Early Adopters" },
-    { "id": "early_majority", "label": "Early Majority" },
-    { "id": "late_majority", "label": "Late Majority" },
-    { "id": "sceptics", "label": "Sceptics" }
+    { "id": "innovator",       "label": "Innovator" },
+    { "id": "early-adopter",   "label": "Early Adopter" },
+    { "id": "early-majority",  "label": "Early Majority" },
+    { "id": "late-majority",   "label": "Late Majority" },
+    { "id": "sceptic",         "label": "Sceptic" }
   ],
   "sales_modes": [
-    { "id": "direct", "label": "Direct Buyer Library" },
+    { "id": "direct",  "label": "Direct Buyer Library" },
     { "id": "partner", "label": "Partner Library" }
   ],
   "stages": [
