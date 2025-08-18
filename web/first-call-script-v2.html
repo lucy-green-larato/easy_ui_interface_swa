@@ -53,6 +53,15 @@
     .row-between{ display:flex; align-items:center; justify-content:space-between; gap:var(--space-3) }
     .btn.inline{ padding:.35rem .6rem; font-size:.9rem }
     .muted{ color:var(--text-2) }
+
+    /* make sure header is correct*/
+    .app-header { padding: 10px 16px; }
+    .app-header .header-right { display:flex; align-items:center; gap:12px; }
+    .calltype-mini { display:flex; align-items:center; gap:8px; padding:4px 6px; border:1px solid #e5e7eb; border-radius:999px; background:#fff; }
+    .calltype-mini .mini-label { color:#6b7280; font-size:.85rem; }
+    .model-note { color:#6b7280; font-size:.9rem; }
+    .badge { display:flex; align-items:center; gap:6px; color:#374151; }
+    .badge svg { width:16px; height:16px; stroke:#6b7280; fill:none; stroke-width:1.5; }
   </style>
 </head>
 <body>
@@ -583,7 +592,8 @@
         saveCallPrefIfRequested(); refreshSubmitState();
       });
       on(toggleTipsBtn, ['click'], () => {
-        const hidden = !(toggleTipsBtn.getAttribute('aria-expanded') === 'true');
+        const currentlyExpanded = toggleTipsBtn.getAttribute('aria-expanded') === 'true';
+        const currentlyExpanded = toggleTipsBtn.getAttribute('aria-expanded') === 'true';
         localStorage.setItem(TIPS_HIDDEN_KEY, hidden ? '0':'1'); // will be flipped in apply
         applyTipsVisibility();
       });
@@ -641,6 +651,7 @@
 
       popoutBtn && popoutBtn.addEventListener('click', () => {
         const txt = (outputEl?.textContent || '').trim();
+        if (!txt) { setStatus('No script to pop out yet.', 'error'); return; }
         const meta = (outputMeta?.textContent || '').trim();
         const w = window.open('', '_blank', 'noopener,noreferrer');
         if (!w) return;
