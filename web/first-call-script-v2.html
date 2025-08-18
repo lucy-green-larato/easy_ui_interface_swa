@@ -28,16 +28,18 @@
       background:#fff;
       color:#111827;
       border:1px solid #e5e7eb;
-      padding:var(--space-4);
-      border-radius:10px;
-      min-height:220px;
+      padding:var(--space-5);
+      border-radius:12px;
+      min-height:260px;
       outline:none;
-      font: 15.5px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-      letter-spacing:.01em;
+      font: 16.5px/1.7 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      letter-spacing:.005em;
     }
 
     .tips-card ul{ margin:.5rem 0 0; padding-left:1.25rem }
     .tips-card ul li{ margin:.25rem 0 }
+
+    .panel .card h3{ margin: 0 0 .5rem 0 }
 
     .intel-grid{ display:grid; grid-template-columns:1fr !important; gap:var(--space-3) }
 
@@ -46,6 +48,11 @@
       outline:none; transition: box-shadow .15s ease, border-color .15s ease;
     }
     input:focus,select:focus,textarea:focus{ box-shadow:0 0 0 2px rgba(36,88,230,.35); border-color:var(--accent); }
+
+    /* Small UI bits */
+    .row-between{ display:flex; align-items:center; justify-content:space-between; gap:var(--space-3) }
+    .btn.inline{ padding:.35rem .6rem; font-size:.9rem }
+    .muted{ color:var(--text-2) }
   </style>
 </head>
 <body>
@@ -185,6 +192,12 @@
             <label for="context">Other points to cover (optional)</label>
             <textarea id="context" name="context" rows="3" placeholder="Any specific themes you want woven into the call (comma, semicolon or new line separated)."></textarea>
           </div>
+
+          <!-- NEW: Next step (salesperson-chosen) -->
+          <div class="field">
+            <label for="next_step">Your desired next step (shown verbatim in the script)</label>
+            <input id="next_step" name="next_step" placeholder="e.g., I’ll send a 1-page summary and we can pick it up from there." />
+          </div>
         </fieldset>
 
         <div class="actions">
@@ -210,16 +223,35 @@
     <!-- MIDDLE -->
     <section class="panel middle">
       <div class="output-card card">
-        <div class="output-head" style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3)">
+        <div class="row-between output-head">
           <h2 id="output-title">Generated Script</h2>
-          <div class="meta" id="output-meta" aria-live="polite" style="color:var(--text-2);font-size:.9rem"></div>
+          <div class="row-between" style="gap:8px">
+            <button id="popout" class="btn inline" type="button" title="Open script in a clean window">Pop-out</button>
+            <div class="meta" id="output-meta" aria-live="polite" style="color:var(--text-2);font-size:.9rem"></div>
+          </div>
         </div>
         <pre id="output" class="output" tabindex="0" aria-label="Generated script will appear here"></pre>
 
         <!-- Helpful tips (separate box) -->
         <div class="tips-card card" style="margin-top:var(--space-4)">
-          <h3>Helpful tips</h3>
+          <div class="row-between">
+            <h3>Helpful tips</h3>
+            <button id="toggle-tips" class="btn inline" type="button" aria-expanded="true" aria-controls="tips-list">Hide tips</button>
+          </div>
           <ul id="tips-list"></ul>
+        </div>
+
+        <!-- Notes -->
+        <div class="notes-card card" style="margin-top:var(--space-4)">
+          <div class="row-between">
+            <h3>Call notes</h3>
+            <div class="row-between" style="gap:8px">
+              <button id="save-notes" class="btn inline" type="button">Save notes</button>
+              <button id="download-notes" class="btn inline" type="button">Download .txt</button>
+            </div>
+          </div>
+          <textarea id="notes" rows="6" placeholder="Type notes during the call. Saved locally on this device."></textarea>
+          <p class="muted" style="margin-top:.5rem">Notes are stored locally (this browser only).</p>
         </div>
 
         <div class="change-log" style="margin-top:var(--space-4)">
@@ -263,10 +295,11 @@
     </li>
   </template>
 
-  <!-- === SCRIPT: glue UI to library + synthesis === -->
+  <!-- === SCRIPT: glue UI to library (prompt-based) === -->
   <script type="module">
-    import { getIndex, canonical } from "/src/lib/callLibrary.js";
-    import { generateCallFromLibrary } from "/src/lib/callSynthesis.js";
+    /* IMPORTANT: relative import so it works under sub-paths */
+    import { getIndex, canonical } from "./src/lib/callLibrary.js";
+    import { generatePromptBasedCallScript } from "./src/lib/callPromptEngine.js";
 
     (function () {
       const FORM_ID = 'script-form';
@@ -274,6 +307,8 @@
       const ACTIVITY_KEY = 'first_call_script_v2.activity';
       const OUTPUT_KEY = 'first_call_script_v2.last_output';
       const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
+      const TIPS_HIDDEN_KEY = 'first_call_script_v2.tips_hidden';
+      const NOTES_KEY_PREFIX = 'first_call_script_v2.notes';
       const INTEL_URL = './intel.json';
       const RESTORE_LAST = false;
 
@@ -285,7 +320,13 @@
       const copyBtn = document.getElementById('copy');
       const downloadBtn = document.getElementById('download');
       const outputEl = document.getElementById('output');
+      const tipsCard = document.querySelector('.tips-card');
       const tipsList = document.getElementById('tips-list');
+      const toggleTipsBtn = document.getElementById('toggle-tips');
+      const popoutBtn = document.getElementById('popout');
+      const notesArea = document.getElementById('notes');
+      const saveNotesBtn = document.getElementById('save-notes');
+      const downloadNotesBtn = document.getElementById('download-notes');
       const outputMeta = document.getElementById('output-meta');
       const statusEl = document.getElementById('status');
       const deltaLog = document.getElementById('delta-log');
@@ -362,7 +403,10 @@
           });
         } catch {}
       }
-      function clearFormState(){ localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
+      function clearFormState(){
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(ACTIVITY_KEY);
+      }
 
       // ---------- Buyer needs helpers ----------
       const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
@@ -507,12 +551,46 @@
         if (mapLabel) mapLabel.textContent = pref?.call_type || (callTypeSel?.value || 'Not set');
       }
 
+      // ---------- Tips toggle ----------
+      function applyTipsVisibility() {
+        const hidden = localStorage.getItem(TIPS_HIDDEN_KEY) === '1';
+        tipsList.hidden = hidden;
+        toggleTipsBtn.setAttribute('aria-expanded', String(!hidden));
+        toggleTipsBtn.textContent = hidden ? 'Show tips' : 'Hide tips';
+      }
+
+      // ---------- Notes helpers ----------
+      const notesKey = () => {
+        const pn = (form?.elements?.prospect_name?.value || '').trim().toLowerCase();
+        const pc = (form?.elements?.prospect_company?.value || '').trim().toLowerCase();
+        return `${NOTES_KEY_PREFIX}::${pc}::${pn}` || NOTES_KEY_PREFIX;
+      };
+      function loadNotes(){ try{ notesArea.value = localStorage.getItem(notesKey()) || ''; }catch{} }
+      function saveNotes(){ try{ localStorage.setItem(notesKey(), notesArea.value || ''); setStatus('Notes saved.'); }catch(e){ setStatus('Could not save notes.', 'error'); } }
+      function downloadText(filename, text){
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      }
+
       // ---------- Events ----------
       on(callTypeSel, ['change','input','blur'], () => {
         validateField(callTypeSel); saveForm(); updateMapIndicator(); refreshSubmitState();
       });
       on(rememberCallType, ['change','input','blur'], () => {
         saveCallPrefIfRequested(); refreshSubmitState();
+      });
+      on(toggleTipsBtn, ['click'], () => {
+        const hidden = !(toggleTipsBtn.getAttribute('aria-expanded') === 'true');
+        localStorage.setItem(TIPS_HIDDEN_KEY, hidden ? '0':'1'); // will be flipped in apply
+        applyTipsVisibility();
+      });
+      on(saveNotesBtn, ['click'], saveNotes);
+      on(downloadNotesBtn, ['click'], () => {
+        const who = (form?.elements?.prospect_name?.value || 'prospect').trim().replace(/\s+/g,'-');
+        downloadText(`call-notes_${who}_${new Date().toISOString().slice(0,10)}.txt`, notesArea.value || '');
       });
 
       on(form, ['input','change','blur'], (e) => {
@@ -522,6 +600,9 @@
         if (e.type==='change' && (e.target === productSel || e.target === buyerBehSel)) {
           const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
           renderIntel(label, buyerBehSel?.value || '');
+        }
+        if (e.target === form?.elements?.prospect_name || e.target === form?.elements?.prospect_company) {
+          loadNotes(); // switch notes bucket when identity fields change
         }
       }, true);
 
@@ -537,9 +618,9 @@
         form.reset(); clearFormState(); loadCallPref();
         const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
         renderIntel(label, buyerBehSel?.value || '');
-        renderActivity(); refreshSubmitState();
-        setStatus('Form reset. Stored values cleared.');
+        renderActivity(); refreshSubmitState(); setStatus('Form reset. Stored values cleared.');
         form.querySelector('input, select, textarea')?.focus();
+        loadNotes();
       });
 
       copyBtn && copyBtn.addEventListener('click', async () => {
@@ -556,6 +637,25 @@
         a.href = url; a.download = `first-call-script_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
         document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
         setStatus('Download started.');
+      });
+
+      popoutBtn && popoutBtn.addEventListener('click', () => {
+        const txt = (outputEl?.textContent || '').trim();
+        const meta = (outputMeta?.textContent || '').trim();
+        const w = window.open('', '_blank', 'noopener,noreferrer');
+        if (!w) return;
+        w.document.write(`<!doctype html><meta charset="utf-8"><title>Script</title>
+          <style>
+            body{font:16.5px/1.7 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica Neue,Arial;padding:24px;background:#fff;color:#111}
+            .meta{color:#6b7280;font-size:.9rem;margin-bottom:12px}
+            pre{white-space:pre-wrap;border:1px solid #e5e7eb;border-radius:12px;padding:20px}
+            .bar{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-bottom:8px}
+            button{padding:.4rem .6rem;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;cursor:pointer}
+          </style>
+          <div class="bar"><button onclick="window.print()">Print</button><button onclick="navigator.clipboard.writeText(document.querySelector('pre').textContent)">Copy</button></div>
+          <div class="meta">${meta}</div>
+          <pre>${txt.replace(/[<>&]/g, s => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[s]))}</pre>`);
+        w.document.close();
       });
 
       // ---------- Submit ----------
@@ -582,10 +682,11 @@
           tone: fd.tone || '',
           length: fd.length || '',
           value_proposition: fd.value_proposition || '',
-          context: fd.context || ''
+          context: fd.context || '',
+          next_step: fd.next_step || ''
         };
 
-        setBusy(true); setStatus('Synthesising call script from Library…'); diag && (diag.open = false); diagJson && (diagJson.textContent = '');
+        setBusy(true); setStatus('Generating call script…'); diag && (diag.open = false); diagJson && (diagJson.textContent = '');
 
         const lookup = {
           product: variables.product,
@@ -593,36 +694,24 @@
           mode: canonical.mode(variables.call_type)
         };
 
-        const synthForm = {
-          company:       variables.prospect_company,
-          role:          variables.prospect_role,
-          sector:        '',
-          company_size:  '',
-          scenario:      variables.context || '',
-          meeting_type:  'first call'
-        };
-
         const lengthHint = /\d+/.exec(variables.length || "")?.[0] || "300";
 
         try {
-          const result = await generateCallFromLibrary({
-            lookup,
-            form: synthForm,
+          const result = await generatePromptBasedCallScript({
+            input: variables,
             tone: variables.tone,
-            length: Number(lengthHint),
-            variables,
-            withLabels: true
+            lengthHint: Number(lengthHint),
+            lookup
           });
 
-          // Render labeled script for readability
-          const text = (result.script_text_labeled || result.script_text || '').trim();
+          const text = (result.script || '').trim();
           outputEl.textContent = text;
-          outputMeta.textContent = result.metaLine || `Library · ${lookup.product || '—'} · ${variables.buyer_type || '—'} · ${variables.call_type || '—'}`;
+          outputMeta.textContent = result.meta || `Library · ${lookup.product || '—'} · ${variables.buyer_type || '—'} · ${variables.call_type || '—'}`;
 
-          // Helpful tips (exactly 3 from synthesis)
+          // Helpful tips (exactly 3 from engine)
           if (tipsList) {
             tipsList.innerHTML = '';
-            (result.tips_list || []).forEach(t => {
+            (result.tips || []).forEach(t => {
               const li = document.createElement('li');
               li.textContent = t;
               tipsList.appendChild(li);
@@ -654,9 +743,9 @@
           intel = normaliseIntel(raw);
         } catch { intel = { products:{} }; }
 
-        // Populate Product from index (fallback to intel keys)
+        // Populate Product from index (safe populate)
         try {
-          const idx = await getIndex();
+          const idx = await getIndex();                      // reads ./content/call-library/v1/index.json
           const items = Array.isArray(idx?.products) ? idx.products : [];
           if (productSel) {
             productSel.innerHTML = '<option value="">Select…</option>';
@@ -666,23 +755,15 @@
               productSel.appendChild(opt);
             }
           }
-        } catch {
-          if (productSel) {
-            productSel.innerHTML = '<option value="">Select…</option>';
-            Object.keys(intel.products || {}).forEach(p => {
-              const opt = document.createElement('option');
-              opt.value = p; opt.textContent = p;
-              productSel.appendChild(opt);
-            });
-          }
+        } catch (e) {
+          console.error('[Product] Failed to load index.json', e);
+          if (productSel) productSel.innerHTML = '<option value="">Select…</option>';
         }
 
         loadForm();
-        // Remembered sales mode (header chip)
-        try {
-          const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
-          if (pref?.call_type && callTypeSel && !callTypeSel.value) callTypeSel.value = pref.call_type;
-        } catch {}
+        loadNotes();
+        loadCallPref();
+        applyTipsVisibility();
 
         // First render of Buyer needs if selections exist
         if (productSel?.value && buyerBehSel?.value) {
