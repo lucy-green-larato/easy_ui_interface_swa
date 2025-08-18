@@ -1,125 +1,119 @@
-// web/src/lib/callLibrary.js
+// /src/lib/callLibrary.js
+// Single-combined-index first. All paths are RELATIVE (works under SWA sub-paths).
 
-// --- Paths (relative so it works under sub-path hosting) ---
-const INTEL_URL = './intel.json';
-const LIB_BASE  = './content/call-library/v1';
+const BASE = "./content/call-library/v1"; // relative, not absolute
 
-// --- Caches ---
-let intelCache = null;
-let indexCache = null;
+// ---- helpers
+const BUYER_ALIASES = new Map([
+  ["innovator","innovator"],["innovators","innovator"],
+  ["early adopter","early-adopter"],["early adopters","early-adopter"],
+  ["early_adopter","early-adopter"],["early_adopters","early-adopter"],
+  ["early-adopter","early-adopter"],["early-adopters","early-adopter"],
+  ["early majority","early-majority"],["early_majority","early-majority"],["early-majority","early-majority"],
+  ["late majority","late-majority"],["late_majority","late-majority"],["late-majority","late-majority"],
+  ["sceptic","sceptic"],["sceptics","sceptic"],["skeptic","sceptic"],["skeptics","sceptic"],
+]);
 
-/**
- * Load and cache intel.json (for Buyer Needs side panel and as a fallback)
- */
-async function loadIntel() {
-  if (intelCache) return intelCache;
-  try {
-    const res = await fetch(INTEL_URL, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    intelCache = await res.json();
-  } catch (err) {
-    console.error('[intel] Failed to load intel.json:', err);
-    intelCache = { products: {} };
-  }
-  return intelCache;
+const slug = (s="") => String(s)
+  .toLowerCase()
+  .replace(/[\u2010-\u2015]/g,"-")   // unicode dashes
+  .replace(/[_\s]+/g,"-")
+  .replace(/-+/g,"-")
+  .replace(/[^a-z0-9\-]/g,"")
+  .trim();
+
+function canonicalMode(v){
+  return String(v||"").toLowerCase()==="partner" ? "partner" : "direct";
+}
+function canonicalBuyer(v){
+  const raw = String(v||"").toLowerCase().trim().replace(/[\u2010-\u2015]/g,"-").replace(/[_\s]+/g," ");
+  if (BUYER_ALIASES.has(raw)) return BUYER_ALIASES.get(raw);
+  const spaced = slug(raw).replace(/-/g," ");
+  if (BUYER_ALIASES.has(spaced)) return BUYER_ALIASES.get(spaced);
+  return slug(raw);
 }
 
-/**
- * Load and cache the library index.json (primary source for Product dropdown)
- * Expected shape:
- * {
- *   "products": [
- *     { "id": "connectivity", "label": "Connectivity", "path": "/content/call-library/v1/direct/connectivity" },
- *     ...
- *   ]
- * }
- */
-async function loadLibraryIndex() {
-  if (indexCache) return indexCache;
-  try {
-    const res = await fetch(`${LIB_BASE}/index.json`, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    indexCache = await res.json();
-  } catch (err) {
-    console.error('[library] Failed to load library index.json:', err);
-    indexCache = null; // keep null so callers can trigger fallback
-  }
-  return indexCache;
+async function tryFetchJson(url){
+  try{
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return null;
+    return await res.json();
+  }catch{ return null; }
 }
 
-/**
- * Return product options for dropdown population.
- * Priority: library index → fallback to intel.json product keys.
- */
-export async function getIndex() {
-  const idx = await loadLibraryIndex();
-  if (idx && Array.isArray(idx.products) && idx.products.length) {
-    // Normalise to { id, label } for the UI
-    return {
-      products: idx.products.map(p => ({
-        id: String(p.id ?? '').trim(),
-        label: String(p.label ?? p.id ?? '').trim() || String(p.id ?? '').trim()
-      })).filter(p => p.id)
-    };
+function normaliseBasePath(p="", mode="direct", productId=""){
+  let base = String(p||"").replace(/^[./]+/,""); // strip leading ./ or /
+  // If caller provided full content prefix, remove it to keep things relative once:
+  base = base.replace(/^content\/call-library\/v1\//, "");
+  if (!/^direct\/|^partner\//.test(base)){
+    base = `${mode}/${base || slug(productId)}`;
   }
-
-  // Fallback: derive products from intel.json
-  const intel = await loadIntel();
-  const productsObj = intel?.products || {};
-  const uniqueProducts = Object.keys(productsObj).sort();
-  return {
-    products: uniqueProducts.map(p => ({ id: p, label: p }))
-  };
+  if (!base.endsWith("/")) base += "/";
+  return base; // still relative to v1/
 }
 
-/**
- * Canonical helpers used by the UI
- */
-export const canonical = {
-  /**
-   * Normalise buyer behaviour labels to file-friendly ids
-   * e.g., "Early adopter" -> "early-adopter", "Skeptic" -> "sceptic"
-   */
-  buyer(input) {
-    const s = String(input || '').trim().toLowerCase();
-    const map = new Map([
-      ['innovator', 'innovator'],
-      ['early adopter', 'early-adopter'],
-      ['early-adopter', 'early-adopter'],
-      ['early majority', 'early-majority'],
-      ['early-majority', 'early-majority'],
-      ['late majority', 'late-majority'],
-      ['late-majority', 'late-majority'],
-      ['skeptic', 'sceptic'],
-      ['sceptic', 'sceptic']
-    ]);
-    // loose contains match
-    for (const [k, v] of map.entries()) {
-      if (s === k || s.replace(/\s+/g, '-') === k) return v;
-      if (k.includes(s)) return v;
-    }
-    // default to kebab-cased input
-    return s.replace(/\s+/g, '-');
-  },
+// ---- public: canonical
+export const canonical = { buyer: canonicalBuyer, mode: canonicalMode };
 
-  /**
-   * Normalise sales model (Direct/Partner)
-   */
-  mode(input) {
-    const s = String(input || '').trim().toLowerCase();
-    if (s.startsWith('dir')) return 'direct';
-    if (s.startsWith('part')) return 'partner';
-    return s || 'direct';
+// ---- public: getIndex(mode)
+// Prefers combined index at ./content/call-library/v1/index.json
+export async function getIndex(mode){
+  const m = canonicalMode(mode);
+
+  // 1) Combined index (your current file)
+  const combined = await tryFetchJson(`${BASE}/index.json`);
+  if (combined && combined.products && Array.isArray(combined.products[m])) {
+    const list = combined.products[m].map(p => ({
+      id: p.id,
+      label: p.label || p.id,
+      // keep relative later; strip content prefix if present
+      path: String(p.path || `${m}/${slug(p.id)}`).replace(/^content\/call-library\/v1\//,"").replace(/^\//,"")
+    }));
+    return { mode: m, products: list };
   }
-};
 
-/**
- * DEPRECATED: Old synthesis entry point.
- * Keep exported to avoid breaking legacy callers, but make it explicit.
- */
-export async function generateCallFromLibrary() {
-  throw new Error(
-    'generateCallFromLibrary is deprecated. Use generatePromptBasedCallScript ' +
-    'from ./src/lib/callPromptEngine.js (Markdown templates, prompt-library approach).'
-  );
+  // 2) Fallback: per-mode file (quietly)
+  const perMode = await tryFetchJson(`${BASE}/${m}/index.json`);
+  if (perMode && Array.isArray(perMode.products)) {
+    const list = perMode.products.map(p => ({
+      id: p.id,
+      label: p.label || p.id,
+      path: String(p.path || `${m}/${slug(p.id)}`).replace(/^\//,"")
+    }));
+    return { mode: m, products: list };
+  }
+
+  console.error("[callLibrary] Could not load product index for mode:", m);
+  return { mode: m, products: [] };
+}
+
+// ---- optional helpers if you need template paths later
+export function getTemplatePath({ mode="direct", productId="", buyerId="", indexJson=null }){
+  const m = canonicalMode(mode);
+  const buyer = canonicalBuyer(buyerId);
+  const prod = slug(productId);
+
+  let baseRel = null;
+  if (indexJson && Array.isArray(indexJson.products)) {
+    const match = indexJson.products.find(p => slug(p.id) === prod);
+    if (match) baseRel = normaliseBasePath(match.path || "", m, prod);
+  }
+  if (!baseRel) baseRel = `${m}/${prod}/`;
+
+  baseRel = baseRel.replace(/^content\/call-library\/v1\//,"");
+  if (!baseRel.endsWith("/")) baseRel += "/";
+
+  return `${BASE}/${baseRel}${buyer}.md`;
+}
+
+export async function loadTemplate({ mode="direct", productId="", buyerId="", indexJson=null }){
+  const path = getTemplatePath({ mode, productId, buyerId, indexJson });
+  try{
+    const res = await fetch(path, { cache: "no-store" });
+    if (!res.ok) return { path, text: null };
+    const text = await res.text();
+    return { path, text };
+  }catch{
+    return { path, text: null };
+  }
 }
