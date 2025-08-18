@@ -194,11 +194,35 @@ def run_docx_mode(pattern: str):
         buyer = None
         nf = _norm(os.path.basename(f))
         nh = _norm(html)
+        matched_key = None
         for key, val in BUYER_MAP.items():
             nk = _norm(key)
             if nk in nf or nk in nh:
                 buyer = val
+                matched_key = key
                 break
+                        
+         # 2) Fallback: tokenised heuristic (covers weird spellings / extra words)
+        if not buyer:
+            tokens = set(re.split(r"[^a-z0-9]+", nf)) | set(re.split(r"[^a-z0-9]+", nh))
+            # remove empties
+            tokens = {t for t in tokens if t}
+
+            def has(*words): return all(w in tokens for w in words)
+
+            if has("innovators") or has("innovator"):
+                buyer, matched_key = "innovator", "innovators*"
+            elif has("early", "adopters") or has("early", "adopter"):
+                buyer, matched_key = "early-adopter", "early adopters*"
+            elif has("early", "majority"):
+                buyer, matched_key = "early-majority", "early majority*"
+            elif has("late", "majority"):
+                buyer, matched_key = "late-majority", "late majority*"
+            elif has("sceptics") or has("sceptic") or has("skeptics") or has("skeptic"):
+                buyer, matched_key = "sceptic", "sceptics*"
+
+        # Debug: show what we saw and what we chose
+        print(f"  · detect -> file='{os.path.basename(f)}' nf='{nf}' | match='{matched_key}' => buyer='{buyer}'")
 
         if not buyer or buyer not in VALID_BUYERS:
             print(f"  ! Skipping (buyer not recognised): {f}")
