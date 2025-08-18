@@ -6,7 +6,7 @@ Dual-mode converter:
 
 Usage (from repo root):
 
-DOCX mode (single file or glob):
+DOCX (single file or glob):
   python scripts/convert_scripts.py --docx "script_doc_inputs/connectivity-early-adopters.docx" \
     --out web/content/call-library/v1/direct/connectivity
 
@@ -37,65 +37,30 @@ try:
 except Exception:
     HAVE_BS = False
 
-# Optional (DOCX mode) parsers:
-# 1) mammoth (preferred HTML fidelity), 2) python-docx fallback (no external HTML).
-_HAVE_MAMMOTH = False
-_HAVE_PYDOCX = False
+# Optional DOCX parsers (we'll use whichever is available)
+HAVE_MAMMOTH = False
+HAVE_PYDOCX = False
 try:
     import mammoth  # type: ignore
-    _HAV E_MAMMOTH = True
+    HAVE_MAMMOTH = True
 except Exception:
-    _HAVE_MAMMOTH = False
+    HAVE_MAMMOTH = False
 try:
     import docx  # type: ignore
-    _HAVE_PYDOCX = True
+    HAVE_PYDOCX = True
 except Exception:
-    _HAVE_PYDOCX = False
+    HAVE_PYDOCX = False
 
-# --------------------------------------------------------------------
-# CLI
-# --------------------------------------------------------------------
+# ---------------- CLI ----------------
 parser = argparse.ArgumentParser(description="Convert sales scripts (URL or DOCX) to Markdown library files.")
 parser.add_argument("--url", help="Source page containing all buyer sections")
-parser.add_argument("--docx", help="Glob path OR exact .docx file path (uses mammoth if available, else python-docx)")
+parser.add_argument("--docx", help="Glob path OR exact .docx file path (uses python-docx or mammoth)")
 parser.add_argument("--buyer", help="Force buyer id (innovator|early-adopter|early-majority|late-majority|sceptic)")
 parser.add_argument("--out", required=True, help="Output dir, e.g. web/content/call-library/v1/direct/connectivity")
 args = parser.parse_args()
-
 OUT_DIR = Path(args.out).resolve()
 
-# --------------------------------------------------------------------
-# Canonical mapping & sets
-# --------------------------------------------------------------------
-BUYER_MAP = {
-    # Innovator
-    "innovators": "innovator",
-    "innovator": "innovator",
-
-    # Early Adopter
-    "early adopters": "early-adopter",
-    "early adopter": "early-adopter",
-    "early_adopters": "early-adopter",
-    "early-adopters": "early-adopter",
-
-    # Early Majority
-    "early majority": "early-majority",
-    "early_majority": "early-majority",
-    "early-majority": "early-majority",
-
-    # Late Majority
-    "late majority": "late-majority",
-    "late_majority": "late-majority",
-    "late-majority": "late-majority",
-
-    # Sceptic (tolerate US spelling)
-    "sceptics": "sceptic",
-    "sceptic": "sceptic",
-    "skeptics": "sceptic",
-    "skeptic": "sceptic",
-}
-VALID_BUYERS = {"innovator", "early-adopter", "early-majority", "late-majority", "sceptic"}
-
+# ------------- Constants -------------
 REQUIRED_HEADINGS = [
     "Opener",
     "Context bridge",
@@ -106,6 +71,38 @@ REQUIRED_HEADINGS = [
     "Close",
 ]
 
+# Canonical mapping & sets
+BUYER_MAP = {
+    # Innovator
+    "innovator": "innovator",
+    "innovators": "innovator",
+
+    # Early Adopter
+    "early adopter": "early-adopter",
+    "early adopters": "early-adopter",
+    "early-adopter": "early-adopter",
+    "early-adopters": "early-adopter",
+    "early_adopter": "early-adopter",
+    "early_adopters": "early-adopter",
+
+    # Early Majority
+    "early majority": "early-majority",
+    "early-majority": "early-majority",
+    "early_majority": "early-majority",
+
+    # Late Majority
+    "late majority": "late-majority",
+    "late-majority": "late-majority",
+    "late_majority": "late-majority",
+
+    # Sceptic (tolerate US spelling)
+    "sceptic": "sceptic",
+    "sceptics": "sceptic",
+    "skeptic": "sceptic",
+    "skeptics": "sceptic",
+}
+VALID_BUYERS = {"innovator", "early-adopter", "early-majority", "late-majority", "sceptic"}
+
 # Flexible input → canonical section mapping
 SECTION_RULES: List[Tuple[re.Pattern, str, bool]] = [
     (re.compile(r"^\s*(opening|opener)\b", re.I), "Opener", False),
@@ -115,7 +112,7 @@ SECTION_RULES: List[Tuple[re.Pattern, str, bool]] = [
     (re.compile(r"^\s*(handling\s+objections|objections)\b", re.I), "Objections", False),
     (re.compile(r"^\s*(call\s+to\s+action|next\s*steps?)\b", re.I), "Next step (salesperson-chosen)", False),
     (re.compile(r"^\s*(exploration|discovery|questions?)\b", re.I), "Exploration nudge", False),
-    # Also accept exact required headings even if they already exist in source
+    # Accept exact headings if already present
     (re.compile(r"^\s*#?\s*opener\s*$", re.I), "Opener", False),
     (re.compile(r"^\s*#?\s*context\s*bridge\s*$", re.I), "Context bridge", False),
     (re.compile(r"^\s*#?\s*value\s*moment\s*$", re.I), "Value moment", False),
@@ -125,9 +122,7 @@ SECTION_RULES: List[Tuple[re.Pattern, str, bool]] = [
     (re.compile(r"^\s*#?\s*close\s*$", re.I), "Close", False),
 ]
 
-# --------------------------------------------------------------------
-# Helpers
-# --------------------------------------------------------------------
+# ------------- Utilities -------------
 def ensure_out() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -135,27 +130,57 @@ def _norm(s: str) -> str:
     """Lowercase; collapse spaces/underscores/hyphens to a single dash."""
     return re.sub(r"[\s_\-]+", "-", (s or "").lower())
 
+def _tokenise_filename_for_buyer(path: str) -> List[str]:
+    """
+    Tokenises filename into simple words (removing extension and punctuation) for robust buyer match.
+    """
+    base = os.path.basename(path)
+    stem = os.path.splitext(base)[0]  # drop .docx
+    # replace separators with spaces, then split
+    cleaned = re.sub(r"[_\-\.\s]+", " ", stem.lower())
+    return cleaned.split()
+
+def detect_buyer_from_filename(path: str) -> str:
+    tokens = _tokenise_filename_for_buyer(path)
+    joined = " ".join(tokens)
+    # Strong contains match
+    for key, val in BUYER_MAP.items():
+        if key in joined:
+            return val
+    # Token combos
+    s = set(tokens)
+    def has(*ws): return all(w in s for w in ws)
+    if has("innovator") or has("innovators"):
+        return "innovator"
+    if has("early","adopter") or has("early","adopters"):
+        return "early-adopter"
+    if has("early","majority"):
+        return "early-majority"
+    if has("late","majority"):
+        return "late-majority"
+    if has("sceptic") or has("sceptics") or has("skeptic") or has("skeptics"):
+        return "sceptic"
+    return ""
+
 def html_to_text(html: str) -> str:
-    """Very tolerant HTML → plain text normaliser."""
+    """Loose HTML → plain text normaliser."""
     if not html:
         return ""
-    # Convert lists and line breaks
     html = re.sub(r"(?is)<li[^>]*>\s*", "\n- ", html)
     html = re.sub(r"(?is)<br\s*/?>", "\n", html)
     html = re.sub(r"(?is)</(p|div|section|ul|ol|h[1-6])>", "\n\n", html)
-    # Strip tags
     html = re.sub(r"(?is)<[^>]+>", "", html)
-    # Unescape entities
     text = htmllib.unescape(html)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 def compose_markdown(sections: Dict[str, str]) -> str:
     """
-    Build final Markdown with required headings, guaranteeing tokens:
-    - {{value_proposition}} included in "Value moment" (woven, not dumped elsewhere)
-    - {{next_step}} included in "Next step (salesperson-chosen)"
-    - Close ends with "Thank you for your time."
+    Build final Markdown ensuring:
+      - 7 required headings present
+      - {{value_proposition}} inside Value moment
+      - {{next_step}} inside Next step (salesperson-chosen)
+      - Close ends with "Thank you for your time."
     """
     out = {
         "Opener": sections.get("Opener", "").strip(),
@@ -167,21 +192,18 @@ def compose_markdown(sections: Dict[str, str]) -> str:
         "Close": sections.get("Close", "").strip(),
     }
 
-    # Value moment must weave {{value_proposition}}
     if out["Value moment"]:
         if "{{value_proposition}}" not in out["Value moment"]:
             out["Value moment"] += "\n\n{{value_proposition}}"
     else:
         out["Value moment"] = "{{value_proposition}}"
 
-    # Next step must include {{next_step}}
     if out["Next step (salesperson-chosen)"]:
         if "{{next_step}}" not in out["Next step (salesperson-chosen)"]:
             out["Next step (salesperson-chosen)"] += "\n\n{{next_step}}"
     else:
         out["Next step (salesperson-chosen)"] = "{{next_step}}"
 
-    # Close must end correctly
     close = out["Close"].strip()
     if not close:
         close = "Thank you for your time."
@@ -202,7 +224,6 @@ def compose_markdown(sections: Dict[str, str]) -> str:
 
 def write_md(buyer_id: str, md: str) -> None:
     ensure_out()
-    buyer_id = canonical_buyer(buyer_id)
     file_path = OUT_DIR / f"{buyer_id}.md"
     file_path.write_text(md, encoding="utf-8")
     print(f"✓ Wrote {file_path}")
@@ -210,36 +231,17 @@ def write_md(buyer_id: str, md: str) -> None:
 def canonical_buyer(s: str) -> str:
     if not s:
         return ""
-    q = s.strip().lower()
-    q = q.replace("_", "-").replace("  ", " ")
+    q = s.strip().lower().replace("_", " ").replace("-", " ")
     q = re.sub(r"\s+", " ", q)
-    # direct mapping first
-    if q in BUYER_MAP:
-        return BUYER_MAP[q]
-    # contains match
-    for key, val in BUYER_MAP.items():
-        if key in q:
-            return val
-    # already canonical?
-    if q in VALID_BUYERS:
-        return q
-    # last fallback
-    return q
-
-def guess_buyer_from_filename(path: str) -> str:
-    base = os.path.basename(path).lower()
-    norm = base.replace("_", " ").replace("-", " ")
-    for key, val in BUYER_MAP.items():
-        if key in base or key in norm:
-            return val
-    return ""
+    return BUYER_MAP.get(q, s.strip().lower())
 
 def guess_buyer_from_body(text: str) -> str:
     low = text.lower()
+    # Fast contains checks
     for key, val in BUYER_MAP.items():
         if re.search(rf"\b{re.escape(key)}\b", low):
             return val
-    # token combo fallbacks
+    # Token combos
     tokens = set(re.split(r"[^a-z0-9]+", low))
     def has(*ws): return all(w in tokens for w in ws)
     if has("innovator") or has("innovators"):
@@ -250,14 +252,13 @@ def guess_buyer_from_body(text: str) -> str:
         return "early-majority"
     if has("late","majority"):
         return "late-majority"
-    if any(has(x) for x in [["sceptic"],["sceptics"],["skeptic"],["skeptics"]]):
+    if any(w in tokens for w in ["sceptic","sceptics","skeptic","skeptics"]):
         return "sceptic"
     return ""
 
 def map_inner_sections_to_canonical(text: str) -> Dict[str, str]:
     """
-    Take a rough, plain-text block and group lines into canonical sections
-    using SECTION_RULES + tolerant heading detection.
+    Group lines into canonical sections using tolerant regex rules.
     """
     lines = [l.rstrip() for l in text.splitlines()]
     buckets: Dict[str, List[str]] = {}
@@ -272,8 +273,6 @@ def map_inner_sections_to_canonical(text: str) -> Dict[str, str]:
         line = raw.strip()
         if not line:
             continue
-
-        # Detect explicit required headings like "Opener", "# Opener", etc.
         matched = False
         for pattern, target, _append in SECTION_RULES:
             if pattern.match(line):
@@ -281,27 +280,18 @@ def map_inner_sections_to_canonical(text: str) -> Dict[str, str]:
                 buckets.setdefault(current, [])
                 matched = True
                 break
-
         if not matched:
             push(line)
 
-    # Join
-    out: Dict[str, str] = {}
-    for k, arr in buckets.items():
-        out[k] = "\n".join(arr).strip()
-
-    # Ensure all required keys exist
+    out: Dict[str, str] = {k: "\n".join(v).strip() for k, v in buckets.items()}
     for h in REQUIRED_HEADINGS:
         out.setdefault(h, "")
-
     return out
 
-# --------------------------------------------------------------------
-# URL MODE
-# --------------------------------------------------------------------
+# ------------- URL MODE -------------
 def run_url_mode(url: str) -> None:
     if not HAVE_BS:
-        print("URL mode requires BeautifulSoup + html5lib. Install with:\n  pip install beautifulsoup4 html5lib")
+        print("URL mode requires BeautifulSoup + html5lib. Install:\n  pip install beautifulsoup4 html5lib")
         sys.exit(1)
 
     print(f"Fetching: {url}")
@@ -310,7 +300,6 @@ def run_url_mode(url: str) -> None:
         raw_html = resp.read().decode("utf-8", errors="ignore")
     soup = BeautifulSoup(raw_html, "html5lib")
 
-    # Find anchor elements for each buyer
     anchors: List[Tuple[str, object]] = []
     for tag in soup.find_all(True):
         txt = (tag.get_text(" ", strip=True) or "").lower()
@@ -324,38 +313,33 @@ def run_url_mode(url: str) -> None:
         print("✗ Could not detect buyer sections on the page.")
         sys.exit(1)
 
-    # Keep first instance per buyer in page order
     seen, anchors_ordered = set(), []
     for val, el in anchors:
         if val not in seen and val in VALID_BUYERS:
             seen.add(val)
             anchors_ordered.append((val, el))
 
-    # Extract content between anchors
     for i, (buyer, el) in enumerate(anchors_ordered):
-        stop_set = {id(x[1]) for x in anchors_ordered[i + 1:]}
+        stop_ids = {id(x[1]) for x in anchors_ordered[i + 1:]}
         parts, cur = [], el.find_next_sibling()
-        while cur is not None and id(cur) not in stop_set:
+        while cur is not None and id(cur) not in stop_ids:
             parts.append(str(cur))
             cur = cur.find_next_sibling()
         seg_html = "".join(parts)
         if not seg_html.strip():
             print(f"! Buyer '{buyer}' found but segment empty.")
             continue
-
         text = html_to_text(seg_html)
         sections = map_inner_sections_to_canonical(text)
         md = compose_markdown(sections)
         write_md(buyer, md)
 
-# --------------------------------------------------------------------
-# DOCX MODE
-# --------------------------------------------------------------------
-def docx_to_html_text_mammoth(path: str) -> str:
+# ------------- DOCX MODE -------------
+def docx_to_text_mammoth(path: str) -> str:
     with open(path, "rb") as fh:
         result = mammoth.convert_to_html(fh)
         html = result.value or ""
-    return html
+    return html_to_text(html)
 
 def docx_to_text_python_docx(path: str) -> str:
     d = docx.Document(path)
@@ -364,74 +348,75 @@ def docx_to_text_python_docx(path: str) -> str:
         t = p.text.strip()
         if t:
             paras.append(t)
-    # Add simple blank lines between paragraphs
     return "\n\n".join(paras)
 
 def run_docx_mode(pattern: str, buyer_override: str | None) -> None:
-    # Accept BOTH a glob and an exact file path
-    if os.path.isfile(pattern):
-        files = [pattern]
-    else:
-        files = sorted(glob.glob(pattern))
-
+    # Accept exact file or glob
+    files = [pattern] if os.path.isfile(pattern) else sorted(glob.glob(pattern))
     if not files:
         print(f"✗ No .docx files matched: {pattern}")
         sys.exit(1)
 
-    if not (_HAVE_MAMMOTH or _HAVE_PYDOCX):
-        print("DOCX mode needs one of:\n  pip install mammoth\nor\n  pip install python-docx")
+    if not (HAVE_MAMMOTH or HAVE_PYDOCX):
+        print("DOCX mode needs one of:\n  pip install python-docx\nor\n  pip install mammoth")
         sys.exit(1)
 
     for f in files:
         print(f"Reading {f}")
+
+        # 1) Decide buyer up-front from filename (deterministic)
+        buyer = canonical_buyer(buyer_override) if buyer_override else ""
+        matched_source = "(forced)" if buyer_override else ""
+
+        if not buyer:
+            buyer = detect_buyer_from_filename(f)
+            matched_source = "filename" if buyer else ""
+
+        # 2) Parse text (we’ll still read body for section mapping)
+        origin = None
+        text = ""
         try:
-            if _HAVE_MAMMOTH:
-                html = docx_to_html_text_mammoth(f)
-                text = html_to_text(html)
-                origin = "mammoth"
-            else:
+            if HAVE_PYDOCX:
                 text = docx_to_text_python_docx(f)
                 origin = "python-docx"
+            elif HAVE_MAMMOTH:
+                text = docx_to_text_mammoth(f)
+                origin = "mammoth"
         except Exception as e:
-            print(f"  ! Failed to parse DOCX with available parsers: {e}")
+            print(f"  ! Failed to parse DOCX: {e}")
+            # still proceed if we already have buyer and at least create a skeleton
+            text = ""
+
+        # 3) If buyer still unknown, try the body text
+        if not buyer:
+            body_guess = guess_buyer_from_body(text)
+            if body_guess:
+                buyer = body_guess
+                matched_source = "body"
+
+        # 4) Finalise buyer decision
+        if not buyer:
+            buyer = "early-majority"
+            matched_source = "default"
+            print("  · detect -> none, defaulting to 'early-majority'")
+        elif buyer not in VALID_BUYERS:
+            print(f"  ! Skipping (buyer not recognised): {f} (got '{buyer}')")
             continue
 
-        buyer = canonical_buyer(buyer_override) if buyer_override else ""
-        matched_key = "(forced)" if buyer_override else None
+        print(f"  · detect -> buyer='{buyer}' via {matched_source}; parser={origin or 'n/a'}")
 
-        if not buyer:
-            # Robust buyer detection: filename OR document body
-            nf = _norm(os.path.basename(f))   # e.g. connectivity-early-adopters.docx
-            nt = _norm(text)
-
-            for key, val in BUYER_MAP.items():
-                nk = _norm(key)
-                if nk in nf or nk in nt:
-                    buyer = val
-                    matched_key = key
-                    break
-
-            if not buyer:
-                buyer = guess_buyer_from_body(text)
-
-        if not buyer:
-            buyer = "early-majority"  # practical default
-            print("  · detect -> (none) => defaulting to 'early-majority'")
+        # 5) Map sections & compose
+        if text.strip():
+            sections = map_inner_sections_to_canonical(text)
         else:
-            print(f"  · detect -> file='{os.path.basename(f)}' | match='{matched_key}' => buyer='{buyer}'")
+            sections = {h: "" for h in REQUIRED_HEADINGS}  # empty skeleton
 
-        if buyer not in VALID_BUYERS:
-            print(f"  ! Skipping (buyer not recognised): {f}  (got '{buyer}')")
-            continue
-
-        sections = map_inner_sections_to_canonical(text)
         md = compose_markdown(sections)
-        md += f"\n<!-- Parsed via {origin} -->\n"
+        if origin:
+            md += f"\n<!-- Parsed via {origin} -->\n"
         write_md(buyer, md)
 
-# --------------------------------------------------------------------
-# main
-# --------------------------------------------------------------------
+# ------------- main -------------
 def main() -> None:
     if not args.url and not args.docx:
         print("Provide either --url or --docx")
@@ -441,7 +426,6 @@ def main() -> None:
 
     if args.url:
         run_url_mode(args.url)
-
     if args.docx:
         run_docx_mode(args.docx, args.buyer)
 
