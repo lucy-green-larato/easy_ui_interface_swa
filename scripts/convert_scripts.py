@@ -12,16 +12,16 @@ URL mode:
     --url "https://info.larato.co.uk/xxx-sales-script" \
     --out web/content/call-library/v1/direct/connectivity
 
-DOCX mode (optional, requires: pip install mammoth):
+DOCX mode (requires: pip install mammoth):
   python tools/convert_sales_scripts.py \
-    --docx "/workspaces/easy_ui_interface_swa/inputs/*.docx" \
+    --docx "script_doc_inputs/*.docx" \
     --out web/content/call-library/v1/direct/connectivity
 """
 
 import argparse, glob, os, re, sys, urllib.request, html as htmllib
 from pathlib import Path
 
-# ---- extra imports for robust HubSpot parsing ----
+# ---- extra imports for robust HubSpot parsing (URL mode) ----
 try:
     from bs4 import BeautifulSoup
 except ImportError:
@@ -43,6 +43,8 @@ BUYER_MAP = {
     "innovator": "innovator",
     "early adopters": "early-adopter",
     "early adopter": "early-adopter",
+    "early_adopters": "early-adopter",   # explicit alias (underscores)
+    "early-adopters": "early-adopter",   # explicit alias (hyphens)
     "early majority": "early-majority",
     "late majority": "late-majority",
     "sceptic": "sceptic",
@@ -65,6 +67,10 @@ SECTION_RULES = [
 # ---------- helpers ----------
 def ensure_out():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+def _norm(s: str) -> str:
+    """Normalise for matching: lowercase, collapse whitespace/underscore/hyphen to single '-'."""
+    return re.sub(r"[\s_\-]+", "-", (s or "").lower())
 
 def html_to_text(html: str) -> str:
     if not html:
@@ -131,7 +137,7 @@ def run_url_mode(url: str):
         raw_html = resp.read().decode("utf-8", errors="ignore")
     soup = BeautifulSoup(raw_html, "html5lib")
 
-    # find anchors for each buyer type
+    # find anchors for each buyer type (by text, id, class)
     anchors = []
     for tag in soup.find_all(True):
         txt = (tag.get_text(" ", strip=True) or "").lower()
@@ -172,23 +178,32 @@ def run_docx_mode(pattern: str):
     except ImportError:
         print("Please install mammoth for DOCX mode: pip install mammoth")
         sys.exit(1)
+
     files = sorted(glob.glob(pattern))
     if not files:
         print("✗ No .docx files matched.")
         sys.exit(1)
+
     for f in files:
         print(f"Reading {f}")
         with open(f, "rb") as fh:
             result = mammoth.convert_to_html(fh)
-            html = result.value
+            html = result.value or ""
+
+        # robust buyer detection: filename or document body (underscores/hyphens/spaces all OK)
         buyer = None
+        nf = _norm(os.path.basename(f))
+        nh = _norm(html)
         for key, val in BUYER_MAP.items():
-            if key in f.lower() or key in html.lower():
+            nk = _norm(key)
+            if nk in nf or nk in nh:
                 buyer = val
                 break
+
         if not buyer or buyer not in VALID_BUYERS:
             print(f"  ! Skipping (buyer not recognised): {f}")
             continue
+
         text = html_to_text(html)
         sections = map_inner_sections_to_canonical(text)
         md = compose_markdown(sections)
