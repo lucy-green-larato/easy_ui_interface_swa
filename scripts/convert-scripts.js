@@ -1,283 +1,261 @@
-#!/usr/bin/env node
-/**
- * Convert sales scripts from either:
- *  - a single URL containing all buyer types (with headings like "# Innovators")
- *  - one or more DOCX files (each structured like your test document)
- * into Markdown files the app expects, and update index.json.
- *
- * Node 18+ required (fetch built-in). Run:
- *   node scripts/convert-scripts.js \
- *     --url "https://info.larato.co.uk/xxx-sales-script" \
- *     --productId connectivity \
- *     --productLabel "Connectivity" \
- *     --salesModel direct \
- *     --out web/content/call-library/v1
- *
- * OR for docx files:
- *   node scripts/convert-scripts.js \
- *     --docx "./inputs/*.docx" \
- *     --productId connectivity \
- *     --productLabel "Connectivity" \
- *     --salesModel direct \
- *     --out web/content/call-library/v1
- */
+#!/usr/bin/env python3
+"""
+Dual-mode converter:
+- URL mode: fetch a single web page that contains ALL buyer types (Innovators, Early Adopters, etc.),
+            split by buyer headings, map sub-sections to canonical headers, and write .md files.
+- DOCX mode: parse one or more Word .docx files with similar headings and write .md files.
 
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { glob } from 'glob';
-import TurndownService from 'turndown';
-import { JSDOM } from 'jsdom';
-import mammoth from 'mammoth';
+Usage (run from repo root in Codespaces terminal):
 
-const turndown = new TurndownService({ headingStyle: 'atx', bulletListMarker: '-' });
+URL mode:
+  python tools/convert_sales_scripts.py \
+    --url "https://info.larato.co.uk/xxx-sales-script" \
+    --out web/content/call-library/v1/direct/connectivity
 
-// ---- CLI args (simple) ----
-const args = Object.fromEntries(process.argv.slice(2).reduce((acc, item, i, arr) => {
-  if (!item.startsWith('--')) return acc;
-  const key = item.slice(2);
-  const val = (arr[i+1] && !arr[i+1].startsWith('--')) ? arr[i+1] : true;
-  acc.push([key, val]);
-  return acc;
-}, []));
+DOCX mode (optional, requires: pip install mammoth):
+  python tools/convert_sales_scripts.py \
+    --docx "/workspaces/easy_ui_interface_swa/inputs/*.docx" \
+    --out web/content/call-library/v1/direct/connectivity
+"""
 
-const SOURCE_URL   = args.url || '';
-const DOCX_GLOB    = args.docx || '';
-const PRODUCT_ID   = (args.productId || '').trim() || fail('--productId required');
-const PRODUCT_LABEL= (args.productLabel || PRODUCT_ID).trim();
-const SALES_MODEL  = (args.salesModel || 'direct').toLowerCase();
-const OUT_BASE     = (args.out || '').trim() || fail('--out required (e.g. web/content/call-library/v1)');
+import argparse
+import glob
+import os
+import re
+import sys
+import urllib.request
+import html as htmllib
+from pathlib import Path
 
-// buyer type normalisation
-const BUYER_MAP = new Map([
-  ['innovators','innovator'], ['innovator','innovator'],
-  ['early adopters','early-adopter'], ['early adopter','early-adopter'],
-  ['early majority','early-majority'],
-  ['late majority','late-majority'],
-  ['skeptic','sceptic'], ['skeptics','sceptic'], ['sceptic','sceptic'], ['sceptics','sceptic']
-]);
+# ---------- CLI ----------
+parser = argparse.ArgumentParser(description="Convert sales scripts (URL or DOCX) to Markdown library files.")
+parser.add_argument("--url", help="Source page containing all buyer sections")
+parser.add_argument("--docx", help="Glob path for .docx files (optional, requires mammoth)")
+parser.add_argument("--out", required=True, help="Output directory, e.g. web/content/call-library/v1/direct/connectivity")
+args = parser.parse_args()
 
-const SECTION_RULES = [
-  { test: /^opening\b/i,                to: 'Opener' },
-  { test: /^opener\b/i,                 to: 'Opener' },
-  { test: /^buyer pain\b/i,             to: 'Context bridge' },
-  { test: /^pain\b/i,                   to: 'Context bridge' },
-  { test: /^buyer desire\b/i,           to: 'Value moment' },
-  { test: /^desire\b/i,                 to: 'Value moment' },
-  { test: /^example/i,                  to: 'Value moment', append: true },
-  { test: /^handling objections/i,      to: 'Objections' },
-  { test: /^objections/i,               to: 'Objections' },
-  { test: /^call to action/i,           to: 'Next step' },
-  { test: /^next steps?/i,              to: 'Next step' }
-];
+OUT_DIR = Path(args.out)
 
-function fail(msg){ console.error(msg); process.exit(1); }
-
-// --- utilities ---
-function normaliseBuyerHeading(h){
-  if (!h) return null;
-  const s = String(h).trim().toLowerCase().replace(/\s+/g,' ');
-  const hit = [...BUYER_MAP.keys()].find(k => s.includes(k));
-  return hit ? BUYER_MAP.get(hit) : null;
-}
-function ensureDir(p){ return fs.mkdir(p, { recursive: true }); }
-function asMd(html){ return turndown.turndown(html); }
-function mdSafe(str=''){ return String(str||'').trim(); }
-
-function composeMarkdown(sections){
-  // Ensure all six sections exist, append tokens where required
-  const out = {
-    'Opener': mdSafe(sections['Opener'] || ''),
-    'Context bridge': mdSafe(sections['Context bridge'] || ''),
-    'Value moment': mdSafe(sections['Value moment'] || ''),
-    'Exploration nudge': mdSafe(sections['Exploration nudge'] || ''),
-    'Objections': mdSafe(sections['Objections'] || ''),
-    'Next step (salesperson-chosen)': '{{next_step}}',
-    'Close': 'Thank you for your time.'
-  };
-
-  // If the source CTA had useful copy, keep it BEFORE the token
-  if (sections['Next step']) {
-    const pre = mdSafe(sections['Next step']);
-    out['Next step (salesperson-chosen)'] = (pre ? pre + '\n\n' : '') + '{{next_step}}';
-  }
-
-  // If we have no Value moment text, add a tokenised bridge to USPs
-  if (!out['Value moment']) {
-    out['Value moment'] = '{{value_proposition}}';
-  } else {
-    // Append the token as a supportive sentence if value already exists
-    out['Value moment'] += `\n\n{{value_proposition}}`;
-  }
-
-  // Build final MD
-  const order = ['Opener','Context bridge','Value moment','Exploration nudge','Objections','Next step (salesperson-chosen)','Close'];
-  return order.map(h => `# ${h}\n${out[h] || ''}`.trim()).join('\n\n');
+BUYER_MAP = {
+    "innovators": "innovator",
+    "innovator": "innovator",
+    "early adopters": "early-adopter",
+    "early adopter": "early-adopter",
+    "early majority": "early-majority",
+    "late majority": "late-majority",
+    "sceptic": "sceptic",
+    "sceptics": "sceptic",
+    "skeptic": "sceptic",
+    "skeptics": "sceptic",
 }
 
-// --- URL mode: split by buyer sections and map subheadings ---
-async function parseFromUrl(url){
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Fetch failed ${res.status}`);
-  const html = await res.text();
-  const dom = new JSDOM(html);
-  const $ = dom.window.document;
+SECTION_RULES = [
+    (re.compile(r"^\s*(opening|opener)\b", re.I), "Opener", False),
+    (re.compile(r"^\s*(buyer\s+pain|pain)\b", re.I), "Context bridge", False),
+    (re.compile(r"^\s*(buyer\s+desire|desire)\b", re.I), "Value moment", False),
+    (re.compile(r"^\s*example", re.I), "Value moment", True),  # append into Value moment
+    (re.compile(r"^\s*(handling\s+objections|objections)\b", re.I), "Objections", False),
+    (re.compile(r"^\s*(call\s+to\s+action|next\s*steps?)\b", re.I), "Next step", False),
+    (re.compile(r"^\s*(exploration|discovery|questions?)\b", re.I), "Exploration nudge", False),
+]
 
-  // Strategy: find headings that announce buyer segments, then capture until next buyer heading
-  const all = [...$.querySelectorAll('h1,h2,h3,h4,h5')];
-  const buyerAnchors = all
-    .map((h, idx) => ({ idx, el: h, buyer: normaliseBuyerHeading(h.textContent) }))
-    .filter(x => !!x.buyer);
+VALID_BUYERS = {"innovator","early-adopter","early-majority","late-majority","sceptic"}
 
-  if (!buyerAnchors.length) throw new Error('No buyer headings found on page');
+# ---------- helpers ----------
+def ensure_out():
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-  const segments = [];
-  for (let i = 0; i < buyerAnchors.length; i++){
-    const { idx, buyer } = buyerAnchors[i];
-    const end = (i+1 < buyerAnchors.length) ? buyerAnchors[i+1].idx : all.length;
-    const startEl = all[idx];
-    const container = [];
-    // collect nodes between startEl and the next buyer heading
-    for (let n = startEl.nextElementSibling; n && !all.slice(idx+1, end).includes(n); n = n.nextElementSibling){
-      container.push(n);
+def norm_space(s: str) -> str:
+    return re.sub(r"\s+", " ", s or "").strip()
+
+def html_to_text(html: str) -> str:
+    """Very light HTML → text; handle <li>, <br>, <p>, strip tags."""
+    if not html:
+        return ""
+    # list items -> "- ..."
+    html = re.sub(r"(?is)<li[^>]*>\s*", "\n- ", html)
+    # <br> -> newline
+    html = re.sub(r"(?is)<br\s*/?>", "\n", html)
+    # close p/div/section -> double newline
+    html = re.sub(r"(?is)</(p|div|section|ul|ol|h[1-6])>", "\n\n", html)
+    # remove all other tags
+    html = re.sub(r"(?is)<[^>]+>", "", html)
+    text = htmllib.unescape(html)
+    # compress multiple blank lines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+def compose_markdown(sections: dict) -> str:
+    # ensure all standard sections, and include tokens
+    out = {
+        "Opener": sections.get("Opener", "").strip(),
+        "Context bridge": sections.get("Context bridge", "").strip(),
+        "Value moment": sections.get("Value moment", "").strip(),
+        "Exploration nudge": sections.get("Exploration nudge", "").strip(),
+        "Objections": sections.get("Objections", "").strip(),
+        "Next step (salesperson-chosen)": "{{next_step}}",
+        "Close": "Thank you for your time.",
     }
-    segments.push({ buyer, nodes: container });
-  }
+    # if CTA text existed, keep it before the token
+    if sections.get("Next step"):
+        pre = sections["Next step"].strip()
+        if pre:
+            out["Next step (salesperson-chosen)"] = pre + "\n\n{{next_step}}"
+    # ensure value proposition token appears
+    if out["Value moment"]:
+        out["Value moment"] += "\n\n{{value_proposition}}"
+    else:
+        out["Value moment"] = "{{value_proposition}}"
 
-  // Inside each segment, map inner headings to our canonical sections
-  const results = [];
-  for (const seg of segments){
-    const sec = Object.create(null);
-    let current = 'Opener'; // default bucket until first match
-    for (const node of seg.nodes){
-      if (/^H[1-6]$/.test(node.tagName)) {
-        const text = (node.textContent || '').trim();
-        const rule = SECTION_RULES.find(r => r.test.test(text));
-        if (rule) {
-          if (rule.append) {
-            current = rule.to; // we will append to this bucket
-            if (!sec[current]) sec[current] = '';
-            continue;
-          }
-          current = rule.to;
-          if (!sec[current]) sec[current] = '';
-          continue;
-        }
-      }
-      // append node HTML into current bucket
-      sec[current] = (sec[current] || '') + '\n' + node.outerHTML;
-    }
-    // convert each bucket HTML → MD
-    const mapped = {};
-    for (const [k, html] of Object.entries(sec)){
-      mapped[k] = asMd(html || '').trim();
-    }
-    results.push({ buyer: seg.buyer, sections: mapped });
-  }
+    order = ["Opener","Context bridge","Value moment","Exploration nudge","Objections","Next step (salesperson-chosen)","Close"]
+    blocks = []
+    for h in order:
+        body = out[h].rstrip()
+        blocks.append(f"# {h}\n{body}" if body else f"# {h}\n")
+    return "\n\n".join(blocks).strip() + "\n"
 
-  return results;
-}
+def write_md(buyer_id: str, md: str):
+    ensure_out()
+    file_path = OUT_DIR / f"{buyer_id}.md"
+    file_path.write_text(md, encoding="utf-8")
+    print(f"✓ Wrote {file_path}")
 
-// --- DOCX mode: each file contains one buyer script with familiar headings ---
-async function parseFromDocx(globPattern){
-  const files = await glob(globPattern, { nodir: true });
-  if (!files.length) throw new Error('No .docx files matched.');
-  const results = [];
-  for (const f of files){
-    const buf = await fs.readFile(f);
-    const { value: html } = await mammoth.convertToHtml({ buffer: buf });
-    const dom = new JSDOM(html);
-    const $ = dom.window.document;
+def pick_buyer_from_str(s: str) -> str | None:
+    s = (s or "").lower()
+    for key, val in BUYER_MAP.items():
+        if key in s:
+            return val
+    return None
 
-    // Guess buyer from first heading that matches buyer names; if not found, derive from filename
-    const heads = [...$.querySelectorAll('p strong, h1, h2, h3, p')].map(n => (n.textContent || '').trim());
-    let buyer = null;
-    for (const t of heads){
-      buyer = normaliseBuyerHeading(t);
-      if (buyer) break;
-    }
-    if (!buyer){
-      const base = path.basename(f).toLowerCase();
-      buyer = normaliseBuyerHeading(base);
-    }
-    if (!buyer) throw new Error(`Could not determine buyer type for ${f}`);
+def split_by_buyer_sections(html: str):
+    """Return list of (buyer_id, html_segment) in order of appearance."""
+    # Build a list of (start_index, buyer_id)
+    hits = []
+    lower = html.lower()
+    # Find headings mentioning buyer groups, e.g. <h2>Innovators</h2>
+    for key in BUYER_MAP.keys():
+        pattern = re.compile(rf"<h[1-6][^>]*>[^<]*{re.escape(key)}[^<]*</h[1-6]>", re.I)
+        for m in pattern.finditer(lower):
+            hits.append((m.start(), BUYER_MAP[key]))
+    if not hits:
+        # fallback: anchors like id="innovators"
+        for key in BUYER_MAP.keys():
+            pattern = re.compile(rf'id="[^"]*{re.escape(key)}[^"]*"', re.I)
+            for m in pattern.finditer(lower):
+                hits.append((m.start(), BUYER_MAP[key]))
+    hits.sort(key=lambda x: x[0])
+    if not hits:
+        return []
 
-    // Map headings to canonical sections
-    const sec = {};
-    let current = 'Opener';
-    const nodes = [...$.body.children];
-    for (const node of nodes){
-      const text = (node.textContent || '').trim();
-      if (!text) continue;
-      if (/^H[1-6]$/.test(node.tagName) || node.tagName === 'P' && node.querySelector && node.querySelector('strong')) {
-        const heading = text;
-        const rule = SECTION_RULES.find(r => r.test.test(heading));
-        if (rule) {
-          current = rule.to;
-          if (!sec[current]) sec[current] = '';
-          continue;
-        }
-      }
-      sec[current] = (sec[current] || '') + '\n' + node.outerHTML;
-    }
+    segments = []
+    for i, (pos, buyer) in enumerate(hits):
+        end = hits[i+1][0] if i+1 < len(hits) else len(html)
+        segments.append((buyer, html[pos:end]))
+    # De-dup in case multiple matches for same section header
+    seen = set()
+    uniq = []
+    for buyer, seg in segments:
+        if buyer in seen:
+            continue
+        seen.add(buyer)
+        uniq.append((buyer, seg))
+    return uniq
 
-    const mapped = {};
-    for (const [k, html] of Object.entries(sec)){
-      mapped[k] = asMd(html || '').trim();
-    }
-    results.push({ buyer, sections: mapped, source: f });
-  }
-  return results;
-}
+def map_inner_sections_to_canonical(text: str) -> dict:
+    """
+    Given plain text of a buyer segment, map its internal headings to our canonical sections.
+    Returns dict: { 'Opener': '...', 'Context bridge':'...', ... }
+    """
+    lines = [l.rstrip() for l in text.splitlines()]
+    buckets = {}
+    current = "Opener"
+    buckets[current] = ""
 
-// --- Write files & index.json ---
-async function writeOutput({ pieces }){
-  const productDir = path.join(OUT_BASE, SALES_MODEL, PRODUCT_ID);
-  await ensureDir(productDir);
+    def push(line):
+        buckets[current] = (buckets.get(current, "") + ("\n" if buckets.get(current) else "") + line).strip()
 
-  for (const { buyer, sections } of pieces){
-    const md = composeMarkdown(sections);
-    const file = path.join(productDir, `${buyer}.md`);
-    await fs.writeFile(file, md, 'utf8');
-    console.log('Wrote', file);
-  }
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        matched = False
+        for pattern, target, append in SECTION_RULES:
+            if pattern.match(line):
+                # switch bucket
+                current = target
+                buckets.setdefault(current, "")
+                matched = True
+                break
+        if matched:
+            continue
+        # otherwise accumulate
+        push(line)
 
-  // Update/create index.json (prefer root; if you maintain per-model indexes, adjust here)
-  const indexPath = path.join(OUT_BASE, 'index.json');
-  let index = { products: [] };
-  try {
-    const raw = await fs.readFile(indexPath, 'utf8');
-    index = JSON.parse(raw);
-  } catch { /* new file */ }
+    return buckets
 
-  // upsert product
-  const relPath = path.posix.join('content/call-library/v1', SALES_MODEL, PRODUCT_ID);
-  const idx = index.products.findIndex(p => (p.id || '').toLowerCase() === PRODUCT_ID.toLowerCase());
-  const entry = { id: PRODUCT_ID, label: PRODUCT_LABEL, path: relPath };
-  if (idx >= 0) index.products[idx] = entry; else index.products.push(entry);
+# ---------- URL MODE ----------
+def run_url_mode(url: str):
+    print(f"Fetching: {url}")
+    with urllib.request.urlopen(url) as resp:
+        html = resp.read().decode("utf-8", errors="ignore")
 
-  await fs.writeFile(indexPath, JSON.stringify(index, null, 2), 'utf8');
-  console.log('Updated index:', indexPath);
-}
+    segments = split_by_buyer_sections(html)
+    if not segments:
+        print("✗ Could not detect buyer sections on the page.")
+        sys.exit(1)
 
-// --- main ---
-(async () => {
-  let pieces = [];
-  if (SOURCE_URL) {
-    pieces = await parseFromUrl(SOURCE_URL);
-  } else if (DOCX_GLOB) {
-    pieces = await parseFromDocx(DOCX_GLOB);
-  } else {
-    fail('Provide --url or --docx');
-  }
+    for buyer, seg_html in segments:
+        if buyer not in VALID_BUYERS:
+            continue
+        text = html_to_text(seg_html)
+        sections = map_inner_sections_to_canonical(text)
+        md = compose_markdown(sections)
+        write_md(buyer, md)
 
-  // Filter to recognised buyers only (avoid accidental sections)
-  const valid = new Set(['innovator','early-adopter','early-majority','late-majority','sceptic']);
-  pieces = pieces.filter(p => valid.has(p.buyer));
-  if (!pieces.length) fail('No recognised buyer sections found.');
+# ---------- DOCX MODE (optional) ----------
+def run_docx_mode(pattern: str):
+    try:
+        import mammoth  # lazy import, only needed for DOCX mode
+    except ImportError:
+        print("Please install mammoth for DOCX mode: pip install mammoth")
+        sys.exit(1)
 
-  await writeOutput({ pieces });
-})().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+    files = sorted(glob.glob(pattern))
+    if not files:
+        print("✗ No .docx files matched.")
+        sys.exit(1)
+
+    for f in files:
+        print(f"Reading {f}")
+        with open(f, "rb") as fh:
+            result = mammoth.convert_to_html(fh)
+            html = result.value  # HTML string
+
+        # guess buyer from content or filename
+        buyer = pick_buyer_from_str(html) or pick_buyer_from_str(os.path.basename(f))
+        if not buyer or buyer not in VALID_BUYERS:
+            print(f"  ! Skipping (buyer not recognised): {f}")
+            continue
+
+        text = html_to_text(html)
+        sections = map_inner_sections_to_canonical(text)
+        md = compose_markdown(sections)
+        write_md(buyer, md)
+
+# ---------- main ----------
+def main():
+    if not args.url and not args.docx:
+        print("Provide either --url or --docx")
+        sys.exit(1)
+
+    if args.url:
+        run_url_mode(args.url)
+
+    if args.docx:
+        run_docx_mode(args.docx)
+
+    print("Done.")
+
+if __name__ == "__main__":
+    ensure_out()
+    main()
