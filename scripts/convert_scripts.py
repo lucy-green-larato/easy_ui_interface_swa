@@ -1,38 +1,34 @@
 #!/usr/bin/env python3
 """
 Dual-mode converter:
-- URL mode: fetch a single web page that contains ALL buyer types (Innovators, Early Adopters, etc.),
-            split by buyer headings, map sub-sections to canonical headers, and write .md files.
-- DOCX mode: parse one or more Word .docx files with similar headings and write .md files.
+- URL mode: fetch a page that contains ALL buyer types and split into .md files.
+- DOCX mode: parse one or more Word .docx files and write .md files.
 
-Usage (run from repo root in Codespaces terminal):
+Usage (from repo root):
+
+DOCX mode:
+  python scripts/convert_scripts.py --docx "script_doc_inputs/*.docx" --out web/content/call-library/v1/direct/connectivity
+  # or a single file:
+  python scripts/convert_scripts.py --docx script_doc_inputs/connectivity-early-adopters.docx --out web/content/call-library/v1/direct/connectivity
 
 URL mode:
-  python tools/convert_sales_scripts.py \
-    --url "https://info.larato.co.uk/xxx-sales-script" \
-    --out web/content/call-library/v1/direct/connectivity
-
-DOCX mode (requires: pip install mammoth):
-  python tools/convert_sales_scripts.py \
-    --docx "script_doc_inputs/*.docx" \
-    --out web/content/call-library/v1/direct/connectivity
+  python scripts/convert_scripts.py --url "https://info.larato.co.uk/xxx-sales-script" --out web/content/call-library/v1/direct/connectivity
 """
 
 import argparse, glob, os, re, sys, urllib.request, html as htmllib
 from pathlib import Path
 
-# ---- extra imports for robust HubSpot parsing (URL mode) ----
+# ---- optional for URL mode (install once: pip install beautifulsoup4 html5lib) ----
 try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    print("Please install BeautifulSoup for URL mode:\n  pip install beautifulsoup4 html5lib")
-    sys.exit(1)
+    from bs4 import BeautifulSoup  # noqa: F401
+    HAVE_BS = True
+except Exception:
+    HAVE_BS = False
 
-# ---------- CLI ----------
 parser = argparse.ArgumentParser(description="Convert sales scripts (URL or DOCX) to Markdown library files.")
 parser.add_argument("--url", help="Source page containing all buyer sections")
-parser.add_argument("--docx", help="Glob path for .docx files (optional, requires mammoth)")
-parser.add_argument("--out", required=True, help="Output directory, e.g. web/content/call-library/v1/direct/connectivity")
+parser.add_argument("--docx", help="Glob path OR exact .docx file path (requires mammoth)")
+parser.add_argument("--out", required=True, help="Output dir, e.g. web/content/call-library/v1/direct/connectivity")
 args = parser.parse_args()
 
 OUT_DIR = Path(args.out)
@@ -43,8 +39,8 @@ BUYER_MAP = {
     "innovator": "innovator",
     "early adopters": "early-adopter",
     "early adopter": "early-adopter",
-    "early_adopters": "early-adopter",   # explicit alias (underscores)
-    "early-adopters": "early-adopter",   # explicit alias (hyphens)
+    "early_adopters": "early-adopter",   # alias
+    "early-adopters": "early-adopter",   # alias
     "early majority": "early-majority",
     "late majority": "late-majority",
     "sceptic": "sceptic",
@@ -69,7 +65,7 @@ def ensure_out():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def _norm(s: str) -> str:
-    """Normalise for matching: lowercase, collapse whitespace/underscore/hyphen to single '-'."""
+    """Lowercase; collapse spaces/underscores/hyphens to a single dash."""
     return re.sub(r"[\s_\-]+", "-", (s or "").lower())
 
 def html_to_text(html: str) -> str:
@@ -131,6 +127,9 @@ def map_inner_sections_to_canonical(text: str) -> dict:
 
 # ---------- URL MODE ----------
 def run_url_mode(url: str):
+    if not HAVE_BS:
+        print("URL mode requires BeautifulSoup. Install with: pip install beautifulsoup4 html5lib")
+        sys.exit(1)
     print(f"Fetching: {url}")
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req) as resp:
@@ -179,9 +178,14 @@ def run_docx_mode(pattern: str):
         print("Please install mammoth for DOCX mode: pip install mammoth")
         sys.exit(1)
 
-    files = sorted(glob.glob(pattern))
+    # Accept BOTH a glob and an exact file path
+    if os.path.isfile(pattern):
+        files = [pattern]
+    else:
+        files = sorted(glob.glob(pattern))
+
     if not files:
-        print("✗ No .docx files matched.")
+        print(f"✗ No .docx files matched: {pattern}")
         sys.exit(1)
 
     for f in files:
@@ -190,38 +194,36 @@ def run_docx_mode(pattern: str):
             result = mammoth.convert_to_html(fh)
             html = result.value or ""
 
-        # robust buyer detection: filename or document body (underscores/hyphens/spaces all OK)
-        buyer = None
-        nf = _norm(os.path.basename(f))
+        # robust buyer detection: filename OR document body
+        nf = _norm(os.path.basename(f))   # e.g. connectivity-early-adopters.docx
         nh = _norm(html)
+        buyer = None
         matched_key = None
+
+        # Primary mapping
         for key, val in BUYER_MAP.items():
-            nk = _norm(key)
+            nk = _norm(key)               # e.g. early-adopters
             if nk in nf or nk in nh:
                 buyer = val
                 matched_key = key
                 break
-                        
-         # 2) Fallback: tokenised heuristic (covers weird spellings / extra words)
+
+        # Fallback tokens if needed
         if not buyer:
             tokens = set(re.split(r"[^a-z0-9]+", nf)) | set(re.split(r"[^a-z0-9]+", nh))
-            # remove empties
             tokens = {t for t in tokens if t}
-
             def has(*words): return all(w in tokens for w in words)
-
             if has("innovators") or has("innovator"):
                 buyer, matched_key = "innovator", "innovators*"
-            elif has("early", "adopters") or has("early", "adopter"):
+            elif has("early","adopters") or has("early","adopter"):
                 buyer, matched_key = "early-adopter", "early adopters*"
-            elif has("early", "majority"):
+            elif has("early","majority"):
                 buyer, matched_key = "early-majority", "early majority*"
-            elif has("late", "majority"):
+            elif has("late","majority"):
                 buyer, matched_key = "late-majority", "late majority*"
-            elif has("sceptics") or has("sceptic") or has("skeptics") or has("skeptic"):
+            elif any(has(x) for x in [["sceptics"],["sceptic"],["skeptics"],["skeptic"]]):
                 buyer, matched_key = "sceptic", "sceptics*"
 
-        # Debug: show what we saw and what we chose
         print(f"  · detect -> file='{os.path.basename(f)}' nf='{nf}' | match='{matched_key}' => buyer='{buyer}'")
 
         if not buyer or buyer not in VALID_BUYERS:
@@ -238,8 +240,10 @@ def main():
     if not args.url and not args.docx:
         print("Provide either --url or --docx")
         sys.exit(1)
-    if args.url: run_url_mode(args.url)
-    if args.docx: run_docx_mode(args.docx)
+    if args.url:
+        run_url_mode(args.url)
+    if args.docx:
+        run_docx_mode(args.docx)
     print("Done.")
 
 if __name__ == "__main__":
