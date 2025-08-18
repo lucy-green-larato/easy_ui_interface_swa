@@ -1,93 +1,125 @@
-const INTEL_URL = '/intel.json';
+// web/src/lib/callLibrary.js
 
+// --- Paths (relative so it works under sub-path hosting) ---
+const INTEL_URL = './intel.json';
+const LIB_BASE  = './content/call-library/v1';
+
+// --- Caches ---
 let intelCache = null;
+let indexCache = null;
 
 /**
- * Fetch and return the full intel.json, cached after first load
+ * Load and cache intel.json (for Buyer Needs side panel and as a fallback)
  */
 async function loadIntel() {
   if (intelCache) return intelCache;
-
   try {
     const res = await fetch(INTEL_URL, { cache: 'no-store' });
-    const json = await res.json();
-    intelCache = json;
-    return json;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    intelCache = await res.json();
   } catch (err) {
-    console.error('Error loading intel.json:', err);
-    return { products: {} };
+    console.error('[intel] Failed to load intel.json:', err);
+    intelCache = { products: {} };
   }
+  return intelCache;
 }
 
 /**
- * Return product and buyer options for dropdown population
+ * Load and cache the library index.json (primary source for Product dropdown)
+ * Expected shape:
+ * {
+ *   "products": [
+ *     { "id": "connectivity", "label": "Connectivity", "path": "/content/call-library/v1/direct/connectivity" },
+ *     ...
+ *   ]
+ * }
+ */
+async function loadLibraryIndex() {
+  if (indexCache) return indexCache;
+  try {
+    const res = await fetch(`${LIB_BASE}/index.json`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    indexCache = await res.json();
+  } catch (err) {
+    console.error('[library] Failed to load library index.json:', err);
+    indexCache = null; // keep null so callers can trigger fallback
+  }
+  return indexCache;
+}
+
+/**
+ * Return product options for dropdown population.
+ * Priority: library index → fallback to intel.json product keys.
  */
 export async function getIndex() {
-  const data = await loadIntel();
-  const products = data.products || {};
-  const entries = [];
-
-  for (const [productName, productData] of Object.entries(products)) {
-    const buyers = productData.buyers || {};
-    for (const buyerName of Object.keys(buyers)) {
-      entries.push({ product: productName, buyer: buyerName });
-    }
+  const idx = await loadLibraryIndex();
+  if (idx && Array.isArray(idx.products) && idx.products.length) {
+    // Normalise to { id, label } for the UI
+    return {
+      products: idx.products.map(p => ({
+        id: String(p.id ?? '').trim(),
+        label: String(p.label ?? p.id ?? '').trim() || String(p.id ?? '').trim()
+      })).filter(p => p.id)
+    };
   }
 
-  const uniqueProducts = [...new Set(entries.map(e => e.product))].sort();
+  // Fallback: derive products from intel.json
+  const intel = await loadIntel();
+  const productsObj = intel?.products || {};
+  const uniqueProducts = Object.keys(productsObj).sort();
   return {
     products: uniqueProducts.map(p => ({ id: p, label: p }))
   };
 }
 
 /**
- * Return the script and tips for a given product + buyer type
+ * Canonical helpers used by the UI
  */
-export async function generateCallFromLibrary({ lookup, variables }) {
-  const { product, buyerType } = lookup;
-  const intel = await loadIntel();
-  const productNode = intel.products?.[product];
-
-  if (!productNode) {
-    throw new Error(`Unknown product: ${product}`);
-  }
-
-  const buyerNode = productNode.buyers?.[buyerType];
-
-  if (!buyerNode) {
-    const available = Object.keys(productNode.buyers || {}).join(', ') || 'None';
-    throw new Error(`Unknown buyer type: ${buyerType} for ${product}. Available: ${available}`);
-  }
-
-  // Compose script text from buyerNode keys
-  const sections = ['priorities', 'pains', 'triggers', 'proof', 'objections', 'ctas'];
-  const labelMap = {
-    priorities: 'Buyer Priorities',
-    pains: 'Typical Pains',
-    triggers: 'Triggers',
-    proof: 'Value Proof',
-    objections: 'Objections',
-    ctas: 'Call to Action'
-  };
-
-  const scriptParts = [];
-  for (const key of sections) {
-    const values = buyerNode[key] || [];
-    if (values.length > 0) {
-      scriptParts.push(`**${labelMap[key]}**:\n- ${values.join('\n- ')}`);
+export const canonical = {
+  /**
+   * Normalise buyer behaviour labels to file-friendly ids
+   * e.g., "Early adopter" -> "early-adopter", "Skeptic" -> "sceptic"
+   */
+  buyer(input) {
+    const s = String(input || '').trim().toLowerCase();
+    const map = new Map([
+      ['innovator', 'innovator'],
+      ['early adopter', 'early-adopter'],
+      ['early-adopter', 'early-adopter'],
+      ['early majority', 'early-majority'],
+      ['early-majority', 'early-majority'],
+      ['late majority', 'late-majority'],
+      ['late-majority', 'late-majority'],
+      ['skeptic', 'sceptic'],
+      ['sceptic', 'sceptic']
+    ]);
+    // loose contains match
+    for (const [k, v] of map.entries()) {
+      if (s === k || s.replace(/\s+/g, '-') === k) return v;
+      if (k.includes(s)) return v;
     }
+    // default to kebab-cased input
+    return s.replace(/\s+/g, '-');
+  },
+
+  /**
+   * Normalise sales model (Direct/Partner)
+   */
+  mode(input) {
+    const s = String(input || '').trim().toLowerCase();
+    if (s.startsWith('dir')) return 'direct';
+    if (s.startsWith('part')) return 'partner';
+    return s || 'direct';
   }
+};
 
-  const script_text = scriptParts.join('\n\n');
-
-  return {
-    script_text,
-    script_text_labeled: script_text,
-    tips_list: [
-      'Adapt language to match your prospect’s role and tone',
-      'Use real examples or metrics where available',
-      'Keep it conversational and pace yourself'
-    ],
-    metaLine: `Library · ${product} · ${buyerType}`
-  };
+/**
+ * DEPRECATED: Old synthesis entry point.
+ * Keep exported to avoid breaking legacy callers, but make it explicit.
+ */
+export async function generateCallFromLibrary() {
+  throw new Error(
+    'generateCallFromLibrary is deprecated. Use generatePromptBasedCallScript ' +
+    'from ./src/lib/callPromptEngine.js (Markdown templates, prompt-library approach).'
+  );
 }
