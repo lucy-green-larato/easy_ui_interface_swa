@@ -1,13 +1,14 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-client-prefetch-markdown
+// Version: v3-markdown-first-2025-08-19-fixed
 
 const fs = require("fs");
 const path = require("path");
 const { z } = require("zod");
 
 // ------------------------ Utils & helpers ------------------------
-const VERSION = "v3-client-prefetch-markdown";
+const VERSION = "v3-markdown-first-2025-08-19-fixed";
 
+// Extract assistant text from various SDK shapes
 function extractText(res) {
   if (!res) return "";
   if (typeof res === "string") return res;
@@ -20,20 +21,26 @@ function extractText(res) {
   return "";
 }
 
+// Call Azure OpenAI (preferred) or OpenAI
 async function callModel({ system, prompt, temperature }) {
-  const azEndpoint   = process.env.AZURE_OPENAI_ENDPOINT;
-  const azKey        = process.env.AZURE_OPENAI_API_KEY;
+  const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
+  const azKey = process.env.AZURE_OPENAI_API_KEY;
   const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
   const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-02-15-preview";
 
   if (azEndpoint && azKey && azDeployment) {
-    const url = `${azEndpoint.replace(/\/+$/, "")}/openai/deployments/${encodeURIComponent(azDeployment)}/chat/completions?api-version=${encodeURIComponent(azApiVersion)}`;
+    const url = `${azEndpoint.replace(/\/+$/, "")}/openai/deployments/${encodeURIComponent(
+      azDeployment
+    )}/chat/completions?api-version=${encodeURIComponent(azApiVersion)}`;
     const r = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "api-key": azKey },
       body: JSON.stringify({
         temperature,
-        messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: prompt },
+        ],
       }),
     });
     const data = await r.json().catch(() => ({}));
@@ -41,16 +48,22 @@ async function callModel({ system, prompt, temperature }) {
     return data;
   }
 
-  const oaKey   = process.env.OPENAI_API_KEY;
+  const oaKey = process.env.OPENAI_API_KEY;
   const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
   if (oaKey) {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${oaKey}` },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${oaKey}`,
+      },
       body: JSON.stringify({
         model: oaModel,
         temperature,
-        messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: prompt },
+        ],
       }),
     });
     const data = await r.json().catch(() => ({}));
@@ -58,6 +71,7 @@ async function callModel({ system, prompt, temperature }) {
     return data;
   }
 
+  // No model configured -> return null
   return null;
 }
 
@@ -68,7 +82,8 @@ function ensureThanksClose(text) {
 }
 
 // ------------------------ Canonicalisers ------------------------
-const toModeId = (v = "") => (String(v).toLowerCase().startsWith("p") ? "partner" : "direct");
+const toModeId = (v = "") =>
+  String(v).toLowerCase().startsWith("p") ? "partner" : "direct";
 const toBuyerTypeId = (v = "") => {
   const s = String(v).toLowerCase();
   if (s.startsWith("innovator")) return "innovator";
@@ -81,10 +96,10 @@ const toBuyerTypeId = (v = "") => {
 const toProductId = (v = "") => {
   const s = String(v).toLowerCase().trim();
   const map = {
-    "connectivity": "connectivity",
-    "cybersecurity": "cybersecurity",
+    connectivity: "connectivity",
+    cybersecurity: "cybersecurity",
     "artificial intelligence": "ai",
-    "ai": "ai",
+    ai: "ai",
     "hardware/software": "hardware_software",
     "hardware & software": "hardware_software",
     "it solutions": "it_solutions",
@@ -93,14 +108,28 @@ const toProductId = (v = "") => {
     "telecommunications solutions": "telecoms_solutions",
   };
   if (map[s]) return map[s];
-  return s.replace(/[^\w]+/g, "_").replace(/_{2,}/g, "_").replace(/^_|_$/g, "");
+  return s
+    .replace(/[^\w]+/g, "_")
+    .replace(/_{2,}/g, "_")
+    .replace(/^_|_$/g, "");
 };
 
 // ------------------------ Markdown prompt builder ------------------------
-function buildPromptFromMarkdown({ templateMd, seller, prospect, productLabel, buyerType, valueProposition, context, nextStep }) {
-  const usp   = (valueProposition || "").trim() || "(none provided)";
+function buildPromptFromMarkdown({
+  templateMd,
+  seller,
+  prospect,
+  productLabel,
+  buyerType,
+  valueProposition,
+  context,
+  nextStep,
+}) {
+  const usp = (valueProposition || "").trim() || "(none provided)";
   const other = (context || "").trim() || "(none provided)";
-  const cta   = (nextStep || "").trim() || "(use suggested_next_step from the template if present; otherwise propose a sensible next step)";
+  const cta =
+    (nextStep || "").trim() ||
+    "(use suggested_next_step from the template if present; otherwise propose a sensible next step)";
 
   return `
 You are a highly effective UK B2B salesperson.
@@ -134,7 +163,7 @@ Provide exactly 3 concise, practical tips (numbered 1., 2., 3.).
 `;
 }
 
-// ------------------------ Legacy packs (kept intact) ------------------------
+// ------------------------ Legacy packs ------------------------
 let PACKS_CACHE = null;
 function loadPacks() {
   if (PACKS_CACHE) return PACKS_CACHE;
@@ -171,7 +200,7 @@ function compileTemplate(tpl, vars) {
   };
   return tpl
     .replace(/{{\s*([\w.]+)\s*}}/g, (_, key) => rep(key))
-    .replace(/{\s*([\w.]+)\s*}/g,  (_, key) => rep(key));
+    .replace(/{\s*([\w.]+)\s*}/g, (_, key) => rep(key));
 }
 
 // ------------------------ Azure Function entry ------------------------
@@ -179,88 +208,129 @@ module.exports = async function (context, req) {
   const cors = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-ms-client-principal",
+    "Access-Control-Allow-Headers":
+      "Content-Type, Authorization, x-ms-client-principal",
   };
 
-  // OPTIONS preflight
+  const hostHeader =
+    (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0] ||
+    "";
+  const isLocalDev = /localhost|127\.0\.0\.1|app\.github\.dev$/i.test(hostHeader);
+
   if (req.method === "OPTIONS") {
     context.res = { status: 204, headers: cors };
     return;
   }
 
-  // Health check on GET
   if (req.method === "GET") {
-    context.res = { status: 200, headers: cors, body: { ok: true, route: "generate", version: VERSION } };
+    context.res = {
+      status: 200,
+      headers: cors,
+      body: { ok: true, route: "generate", version: VERSION },
+    };
     return;
   }
 
   if (req.method !== "POST") {
-    context.res = { status: 405, headers: cors, body: { error: "Method Not Allowed", version: VERSION } };
+    context.res = {
+      status: 405,
+      headers: cors,
+      body: { error: "Method Not Allowed", version: VERSION },
+    };
     return;
   }
 
-  // SWA auth required in cloud; bypass for local (SWA CLI / Codespaces)
-  const hostHeader = (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0] || "";
-  const isLocalDev = /localhost|127\.0\.0\.1|app\.github\.dev$/i.test(hostHeader);
   const principalHeader = req.headers["x-ms-client-principal"];
   if (!principalHeader && !isLocalDev) {
-    context.res = { status: 401, headers: cors, body: { error: "Not authenticated", version: VERSION } };
+    context.res = {
+      status: 401,
+      headers: cors,
+      body: { error: "Not authenticated", version: VERSION },
+    };
     return;
   }
 
   try {
-    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const body =
+      typeof req.body === "string"
+        ? JSON.parse(req.body || "{}")
+        : req.body || {};
     const kind = String(body?.kind || "").toLowerCase();
 
-    // ========== New call-script (Markdown-first; client sends templateMd) ==========
+    // ---------- Markdown-first call-script ----------
     if (kind === "call-script") {
       const v = body.variables || body || {};
       const productId = toProductId(v.product || body.product);
       const buyerType = toBuyerTypeId(v.buyerType || body.buyerType);
-      const mode      = toModeId(v.mode || body.mode || "direct");
+      const mode = toModeId(v.mode || body.mode || "direct");
 
       if (!productId || !buyerType || !mode) {
-        context.res = { status: 400, headers: cors, body: { error: "Missing product / buyerType / mode", version: VERSION } };
+        context.res = {
+          status: 400,
+          headers: cors,
+          body: {
+            error: "Missing product / buyerType / mode",
+            version: VERSION,
+          },
+        };
         return;
       }
 
-      // Prefer client-provided templateMd; only fallback to server fetch if missing
-      let templateMd = String(body.templateMd || "").trim();
+      const basePrefix = String(body.basePrefix || "").replace(/\/+$/, "");
+      let origin;
 
-      if (!templateMd) {
-        const basePrefix = String(body.basePrefix || "").replace(/\/+$/, "");
-        const origin = isLocalDev ? "http://localhost:4280" : `https://${hostHeader}`;
-        const contentRoot = `${origin}${basePrefix}/content/call-library/v1/${mode}/${productId}`;
-        const mdUrl = `${contentRoot}/${buyerType}.md`;
-
-        context.log(`[${VERSION}] [CallLib:FallbackFetch] GET ${mdUrl}`);
-        const resMd = await fetch(mdUrl, {
-          headers: {
-            cookie: req.headers.cookie || "",
-            "x-ms-client-principal": principalHeader || "",
-            "cache-control": "no-cache",
-          },
-          cache: "no-store",
-          redirect: "follow",
-        });
-
-        if (!resMd.ok) {
-          const sample = await resMd.text().catch(() => "");
-          context.res = {
-            status: 404,
-            headers: cors,
-            body: { error: "Call library markdown not found", detail: `${mode}/${productId}/${buyerType}.md`, tried: mdUrl, sample: sample.slice(0, 200), version: VERSION },
-          };
-          return;
-        }
-        templateMd = await resMd.text();
+      if (isLocalDev) {
+        origin = "http://localhost:4280";
+      } else {
+        origin = `https://${hostHeader}`;
       }
 
-      const productLabel = productId.replace(/[_-]+/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+      const contentRoot = `${origin}${basePrefix}/content/call-library/v1/${mode}/${productId}`;
+      const mdUrl = `${contentRoot}/${buyerType}.md`;
+
+      context.log(`[${VERSION}] [CallLib] GET ${mdUrl}`);
+
+      const resMd = await fetch(mdUrl, {
+        headers: {
+          cookie: req.headers.cookie || "",
+          "x-ms-client-principal": principalHeader || "",
+          "cache-control": "no-cache",
+        },
+        cache: "no-store",
+        redirect: "follow",
+      });
+
+      if (!resMd.ok) {
+        const sample = await resMd.text().catch(() => "");
+        context.res = {
+          status: 404,
+          headers: cors,
+          body: {
+            error: "Call library markdown not found",
+            detail: `${mode}/${productId}/${buyerType}.md`,
+            tried: mdUrl,
+            version: VERSION,
+            sample: sample.slice(0, 200),
+          },
+        };
+        return;
+      }
+
+      // ✅ Always define templateMd first
+      const templateMd = await resMd.text();
+
+      // ✅ Only then build the prompt
+      const productLabel = productId
+        .replace(/[_-]+/g, " ")
+        .replace(/\b\w/g, (m) => m.toUpperCase());
       const prompt = buildPromptFromMarkdown({
         templateMd,
-        seller:   { name: v.seller_name,   company: v.seller_company },
-        prospect: { name: v.prospect_name, role: v.prospect_role, company: v.prospect_company },
+        seller: { name: v.seller_name, company: v.seller_company },
+        prospect: {
+          name: v.prospect_name,
+          role: v.prospect_role,
+          company: v.prospect_company,
+        },
         productLabel,
         buyerType,
         valueProposition: v.value_proposition,
@@ -269,54 +339,90 @@ module.exports = async function (context, req) {
       });
 
       const llmRes = await callModel({
-        system: "You are a highly effective UK B2B salesperson writing a cold call script.",
+        system:
+          "You are a highly effective UK B2B salesperson writing a cold call script.",
         prompt,
         temperature: 0.6,
       });
 
       const output = extractText(llmRes) || "";
-      const [scriptTextRaw, tipsBlock] = output.split("**Sales tips for colleagues conducting similar calls**");
+      const [scriptTextRaw, tipsBlock] = output.split(
+        "**Sales tips for colleagues conducting similar calls**"
+      );
       const scriptText = ensureThanksClose((scriptTextRaw || "").trim());
       const tips = (tipsBlock || "")
         .split("\n")
         .filter((l) => l.trim().match(/^[0-9]+\./))
         .map((t) => t.replace(/^[0-9]+\.\s*/, "").trim());
 
-      context.res = { status: 200, headers: cors, body: { script: { text: scriptText, tips }, version: VERSION } };
+      context.res = {
+        status: 200,
+        headers: cors,
+        body: { script: { text: scriptText, tips }, version: VERSION },
+      };
       return;
     }
 
-    // ========== Legacy packs path (unchanged) ==========
+    // ---------- Legacy packs ----------
     const parsed = BodySchema.safeParse(body);
     if (!parsed.success) {
-      context.res = { status: 400, headers: cors, body: { error: "Invalid request body", version: VERSION } };
+      context.res = {
+        status: 400,
+        headers: cors,
+        body: { error: "Invalid request body", version: VERSION },
+      };
       return;
     }
     const { pack, template, variables } = parsed.data;
     const { packs } = loadPacks();
     const packDef = packs[pack];
     if (!packDef) {
-      context.res = { status: 400, headers: cors, body: { error: `Unknown pack '${pack}'`, version: VERSION } };
+      context.res = {
+        status: 400,
+        headers: cors,
+        body: { error: `Unknown pack '${pack}'`, version: VERSION },
+      };
       return;
     }
 
     const tplDef = packDef.templates?.[template] || {};
-    const system      = tplDef.system ?? packDef.default?.system ?? "";
+    const system = tplDef.system ?? packDef.default?.system ?? "";
     const temperature = tplDef.temperature ?? packDef.default?.temperature ?? 0.4;
-    const templateStr = typeof tplDef === "string" ? tplDef : String(tplDef.prompt || "");
-    const compiledPrompt = templateStr ? compileTemplate(templateStr, variables) : "";
+    const templateStr =
+      typeof tplDef === "string" ? tplDef : String(tplDef.prompt || "");
+    const compiledPrompt = templateStr
+      ? compileTemplate(templateStr, variables)
+      : "";
 
     let llmText = "";
     try {
-      const llmRes = await callModel({ system, prompt: compiledPrompt, temperature });
+      const llmRes = await callModel({
+        system,
+        prompt: compiledPrompt,
+        temperature,
+      });
       llmText = extractText(llmRes);
     } catch (e) {
       context.log.warn(`[${VERSION}] callModel failed: ${e?.message || e}`);
     }
 
-    context.res = { status: 200, headers: cors, body: { output: llmText, preview: compiledPrompt, version: VERSION } };
+    context.res = {
+      status: 200,
+      headers: cors,
+      body: { output: llmText, preview: compiledPrompt, version: VERSION },
+    };
   } catch (err) {
-    context.log.error(`[${VERSION}] Unhandled error: ${err?.stack || err}`);
-    context.res = { status: 500, headers: cors, body: { error: "Server error", detail: String(err?.message ?? err), version: VERSION } };
+    context.log.error(
+      `[${VERSION}] Unhandled error: ${err?.stack || err}`
+    );
+    context.res = {
+      status: 500,
+      headers: cors,
+      body: {
+        error: "Server error",
+        detail: String(err?.message ?? err),
+        version: VERSION,
+      },
+    };
   }
 };
