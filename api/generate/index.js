@@ -1,12 +1,12 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-08-19-fixed
+// Version: v3-client-prefetch-markdown
 
 const fs = require("fs");
 const path = require("path");
 const { z } = require("zod");
 
 // ------------------------ Utils & helpers ------------------------
-const VERSION = "v3-markdown-first-2025-08-19-fixed";
+const VERSION = "v3-client-prefetch-markdown";
 
 function extractText(res) {
   if (!res) return "";
@@ -134,7 +134,7 @@ Provide exactly 3 concise, practical tips (numbered 1., 2., 3.).
 `;
 }
 
-// ------------------------ Legacy packs ------------------------
+// ------------------------ Legacy packs (kept intact) ------------------------
 let PACKS_CACHE = null;
 function loadPacks() {
   if (PACKS_CACHE) return PACKS_CACHE;
@@ -182,14 +182,13 @@ module.exports = async function (context, req) {
     "Access-Control-Allow-Headers": "Content-Type, Authorization, x-ms-client-principal",
   };
 
-  const hostHeader = (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0] || "";
-  const isLocalDev = /localhost|127\.0\.0\.1|app\.github\.dev$/i.test(hostHeader);
-
+  // OPTIONS preflight
   if (req.method === "OPTIONS") {
     context.res = { status: 204, headers: cors };
     return;
   }
 
+  // Health check on GET
   if (req.method === "GET") {
     context.res = { status: 200, headers: cors, body: { ok: true, route: "generate", version: VERSION } };
     return;
@@ -200,6 +199,9 @@ module.exports = async function (context, req) {
     return;
   }
 
+  // SWA auth required in cloud; bypass for local (SWA CLI / Codespaces)
+  const hostHeader = (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0] || "";
+  const isLocalDev = /localhost|127\.0\.0\.1|app\.github\.dev$/i.test(hostHeader);
   const principalHeader = req.headers["x-ms-client-principal"];
   if (!principalHeader && !isLocalDev) {
     context.res = { status: 401, headers: cors, body: { error: "Not authenticated", version: VERSION } };
@@ -210,6 +212,7 @@ module.exports = async function (context, req) {
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const kind = String(body?.kind || "").toLowerCase();
 
+    // ========== New call-script (Markdown-first; client sends templateMd) ==========
     if (kind === "call-script") {
       const v = body.variables || body || {};
       const productId = toProductId(v.product || body.product);
@@ -221,23 +224,16 @@ module.exports = async function (context, req) {
         return;
       }
 
-      // NEW: local disk path for Codespaces, remote fetch in prod
-      let templateMd = "";
-      if (isLocalDev) {
-        const filePath = path.join(
-          process.cwd(),
-          "web/content/call-library/v1",
-          mode,
-          productId,
-          `${buyerType}.md`
-        );
-        templateMd = fs.readFileSync(filePath, "utf8");
-      } else {
-        const origin = `https://${hostHeader}`;
-        const contentRoot = `${origin}/content/call-library/v1/${mode}/${productId}`;
-        const mdUrl = `${contentRoot}/${buyerType}.md`;
-        context.log(`[${VERSION}] [CallLib] GET ${mdUrl}`);
+      // Prefer client-provided templateMd; only fallback to server fetch if missing
+      let templateMd = String(body.templateMd || "").trim();
 
+      if (!templateMd) {
+        const basePrefix = String(body.basePrefix || "").replace(/\/+$/, "");
+        const origin = isLocalDev ? "http://localhost:4280" : `https://${hostHeader}`;
+        const contentRoot = `${origin}${basePrefix}/content/call-library/v1/${mode}/${productId}`;
+        const mdUrl = `${contentRoot}/${buyerType}.md`;
+
+        context.log(`[${VERSION}] [CallLib:FallbackFetch] GET ${mdUrl}`);
         const resMd = await fetch(mdUrl, {
           headers: {
             cookie: req.headers.cookie || "",
@@ -253,13 +249,7 @@ module.exports = async function (context, req) {
           context.res = {
             status: 404,
             headers: cors,
-            body: {
-              error: "Call library markdown not found",
-              detail: `${mode}/${productId}/${buyerType}.md`,
-              tried: mdUrl,
-              version: VERSION,
-              sample: sample.slice(0, 200),
-            },
+            body: { error: "Call library markdown not found", detail: `${mode}/${productId}/${buyerType}.md`, tried: mdUrl, sample: sample.slice(0, 200), version: VERSION },
           };
           return;
         }
@@ -296,6 +286,7 @@ module.exports = async function (context, req) {
       return;
     }
 
+    // ========== Legacy packs path (unchanged) ==========
     const parsed = BodySchema.safeParse(body);
     if (!parsed.success) {
       context.res = { status: 400, headers: cors, body: { error: "Invalid request body", version: VERSION } };
