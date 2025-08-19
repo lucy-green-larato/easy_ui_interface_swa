@@ -23,8 +23,8 @@ function extractText(res) {
 
 // Call Azure OpenAI (preferred) or OpenAI
 async function callModel({ system, prompt, temperature }) {
-  const azEndpoint   = process.env.AZURE_OPENAI_ENDPOINT;
-  const azKey        = process.env.AZURE_OPENAI_API_KEY;
+  const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
+  const azKey = process.env.AZURE_OPENAI_API_KEY;
   const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
   const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-02-15-preview";
 
@@ -43,7 +43,7 @@ async function callModel({ system, prompt, temperature }) {
     return data;
   }
 
-  const oaKey   = process.env.OPENAI_API_KEY;
+  const oaKey = process.env.OPENAI_API_KEY;
   const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
   if (oaKey) {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -101,9 +101,9 @@ const toProductId = (v = "") => {
 
 // ------------------------ Markdown prompt builder ------------------------
 function buildPromptFromMarkdown({ templateMd, seller, prospect, productLabel, buyerType, valueProposition, context, nextStep }) {
-  const usp   = (valueProposition || "").trim() || "(none provided)";
+  const usp = (valueProposition || "").trim() || "(none provided)";
   const other = (context || "").trim() || "(none provided)";
-  const cta   = (nextStep || "").trim() || "(use suggested_next_step from the template if present; otherwise propose a sensible next step)";
+  const cta = (nextStep || "").trim() || "(use suggested_next_step from the template if present; otherwise propose a sensible next step)";
 
   return `
 You are a highly effective UK B2B salesperson.
@@ -176,7 +176,7 @@ function compileTemplate(tpl, vars) {
   };
   return tpl
     .replace(/{{\s*([\w.]+)\s*}}/g, (_, key) => rep(key))
-    .replace(/{\s*([\w.]+)\s*}/g,  (_, key) => rep(key));
+    .replace(/{\s*([\w.]+)\s*}/g, (_, key) => rep(key));
 }
 
 // ------------------------ Azure Function entry ------------------------
@@ -223,16 +223,25 @@ module.exports = async function (context, req) {
       const v = body.variables || body || {};
       const productId = toProductId(v.product || body.product);
       const buyerType = toBuyerTypeId(v.buyerType || body.buyerType);
-      const mode      = toModeId(v.mode || body.mode || "direct");
+      const mode = toModeId(v.mode || body.mode || "direct");
 
       if (!productId || !buyerType || !mode) {
         context.res = { status: 400, headers: cors, body: { error: "Missing product / buyerType / mode", version: VERSION } };
         return;
       }
 
-      // Build Codespaces/SWA content URL, respecting the basePrefix sent by the client
+      // Build Codespaces/SWA content URL
       const basePrefix = String(body.basePrefix || "").replace(/\/+$/, ""); // e.g. "/ubiquitous-space-trout-xxxx"
-      const origin = `https://${hostHeader}`;
+      let origin;
+
+      if (isLocalDev) {
+        // In Codespaces / local SWA CLI, fetch directly from localhost
+        origin = "http://localhost:4280";
+      } else {
+        // In production (Azure), use the real host
+        origin = `https://${hostHeader}`;
+      }
+
       const contentRoot = `${origin}${basePrefix}/content/call-library/v1/${mode}/${productId}`;
       const mdUrl = `${contentRoot}/${buyerType}.md`;
 
@@ -269,7 +278,7 @@ module.exports = async function (context, req) {
       const productLabel = productId.replace(/[_-]+/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
       const prompt = buildPromptFromMarkdown({
         templateMd,
-        seller:   { name: v.seller_name,   company: v.seller_company },
+        seller: { name: v.seller_name, company: v.seller_company },
         prospect: { name: v.prospect_name, role: v.prospect_role, company: v.prospect_company },
         productLabel,
         buyerType,
@@ -311,7 +320,7 @@ module.exports = async function (context, req) {
     }
 
     const tplDef = packDef.templates?.[template] || {};
-    const system      = tplDef.system ?? packDef.default?.system ?? "";
+    const system = tplDef.system ?? packDef.default?.system ?? "";
     const temperature = tplDef.temperature ?? packDef.default?.temperature ?? 0.4;
     const templateStr = typeof tplDef === "string" ? tplDef : String(tplDef.prompt || "");
     const compiledPrompt = templateStr ? compileTemplate(templateStr, variables) : "";
