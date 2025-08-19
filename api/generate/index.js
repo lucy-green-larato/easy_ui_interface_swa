@@ -1,21 +1,18 @@
-// Minimal generate function for Azure Functions (JavaScript)
-// Validates body, resolves pack+template, compiles {{vars}} / {vars}, returns payload (+ GPT output)
+// index.js – Azure Function handler for /api/generate
+// Drop-in with Markdown call-script support (no JSON required)
 
 const fs = require("fs");
 const path = require("path");
 const { z } = require("zod");
 
-// ---------- Unified packs loader (same behaviour as packs-debug) ----------
+// ---------- Packs loader (legacy path kept intact) ----------
 let PACKS_CACHE = null;
-
 function loadPacks() {
   if (PACKS_CACHE) return PACKS_CACHE;
-
   const candidates = [
-    path.join(process.cwd(), "packs.json"),        // SWA runtime
-    path.join(__dirname, "..", "packs.json"),      // local dev (/api)
+    path.join(process.cwd(), "packs.json"),
+    path.join(__dirname, "..", "packs.json"),
   ];
-
   const tried = [];
   for (const p of candidates) {
     try {
@@ -30,7 +27,7 @@ function loadPacks() {
   throw new Error(`packs.json not found. Tried:\n- ${tried.join("\n- ")}`);
 }
 
-// ---- Simple {{token}} and {token} replacement ----
+// ---------- Token replacement (legacy) ----------
 function compileTemplate(tpl, vars) {
   if (typeof tpl !== "string") return "";
   const rep = (key) => {
@@ -43,17 +40,7 @@ function compileTemplate(tpl, vars) {
     .replace(/{\s*([\w.]+)\s*}/g,  (_, key) => rep(key));
 }
 
-// ---- Determine required variables for a template ----
-function requiredVarsForTemplate(tplDef) {
-  if (tplDef && typeof tplDef === "object" && Array.isArray(tplDef.variables)) return tplDef.variables;
-  const src = typeof tplDef === "string" ? tplDef : String(tplDef?.prompt || "");
-  const names = new Set();
-  src.replace(/{{\s*([\w.]+)\s*}}/g, (_, k) => names.add(k));
-  src.replace(/{\s*([\w.]+)\s*}/g,  (_, k) => names.add(k));
-  return Array.from(names);
-}
-
-// ---- Extract assistant text from common GPT responses ----
+// ---------- Extract assistant text ----------
 function extractText(res) {
   if (!res) return "";
   if (typeof res === "string") return res;
@@ -66,12 +53,11 @@ function extractText(res) {
   return "";
 }
 
-// ---- Built-in model caller: Azure OpenAI OR OpenAI (env-driven, no extra deps) ----
+// ---------- Model caller (Azure OpenAI or OpenAI) ----------
 async function callModel({ system, prompt, temperature }) {
-  // Azure OpenAI
-  const azEndpoint   = process.env.AZURE_OPENAI_ENDPOINT;        // e.g. https://myres.openai.azure.com
+  const azEndpoint   = process.env.AZURE_OPENAI_ENDPOINT;
   const azKey        = process.env.AZURE_OPENAI_API_KEY;
-  const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;      // chat model deployment name
+  const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
   const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-02-15-preview";
 
   if (azEndpoint && azKey && azDeployment) {
@@ -81,18 +67,14 @@ async function callModel({ system, prompt, temperature }) {
       headers: { "Content-Type": "application/json", "api-key": azKey },
       body: JSON.stringify({
         temperature,
-        messages: [
-          ...(system ? [{ role: "system", content: system }] : []),
-          { role: "user", content: prompt }
-        ]
-      })
+        messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+      }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data?.error?.message || r.statusText);
     return data;
   }
 
-  // OpenAI
   const oaKey   = process.env.OPENAI_API_KEY;
   const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
   if (oaKey) {
@@ -102,11 +84,8 @@ async function callModel({ system, prompt, temperature }) {
       body: JSON.stringify({
         model: oaModel,
         temperature,
-        messages: [
-          ...(system ? [{ role: "system", content: system }] : []),
-          { role: "user", content: prompt }
-        ]
-      })
+        messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+      }),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data?.error?.message || r.statusText);
@@ -117,32 +96,27 @@ async function callModel({ system, prompt, temperature }) {
   return null;
 }
 
-// ---- Request body schema (generic variables) ----
+// ---------- Request body schema (legacy) ----------
 const BodySchema = z.object({
   pack: z.string().min(1),
   template: z.string().min(1),
   variables: z.record(z.any()).default({}),
 });
 
-/* =========================
-   NEW: Call Library helpers
-   ========================= */
-const FALLBACK_ORDER = ["early_majority","early_adopters","late_majority","sceptics","innovators"];
-
+// ---------- Helpers for call-script ----------
 const toModeId = (v = "") => (String(v).toLowerCase().startsWith("p") ? "partner" : "direct");
 const toBuyerTypeId = (v = "") => {
   const s = String(v).toLowerCase();
-  if (s.startsWith("innovator")) return "innovators";
-  if (s.startsWith("early adopter")) return "early_adopters";
-  if (s.startsWith("early majority")) return "early_majority";
-  if (s.startsWith("late majority")) return "late_majority";
-  if (s.startsWith("sceptic") || s.startsWith("skeptic")) return "sceptics";
-  return "early_majority";
+  if (s.startsWith("innovator")) return "innovator";
+  if (s.startsWith("early adopter")) return "early-adopter";
+  if (s.startsWith("early majority")) return "early-majority";
+  if (s.startsWith("late majority")) return "late-majority";
+  if (s.startsWith("sceptic") || s.startsWith("skeptic")) return "sceptic";
+  return "early-majority";
 };
 const toProductId = (v = "") => {
   const s = String(v).toLowerCase().trim();
   const map = {
-    "connectivity (mobile & fixed)": "connectivity",
     "connectivity": "connectivity",
     "cybersecurity": "cybersecurity",
     "artificial intelligence": "ai",
@@ -158,108 +132,67 @@ const toProductId = (v = "") => {
   return s.replace(/[^\w]+/g, "_").replace(/_{2,}/g, "_").replace(/^_|_$/g, "");
 };
 
-/** Robust loader that fetches the static JSON the same user could see in the browser. */
-async function fetchCallLibrary({ req, product, buyerType, mode, context, debug = false }) {
-  const baseOverride = (process.env.CALL_LIB_BASE || "").replace(/\/+$/, "");
-  const host = (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0];
-  const origin = baseOverride || `https://${host}`;
-  const url = `${origin}/content/call-library/v1/${mode}/${product}.json`;
-
-  // Forward auth (works whether /content is public or not)
-  const headers = {};
-  if (req.headers.cookie) headers.cookie = req.headers.cookie;
-  if (req.headers["x-ms-client-principal"]) headers["x-ms-client-principal"] = req.headers["x-ms-client-principal"];
-
-  context.log(`[CallLib] GET ${url}`);
-  const res = await fetch(url, { headers, cache: "no-store", redirect: "follow" });
-  const contentType = res.headers.get("content-type") || "";
-  context.log(`[CallLib] status ${res.status} ct=${contentType}`);
-
-  const dbg = { url, status: res.status, contentType };
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    if (debug) dbg.bodySample = body.slice(0, 300);
-    const err = new Error(`Call library not found: ${mode}/${product}`);
-    err.status = res.status;
-    err._debug = dbg;
-    throw err;
-  }
-
-  // Parse JSON defensively (SWA rewrites return HTML)
-  let doc;
-  try {
-    doc = await res.json();
-  } catch (e) {
-    const body = await res.text().catch(() => "");
-    const err = new Error("Call library JSON parse failed");
-    err.status = 500;
-    err._debug = { ...dbg, parseError: String(e), bodySample: body.slice(0, 300) };
-    throw err;
-  }
-
-  // ----- map to response shape -----
-  let bt = buyerType;
-  if (!doc?.buyer_types?.[bt]) bt = FALLBACK_ORDER.find(b => !!doc?.buyer_types?.[b]);
-  if (!bt) {
-    const err = new Error(`No buyer_types available in ${mode}/${product}`);
-    err.status = 422;
-    err._debug = dbg;
-    throw err;
-  }
-
-  const chosen = doc.buyer_types[bt] || {};
-  const ppIndex  = Object.fromEntries((doc.shared?.proof_points || []).map(p => [p.id, p.text]));
-  const ctaIndex = Object.fromEntries((doc.shared?.ctas || []).map(c => [c.id, c.text]));
-
-  const stageKeys = ["opening","buyer_pain","buyer_desire","example","objections","call_to_action"];
-  const stages = {};
-  stageKeys.forEach(k => {
-    const s = (chosen.stages || {})[k] || {};
-    stages[k] = {
-      ...s,
-      proof_points_text: (s.proof_points || []).map(id => ppIndex[id]).filter(Boolean),
-      ctas_text: (s.ctas || []).map(id => ctaIndex[id]).filter(Boolean),
-    };
-  });
-
-  const result = {
-    type: "call_script_v1",
-    source: "larato_call_library",
-    meta: doc.meta,
-    tone: doc.shared?.tone,
-    buyerType: bt,
-    stages,
-  };
-
-  if (debug) result._debug = dbg;
-  return result;
+function ensureThanksClose(text) {
+  const t = String(text || "").trim();
+  if (/thank you for your time\.?$/i.test(t)) return t;
+  return (t + (t.endsWith("\n") ? "" : "\n") + "Thank you for your time.").trim();
 }
 
-/* =========================
-   Azure Function handler
-   ========================= */
+function buildPromptFromMarkdown({ templateMd, seller, prospect, productLabel, buyerType, valueProposition, context, nextStep }) {
+  const usp   = (valueProposition || "").trim() || "(none provided)";
+  const other = (context || "").trim() || "(none provided)";
+  const cta   = (nextStep || "").trim() || "(use suggested_next_step from the template if present; otherwise propose a sensible next step)";
+
+  return `
+You are a highly effective UK B2B salesperson.
+
+Use the Markdown template below as the skeleton for the call. Preserve the section headings and overall order. Fill the content so it reads as a natural, spoken conversation.
+
+MANDATES:
+- British business English; no US slang; no assumptive closes.
+- Open with a brief personal introduction from ${seller.name} at ${seller.company} to ${prospect.name} (${prospect.role} at ${prospect.company}).
+- Reference observations from similar businesses; do not assume the prospect’s current state.
+- Elegantly weave the USPs and Other points where they make sense in context (not all must be used).
+- Include one specific, relevant customer example with measurable results.
+- Handle common objections factually and without pressure.
+- For the "Next Step": use the salesperson’s input if provided; otherwise, if the template includes an HTML comment <!-- suggested_next_step: ... --> use that; otherwise propose a clear, low-friction next step.
+- End the "Close" with: "Thank you for your time."
+
+Buyer type: ${buyerType}
+Product: ${productLabel}
+
+USPs (from salesperson): ${usp}
+Other points to consider: ${other}
+Requested Next Step (if any): ${nextStep || "(none)"}
+
+--- BEGIN TEMPLATE ---
+${templateMd}
+--- END TEMPLATE ---
+
+After the script, add this heading and content:
+**Sales tips for colleagues conducting similar calls**
+Provide exactly 3 concise, practical tips (numbered 1., 2., 3.).
+`;
+}
+
+// ---------- Azure Function entry ----------
 module.exports = async function (context, req) {
-  // --- Basic CORS (lock down origin if needed) ---
   const cors = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, x-ms-client-principal",
   };
 
-  // Preflight
   if (req.method === "OPTIONS") {
     context.res = { status: 204, headers: cors };
     return;
   }
-
-  // Enforce POST
   if (req.method !== "POST") {
-    context.res = { status: 405, headers: cors, body: { error: "Method Not Allowed. Use POST." } };
+    context.res = { status: 405, headers: cors, body: { error: "Method Not Allowed" } };
     return;
   }
 
-  // Require Azure SWA auth (SWA injects x-ms-client-principal for signed-in users)
+  // Require SWA auth (as you had)
   const principalHeader = req.headers["x-ms-client-principal"];
   if (!principalHeader) {
     context.res = { status: 401, headers: cors, body: { error: "Not authenticated" } };
@@ -267,143 +200,110 @@ module.exports = async function (context, req) {
   }
 
   try {
-    // Handle string body defensively
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
-    const queryKind = String(req.query?.kind || "").toLowerCase();
-    const bodyKind  = String(body?.kind || "").toLowerCase();
-    const kind = bodyKind || queryKind;
+    const kind = String(body?.kind || "").toLowerCase();
 
-    /* ===================================================
-       NEW: Serve Call Script Library via /api/generate
-       =================================================== */
+    // ===== New call-script route (Markdown first; no JSON required) =====
     if (kind === "call-script") {
-      try {
-        const v = body.variables || body || {};
-        const product   = toProductId(v.product || body.product || req.query?.product);
-        const buyerType = toBuyerTypeId(v.buyerType || v.buyer_type || body.buyerType || body.buyer_type || req.query?.buyerType || req.query?.buyer_type);
-        const mode      = toModeId(v.mode || v.call_type || body.mode || body.call_type || req.query?.mode || req.query?.call_type);
-        const debug     = String(req.query?.debug || body?.debug || "") === "1";
+      const v = body.variables || body || {};
+      const productId = toProductId(v.product || body.product);
+      const buyerType = toBuyerTypeId(v.buyerType || body.buyerType);
+      const mode      = toModeId(v.mode || body.mode || "direct");
 
-        if (!product || !buyerType || !mode) {
-          context.res = { status: 400, headers: { "Content-Type": "application/json", ...cors }, body: { error: "Missing product / buyerType / mode" } };
-          return;
-        }
-
-        const result = await fetchCallLibrary({ req, product, buyerType, mode, context, debug });
-        context.res = {
-          status: 200,
-          headers: { "Content-Type": "application/json", ...cors, "Cache-Control": "no-store" },
-          body: result,
-        };
+      if (!productId || !buyerType || !mode) {
+        context.res = { status: 400, headers: cors, body: { error: "Missing product / buyerType / mode" } };
         return;
-      } catch (e) {
-        context.log.error(`[CallLib] route error: ${e?.message || e}`);
+      }
+
+      // Handle SWA/Codespaces base path if provided by the client
+      const host = (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0];
+      const origin = `https://${host}`;
+      const basePrefix = String(body.basePrefix || "").replace(/\/+$/, ""); // e.g. "/space-trout-5520"
+      const contentRoot = `${origin}${basePrefix}/content/call-library/v1/${mode}/${productId}`;
+
+      // Fetch the buyer-specific Markdown template
+      const mdUrl = `${contentRoot}/${buyerType}.md`;
+      context.log(`[CallLib] GET ${mdUrl}`);
+      const resMd = await fetch(mdUrl, {
+        headers: { cookie: req.headers.cookie || "", "x-ms-client-principal": req.headers["x-ms-client-principal"] || "" },
+        cache: "no-store",
+        redirect: "follow",
+      });
+
+      if (!resMd.ok) {
+        const sample = await resMd.text().catch(() => "");
         context.res = {
-          status: e.status || 500,
-          headers: { "Content-Type": "application/json", ...cors },
-          body: { error: String(e?.message || "Call library unavailable"), _debug: e?._debug }
+          status: 404,
+          headers: cors,
+          body: { error: `Call library markdown not found`, detail: `${mode}/${productId}/${buyerType}.md`, tried: mdUrl, sample: sample.slice(0, 200) }
         };
         return;
       }
+
+      const templateMd = await resMd.text();
+
+      // Build prompt from Markdown skeleton
+      const productLabel = productId.replace(/[_-]+/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+      const prompt = buildPromptFromMarkdown({
+        templateMd,
+        seller:   { name: v.seller_name,   company: v.seller_company },
+        prospect: { name: v.prospect_name, role: v.prospect_role, company: v.prospect_company },
+        productLabel,
+        buyerType,
+        valueProposition: v.value_proposition,
+        context: v.context,
+        nextStep: v.next_step,
+      });
+
+      // Call model
+      const llmRes = await callModel({
+        system: "You are a highly effective UK B2B salesperson writing a cold call script.",
+        prompt,
+        temperature: 0.6,
+      });
+      let output = extractText(llmRes) || "";
+
+      // Split tips
+      const [scriptTextRaw, tipsBlock] = output.split("**Sales tips for colleagues conducting similar calls**");
+      const scriptText = ensureThanksClose((scriptTextRaw || "").trim());
+      const tips = (tipsBlock || "")
+        .split("\n")
+        .filter((l) => l.trim().match(/^[0-9]+\./))
+        .map((t) => t.replace(/^[0-9]+\.\s*/, "").trim());
+
+      context.res = { status: 200, headers: cors, body: { script: { text: scriptText, tips } } };
+      return;
     }
 
-    /* ===================================================
-       Legacy / existing packs + template generation path
-       =================================================== */
+    // ===== Legacy packs path (unchanged) =====
     const parsed = BodySchema.safeParse(body);
     if (!parsed.success) {
-      context.res = {
-        status: 400,
-        headers: { "Content-Type": "application/json", ...cors },
-        body: { error: "Invalid request body", details: parsed.error.flatten() },
-      };
+      context.res = { status: 400, headers: cors, body: { error: "Invalid request body" } };
       return;
     }
-
     const { pack, template, variables } = parsed.data;
-
-    const { packs, packPath } = loadPacks();
-
+    const { packs } = loadPacks();
     const packDef = packs[pack];
     if (!packDef) {
-      context.res = {
-        status: 400,
-        headers: { "Content-Type": "application/json", ...cors },
-        body: { error: `Unknown pack '${pack}'`, packPath, availablePacks: Object.keys(packs || {}) }
-      };
+      context.res = { status: 400, headers: cors, body: { error: `Unknown pack '${pack}'` } };
       return;
     }
-
-    const templates = packDef.templates || packDef;
-
-    let tplDef =
-      templates[template] ||
-      (template === "first_call_script" ? templates["intro_builder"] : null) ||
-      (template === "intro_builder" ? templates["first_call_script"] : null);
-
-    if (!tplDef) {
-      context.res = {
-        status: 400,
-        headers: { "Content-Type": "application/json", ...cors },
-        body: { error: `Unknown template '${template}' in pack '${pack}'`, packPath, availableTemplates: Object.keys(templates || {}) },
-      };
-      return;
-    }
-
-    const defaultSys  = packDef.default?.system ?? "";
-    const defaultTemp = packDef.default?.temperature ?? 0.4;
-
-    const tplSystem = typeof tplDef === "object" && tplDef.system != null ? String(tplDef.system) : null;
-    const tplTemp   = typeof tplDef === "object" && tplDef.temperature != null ? Number(tplDef.temperature) : null;
-
-    const system      = tplSystem ?? defaultSys;
-    const temperature = tplTemp ?? defaultTemp;
-
+    const tplDef = packDef.templates?.[template] || {};
+    const system      = tplDef.system ?? packDef.default?.system ?? "";
+    const temperature = tplDef.temperature ?? packDef.default?.temperature ?? 0.4;
     const templateString = typeof tplDef === "string" ? tplDef : String(tplDef.prompt || "");
-    if (!templateString) {
-      context.res = { status: 400, headers: { "Content-Type": "application/json", ...cors }, body: { error: `Template '${template}' in pack '${pack}' has no prompt`, packPath } };
-      return;
-    }
-
-    const OPTIONAL_VARS = new Set(["call_to_action"]);
-    const required = requiredVarsForTemplate(tplDef).filter((k) => !OPTIONAL_VARS.has(k));
-    const missing = required.filter((k) => !(k in variables) || variables[k] == null || String(variables[k]).trim() === "");
-    if (missing.length) {
-      context.res = { status: 400, headers: { "Content-Type": "application/json", ...cors }, body: { error: "Missing required variables", required, missing, packPath } };
-      return;
-    }
-
     const compiledPrompt = compileTemplate(templateString, variables);
 
     let llmText = "";
     try {
       const llmRes = await callModel({ system, prompt: compiledPrompt, temperature });
-      llmText = extractText(llmRes) || "";
-      if (!llmText) context.log.warn("Model returned empty text");
+      llmText = extractText(llmRes);
     } catch (e) {
       context.log.warn("callModel failed: " + (e?.message || e));
     }
 
-    context.res = {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...cors },
-      body: {
-        system,
-        temperature,
-        preview: compiledPrompt,
-        variables,
-        pack,
-        template,
-        packPath,
-        output: llmText || ""
-      },
-    };
+    context.res = { status: 200, headers: cors, body: { output: llmText, preview: compiledPrompt } };
   } catch (err) {
-    context.log.error("generate error", err);
-    context.res = {
-      status: 500,
-      headers: { "Content-Type": "application/json", ...cors },
-      body: { error: "Server error", detail: String(err?.message ?? err) },
-    };
+    context.res = { status: 500, headers: cors, body: { error: "Server error", detail: String(err?.message ?? err) } };
   }
 };

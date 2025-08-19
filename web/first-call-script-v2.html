@@ -1,86 +1,231 @@
 <!doctype html>
 <html lang="en" data-app="inside-track-tools">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Tools · First Call Script (v2)</title>
   <link rel="stylesheet" href="./styles.css?v=fix4" />
   <style>
-    /* Page-scoped tweaks only */
-    :root{
+    :root {
       --right-min: 280px;
-      --space-3: 12px; --space-4:16px; --space-5:24px; --space-6:32px;
-      --surface-3:#e5e8ee; --text-2:#5b6270; --accent:#2458e6; --bg:#f7f7f9;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 24px;
+      --space-6: 32px;
+      --surface-2: #f2f4f8;
+      --surface-3: #e5e7eb;
+      --text-2: #5b6270;
+      --accent: #2458e6;
+      --bg: #f7f7f9;
     }
-    body{background:var(--bg)}
-    .layout{
-      display:grid;
-      grid-template-columns:minmax(0,1.35fr) minmax(0,2.65fr) minmax(var(--right-min),clamp(260px,14vw,300px));
-      gap:var(--space-6); padding:var(--space-5); align-items:start; width:100%;
+
+    body {
+      background: var(--bg)
     }
-    @media (max-width:1200px){ .layout{ grid-template-columns:1fr; } }
-    .grid-2{ display:grid; grid-template-columns:1fr 1fr; gap:var(--space-3) }
-    @media (max-width: 800px){ .grid-2{ grid-template-columns:1fr } }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(0, 2.65fr) minmax(var(--right-min), clamp(260px, 14vw, 300px));
+      gap: var(--space-6);
+      padding: var(--space-5);
+      align-items: start;
+      width: 100%;
+    }
+
+    @media (max-width:1200px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-3)
+    }
+
+    @media (max-width: 800px) {
+      .grid-2 {
+        grid-template-columns: 1fr
+      }
+    }
 
     /* Readable script box */
-    .output{
-      white-space:pre-wrap;
-      background:#fff;
-      color:#111827;
-      border:1px solid #e5e7eb;
-      padding:var(--space-5);
-      border-radius:12px;
-      min-height:260px;
-      outline:none;
+    .output {
+      white-space: pre-wrap;
+      background: #fff;
+      color: #111827;
+      border: 1px solid #e5e7eb;
+      padding: var(--space-5);
+      border-radius: 12px;
+      min-height: 260px;
+      outline: none;
       font: 16.5px/1.7 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-      letter-spacing:.005em;
+      letter-spacing: .005em;
     }
 
-    .tips-card ul{ margin:.5rem 0 0; padding-left:1.25rem }
-    .tips-card ul li{ margin:.25rem 0 }
-
-    .panel .card h3{ margin: 0 0 .5rem 0 }
-    .intel-grid{ display:grid; grid-template-columns:1fr !important; gap:var(--space-3) }
-
-    input,select,textarea{
-      width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--surface-3); background:#fff;
-      outline:none; transition: box-shadow .15s ease, border-color .15s ease;
+    .tips-card ul {
+      margin: .5rem 0 0;
+      padding-left: 1.25rem
     }
-    input:focus,select:focus,textarea:focus{ box-shadow:0 0 0 2px rgba(36,88,230,.35); border-color:var(--accent); }
 
-    /* Small UI bits */
-    .row-between{ display:flex; align-items:center; justify-content:space-between; gap:var(--space-3) }
-    .btn.inline{ padding:.35rem .6rem; font-size:.9rem }
-    .muted{ color:var(--text-2) }
-
-    /* header (matches your screenshot) */  
-    .app-header{ 
-      display:flex; align-items:center; justify-content:space-between;
-      padding:10px 16px; background:#fff; border-bottom:1px solid #e5e7eb;
+    .tips-card ul li {
+      margin: .25rem 0
     }
-    .app-header .header-left{ display:flex; align-items:center; gap:10px; }
-    .app-header .logo{ height:28px; width:auto; }
-    .app-header .brand-text{ display:flex; flex-direction:column; line-height:1.2; }
-    .app-header .app-title{ font-size:1rem; font-weight:600; margin:0; }
-    .app-header .kicker{ margin:0; color:#6b7280; font-size:.85rem; }
 
-    .app-header .header-right{ display:flex; align-items:center; gap:12px; }
-    .calltype-mini{
-      display:flex; align-items:center; gap:8px;
-      padding:4px 8px; border:1px solid #e5e7eb; border-radius:999px; background:#fff;
+    .panel .card h3 {
+      margin: 0 0 .5rem 0
     }
-    .calltype-mini select{ border:none; padding:2px 6px; background:transparent; }
-    .calltype-mini .mini-label{ color:#6b7280; font-size:.85rem; }
-    .calltype-mini .remember{ display:flex; align-items:center; gap:6px; }
 
-    .model-note{ color:#6b7280; font-size:.9rem; padding:4px 8px; border:1px solid #e5e7eb; border-radius:999px; background:#f9fafb; }
-    .badge{ display:flex; align-items:center; gap:6px; color:#374151; }
-    .badge svg{ width:16px; height:16px; stroke:#6b7280; fill:none; stroke-width:1.5; }
+    .intel-grid {
+      display: grid;
+      grid-template-columns: 1fr !important;
+      gap: var(--space-3)
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--surface-3);
+      background: #fff;
+      outline: none;
+      transition: box-shadow .15s ease, border-color .15s ease;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      box-shadow: 0 0 0 2px rgba(36, 88, 230, .35);
+      border-color: var(--accent);
+    }
+
+    /* Header (match screenshot) */
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: #fff;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .app-header .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .app-header .logo {
+      height: 24px;
+      width: auto;
+    }
+
+    .app-header .brand-text {
+      line-height: 1.15;
+    }
+
+    .app-header .app-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    .app-header .kicker {
+      margin: 0;
+      color: #6b7280;
+      font-size: .85rem;
+    }
+
+    .app-header .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Compact pill (selector + remember) */
+    .calltype-mini {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 8px;
+      border: 1px solid #e5e7eb;
+      border-radius: 999px;
+      background: #fff;
+    }
+
+    .calltype-mini .mini-label {
+      color: #6b7280;
+      font-size: .85rem;
+    }
+
+    .calltype-mini select {
+      appearance: none;
+      border: none;
+      background: #f9fafb;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: .85rem;
+    }
+
+    .calltype-mini .remember {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .85rem;
+      color: #374151;
+    }
+
+    /* Subtle status chip */
+    .model-note {
+      color: #374151;
+      font-size: .85rem;
+      padding: 4px 10px;
+      border: 1px solid #e5e7eb;
+      border-radius: 999px;
+      background: #f9fafb;
+    }
+
+    .model-note .label {
+      color: #6b7280;
+      margin-right: 6px;
+    }
+
+    /* Optional user badge */
+    .badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #374151;
+      font-size: .85rem;
+    }
+
+    .badge svg {
+      width: 16px;
+      height: 16px;
+      stroke: #6b7280;
+      fill: none;
+      stroke-width: 1.5;
+    }
+
+    .is-hidden {
+      display: none !important;
+    }
+
+    .error-inline {
+      color: #b91c1c;
+      font-size: .85rem;
+      margin-left: 8px;
+    }
   </style>
 </head>
+
 <body>
 
-  <!-- HEADER -->
+  <!-- HEADER (matches screenshot) -->
   <header class="app-header" role="banner">
     <div class="header-left">
       <img class="logo" src="./larato-logo.svg" alt="Larato" />
@@ -107,12 +252,15 @@
 
       <span class="model-note">
         <span class="label">Sales model in use:</span>
-        <strong id="map-label">Not set</strong>
+        <strong id="map-label">Direct</strong>
       </span>
 
       <span id="user-badge" class="badge is-hidden" aria-live="polite" aria-atomic="true">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path></svg>
-        <span>Loading user…</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="7" r="4"></circle>
+          <path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path>
+        </svg>
+        <span id="user-email">Loading…</span>
       </span>
     </div>
   </header>
@@ -205,21 +353,22 @@
             </div>
           </div>
 
-          <!-- USPs + Other points (optional, used in narrative) -->
           <div class="field">
             <label for="value_proposition">Unique Selling Points (optional)</label>
-            <textarea id="value_proposition" name="value_proposition" rows="2" placeholder="e.g., pooled data; contract portability; self-serve provisioning"></textarea>
+            <textarea id="value_proposition" name="value_proposition" rows="2"
+              placeholder="e.g., pooled data; contract portability; self-serve provisioning"></textarea>
           </div>
 
           <div class="field">
             <label for="context">Other points to cover (optional)</label>
-            <textarea id="context" name="context" rows="3" placeholder="Any specific themes you want woven into the call (comma, semicolon or new line separated)."></textarea>
+            <textarea id="context" name="context" rows="3"
+              placeholder="Any specific themes you want woven into the call (comma, semicolon or new line separated)."></textarea>
           </div>
 
-          <!-- NEW: Next step (salesperson-chosen) -->
           <div class="field">
             <label for="next_step">Your desired next step</label>
-            <input id="next_step" name="next_step" placeholder="e.g., I’ll send a 1-page summary and we can pick it up from there." />
+            <input id="next_step" name="next_step"
+              placeholder="e.g., I’ll send a 1-page summary and we can pick it up from there." />
           </div>
         </fieldset>
 
@@ -255,16 +404,15 @@
         </div>
         <pre id="output" class="output" tabindex="0" aria-label="Generated script will appear here"></pre>
 
-        <!-- Helpful tips (separate box) -->
         <div class="tips-card card" style="margin-top:var(--space-4)">
           <div class="row-between">
             <h3>Helpful tips</h3>
-            <button id="toggle-tips" class="btn inline" type="button" aria-expanded="true" aria-controls="tips-list">Hide tips</button>
+            <button id="toggle-tips" class="btn inline" type="button" aria-expanded="true"
+              aria-controls="tips-list">Hide tips</button>
           </div>
           <ul id="tips-list"></ul>
         </div>
 
-        <!-- Notes -->
         <div class="notes-card card" style="margin-top:var(--space-4)">
           <div class="row-between">
             <h3>Call notes</h3>
@@ -273,7 +421,8 @@
               <button id="download-notes" class="btn inline" type="button">Download .txt</button>
             </div>
           </div>
-          <textarea id="notes" rows="6" placeholder="Type notes during the call. Saved locally on this device."></textarea>
+          <textarea id="notes" rows="6"
+            placeholder="Type notes during the call. Saved locally on this device."></textarea>
           <p class="muted" style="margin-top:.5rem">Notes are stored locally (this browser only).</p>
         </div>
 
@@ -291,18 +440,38 @@
     <!-- RIGHT -->
     <section class="panel right" aria-labelledby="intel-title">
       <aside class="intel card">
-        <div class="intel-head" style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
+        <div class="intel-head"
+          style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
           <h2 id="intel-title">Buyer needs</h2>
-          <button id="toggle-intel" class="btn small" type="button" aria-expanded="true" aria-controls="intel-body">Hide</button>
+          <button id="toggle-intel" class="btn small" type="button" aria-expanded="true"
+            aria-controls="intel-body">Hide</button>
         </div>
         <div id="intel-body">
           <div class="intel-grid">
-            <section><h3>1) Buyer Priorities</h3><div id="intel-priorities" class="intel-slot"></div></section>
-            <section><h3>2) Typical Pains</h3><div id="intel-pains" class="intel-slot"></div></section>
-            <section><h3>3) Triggers</h3><div id="intel-triggers" class="intel-slot"></div></section>
-            <section><h3>4) Value Proof</h3><div id="intel-proof" class="intel-slot"></div></section>
-            <section><h3>5) Objections</h3><div id="intel-objections" class="intel-slot"></div></section>
-            <section><h3>6) CTAs</h3><div id="intel-ctas" class="intel-slot"></div></section>
+            <section>
+              <h3>1) Buyer Priorities</h3>
+              <div id="intel-priorities" class="intel-slot"></div>
+            </section>
+            <section>
+              <h3>2) Typical Pains</h3>
+              <div id="intel-pains" class="intel-slot"></div>
+            </section>
+            <section>
+              <h3>3) Triggers</h3>
+              <div id="intel-triggers" class="intel-slot"></div>
+            </section>
+            <section>
+              <h3>4) Value Proof</h3>
+              <div id="intel-proof" class="intel-slot"></div>
+            </section>
+            <section>
+              <h3>5) Objections</h3>
+              <div id="intel-objections" class="intel-slot"></div>
+            </section>
+            <section>
+              <h3>6) CTAs</h3>
+              <div id="intel-ctas" class="intel-slot"></div>
+            </section>
           </div>
         </div>
       </aside>
@@ -318,16 +487,12 @@
     </li>
   </template>
 
-  <!-- === SCRIPT: glue UI to library (prompt-based) === -->
+  <!-- === SCRIPT: glue UI to Library + API-first generation === -->
   <script type="module">
-    /* Relative imports so it works under SWA sub-paths */
     import { getIndex, loadTemplate, canonical } from "./src/lib/callLibrary.js";
-    import { generatePromptBasedCallScript } from "./src/lib/callPromptEngine.js";
-    const canonicaliseBuyerId = (value) => canonical.buyer(value);
-    const INDEX_CACHE = new Map(); // mode -> index json
-    const modeFromCallType = (v) => canonical.mode(v);
-    const buyerCanon       = (v) => canonical.buyer(v);
 
+    const modeFromCallType = (v) => canonical.mode(v);
+    const buyerCanon = (v) => canonical.buyer(v);
 
     (function () {
       const FORM_ID = 'script-form';
@@ -339,7 +504,7 @@
       const NOTES_KEY_PREFIX = 'first_call_script_v2.notes';
       const INTEL_URL = './intel.json';
 
-      const REQUIRED = ['call_type','seller_name','seller_company','prospect_name','prospect_role','prospect_company','buyer_behaviour','product'];
+      const REQUIRED = ['call_type', 'seller_name', 'seller_company', 'prospect_name', 'prospect_role', 'prospect_company', 'buyer_behaviour', 'product'];
 
       const form = document.getElementById(FORM_ID);
       const submitBtn = document.getElementById('submit');
@@ -370,174 +535,93 @@
       const rememberCallType = document.getElementById('remember_call_type');
       const mapLabel = document.getElementById('map-label');
 
+      const userBadge = document.getElementById('user-badge');
+      const userEmail = document.getElementById('user-email');
+
       let intel = null;
       let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
 
-      const nowTime = () => new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-      const on = (el, evts, h, opt) => { if (el) evts.forEach(e => el.addEventListener(e, h, opt)); };
-
-      // ---------- utilities ----------
-      const norm = s => String(s||'').toLowerCase().trim();
+      const nowTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
       function setBusy(isBusy) {
-        submitBtn && (submitBtn.disabled = isBusy || !allRequiredFilled(form));
-        resetBtn && (resetBtn.disabled = isBusy);
+        if (submitBtn) submitBtn.disabled = isBusy || !allRequiredFilled(form);
+        if (resetBtn) resetBtn.disabled = isBusy;
         const hasText = !!(outputEl?.textContent?.trim());
-        copyBtn && (copyBtn.disabled = isBusy || !hasText);
-        downloadBtn && (downloadBtn.disabled = isBusy || !hasText);
-        submitBtn && submitBtn.classList.toggle('busy', isBusy);
+        if (copyBtn) copyBtn.disabled = isBusy || !hasText;
+        if (downloadBtn) downloadBtn.disabled = isBusy || !hasText;
+        if (submitBtn) submitBtn.classList.toggle('busy', isBusy);
       }
-      function setStatus(msg, kind='info'){ if (statusEl){ statusEl.textContent = msg; statusEl.dataset.kind = kind; } }
+      function setStatus(msg, kind = 'info') {
+        if (!statusEl) return; statusEl.textContent = msg; statusEl.dataset.kind = kind;
+      }
 
       function allRequiredFilled(formEl) {
-       if (!formEl) return false;
-
-        // Labels for friendly status text
-       const labels = {
-          call_type: 'Direct or partner sales',
-          seller_name: 'Your name',
-          seller_company: 'Your company',
-          prospect_name: 'Prospect name',
-          prospect_role: 'Prospect role',
-          prospect_company: 'Prospect company',
-          buyer_behaviour: 'Buyer behaviour',
-          product: 'Product'
+        if (!formEl) return false;
+        const labels = {
+          call_type: 'Direct or partner sales', seller_name: 'Your name', seller_company: 'Your company',
+          prospect_name: 'Prospect name', prospect_role: 'Prospect role', prospect_company: 'Prospect company',
+          buyer_behaviour: 'Buyer behaviour', product: 'Product'
         };
-
         const missing = [];
-
-       // Helper to get current value robustly
         const getVal = (name) => {
-         if (name === 'product') {
-            return (productSel && typeof productSel.value === 'string')
-              ? productSel.value.trim()
-              : (formEl.elements[name]?.value || '').trim();
-          }
-          if (name === 'buyer_behaviour') {
-           return (buyerBehSel && typeof buyerBehSel.value === 'string')
-             ? buyerBehSel.value.trim()
-              : (formEl.elements[name]?.value || '').trim();
-          }
-          if (name === 'call_type') {
-            return (callTypeSel && typeof callTypeSel.value === 'string')
-              ? callTypeSel.value.trim()
-             : (formEl.elements[name]?.value || '').trim();
-          }
+          if (name === 'product') return (productSel?.value || '').trim();
+          if (name === 'buyer_behaviour') return (buyerBehSel?.value || '').trim();
+          if (name === 'call_type') return (callTypeSel?.value || '').trim();
           return (formEl.elements[name]?.value || '').trim();
         };
-
         for (const name of REQUIRED) {
           const val = getVal(name);
           if (!val) missing.push(labels[name] || name);
         }
-
-        // DEBUG: show what the code sees for Product at validation time
-      try {
-        if (diagJson) {
-          const snap = {
-            where: 'allRequiredFilled',
-            productSel_value: productSel?.value ?? null,
-            form_product: formEl.elements?.product?.value ?? null,
-            options: productSel ? [...productSel.options].map(o => ({
-              value: o.value, text: o.textContent, selected: o.selected
-            })) : []
-          };
-          diagJson.textContent = JSON.stringify(snap, null, 2);
-        }
-      } catch {}
-
-
-        if (missing.length) {
-          setStatus(`Please complete: ${missing.join(', ')}.`, 'error');
-        } else {
-         setStatus('');
-        }
-
+        if (missing.length) setStatus(`Please complete: ${missing.join(', ')}.`, 'error'); else setStatus('');
         return missing.length === 0;
       }
-
-      function refreshSubmitState(){ submitBtn && (submitBtn.disabled = !allRequiredFilled(form)); }
+      function refreshSubmitState() { if (submitBtn) submitBtn.disabled = !allRequiredFilled(form); }
 
       function validateField(input) {
         if (!input) return;
-
-          // Allow callers to pass the logical field name (string) too
         const el = (typeof input === 'string') ? (form.elements[input] || document.getElementById(input)) : input;
         if (!el) return;
-
         const id = el.id || el.name || '';
-        const errorEl =
-          document.getElementById(`${id}_error`) ||
-          (id === 'call_type' ? document.getElementById('call_type_error') : null);
-
-        // Robust current value for selects we care about
+        const errorEl = document.getElementById(`${id}_error`) || (id === 'call_type' ? document.getElementById('call_type_error') : null);
         let value = '';
         if (el === productSel) value = (productSel.value || '').trim();
         else if (el === buyerBehSel) value = (buyerBehSel.value || '').trim();
         else if (id === 'call_type') value = (callTypeSel?.value || '').trim();
         else value = (el.value || '').trim();
-
         const valid = !!value;
-
         if (!errorEl) return;
-        if (valid) {
-          errorEl.textContent = '';
-          el.removeAttribute('aria-invalid');
-          el.classList.remove('invalid');
-        } else {
-          errorEl.textContent = id === 'call_type' ? 'Please choose a call type.' : 'This field is required.';
-          el.setAttribute('aria-invalid','true');
-          el.classList.add('invalid');
-        }
+        if (valid) { errorEl.textContent = ''; el.removeAttribute('aria-invalid'); el.classList.remove('invalid'); }
+        else { errorEl.textContent = id === 'call_type' ? 'Please choose a call type.' : 'This field is required.'; el.setAttribute('aria-invalid', 'true'); el.classList.add('invalid'); }
       }
 
-
-      function saveForm(){
-        if (!form) return;
-        const fd = Object.fromEntries(new FormData(form).entries());
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(fd));
-      }
-      function loadForm(){
+      function saveForm() { if (!form) return; const fd = Object.fromEntries(new FormData(form).entries()); localStorage.setItem(STORAGE_KEY, JSON.stringify(fd)); }
+      function loadForm() {
         if (!form) return;
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return;
-        try {
-          const data = JSON.parse(raw);
-          Object.entries(data).forEach(([k,v]) => {
-            const el = form.elements[k] || document.getElementById(k);
-            if (el) el.value = v;
-          });
-        } catch {}
+        try { const data = JSON.parse(raw); Object.entries(data).forEach(([k, v]) => { const el = form.elements[k] || document.getElementById(k); if (el) el.value = v; }); } catch { }
       }
-      function clearFormState(){
-        localStorage.removeItem(STORAGE_KEY);
-        localStorage.removeItem(ACTIVITY_KEY);
-      }
+      function clearFormState() { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
 
-      // ---------- Buyer needs helpers ----------
+      // ---------- Buyer needs ----------
+      const norm = s => String(s || '').toLowerCase().trim();
       const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
-      const getKeyInsensitive = (obj, requested) => {
+      function getKeyInsensitive(obj, requested) {
         if (!obj || typeof obj !== 'object') return null;
-        const want = norm(requested).replace(/\s+/g,'-');
-        for (const k of Object.keys(obj)) if (norm(k).replace(/\s+/g,'-') === want) return k;
+        const want = norm(requested).replace(/\s+/g, '-');
+        for (const k of Object.keys(obj)) if (norm(k).replace(/\s+/g, '-') === want) return k;
         for (const k of Object.keys(obj)) if (norm(k).includes(norm(requested))) return k;
         return null;
-      };
-      const pEl = t => { const el=document.createElement('p'); el.textContent=t; return el; };
-      const setSlot = (id, arr=[]) => {
-        const slot=document.getElementById(id);
-        const items=(arr.length?arr:['No data available for this selection.']);
-        slot && slot.replaceChildren(...items.map(pEl));
-      };
-      const fillAll = arr => {
-        setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr);
-        setSlot('intel-proof', arr); setSlot('intel-objections', arr); setSlot('intel-ctas', arr);
-      };
+      }
+      const pEl = t => { const el = document.createElement('p'); el.textContent = t; return el; };
+      const setSlot = (id, arr = []) => { const slot = document.getElementById(id); const items = (arr.length ? arr : ['No data available for this selection.']); if (slot) slot.replaceChildren(...items.map(pEl)); };
+      const fillAll = arr => { setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr); setSlot('intel-proof', arr); setSlot('intel-objections', arr); setSlot('intel-ctas', arr); };
 
-      function normaliseIntel(raw){
-        if (!raw || typeof raw !== 'object') return { products:{} };
+      function normaliseIntel(raw) {
+        if (!raw || typeof raw !== 'object') return { products: {} };
         if (raw.products && typeof raw.products === 'object') return raw;
-        const out = { products:{} };
+        const out = { products: {} };
         Object.entries(raw).forEach(([product, buyersObj]) => {
           const behaviours = {};
           if (buyersObj && typeof buyersObj === 'object') {
@@ -551,87 +635,48 @@
         return out;
       }
 
-      function renderIntel(productLabel, behaviourLabel){
-              if (!intel) return;
-
+      function renderIntel(productLabel, behaviourLabel) {
+        if (!intel) return;
         const products = intel.products || {};
-        const norm = s => String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
-        const keyEq  = (obj, want) => Object.keys(obj||{}).find(k => norm(k) === norm(want));
-        const keyLike= (obj, want) => Object.keys(obj||{}).find(k => norm(k).includes(norm(want)));
+        const productKey = getKeyInsensitive(products, productLabel);
+        const productNode = productKey ? products[productKey] : null;
+        if (!productNode) { fillAll([`No data available (unknown product).`]); return; }
 
-        const setSlot = (id, arr=[]) => {
-        const slot=document.getElementById(id);
-          const items=(arr.length?arr:['No data available for this selection.']);
-          if (slot) slot.replaceChildren(...items.map(t => { const p=document.createElement('p'); p.textContent=t; return p; }));
-        };
-        const fillAll = arr => {
-          setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr);
-          setSlot('intel-proof', arr);      setSlot('intel-objections', arr); setSlot('intel-ctas', arr);
-        };
-
-        // 1) find product
-        const pKey = keyEq(products, productLabel) || keyLike(products, productLabel);
-        const productNode = pKey ? products[pKey] : null;
-        if (!productNode){ fillAll([`No data available (unknown product).`]); return; }
-
-        // 2) try behaviour-specific
         const pool = productNode.behaviours || productNode.buyers || {};
-        const bKey = keyEq(pool, behaviourLabel) || keyLike(pool, behaviourLabel);
-        const node = bKey ? pool[bKey] : null;
+        const key = getKeyInsensitive(pool, behaviourLabel);
+        const node = key ? pool[key] : (productNode.needs || null);
 
-        // 3) choose source: behaviour node OR product defaults
-        const source = node || productNode.needs || {};
-        const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
-
-        const sections = {
-          priorities: toArr(source.priorities ?? source.Priorities),
-          pains:      toArr(source.pains      ?? source.Pains),
-          triggers:   toArr(source.triggers   ?? source.Triggers),
-          proof:      toArr(source.proof      ?? source.Proof ?? source.value ?? source.Value),
-          objections: toArr(source.objections ?? source.Objections),
-          ctas:       toArr(source.ctas       ?? source.CTAs  ?? source.callsToAction ?? source.CallsToAction),
-        };
-
-        const allEmpty = Object.values(sections).every(a => a.length === 0);
-        if (allEmpty){
-          const available = Object.keys(pool).join(', ') || '—';
-          fillAll([`No data for this behaviour. Showing general product needs. Available: ${available}`]);
+        if (!node) {
+          const behavioursList = [...Object.keys(productNode.behaviours || {}), ...Object.keys(productNode.buyers || {})].join(', ') || '—';
+          fillAll([`No data for this behaviour. Available: ${behavioursList}`]);
           return;
         }
-        setSlot('intel-priorities', sections.priorities);
-        setSlot('intel-pains',      sections.pains);
-        setSlot('intel-triggers',   sections.triggers);
-        setSlot('intel-proof',      sections.proof);
-        setSlot('intel-objections', sections.objections);
-        setSlot('intel-ctas',       sections.ctas);
-      }
-
 
         const sections = {
           priorities: toArr(node?.priorities ?? node?.Priorities),
-          pains:      toArr(node?.pains      ?? node?.Pains),
-          triggers:   toArr(node?.triggers   ?? node?.Triggers),
-          proof:      toArr(node?.proof      ?? node?.Proof ?? node?.value ?? node?.Value),
+          pains: toArr(node?.pains ?? node?.Pains),
+          triggers: toArr(node?.triggers ?? node?.Triggers),
+          proof: toArr(node?.proof ?? node?.Proof ?? node?.value ?? node?.Value),
           objections: toArr(node?.objections ?? node?.Objections),
-          ctas:       toArr(node?.ctas       ?? node?.CTAs  ?? node?.callsToAction ?? node?.CallsToAction)
+          ctas: toArr(node?.ctas ?? node?.CTAs ?? node?.callsToAction ?? node?.CallsToAction)
         };
 
         const allEmpty = Object.values(sections).every(a => a.length === 0);
-        if (allEmpty){ fillAll(['No data available for this selection.']); return; }
+        if (allEmpty) { fillAll(['No data available for this selection.']); return; }
 
         setSlot('intel-priorities', sections.priorities);
-        setSlot('intel-pains',      sections.pains);
-        setSlot('intel-triggers',   sections.triggers);
-        setSlot('intel-proof',      sections.proof);
+        setSlot('intel-pains', sections.pains);
+        setSlot('intel-triggers', sections.triggers);
+        setSlot('intel-proof', sections.proof);
         setSlot('intel-objections', sections.objections);
-        setSlot('intel-ctas',       sections.ctas);
+        setSlot('intel-ctas', sections.ctas);
       }
 
       // ---------- Activity / delta ----------
       function addActivity(entry) {
         const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
         list.unshift(entry);
-        localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0,3)));
+        localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0, 3)));
         renderActivity();
       }
       function renderActivity() {
@@ -648,7 +693,7 @@
         });
       }
       function computeDelta(oldText, newText) {
-        const oldLines = (oldText||'').split('\n'), newLines = (newText||'').split('\n');
+        const oldLines = (oldText || '').split('\n'), newLines = (newText || '').split('\n');
         let added = 0, removed = 0;
         const oldSet = new Set(oldLines), newSet = new Set(newLines);
         newLines.forEach(l => { if (!oldSet.has(l) && l.trim()) added++; });
@@ -658,18 +703,18 @@
       function renderDelta(delta) {
         if (!deltaLog) return;
         deltaLog.innerHTML = '';
-        const a = document.createElement('li'); a.textContent = `+${delta.added} new line${delta.added===1?'':'s'}`;
-        const r = document.createElement('li'); r.textContent = `−${delta.removed} removed line${delta.removed===1?'':'s'}`;
+        const a = document.createElement('li'); a.textContent = `+${delta.added} new line${delta.added === 1 ? '' : 's'}`;
+        const r = document.createElement('li'); r.textContent = `−${delta.removed} removed line${delta.removed === 1 ? '' : 's'}`;
         deltaLog.appendChild(a); deltaLog.appendChild(r);
       }
 
-      // ---------- Header chip (remembered call type) ----------
+      // ---------- Header chip / remember ----------
       function loadCallPref() {
         try {
           const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
           if (pref?.call_type && callTypeSel && !callTypeSel.value) callTypeSel.value = pref.call_type;
           if (pref?.remember === true && rememberCallType) rememberCallType.checked = true;
-        } catch {}
+        } catch { }
         updateMapIndicator();
       }
       function saveCallPrefIfRequested() {
@@ -693,67 +738,54 @@
         toggleTipsBtn.textContent = hidden ? 'Show tips' : 'Hide tips';
       }
 
-      // ---------- Notes helpers ----------
+      // ---------- Notes ----------
       const notesKey = () => {
         const pn = (form?.elements?.prospect_name?.value || '').trim().toLowerCase();
         const pc = (form?.elements?.prospect_company?.value || '').trim().toLowerCase();
         return `${NOTES_KEY_PREFIX}::${pc}::${pn}` || NOTES_KEY_PREFIX;
       };
-      function loadNotes(){ try{ notesArea.value = localStorage.getItem(notesKey()) || ''; }catch{} }
-      function saveNotes(){ try{ localStorage.setItem(notesKey(), notesArea.value || ''); setStatus('Notes saved.'); }catch(e){ setStatus('Could not save notes.', 'error'); } }
-      function downloadText(filename, text){
+      function loadNotes() { try { notesArea.value = localStorage.getItem(notesKey()) || ''; } catch { } }
+      function saveNotes() { try { localStorage.setItem(notesKey(), notesArea.value || ''); setStatus('Notes saved.'); } catch (e) { setStatus('Could not save notes.', 'error'); } }
+      function downloadText(filename, text) {
         const blob = new Blob([text], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filename;
+        const a = document.createElement('a'); a.href = url; a.download = filename;
         document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       }
 
-      // ---------- product registry ----------
+      // ---------- Product registry ----------
       async function populateProductsForMode(mode) {
         try {
-          const idx = await getIndex(mode);   // loads ./content/call-library/v1/index.json (combined)
+          const idx = await getIndex(mode);
           const items = Array.isArray(idx?.products) ? idx.products : [];
-
-          if (productSel) {
-            // Try to restore a saved selection (from localStorage / previous run)
-            const savedRaw = (form?.elements?.product?.value || '').trim();
-            const desired = savedRaw ? savedRaw.toLowerCase() : '';
-
-            productSel.innerHTML = '<option value="">Select…</option>';
-
-            for (const { id, label } of items) {
-              const opt = document.createElement('option');
-              const val = String(id || '').toLowerCase();
-              opt.value = val;
-              opt.textContent = label || id;
-
-              // Preselect if it matches a previously saved value or label
-              if (desired && (desired === val || desired === String(label || '').toLowerCase())) {
-                opt.selected = true;
-              }
-              productSel.appendChild(opt);
-            }
-
-            // ✅ Only clear “required” if a real value exists
-            if (productSel.value) validateField(productSel);
-
-            // Re-render Buyer Needs if both product and buyer are present
-            if (productSel.value && buyerBehSel?.value) {
-              const label =
-                productSel.options?.[productSel.selectedIndex]?.text ||
-                productSel.value ||
-                '';
-              renderIntel(label, buyerBehSel.value);
-            }
+          if (!productSel) return;
+          const saved = (form?.elements?.product?.value || '').trim().toLowerCase();
+          productSel.innerHTML = '<option value="" disabled>Select…</option>';
+          items.forEach((item) => {
+            const idLike = item.id ?? item.slug ?? item.value ?? item.key ?? item.name ?? item.label;
+            const label = item.label ?? item.name ?? String(idLike ?? '');
+            const val = String(idLike || '').trim().toLowerCase().replace(/\s+/g, '-');
+            if (!val) return;
+            const opt = document.createElement('option');
+            opt.value = val; opt.textContent = label;
+            if (saved && (saved === val || saved === String(label).toLowerCase())) opt.selected = true;
+            productSel.appendChild(opt);
+          });
+          if (!productSel.value) productSel.options[0].selected = true;
+          validateField(productSel);
+          if (buyerBehSel?.value) {
+            const label = productSel?.options?.[productSel.selectedIndex]?.text || productSel.value || '';
+            renderIntel(label, buyerBehSel.value);
           }
+          refreshSubmitState();
+          console.info('[Product] index loaded for', mode, 'count =', items.length);
         } catch (e) {
           console.error('[Product] Failed to load index for mode', mode, e);
           if (productSel) productSel.innerHTML = '<option value="">Select…</option>';
         }
       }
 
-      // ---------- events ----------
+      // ---------- Events ----------
       const onChangeRecalcIntel = () => {
         const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
         renderIntel(label, buyerBehSel?.value || '');
@@ -761,22 +793,27 @@
 
       callTypeSel?.addEventListener('change', async () => {
         validateField(callTypeSel);
-        saveForm();
-        updateMapIndicator();
-        refreshSubmitState();
-
-        const mode = modeFromCallType(callTypeSel.value) || "direct";
+        saveForm(); updateMapIndicator(); refreshSubmitState();
+        const mode = modeFromCallType(callTypeSel.value) || 'direct';
         await populateProductsForMode(mode);
         validateField('product');
       });
+      rememberCallType?.addEventListener('change', saveCallPrefIfRequested);
 
       productSel?.addEventListener('change', () => {
-        validateField('product');        // clears any stale “required”
-        onChangeRecalcIntel();
-        saveForm();
-        refreshSubmitState();
+        validateField('product'); onChangeRecalcIntel(); saveForm(); refreshSubmitState();
       });
-      buyerBehSel?.addEventListener('change', onChangeRecalcIntel);
+
+      buyerBehSel?.addEventListener('change', () => {
+        onChangeRecalcIntel(); saveForm(); refreshSubmitState();
+      });
+
+      toggleIntelBtn?.addEventListener('click', () => {
+        const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
+        toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
+        if (intelBody) intelBody.hidden = expanded;
+        toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
+      });
 
       toggleTipsBtn?.addEventListener('click', () => {
         const expanded = toggleTipsBtn.getAttribute('aria-expanded') === 'true';
@@ -785,29 +822,17 @@
         applyTipsVisibility();
       });
 
-      downloadBtn?.addEventListener('click', () => {
-        const txt = (outputEl?.textContent || '').trim();
-        if (!txt) { setStatus('No script to download yet.', 'error'); return; }
-        const blob = new Blob([txt], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `first-call-script_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
-        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-        setStatus('Download started.');
-      });
-
       saveNotesBtn?.addEventListener('click', saveNotes);
       downloadNotesBtn?.addEventListener('click', () => {
-        const who = (form?.elements?.prospect_name?.value || 'prospect').trim().replace(/\s+/g,'-');
-        downloadText(`call-notes_${who}_${new Date().toISOString().slice(0,10)}.txt`, notesArea.value || '');
+        const who = (form?.elements?.prospect_name?.value || 'prospect').trim().replace(/\s+/g, '-');
+        downloadText(`call-notes_${who}_${new Date().toISOString().slice(0, 10)}.txt`, notesArea.value || '');
       });
 
       document.getElementById('reset')?.addEventListener('click', async () => {
         form?.reset(); clearFormState(); loadCallPref();
         onChangeRecalcIntel(); renderActivity(); refreshSubmitState();
         setStatus('Form reset. Stored values cleared.'); loadNotes();
-        await populateProductsForMode(modeFromCallType(callTypeSel.value));
+        await populateProductsForMode(modeFromCallType(callTypeSel.value || 'direct'));
       });
 
       copyBtn?.addEventListener('click', async () => {
@@ -831,129 +856,161 @@
           </style>
           <div class="bar"><button onclick="window.print()">Print</button><button onclick="navigator.clipboard.writeText(document.querySelector('pre').textContent)">Copy</button></div>
           <div class="meta">${meta}</div>
-          <pre>${txt.replace(/[<>&]/g, s => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[s]))}</pre>`);
+          <pre>${txt.replace(/[<>&]/g, s => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[s]))}</pre>`);
         w.document.close();
       });
 
-      // ---------- submit: LIBRARY FLOW ----------
-      form && form.addEventListener('submit', async (e) => {
+      // ---------- Submit: API-first with local fallback ----------
+      form && form.addEventListener("submit", async (e) => {
         e.preventDefault();
 
-        for (const name of REQUIRED){
+        for (const name of REQUIRED) {
           const el = form.elements[name] || document.getElementById(name);
-          if (!el || !String(el.value||'').trim()){
-            validateField(el); el?.focus(); setStatus('Please complete required fields.', 'error'); return;
+          if (!el || !String(el.value || "").trim()) {
+            validateField(el);
+            el?.focus();
+            setStatus("Please complete required fields.", "error");
+            return;
           }
         }
 
+      const basePrefix = (() => {
+       const parts = (location.pathname || "").split("/");
+       return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
+      })();  
+
         const fd = Object.fromEntries(new FormData(form).entries());
-        const productId = (productSel?.value || fd.product || '').toLowerCase().trim();
-        const mode = modeFromCallType(fd.call_type);
-        const buyerId = buyerCanon(fd.buyer_behaviour);
+        const productId = (productSel?.value || fd.product || "").toLowerCase().trim();
+        const mode = canonical.mode(fd.call_type);
+        const buyerId = canonical.buyer(fd.buyer_behaviour);
+
+        if (!productId) {
+          validateField("product");
+          setStatus("Please choose a product.", "error");
+          return;
+        }
 
         setBusy(true);
-        setStatus('Generating call script…'); if (diag) diag.open = false; if (diagJson) diagJson.textContent='';
+        setStatus("Generating call script…");
+        if (diag) diag.open = false;
+        if (diagJson) diagJson.textContent = "";
 
         try {
-          // 1) Load index to confirm product & label (for meta line)
-          const idx = await getIndex(mode);
-          const productObj = (idx?.products || []).find(p => String(p.id).toLowerCase() === productId);
-          const productLabel = productObj?.label || productId;
-
-          // 2) Load markdown template
-          const { path, text: template_text } = await loadTemplate({ mode, productId, buyerId, indexJson: idx });
-
-          if (!template_text) {
-            throw new Error(`No template found for product=${productId}, buyerType=${buyerId} (path tried: ${path || 'n/a'})`);
-          }
-
-          // 3) Build engine input
-          const engineInput = {
-            mode,
-            product: { id: productId, label: productLabel },
-            buyer: buyerId,
-            seller: { name: fd.seller_name, company: fd.seller_company },
-            prospect: { name: fd.prospect_name, role: fd.prospect_role, company: fd.prospect_company },
-            value_proposition: fd.value_proposition || '',
-            next_step: fd.next_step || '',
-            template_text
+          // ---------- API CALL ----------
+          const body = {
+            kind: "call-script",
+            basePrefix,
+            variables: {
+              mode,
+              product: productId,
+              buyerType: buyerId,
+              seller_name: fd.seller_name,
+              seller_company: fd.seller_company,
+              prospect_name: fd.prospect_name,
+              prospect_role: fd.prospect_role,
+              prospect_company: fd.prospect_company,
+              value_proposition: fd.value_proposition || "",
+              context: fd.context || "",
+              next_step: fd.next_step || "",
+            },
           };
 
-          const tone = /warm/i.test(fd.tone || '') ? 'warm' : 'consultative';
-          const lengthHint = Number(/\~?(\d+)/.exec(fd.length || '')?.[1] || 300);
-
-          // 4) Generate script from prompt engine
-          const { script_text_labeled, metaLine, tips_list } = generatePromptBasedCallScript({
-            input: engineInput,
-            tone,
-            lengthHint
+          const resp = await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
           });
 
-          const script = String(script_text_labeled || '').trim();
-          outputEl.textContent = script;
-          outputMeta.textContent = metaLine || `Library · ${productLabel} · ${fd.buyer_behaviour || '—'} · ${fd.call_type || '—'}`;
-
-          // Tips (always 3)
-          if (tipsList) {
-            tipsList.innerHTML = '';
-            (tips_list || []).forEach(t => {
-              const li = document.createElement('li'); li.textContent = t; tipsList.appendChild(li);
-            });
+          if (!resp.ok) {
+            const errTxt = await resp.text();
+            throw new Error(`API ${resp.status}: ${errTxt}`);
           }
 
-          const delta = computeDelta(lastOutput, outputEl.textContent);
+          const data = await resp.json();
+          const script = data?.script?.text || "";
+          const tips = data?.script?.tips || [];
+
+          // ---------- Update UI ----------
+          outputEl.textContent = script;
+          outputMeta.textContent =
+            `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${fd.buyer_behaviour || "—"} · ${fd.call_type || "—"}`;
+
+          // tips
+          tipsList.innerHTML = "";
+          tips.forEach((t) => {
+            const li = document.createElement("li");
+            li.textContent = t;
+            tipsList.appendChild(li);
+          });
+
+          const delta = computeDelta(lastOutput, script);
           renderDelta(delta);
-          lastOutput = outputEl.textContent; localStorage.setItem(OUTPUT_KEY, lastOutput);
+          lastOutput = script;
+          localStorage.setItem(OUTPUT_KEY, lastOutput);
 
-          addActivity({ time: nowTime(), product: productLabel, buyer_behaviour: fd.buyer_behaviour || '—', length: fd.length || '—' });
+          addActivity({
+            time: nowTime(),
+            product: productId,
+            buyer_behaviour: fd.buyer_behaviour || "—",
+            length: fd.length || "—",
+          });
 
-          setStatus('Done. (Generated from curated Library)');
+          setStatus("Done. (Generated from API)");
           setBusy(false);
-          document.getElementById('output-title')?.focus();
-
+          document.getElementById("output-title")?.focus();
         } catch (err) {
-          setStatus('Could not generate a call script. See Diagnostics for details.', 'error');
-          if (diag) { diag.open = true; diagJson.textContent = String(err?.message || err); }
+          setStatus("Could not generate a call script. See Diagnostics for details.", "error");
+          if (diag) {
+            diag.open = true;
+            diagJson.textContent = String(err?.message || err);
+          }
           setBusy(false);
         }
       });
 
       // ---------- Init ----------
-      (async function init(){
+      (async function init() {
+        // Optional: populate user badge (no-op if not signed in)
+        try {
+          const me = await fetch('/.auth/me', { cache: 'no-store' });
+          const j = await me.json();
+          const email = j?.clientPrincipal?.userDetails || j?.clientPrincipal?.identityProvider || '';
+          if (email && userBadge && userEmail) { userEmail.textContent = email; userBadge.classList.remove('is-hidden'); }
+        } catch { }
+
         // Buyer needs preload
         try {
           const res = await fetch(INTEL_URL, { cache: 'no-store' });
           const raw = await res.json();
           intel = normaliseIntel(raw);
-        } catch { intel = { products:{} }; }
+        } catch { intel = { products: {} }; }
 
-        // Load remembered call type & populate products accordingly
         loadForm(); loadCallPref();
         const currentMode = modeFromCallType(callTypeSel?.value || 'direct');
         await populateProductsForMode(currentMode);
 
-        // Initial buyer needs render if selections exist
         if (productSel?.value && buyerBehSel?.value) {
           const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
           renderIntel(label, buyerBehSel.value);
         }
 
-        // Tips visibility
-        const hidden = localStorage.getItem(TIPS_HIDDEN_KEY) === '1';
-        tipsList.hidden = hidden; toggleTipsBtn?.setAttribute('aria-expanded', String(!hidden));
-        toggleTipsBtn && (toggleTipsBtn.textContent = hidden ? 'Show tips' : 'Hide tips');
+        applyTipsVisibility();
 
-        // Enable/disable buttons correctly
         const hasText = !!(outputEl?.textContent?.trim());
-        copyBtn && (copyBtn.disabled = !hasText);
-        downloadBtn && (downloadBtn.disabled = !hasText);
-        submitBtn && (submitBtn.disabled = !allRequiredFilled(form));
+        if (copyBtn) copyBtn.disabled = !hasText;
+        if (downloadBtn) downloadBtn.disabled = !hasText;
+        if (submitBtn) submitBtn.disabled = !allRequiredFilled(form);
 
-        // Notes
         loadNotes();
+
+        document.addEventListener('input', (e) => {
+          if (e.target.closest('#' + FORM_ID)) { validateField(e.target); saveForm(); refreshSubmitState(); }
+          if (e.target === callTypeSel) saveCallPrefIfRequested();
+        });
       })();
     })();
   </script>
 
 </body>
+
 </html>

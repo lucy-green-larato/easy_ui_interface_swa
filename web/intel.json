@@ -2,6 +2,48 @@
   "version": "2025-08-17-call-library-complete",
   "products": {
     "Connectivity": {
+      "behaviours": {
+        "innovator": {
+          "priorities": ["Speed to pilot", "Programmable control", "Vendor openness"],
+          "pains": ["Rigid contracts", "Slow provisioning", "Limited APIs"],
+          "triggers": ["Greenfield site", "New product launch", "SASE/SD-WAN trial"],
+          "proof": ["<30 min SIM onboarding", "API-first workflows", "Pilot ROI in 30–60 days"],
+          "objections": ["Too basic for our needs", "Lock-in risk"],
+          "ctas": ["Spin up a 2-week pilot", "Hands-on demo of orchestration"]
+        },
+        "early-adopter": {
+          "priorities": ["Agility with governance", "Cost visibility", "Scale without friction"],
+          "pains": ["Overage surprises", "Fragmented suppliers", "Manual change windows"],
+          "triggers": ["New SaaS rollout", "Office move/expansion", "Bandwidth spikes"],
+          "proof": ["Pooled data savings (20–40%)", "Provisioning lead time cut by 70%", "Unified reporting"],
+          "objections": ["Disruption during changeover", "Hidden fees"],
+          "ctas": ["Connectivity review (45 mins)", "Pilot secondary link"]
+        },
+        "early-majority": {
+          "priorities": ["Predictable spend", "Service reliability", "Simple management"],
+          "pains": ["Ticket backlog", "MPLS costs", "SLA inconsistencies"],
+          "triggers": ["Contract expiry", "Budget refresh", "Regional expansion"],
+          "proof": ["99.99% uptime patterns", "Before/after latency", "TCO model vs incumbent"],
+          "objections": ["We already have fibre", "Migration risk"],
+          "ctas": ["Share last 2 bills for savings check", "20-minute WAN review"]
+        },
+        "late-majority": {
+          "priorities": ["Stability", "Low operational change", "Clear SLAs"],
+          "pains": ["Change fatigue", "Over-customisation", "Underused features"],
+          "triggers": ["Audit findings", "Board risk review", "Provider price rise"],
+          "proof": ["SLA adherence history", "Like-for-like switch plan", "Reference implementations"],
+          "objections": ["Too complex", "Resource constraints"],
+          "ctas": ["Low-risk side-by-side pilot", "Phased cutover plan"]
+        },
+        "sceptic": {
+          "priorities": ["No disruption", "Value proof first", "Contract clarity"],
+          "pains": ["Vendor promises vs reality", "Hidden costs"],
+          "triggers": ["Incident post-mortem", "Capex request pushback"],
+          "proof": ["Written success criteria", "Cost caps & guardrails"],
+          "objections": ["Sales pitch fatigue", "We’ll stay as is"],
+          "ctas": ["Data-light assessment", "Fixed-scope trial with exit"]
+        }
+      },
       "buyers": {
         "IT Director": {
           "priorities": ["Resilience and uptime", "Scalable bandwidth", "Network visibility"],
@@ -34,6 +76,48 @@
       }
     },
     "Security": {
+      "behaviours": {
+        "innovator": {
+          "priorities": ["Detect-as-code", "Automation", "Attack surface insights"],
+          "pains": ["Manual playbooks", "Tool gaps"],
+          "triggers": ["Purple team exercise", "New exposure mgmt."],
+          "proof": ["Automated response runbooks", "API integrations"],
+          "objections": ["Team bandwidth"],
+          "ctas": ["Adversary emulation pilot"]
+        },
+        "early-adopter": {
+          "priorities": ["Consolidation with outcomes", "SOC efficiency"],
+          "pains": ["Alert fatigue", "Tool sprawl"],
+          "triggers": ["SIEM cost spike", "SOC backlog"],
+          "proof": ["MTTD/MTTR improvement", "False-positive reduction"],
+          "objections": ["Integration risk"],
+          "ctas": ["Controls gap scan"]
+        },
+        "early-majority": {
+          "priorities": ["Risk reduction", "Compliance fit"],
+          "pains": ["Audit findings", "Coverage gaps"],
+          "triggers": ["ISO/PCI audit", "Insurer questionnaire"],
+          "proof": ["Control mapping", "Remediation plan"],
+          "objections": ["Change risk"],
+          "ctas": ["Scope & readiness review"]
+        },
+        "late-majority": {
+          "priorities": ["Stability", "Low-change uplift"],
+          "pains": ["Legacy agents", "Siloed data"],
+          "triggers": ["Vendor renewal", "Major patch cycle"],
+          "proof": ["Like-for-like uplift", "Minimal change path"],
+          "objections": ["Operational overhead"],
+          "ctas": ["Pilot on a non-prod segment"]
+        },
+        "sceptic": {
+          "priorities": ["Proof before cost", "Clarity of ownership"],
+          "pains": ["Shelfware", "Unclear ROI"],
+          "triggers": ["Board scrutiny", "Budget freeze"],
+          "proof": ["Fixed success criteria", "Exit/no-commit terms"],
+          "objections": ["Another tool?"],
+          "ctas": ["Data-light assessment"]
+        }
+      },
       "buyers": {
         "CISO": {
           "priorities": ["Risk reduction", "Regulatory compliance"],
@@ -52,6 +136,48 @@
       }
     },
     "Cloud": {
+      "behaviours": {
+        "innovator": {
+          "priorities": ["FinOps automation", "Ephemeral infra"],
+          "pains": ["Untracked experiments", "Sprawl"],
+          "triggers": ["Platform revamp", "Kubernetes expansion"],
+          "proof": ["Automated rightsizing", "Savings realised in sprints"],
+          "objections": ["Team focus"],
+          "ctas": ["Sandbox rightsizing pilot"]
+        },
+        "early-adopter": {
+          "priorities": ["Savings with governance", "Tag hygiene"],
+          "pains": ["VM sprawl", "Over-provisioning"],
+          "triggers": ["Datacentre exit", "Cost spike"],
+          "proof": ["10–30% rightsizing", "Chargeback reports"],
+          "objections": ["Lock-in"],
+          "ctas": ["Cost optimisation review"]
+        },
+        "early-majority": {
+          "priorities": ["Predictable run-rate", "Cost controls"],
+          "pains": ["Budget overruns", "Idle resources"],
+          "triggers": ["Quarter close", "Renewal window"],
+          "proof": ["TCO model", "Idle reclaim plan"],
+          "objections": ["Disruption risk"],
+          "ctas": ["Readiness & savings snapshot"]
+        },
+        "late-majority": {
+          "priorities": ["Stability", "Minimal policy change"],
+          "pains": ["Policy drift", "Too many tools"],
+          "triggers": ["Audit/insurer questions", "Ops escalation"],
+          "proof": ["Policy templates", "Guardrails"],
+          "objections": ["Complexity"],
+          "ctas": ["Small scoped pilot"]
+        },
+        "sceptic": {
+          "priorities": ["Prove value first", "No long-term commit"],
+          "pains": ["Prior failed projects"],
+          "triggers": ["Budget freeze", "Board challenge"],
+          "proof": ["Fixed-scope PoC", "Exit criteria"],
+          "objections": ["Not the right time"],
+          "ctas": ["Data-light assessment"]
+        }
+      },
       "buyers": {
         "Head of Infrastructure": {
           "priorities": ["Right-size spend"],
@@ -70,6 +196,48 @@
       }
     },
     "UC & Collaboration": {
+      "behaviours": {
+        "innovator": {
+          "priorities": ["Workflow analytics", "AI assist"],
+          "pains": ["Siloed data", "Manual handoffs"],
+          "triggers": ["New channels", "AI pilot"],
+          "proof": ["Time-to-answer lift", "Agent assist wins"],
+          "objections": ["Change fatigue"],
+          "ctas": ["Sandbox with real flows"]
+        },
+        "early-adopter": {
+          "priorities": ["Agent productivity", "Omnichannel"],
+          "pains": ["Missed calls", "Poor routing"],
+          "triggers": ["Contact centre refresh"],
+          "proof": ["AHT reduction", "First-contact resolution"],
+          "objections": ["Training overhead"],
+          "ctas": ["Sandbox demo"]
+        },
+        "early-majority": {
+          "priorities": ["Reliability", "Ease of admin"],
+          "pains": ["Tool overlap", "Adoption issues"],
+          "triggers": ["Renewal", "IT standardisation"],
+          "proof": ["Adoption KPIs", "Admin time saved"],
+          "objections": ["Migration risk"],
+          "ctas": ["Low-risk pilot"]
+        },
+        "late-majority": {
+          "priorities": ["Stability", "Known patterns"],
+          "pains": ["Process variance"],
+          "triggers": ["Audit/complaints"],
+          "proof": ["Reference runbooks", "Minimal-change rollout"],
+          "objections": ["Too much change"],
+          "ctas": ["Readiness check"]
+        },
+        "sceptic": {
+          "priorities": ["Minimal disruption", "Clear ROI"],
+          "pains": ["Previous failed rollouts"],
+          "triggers": ["Exec scrutiny"],
+          "proof": ["Pilot metrics", "Roll-back plan"],
+          "objections": ["Why now?"],
+          "ctas": ["Data-light pilot"]
+        }
+      },
       "buyers": {
         "Head of Operations": {
           "priorities": ["Agent productivity"],
@@ -88,6 +256,48 @@
       }
     },
     "Contact Centre": {
+      "behaviours": {
+        "innovator": {
+          "priorities": ["Real-time orchestration", "Proactive service"],
+          "pains": ["Rigid flows"],
+          "triggers": ["AI routing trials"],
+          "proof": ["Proactive deflection rates", "Real-time SLA guardrails"],
+          "objections": ["Complexity"],
+          "ctas": ["Traffic replay pilot"]
+        },
+        "early-adopter": {
+          "priorities": ["CSAT/ESAT", "Omnichannel"],
+          "pains": ["Channel silos"],
+          "triggers": ["Peak season"],
+          "proof": ["NPS uplift", "Self-serve containment"],
+          "objections": ["Data migration"],
+          "ctas": ["Data-light pilot"]
+        },
+        "early-majority": {
+          "priorities": ["Queue health", "Cost per contact"],
+          "pains": ["Overstaffing", "Long handle times"],
+          "triggers": ["Budget cycle"],
+          "proof": ["AHT reduction", "Schedule efficiency"],
+          "objections": ["Change mgmt"],
+          "ctas": ["Ops review workshop"]
+        },
+        "late-majority": {
+          "priorities": ["Stability", "Compliance"],
+          "pains": ["QA inconsistency"],
+          "triggers": ["QA audit"],
+          "proof": ["Policy-aligned flows", "Gradual rollout"],
+          "objections": ["Risk"],
+          "ctas": ["Limited-scope trial"]
+        },
+        "sceptic": {
+          "priorities": ["No disruption", "Proof first"],
+          "pains": ["Failed migrations"],
+          "triggers": ["Exec scrutiny"],
+          "proof": ["Pilot with exit", "Written success criteria"],
+          "objections": ["Not now"],
+          "ctas": ["Readiness check"]
+        }
+      },
       "buyers": {
         "CX Leader": {
           "priorities": ["CSAT/ESAT"],
@@ -106,6 +316,48 @@
       }
     },
     "Managed Services": {
+      "behaviours": {
+        "innovator": {
+          "priorities": ["Automation coverage", "Runbook-as-code"],
+          "pains": ["Manual toil"],
+          "triggers": ["New platform launch"],
+          "proof": ["Automation rate", "MTTR gains"],
+          "objections": ["Scope creep"],
+          "ctas": ["Ops automation pilot"]
+        },
+        "early-adopter": {
+          "priorities": ["Coverage & SLA", "Skill depth"],
+          "pains": ["Skills gaps", "Overtime"],
+          "triggers": ["Talent churn"],
+          "proof": ["SLA adherence", "Shift coverage map"],
+          "objections": ["Loss of control"],
+          "ctas": ["Runbook workshop"]
+        },
+        "early-majority": {
+          "priorities": ["Cost certainty", "Process alignment"],
+          "pains": ["Ticket ping-pong", "Inconsistent fixes"],
+          "triggers": ["Renewal", "Audit"],
+          "proof": ["KB/Runbook alignment", "Costed service map"],
+          "objections": ["Vendor dependency"],
+          "ctas": ["Governance review"]
+        },
+        "late-majority": {
+          "priorities": ["Stability", "Clear RACI"],
+          "pains": ["Ownership confusion"],
+          "triggers": ["Major incident"],
+          "proof": ["RACI & escalation map", "Gradual transition"],
+          "objections": ["Risk"],
+          "ctas": ["Limited-scope transition"]
+        },
+        "sceptic": {
+          "priorities": ["Proof of value", "Exit options"],
+          "pains": ["Bad MSP experience"],
+          "triggers": ["Budget freeze"],
+          "proof": ["Try-before-buy", "Exit/rollback terms"],
+          "objections": ["Another vendor?"],
+          "ctas": ["Short trial with exit"]
+        }
+      },
       "buyers": {
         "Operations Director": {
           "priorities": ["Coverage & SLA"],
@@ -124,6 +376,48 @@
       }
     },
     "Devices": {
+      "behaviours": {
+        "innovator": {
+          "priorities": ["Zero-touch deploy", "Telemetry"],
+          "pains": ["Manual builds"],
+          "triggers": ["New device class"],
+          "proof": ["Time-to-ship reduction"],
+          "objections": ["Tooling effort"],
+          "ctas": ["Zero-touch pilot"]
+        },
+        "early-adopter": {
+          "priorities": ["Lifecycle value", "User experience"],
+          "pains": ["Warranty admin", "Spare pool chaos"],
+          "triggers": ["Hardware refresh"],
+          "proof": ["DOA rate reduction", "Swap time improvements"],
+          "objections": ["Compatibility"],
+          "ctas": ["Bundle quote"]
+        },
+        "early-majority": {
+          "priorities": ["Standardisation", "Predictable costs"],
+          "pains": ["Ad-hoc buys", "Inconsistent models"],
+          "triggers": ["Supplier renewal"],
+          "proof": ["Standard kit list", "TCO comparison"],
+          "objections": ["Change risk"],
+          "ctas": ["Reference build review"]
+        },
+        "late-majority": {
+          "priorities": ["Stability", "Supportability"],
+          "pains": ["Mixed estate"],
+          "triggers": ["Audit", "Warranty cliff"],
+          "proof": ["Support matrix", "Swap SLA"],
+          "objections": ["Switch cost"],
+          "ctas": ["Phased rollout plan"]
+        },
+        "sceptic": {
+          "priorities": ["Minimal change", "Clear ROI"],
+          "pains": ["Previous failed refresh"],
+          "triggers": ["Budget freeze"],
+          "proof": ["Pilot metrics", "Rollback plan"],
+          "objections": ["Not now"],
+          "ctas": ["Data-light trial"]
+        }
+      },
       "buyers": {
         "Procurement Lead": {
           "priorities": ["Lifecycle value"],
