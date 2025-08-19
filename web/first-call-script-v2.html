@@ -906,6 +906,7 @@
           const body = {
             kind: "call-script",
             basePrefix,
+            templateMd,
             variables: {
               mode,
               product: productId,
@@ -920,6 +921,21 @@
               next_step: fd.next_step || "",
             },
           };
+
+          // PREFETCH the markdown template from the same origin.
+          // We send it to the Function as `templateMd` to avoid server-path issues.
+          const contentRoot = `${window.location.origin}${basePrefix}/content/call-library/v1/${mode}/${productId}`;
+          const mdUrl = `${contentRoot}/${buyerId}.md`;
+
+          let templateMd = "";
+          try {
+            const mdRes = await fetch(mdUrl, { credentials: "include", cache: "no-store" });
+            if (mdRes.ok) templateMd = await mdRes.text();
+            else console.warn("[FCSv2] Template not found at", mdUrl, mdRes.status);
+          } catch (err) {
+            console.warn("[FCSv2] Prefetch failed, server will fallback:", err?.message || err);
+          }
+
 
           const resp = await fetch("/api/generate", {
             method: "POST",
