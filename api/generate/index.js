@@ -231,7 +231,7 @@ module.exports = async function (context, req) {
       }
 
       // Build Codespaces/SWA content URL
-      const basePrefix = String(body.basePrefix || "").replace(/\/+$/, ""); // e.g. "/ubiquitous-space-trout-xxxx"
+      // NOTE: Static content is rooted at "/", so DO NOT prepend basePrefix.
       let origin;
 
       if (isLocalDev) {
