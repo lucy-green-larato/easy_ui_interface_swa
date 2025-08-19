@@ -489,7 +489,13 @@
 
   <!-- === SCRIPT: glue UI to Library + API-first generation === -->
   <script type="module">
+    // DEBUG START
+    window.addEventListener('error', e => console.error('[window.onerror]', e.error || e.message || e));
+    window.addEventListener('unhandledrejection', e => console.error('[unhandledrejection]', e.reason));
+    console.log('[FCSv2] module boot');
+    // DEBUG END
     import { getIndex, loadTemplate, canonical } from "./src/lib/callLibrary.js";
+    console.log('[FCSv2] imports loaded');
 
     const modeFromCallType = (v) => canonical.mode(v);
     const buyerCanon = (v) => canonical.buyer(v);
@@ -874,10 +880,10 @@
           }
         }
 
-      const basePrefix = (() => {
-       const parts = (location.pathname || "").split("/");
-       return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
-      })();  
+        const basePrefix = (() => {
+          const parts = (location.pathname || "").split("/");
+          return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
+        })();
 
         const fd = Object.fromEntries(new FormData(form).entries());
         const productId = (productSel?.value || fd.product || "").toLowerCase().trim();
