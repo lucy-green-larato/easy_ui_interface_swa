@@ -9,30 +9,50 @@ export default async function (context, req) {
     return { status: 405, body: 'Method not allowed' }
   }
 
-  const { pitch, tone, cta, buyerType } = req.body
+  const {
+    pitch,
+    tone,
+    cta,
+    buyerType,
+    sellerName,
+    sellerCompany,
+    prospectName,
+    prospectRole,
+    prospectCompany,
+    value_proposition,
+    other_points
+  } = req.body || {}
 
   if (!pitch) {
     return { status: 400, body: 'Missing pitch input' }
   }
 
-  const toneDescriptor = tone === 'warm' ? 'warm and professional' : 'formal and corporate'
+  const toneDescriptor = /warm/i.test(tone)
+    ? 'warm and professional'
+    : 'formal and corporate'
+
+  // CTA fallback if none provided
+  const chosenCTA = (cta && cta.trim()) ||
+    'a short follow-up call to confirm scope and timelines'
 
   const prompt = `
-Using the sales pitch below, generate a cold call script that:
+Using the researched sales pitch and context below, generate a cold call script that:
 
 - Is written in formal, British business English
-- Has no headings, no slang, and avoids all US-style phrasing (e.g. blocker, flex, roll out)
+- Has no slang and avoids all US-style phrasing (e.g. "blocker", "flex", "roll out")
 - Flows as a natural spoken conversation
-- Begins by referencing observations from similar businesses, but makes no assumptions about the prospect’s current situation
+- Starts with a polite introduction of the salesperson to the prospect:
+  "Hello <prospectName>, this is <sellerName> from <sellerCompany>."
+- References observations from similar businesses, but makes no assumptions about the prospect’s current situation
 - Introduces the offer as a lightweight operational enhancement, not a rebuild
+- Elegantly weaves in the provided Unique Selling Points (if any) and Other Points (if any), placing them where they naturally strengthen the conversation
 - Includes one specific, relevant customer example with measurable results
 - Handles common objections factually and without pressure
-- Ends with a confident, specific call to action using the following wording:
-"${cta}"
+- Ends with a confident, specific call to action using this wording:
+"${chosenCTA}"
+- Always close with: "Thank you for your time."
 
-Adjust the tone and style based on the following setting:
-
-Tone: ${toneDescriptor}
+Tone setting: ${toneDescriptor}
 
 If tone is "warm and professional":
 - Use natural phrasing and a more conversational rhythm
@@ -42,22 +62,30 @@ If tone is "warm and professional":
 If tone is "formal and corporate":
 - Use precise, structured business language
 - Maintain professional distance and clear articulation
-- Avoid any casual phrasing or implied familiarity
+- Avoid casual phrasing or implied familiarity
 
-Then write a short section titled:
+After the script, add a short section:
 **Sales tips for colleagues conducting similar calls**
 Provide exactly 3 practical tips in a warm, instructional tone for less experienced colleagues.
 
-Role being called: ${buyerType}
+Context for the call:
+- Prospect: ${prospectName || '—'}, ${prospectRole || '—'} at ${prospectCompany || '—'}
+- Seller: ${sellerName || '—'} from ${sellerCompany || '—'}
+- Buyer type: ${buyerType || '—'}
+- Unique Selling Points: ${value_proposition || 'none provided'}
+- Other Points to cover: ${other_points || 'none provided'}
 
-Sales pitch:
+Researched sales pitch:
 """${pitch}"""
 `
 
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
-      { role: 'system', content: 'You are a highly effective UK B2B salesperson writing a cold call script.' },
+      {
+        role: 'system',
+        content: 'You are a highly effective UK B2B salesperson writing a cold call script.'
+      },
       { role: 'user', content: prompt }
     ],
     temperature: 0.6
@@ -68,14 +96,14 @@ Sales pitch:
   const [scriptText, tipsBlock] = output.split('**Sales tips for colleagues conducting similar calls**')
   const tips = tipsBlock
     ?.split('\n')
-    ?.filter(line => line.trim().match(/^[0-9]+\\.\\s/))
-    ?.map(tip => tip.replace(/^[0-9]+\\.\\s/, '').trim())
+    ?.filter(line => line.trim().match(/^[0-9]+\. /))
+    ?.map(tip => tip.replace(/^[0-9]+\. /, '').trim())
 
   return {
     status: 200,
     body: {
       script: {
-        text: scriptText.trim(),
+        text: (scriptText || '').trim(),
         tips: tips || []
       }
     }

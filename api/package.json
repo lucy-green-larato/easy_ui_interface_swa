@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "commonjs",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
-    "zod": "^3.23.8"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "ajv": "^8.17.1",
@@ -13,5 +15,10 @@
   },
   "scripts": {
     "validate:calllib": "ajv validate -s ./schemas/call-library.schema.json -d './web/content/call-library/v1/**/*.json'"
-  }
+  },
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
 }

@@ -1,6 +1,6 @@
 // /src/lib/callPromptEngine.js
 // Prompt-library engine: takes a loaded Markdown template and interpolates variables.
-// British English; no assumptive closes; salesperson chooses the next step.
+// British English; no assumptive closes; salesperson can choose the next step.
 
 function toSentenceList(input = "") {
   const txt = String(input || "").trim();
@@ -20,7 +20,9 @@ function canonicalBuyerLabel(id = "") {
   if (s.includes("late_majority") || s.includes("late-majority")) return "Late Majority";
   if (s.includes("sceptic") || s.includes("skeptic")) return "Sceptics";
   // fallback: title case
-  return id.replace(/(^|[-_ ])(\w)/g, (_, sp, ch) => (sp ? " " : "") + ch.toUpperCase()).trim();
+  return String(id || "")
+    .replace(/(^|[-_ ])(\w)/g, (_, sp, ch) => (sp ? " " : "") + ch.toUpperCase())
+    .trim();
 }
 
 function tidy(lines) {
@@ -61,12 +63,9 @@ function weaveValueProposition(sectionText, valueProp, productLabel) {
     ? `In brief, what tends to resonate with teams like yours is ${bullets.length === 1 ? bullets[0] : bullets.slice(0, -1).join(", ") + " and " + bullets.slice(-1)}.`
     : `In short, the way we create value with ${productLabel || "this solution"} is practical and measurable.`;
 
-  // Replace token with a naturally phrased line.
+  // Replace token with a naturally phrased line; append if token absent.
   let out = sectionText.replace(/\{\{\s*value_proposition\s*\}\}/gi, blended);
-  if (out === sectionText) {
-    // No token in the template — append politely.
-    out = `${sectionText}\n\n${blended}`;
-  }
+  if (out === sectionText) out = `${sectionText}\n\n${blended}`;
   return out.trim();
 }
 
@@ -82,34 +81,66 @@ function weaveNextStep(sectionText, nextStep) {
   return out.trim();
 }
 
+// Canonical headings we support
+const CANONICAL_ORDER = [
+  "Opening",
+  "Buyer Pain",
+  "Buyer Desire",
+  "Example Illustration",
+  "Handling Objections",
+  "Next Step",
+  "Close"
+];
+
+// Aliases (case-insensitive) that we normalise into the canonical headings above
+const ALIASES = new Map(
+  Object.entries({
+    "opener": "Opening",
+    "context bridge": "Buyer Pain",
+    "buyer pains": "Buyer Pain",
+    "value moment": "Buyer Desire",
+    "exploration nudge": "Buyer Desire",
+    "value story": "Example Illustration",
+    "example": "Example Illustration",
+    "objections & responses": "Handling Objections",
+    "objections": "Handling Objections",
+    "call to action": "Next Step",
+    "next step (salesperson-chosen)": "Next Step",
+    "next step (salesperson chosen)": "Next Step" // just in case
+  })
+);
+
+function normaliseHeadingName(raw = "") {
+  const k = String(raw).trim().toLowerCase();
+  if (CANONICAL_ORDER.map(s => s.toLowerCase()).includes(k)) {
+    // exact canonical
+    return CANONICAL_ORDER.find(s => s.toLowerCase() === k);
+  }
+  if (ALIASES.has(k)) return ALIASES.get(k);
+  // best-effort: title case the raw
+  return String(raw).replace(/\b\w/g, c => c.toUpperCase()).trim();
+}
+
 function splitSections(markdown) {
-  // Split by H1 headings of the required format (# Title)
+  // Accept both H1 and H2 headings with any of the supported/alias names
   const lines = String(markdown || "").replace(/\r\n/g, "\n").split("\n");
-  const order = [
-    "Opener",
-    "Context bridge",
-    "Value moment",
-    "Exploration nudge",
-    "Objections",
-    "Next step (salesperson-chosen)",
-    "Close"
-  ];
   const sections = {};
   let current = null;
 
   for (const line of lines) {
-    const m = /^#\s+(.+)\s*$/.exec(line);
+    const m = /^#{1,2}\s+(.+?)\s*$/.exec(line); // # or ## heading
     if (m) {
-      current = m[1].trim();
+      const canonical = normaliseHeadingName(m[1]);
+      current = canonical;
       if (!sections[current]) sections[current] = [];
       continue;
     }
     if (current) sections[current].push(line);
   }
 
-  // Join arrays to strings; ensure missing sections exist
-  for (const k of order) sections[k] = tidy((sections[k] || []).join("\n"));
-  return { sections, order };
+  // Join arrays to strings; ensure all canonical sections exist
+  for (const k of CANONICAL_ORDER) sections[k] = tidy((sections[k] || []).join("\n"));
+  return { sections, order: CANONICAL_ORDER.slice() };
 }
 
 function reassemble({ sections, order }) {
@@ -121,12 +152,17 @@ function reassemble({ sections, order }) {
 
 function tipsBank() {
   return [
-    "Lead with relevance and empathy, not features.",
-    "Keep one specific ask — no laundry list.",
-    "Acknowledge constraints briefly if raised; keep the ask.",
-    "Avoid calendar specifics — propose the step, not the slot.",
-    "Use role-specific proof in one line; keep it credible.",
-    "Mirror their language; stay concise and respectful."
+    "Open with something you've seen in the market, not a guess about their business.",
+    "Check that you understand what their business does before you call.",
+    "Introduce yourself briefly, then talk about what’s happening in their world, not yours.",
+    "Use one strong, relevant example of the value on offer.",
+    "Show you understand likely concerns and offer a simple way forward.",
+    "When closing, suggest a clear outcome and agree next steps.",
+    "Ask clear questions and give the prospect space to think.",
+    "Know the value of your pitch — not just the words.",
+    "Be natural. Be yourself.",
+    "After a call, jot down how the prospect received it.",
+    "Keep good call notes. They are gold dust."
   ];
 }
 
@@ -153,51 +189,49 @@ function pickRandom(arr, n) {
  */
 export function generatePromptBasedCallScript({ input, tone = "consultative", lengthHint = 300 }) {
   const tpl = String(input?.template_text || "");
-  if (!tpl.trim()) {
-    throw new Error("Template text missing.");
-  }
+  if (!tpl.trim()) throw new Error("Template text missing.");
 
   const { sections, order } = splitSections(tpl);
 
   // Basic token interpolation (not value/next_step)
-  let pass1 = {};
-  Object.assign(pass1, sections);
-  const baseInterpolated = interpolateBasic(reassemble({ sections: pass1, order }), {
-    seller: input?.seller || {},
-    prospect: input?.prospect || {},
-    product: input?.product || {},
-    buyer: input?.buyer || ""
-  });
+  const baseInterpolated = interpolateBasic(
+    reassemble({ sections, order }),
+    {
+      seller: input?.seller || {},
+      prospect: input?.prospect || {},
+      product: input?.product || {},
+      buyer: input?.buyer || ""
+    }
+  );
 
   // Re-split to work section-by-section for weaving
   const { sections: S2, order: O2 } = splitSections(baseInterpolated);
 
-  // Weave value proposition and next step
-  S2["Value moment"] = weaveValueProposition(
-    S2["Value moment"],
+  // Weave value proposition into Buyer Desire
+  S2["Buyer Desire"] = weaveValueProposition(
+    S2["Buyer Desire"],
     input?.value_proposition || "",
     input?.product?.label || input?.product?.id || "this solution"
   );
 
-  S2["Next step (salesperson-chosen)"] = weaveNextStep(
-    S2["Next step (salesperson-chosen)"],
+  // Weave next step into Next Step
+  S2["Next Step"] = weaveNextStep(
+    S2["Next Step"],
     input?.next_step || ""
   );
 
   // Close: ensure mandated thank-you
   S2["Close"] = ensureThanksClose(S2["Close"]);
 
-  // Light touch length hint: if user asked for ~150 words, trim long sections slightly.
+  // Light-touch length hint: trim long sections slightly
   const budget = parseInt(String(lengthHint), 10) || 300;
   const softTrim = (txt) => {
-    const words = txt.split(/\s+/);
+    const words = String(txt || "").split(/\s+/);
     if (words.length <= budget * 1.4) return txt; // generous
     return words.slice(0, Math.max(80, Math.floor(budget * 0.9))).join(" ") + "…";
-  };
-
-  // Apply soft trim to “Value moment” and “Exploration nudge” if very long
-  S2["Value moment"] = softTrim(S2["Value moment"]);
-  S2["Exploration nudge"] = softTrim(S2["Exploration nudge"]);
+    };
+  S2["Buyer Desire"] = softTrim(S2["Buyer Desire"]);
+  S2["Example Illustration"] = softTrim(S2["Example Illustration"]);
 
   const finalText = reassemble({ sections: S2, order: O2 });
 
@@ -206,8 +240,8 @@ export function generatePromptBasedCallScript({ input, tone = "consultative", le
   const modeNice = String(input?.mode || "direct").charAt(0).toUpperCase() + String(input?.mode || "direct").slice(1);
   const metaLine = `Library · ${input?.product?.label || input?.product?.id || "—"} · ${buyerNice} · ${modeNice}`;
 
-  // Tips: 1 fixed anchor + 2 random
-  const anchor = "Make one clear ask (salesperson-chosen).";
+  // Tips: 1 fixed anchor + 2 random (updated phrasing)
+  const anchor = "Make one clear ask and agree the next step.";
   const extra = pickRandom(tipsBank(), 2);
   const tips_list = [anchor, ...extra];
 

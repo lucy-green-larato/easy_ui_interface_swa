@@ -104,7 +104,9 @@ BUYER_MAP = {
 VALID_BUYERS = {"innovator", "early-adopter", "early-majority", "late-majority", "sceptic"}
 
 # Flexible input → canonical section mapping
-SECTION_RULES = [
+SECTION_RULES = 
+
+[
     (re.compile(r"^\s*(\d+\s*\|\s*)?(opening|opener)\b", re.I), "Opener", False),
     (re.compile(r"^\s*(\d+\s*\|\s*)?(buyer\s+pain|pain)\b", re.I), "Context bridge", False),
     (re.compile(r"^\s*(\d+\s*\|\s*)?(buyer\s+desire|desire)\b", re.I), "Value moment", False),
