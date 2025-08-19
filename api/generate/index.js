@@ -300,8 +300,10 @@ module.exports = async function (context, req) {
         redirect: "follow",
       });
 
+      // ✅ Only call .text() once
+      const bodyText = await resMd.text().catch(() => "");
+
       if (!resMd.ok) {
-        const sample = await resMd.text().catch(() => "");
         context.res = {
           status: 404,
           headers: cors,
@@ -310,14 +312,15 @@ module.exports = async function (context, req) {
             detail: `${mode}/${productId}/${buyerType}.md`,
             tried: mdUrl,
             version: VERSION,
-            sample: sample.slice(0, 200),
+            sample: bodyText.slice(0, 200),
           },
         };
         return;
       }
 
-      // ✅ Always define templateMd first
-      const templateMd = await resMd.text();
+      // ✅ Always define templateMd from the single text read
+      const templateMd = bodyText;
+
 
       // ✅ Only then build the prompt
       const productLabel = productId
