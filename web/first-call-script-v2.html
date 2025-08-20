@@ -325,6 +325,12 @@
         </div>
       </div>
     </section>
+  
+    <!-- Script Pop-out Modal -->
+    <dialog id="script-modal" class="modal">
+      <button id="close-modal" class="btn">Close ×</button>
+      <pre id="modal-script"></pre>
+    </dialog>
 
     <!-- RIGHT -->
     <section class="panel right" aria-labelledby="intel-title">
@@ -420,11 +426,15 @@
       const activityTpl = document.getElementById('activity-item');
       const diag = document.getElementById('diagnostics');
       const diagJson = document.getElementById('diag-json');
+      const modal = document.getElementById('script-modal');
+      const closeModal = document.getElementById('close-modal');
+      const modalScript = document.getElementById('modal-script');
 
       const productSel = document.getElementById('product');
       const buyerBehSel = document.getElementById('buyer_behaviour');
       const toggleIntelBtn = document.getElementById('toggle-intel');
       const intelBody = document.getElementById('intel-body');
+      const scriptOutput = document.getElementByID('output');
 
       const callTypeSel = document.getElementById('call_type');
       const rememberCallType = document.getElementById('remember_call_type');
@@ -437,6 +447,20 @@
       let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
 
       const nowTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      if (popoutBtn) {
+        popoutBtn.addEventListener("click", () => {
+          const scriptOutput = document.getElementById('output'); // adjust if yours is named differently
+          if (scriptOutput) {
+            modalScript.textContent = scriptOutput.textContent;
+            modal.showModal();
+          }
+        });
+      }
+
+      if (closeModal) {
+        closeModal.addEventListener("click", () => modal.close());
+      }
+
 
       function setBusy(isBusy) {
         if (submitBtn) submitBtn.disabled = isBusy || !allRequiredFilled(form);
@@ -768,9 +792,36 @@
         })();
 
         const fd = Object.fromEntries(new FormData(form).entries());
+        const mode = modeFromCallType(fd.call_type);
         const productId = (productSel?.value || fd.product || "").toLowerCase().trim();
-        const mode = canonical.mode(fd.call_type);
-        const buyerId = canonical.buyer(fd.buyer_behaviour);
+        const buyerId = buyerCanon(fd.buyer_behaviour);  
+
+        // FINAL BODY (note: includes value_proposition, context, next_step, tone, length)
+        const body = {
+          kind: "call-script",
+          basePrefix,
+          variables: {
+            mode,
+            product: productId,
+            buyerType: buyerId,
+
+            // people/org
+            seller_name: fd.seller_name,
+            seller_company: fd.seller_company,
+            prospect_name: fd.prospect_name,
+            prospect_role: fd.prospect_role,
+            prospect_company: fd.prospect_company,
+
+            // salesperson inputs (these were missing before)
+            value_proposition: fd.value_proposition || "",
+            context: fd.context || "",
+            next_step: fd.next_step || "",
+
+            // optional prefs used by backend
+            tone: fd.tone || "",
+            length: fd.length || "",
+          },
+        };
 
         if (!productId) {
           validateField("product");
