@@ -1,10 +1,10 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-08-20-patch6 (strict buyer; safe base; host mapping; guarded override; tone+length)
+// Version: v3-markdown-first-2025-08-20-patch7 (strict buyer; safe base; host mapping; guarded override; tone+length; enforce inputs; ban clichés)
 
 const { z } = require("zod");
 
 // ---------- helpers ----------
-const VERSION = "v3-markdown-first-2025-08-20-patch6";
+const VERSION = "v3-markdown-first-2025-08-20-patch7";
 
 /* eslint-disable no-console */
 try { console.log(`[${VERSION}] module loaded`); } catch {}
@@ -113,16 +113,30 @@ function parseTargetLength(label = "") {
   if (s.includes("300")) return 300;
   if (s.includes("450")) return 450;
   if (s.includes("650")) return 650;
-  // default to your current middle option
+  // default midpoint
   return 300;
 }
 
 function buildPromptFromMarkdown({ templateMdText, seller, prospect, productLabel, buyerType, valueProposition, context, nextStep, tone, targetWords }) {
-  const usp   = (valueProposition || "").trim() || "(none provided)";
-  const other = (context || "").trim() || "(none provided)";
-  const cta   = (nextStep || "").trim() || "(use suggested_next_step from the template if present; otherwise propose a sensible next step)";
+  const usp   = (valueProposition || "").trim();
+  const other = (context || "").trim();
+  const cta   = (nextStep || "").trim();
   const toneLine = tone ? `Write in a "${tone}" tone.\n` : "";
   const lengthLine = targetWords ? `Aim for about ${targetWords} words (±10%).\n` : "";
+
+  // hard ban list for clichés we don't want in British business calls
+  const banned = [
+    "i hope you are well",
+    "hope you're well",
+    "just reaching out",
+    "touching base",
+    "circle back",
+    "at your earliest convenience"
+  ].join("; ");
+
+  const uspLine = usp ? `USPs (from salesperson): ${usp}` : "USPs (from salesperson): (none provided)";
+  const otherLine = other ? `Other points to consider: ${other}` : "Other points to consider: (none provided)";
+  const nextLine = cta ? `Requested Next Step (if any): ${cta}` : "Requested Next Step (if any): (none)";
 
   return `
 You are a highly effective UK B2B salesperson.
@@ -131,9 +145,13 @@ ${toneLine}${lengthLine}Use the Markdown template below as the skeleton for the 
 
 MANDATES:
 - British business English; no US slang; no assumptive closes.
+- Do NOT use canned pleasantries or clichés (banned phrases: ${banned}).
 - Open with a brief personal introduction from ${seller.name} at ${seller.company} to ${prospect.name} (${prospect.role} at ${prospect.company}).
 - Reference observations from similar businesses; do not assume the prospect’s current state.
-- Elegantly weave the USPs and Other points where they make sense in context (do not ignore them if provided).
+- **You MUST weave in the items provided by the salesperson**:
+  - If any **USPs** are provided, incorporate them naturally (paraphrase if needed). Do not omit them.
+  - If any **Other points** are provided, acknowledge and integrate them where relevant. Do not omit them.
+  - If something provided is genuinely irrelevant, include a short line explaining why it may not apply, rather than ignoring it.
 - Include one specific, relevant customer example with measurable results.
 - Handle common objections factually and without pressure.
 - For the "Next Step": use the salesperson’s input if provided; otherwise, if the template includes an HTML comment <!-- suggested_next_step: ... --> use that; otherwise propose a clear, low-friction next step.
@@ -142,9 +160,9 @@ MANDATES:
 Buyer type: ${buyerType}
 Product: ${productLabel}
 
-USPs (from salesperson): ${usp}
-Other points to consider: ${other}
-Requested Next Step (if any): ${nextStep || "(none)"}
+${uspLine}
+${otherLine}
+${nextLine}
 
 --- BEGIN TEMPLATE ---
 ${templateMdText}
