@@ -1,10 +1,15 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-08-20
+// Version: v3-markdown-first-2025-08-20-patch1
 
 const { z } = require("zod");
 
 // ---------- helpers ----------
-const VERSION = "v3-markdown-first-2025-08-20";
+const VERSION = "v3-markdown-first-2025-08-20-patch1";
+
+// breadcrumb to prove module evaluated without crashing
+// (If the error happens before this log, it's a require-time crash in a different file.)
+/* eslint-disable no-console */
+try { console.log(`[${VERSION}] module loaded`); } catch {}
 
 function extractText(res) {
   if (!res) return "";
@@ -92,7 +97,7 @@ function ensureThanksClose(text) {
   return (t + (t.endsWith("\n") ? "" : "\n") + "Thank you for your time.").trim();
 }
 
-function buildPromptFromMarkdown({ templateMd, seller, prospect, productLabel, buyerType, valueProposition, context, nextStep }) {
+function buildPromptFromMarkdown({ templateMdText, seller, prospect, productLabel, buyerType, valueProposition, context, nextStep }) {
   const usp   = (valueProposition || "").trim() || "(none provided)";
   const other = (context || "").trim() || "(none provided)";
   const cta   = (nextStep || "").trim() || "(use suggested_next_step from the template if present; otherwise propose a sensible next step)";
@@ -119,7 +124,7 @@ Other points to consider: ${other}
 Requested Next Step (if any): ${nextStep || "(none)"}
 
 --- BEGIN TEMPLATE ---
-${templateMd}
+${templateMdText}
 --- END TEMPLATE ---
 
 After the script, add this heading and content:
@@ -157,6 +162,8 @@ module.exports = async function (context, req) {
   }
 
   try {
+    context.log(`[${VERSION}] handler start`);
+
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const kind = String(body?.kind || "").toLowerCase();
 
@@ -178,7 +185,6 @@ module.exports = async function (context, req) {
 
       context.log(`[${VERSION}] [CallLib] GET ${mdUrl}`);
 
-      // ALWAYS read body first, then branch; never touch templateMd until after we know it's OK.
       const resMd = await fetch(mdUrl, {
         headers: {
           cookie: req.headers.cookie || "",
@@ -188,6 +194,7 @@ module.exports = async function (context, req) {
         cache: "no-store",
         redirect: "follow",
       });
+
       const bodyText = await resMd.text().catch(() => "");
 
       if (!resMd.ok) {
@@ -205,12 +212,12 @@ module.exports = async function (context, req) {
         return;
       }
 
-      // Define templateMd ONLY after success
-      const templateMd = bodyText;
+      // Assign only after successful fetch
+      const templateMdText = bodyText;
 
       const productLabel = productId.replace(/[_-]+/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
       const prompt = buildPromptFromMarkdown({
-        templateMd,
+        templateMdText,
         seller:   { name: v.seller_name,   company: v.seller_company },
         prospect: { name: v.prospect_name, role: v.prospect_role, company: v.prospect_company },
         productLabel,
