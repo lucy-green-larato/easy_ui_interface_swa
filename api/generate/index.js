@@ -211,6 +211,7 @@ module.exports = async function (context, req) {
       const v = {
         ...(body || {}),
         ...BodySchema(body.variables || {}),
+          context.log(`[${VERSION}] [DEBUG] Incoming variables: ${JSON.stringify(v, null, 2)}`);
       }
       const productId = toProductId(v.product || body.product);
 
