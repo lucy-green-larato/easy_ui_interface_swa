@@ -1,10 +1,10 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-08-20-patch3 (A-first with guarded client override)
+// Version: v3-markdown-first-2025-08-20-patch4 (A-first; guarded client override; smart local host mapping)
 
 const { z } = require("zod");
 
 // ---------- helpers ----------
-const VERSION = "v3-markdown-first-2025-08-20-patch3";
+const VERSION = "v3-markdown-first-2025-08-20-patch4";
 
 /* eslint-disable no-console */
 try { console.log(`[${VERSION}] module loaded`); } catch {}
@@ -147,7 +147,7 @@ module.exports = async function (context, req) {
   };
 
   const hostHeader = (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0] || "";
-  const isLocalDev = /localhost|127\.0\.0\.1|app\.github\.dev$/i.test(hostHeader);
+  const isLocalDev = /localhost|127\.0\.0\.1|app\.github\.dev|githubpreview\.dev/i.test(hostHeader);
 
   if (req.method === "OPTIONS") { context.res = { status: 204, headers: cors }; return; }
   if (req.method === "GET")     { context.res = { status: 200, headers: cors, body: { ok: true, route: "generate", version: VERSION } }; return; }
@@ -177,25 +177,56 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const basePrefix = String(body.basePrefix || "").replace(/\/+$/, "");
-      const proto = (req.headers["x-forwarded-proto"] || "https").split(",")[0];
-      const envBase = (process.env.CALL_LIB_BASE || "").trim().replace(/\/+$/, "");
-      const host = (req.headers["x-forwarded-host"] || req.headers.host || "localhost:4280").split(",")[0].trim();
+      // --- resolve base for call-library fetches (no hardcoding) ---
+      const protoHdr = (req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+      const hostHdr  = (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
+      const envBase  = (process.env.CALL_LIB_BASE || "").trim().replace(/\/+$/, "");
+      const bodyBase = String(body.basePrefix || "").trim().replace(/\/+$/, "");
 
-      // choose base in priority: env > body > same host
+      // Map Functions host (7071) -> Static host (4280) in local dev (works for localhost and Codespaces).
+      function mapToStaticHost(h) {
+        if (!isLocalDev || !h) return h;
+        if (/^7071-/.test(h)) return h.replace(/^7071-/, "4280-"); // Codespaces style
+        const m = h.match(/^(.*?):(\d+)$/);
+        if (m && m[2] === "7071") return `${m[1]}:4280`;
+        return h;
+      }
+
+      const proto = isLocalDev ? "http" : (protoHdr || "https");
+      const resolvedHost = isLocalDev ? mapToStaticHost(hostHdr) : hostHdr;
+
+      // Priority: explicit env base > body prefix on current host > current host
       let base;
       if (envBase) {
         base = /^https?:\/\//i.test(envBase)
           ? envBase
-          : `${proto}://${host}${envBase.startsWith("/") ? "" : "/"}${envBase}`;
-      } else if (basePrefix) {
-        base = `${proto}://${host}${basePrefix.startsWith("/") ? "" : "/"}${basePrefix}`;
+          : `${proto}://${resolvedHost}${envBase.startsWith("/") ? "" : "/"}${envBase}`;
+      } else if (bodyBase) {
+        base = `${proto}://${resolvedHost}${bodyBase.startsWith("/") ? "" : "/"}${bodyBase}`;
       } else {
-        base = `${proto}://${host}`;
+        base = `${proto}://${resolvedHost}`;
       }
 
       const mdUrl = `${base}/content/call-library/v1/${mode}/${productId}/${buyerType}.md`;
       context.log(`[${VERSION}] [CallLib] GET ${mdUrl}`);
+
+      // Optional: local retry helper to correct proto/port if needed
+      async function fetchWithLocalFallback(url, init) {
+        try { return await fetch(url, init); }
+        catch (e) {
+          if (isLocalDev) {
+            const alt = url
+              .replace(/^https:\/\//i, "http://")
+              .replace(/\/\/([^/]*):7071\//, "//$1:4280/")
+              .replace(/\/\/7071-/, "//4280-");
+            if (alt !== url) {
+              context.log(`[${VERSION}] [CallLib] retry -> ${alt}`);
+              try { return await fetch(alt, init); } catch {}
+            }
+          }
+          throw e;
+        }
+      }
 
       // ---- Guarded client override (Option B) with A-first default ----
       const allowClientTpl = process.env.ALLOW_CLIENT_TEMPLATE === "1";
@@ -212,7 +243,7 @@ module.exports = async function (context, req) {
         templateMdText = clientTemplate;
         context.log(`[${VERSION}] Using client-supplied template markdown (override)`);
       } else {
-        const resMd = await fetch(mdUrl, {
+        const resMd = await fetchWithLocalFallback(mdUrl, {
           headers: {
             cookie: req.headers.cookie || "",
             "x-ms-client-principal": principalHeader || "",
@@ -221,6 +252,7 @@ module.exports = async function (context, req) {
           cache: "no-store",
           redirect: "follow",
         });
+
         const bodyText = await resMd.text().catch(() => "");
         if (!resMd.ok) {
           context.res = {
