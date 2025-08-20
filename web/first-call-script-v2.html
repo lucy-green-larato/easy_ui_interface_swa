@@ -20,9 +20,7 @@
       --bg: #f7f7f9;
     }
 
-    body {
-      background: var(--bg)
-    }
+    body { background: var(--bg) }
 
     .layout {
       display: grid;
@@ -33,23 +31,10 @@
       width: 100%;
     }
 
-    @media (max-width:1200px) {
-      .layout {
-        grid-template-columns: 1fr;
-      }
-    }
+    @media (max-width:1200px) { .layout { grid-template-columns: 1fr; } }
 
-    .grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: var(--space-3)
-    }
-
-    @media (max-width: 800px) {
-      .grid-2 {
-        grid-template-columns: 1fr
-      }
-    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3) }
+    @media (max-width: 800px) { .grid-2 { grid-template-columns: 1fr } }
 
     /* Readable script box */
     .output {
@@ -65,28 +50,14 @@
       letter-spacing: .005em;
     }
 
-    .tips-card ul {
-      margin: .5rem 0 0;
-      padding-left: 1.25rem
-    }
+    .tips-card ul { margin: .5rem 0 0; padding-left: 1.25rem }
+    .tips-card ul li { margin: .25rem 0 }
 
-    .tips-card ul li {
-      margin: .25rem 0
-    }
+    .panel .card h3 { margin: 0 0 .5rem 0 }
 
-    .panel .card h3 {
-      margin: 0 0 .5rem 0
-    }
+    .intel-grid { display: grid; grid-template-columns: 1fr !important; gap: var(--space-3) }
 
-    .intel-grid {
-      display: grid;
-      grid-template-columns: 1fr !important;
-      gap: var(--space-3)
-    }
-
-    input,
-    select,
-    textarea {
+    input, select, textarea {
       width: 100%;
       padding: 10px 12px;
       border-radius: 8px;
@@ -95,10 +66,7 @@
       outline: none;
       transition: box-shadow .15s ease, border-color .15s ease;
     }
-
-    input:focus,
-    select:focus,
-    textarea:focus {
+    input:focus, select:focus, textarea:focus {
       box-shadow: 0 0 0 2px rgba(36, 88, 230, .35);
       border-color: var(--accent);
     }
@@ -112,114 +80,35 @@
       background: #fff;
       border-bottom: 1px solid #e5e7eb;
     }
-
-    .app-header .header-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .app-header .logo {
-      height: 24px;
-      width: auto;
-    }
-
-    .app-header .brand-text {
-      line-height: 1.15;
-    }
-
-    .app-header .app-title {
-      font-size: 1rem;
-      font-weight: 600;
-      margin: 0;
-    }
-
-    .app-header .kicker {
-      margin: 0;
-      color: #6b7280;
-      font-size: .85rem;
-    }
-
-    .app-header .header-right {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
+    .app-header .header-left { display: flex; align-items: center; gap: 10px; }
+    .app-header .logo { height: 24px; width: auto; }
+    .app-header .brand-text { line-height: 1.15; }
+    .app-header .app-title { font-size: 1rem; font-weight: 600; margin: 0; }
+    .app-header .kicker { margin: 0; color: #6b7280; font-size: .85rem; }
+    .app-header .header-right { display: flex; align-items: center; gap: 12px; }
 
     /* Compact pill (selector + remember) */
     .calltype-mini {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 4px 8px;
-      border: 1px solid #e5e7eb;
-      border-radius: 999px;
-      background: #fff;
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 8px; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff;
     }
-
-    .calltype-mini .mini-label {
-      color: #6b7280;
-      font-size: .85rem;
-    }
-
+    .calltype-mini .mini-label { color: #6b7280; font-size: .85rem; }
     .calltype-mini select {
-      appearance: none;
-      border: none;
-      background: #f9fafb;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-size: .85rem;
+      appearance: none; border: none; background: #f9fafb;
+      padding: 2px 8px; border-radius: 999px; font-size: .85rem;
     }
-
-    .calltype-mini .remember {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: .85rem;
-      color: #374151;
-    }
+    .calltype-mini .remember { display: flex; align-items: center; gap: 6px; font-size: .85rem; color: #374151; }
 
     /* Subtle status chip */
-    .model-note {
-      color: #374151;
-      font-size: .85rem;
-      padding: 4px 10px;
-      border: 1px solid #e5e7eb;
-      border-radius: 999px;
-      background: #f9fafb;
-    }
-
-    .model-note .label {
-      color: #6b7280;
-      margin-right: 6px;
-    }
+    .model-note { color: #374151; font-size: .85rem; padding: 4px 10px; border: 1px solid #e5e7eb; border-radius: 999px; background: #f9fafb; }
+    .model-note .label { color: #6b7280; margin-right: 6px; }
 
     /* Optional user badge */
-    .badge {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      color: #374151;
-      font-size: .85rem;
-    }
+    .badge { display: flex; align-items: center; gap: 6px; color: #374151; font-size: .85rem; }
+    .badge svg { width: 16px; height: 16px; stroke: #6b7280; fill: none; stroke-width: 1.5; }
 
-    .badge svg {
-      width: 16px;
-      height: 16px;
-      stroke: #6b7280;
-      fill: none;
-      stroke-width: 1.5;
-    }
-
-    .is-hidden {
-      display: none !important;
-    }
-
-    .error-inline {
-      color: #b91c1c;
-      font-size: .85rem;
-      margin-left: 8px;
-    }
+    .is-hidden { display: none !important; }
+    .error-inline { color: #b91c1c; font-size: .85rem; margin-left: 8px; }
   </style>
 </head>
 
@@ -814,6 +703,7 @@
         onChangeRecalcIntel(); saveForm(); refreshSubmitState();
       });
 
+      const toggleIntelBtn = document.getElementById('toggle-intel');
       toggleIntelBtn?.addEventListener('click', () => {
         const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
         toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
@@ -821,6 +711,7 @@
         toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
       });
 
+      const toggleTipsBtn = document.getElementById('toggle-tips');
       toggleTipsBtn?.addEventListener('click', () => {
         const expanded = toggleTipsBtn.getAttribute('aria-expanded') === 'true';
         const willHide = expanded;
@@ -828,24 +719,22 @@
         applyTipsVisibility();
       });
 
+      const saveNotesBtn = document.getElementById('save-notes');
       saveNotesBtn?.addEventListener('click', saveNotes);
+
+      const downloadNotesBtn = document.getElementById('download-notes');
       downloadNotesBtn?.addEventListener('click', () => {
         const who = (form?.elements?.prospect_name?.value || 'prospect').trim().replace(/\s+/g, '-');
         downloadText(`call-notes_${who}_${new Date().toISOString().slice(0, 10)}.txt`, notesArea.value || '');
       });
 
-      document.getElementById('reset')?.addEventListener('click', async () => {
-        form?.reset(); clearFormState(); loadCallPref();
-        onChangeRecalcIntel(); renderActivity(); refreshSubmitState();
-        setStatus('Form reset. Stored values cleared.'); loadNotes();
-        await populateProductsForMode(modeFromCallType(callTypeSel.value || 'direct'));
-      });
-
+      const copyBtn = document.getElementById('copy');
       copyBtn?.addEventListener('click', async () => {
         const txt = outputEl?.textContent || ''; if (!txt.trim()) return;
         await navigator.clipboard.writeText(txt); setStatus('Copied to clipboard.');
       });
 
+      const popoutBtn = document.getElementById('popout');
       popoutBtn?.addEventListener('click', () => {
         const txt = (outputEl?.textContent || '').trim();
         if (!txt) { setStatus('No script to pop out yet.', 'error'); return; }
@@ -866,7 +755,7 @@
         w.document.close();
       });
 
-      // ---------- Submit: API-first with local fallback ----------
+      // ---------- Submit: API-first (server fetches library Markdown) ----------
       form && form.addEventListener("submit", async (e) => {
         e.preventDefault();
 
@@ -902,11 +791,10 @@
         if (diagJson) diagJson.textContent = "";
 
         try {
-          // ---------- API CALL ----------
+          // Build payload WITHOUT any template text (server will fetch)
           const body = {
             kind: "call-script",
             basePrefix,
-            templateMd,
             variables: {
               mode,
               product: productId,
@@ -921,21 +809,6 @@
               next_step: fd.next_step || "",
             },
           };
-
-          // PREFETCH the markdown template from the same origin.
-          // We send it to the Function as `templateMd` to avoid server-path issues.
-          const contentRoot = `${window.location.origin}${basePrefix}/content/call-library/v1/${mode}/${productId}`;
-          const mdUrl = `${contentRoot}/${buyerId}.md`;
-
-          let templateMd = "";
-          try {
-            const mdRes = await fetch(mdUrl, { credentials: "include", cache: "no-store" });
-            if (mdRes.ok) templateMd = await mdRes.text();
-            else console.warn("[FCSv2] Template not found at", mdUrl, mdRes.status);
-          } catch (err) {
-            console.warn("[FCSv2] Prefetch failed, server will fallback:", err?.message || err);
-          }
-
 
           const resp = await fetch("/api/generate", {
             method: "POST",
@@ -1034,5 +907,4 @@
   </script>
 
 </body>
-
 </html>
