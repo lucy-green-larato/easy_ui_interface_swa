@@ -787,10 +787,15 @@
           // Build payload WITHOUT any template text (server will fetch)
           const body = {
             kind: "call-script",
+            // basePrefix helps the API find your static content root (keep this if you already have it above)
+            basePrefix: (() => {
+              const parts = (location.pathname || "").split("/");
+              return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
+            })(),
             variables: {
               mode,
-              product: productId,
-              buyerType: buyerId,
+              product: productSel?.value || fd.product || "",
+              buyerType: buyerCanon(fd.buyer_behaviour),
               seller_name: fd.seller_name,
               seller_company: fd.seller_company,
               prospect_name: fd.prospect_name,
