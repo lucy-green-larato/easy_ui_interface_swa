@@ -623,7 +623,7 @@
         const id = el.id || el.name || '';
         const errorEl = document.getElementById(`${id}_error`) || (id === 'call_type' ? document.getElementById('call_type_error') : null);
         let value = '';
-               if (el === productSel) value = (productSel.value || '').trim();
+        if (el === productSel) value = (productSel.value || '').trim();
         else if (el === buyerBehSel) value = (buyerBehSel.value || '').trim();
         else if (id === 'call_type') value = (callTypeSel?.value || '').trim();
         else value = (el.value || '').trim();
@@ -803,8 +803,8 @@
           const idx = await getIndex(mode, basePrefix);
           const items =
             Array.isArray(idx?.products) ? idx.products :
-            Array.isArray(idx?.items)    ? idx.items :
-            Array.isArray(idx)           ? idx : [];
+              Array.isArray(idx?.items) ? idx.items :
+                Array.isArray(idx) ? idx : [];
 
           if (!items.length) {
             sel.innerHTML = `<option value="">No products found</option>`;
@@ -918,6 +918,7 @@
       form && form.addEventListener("submit", async (e) => {
         e.preventDefault();
 
+        // 1) Required fields check
         for (const name of REQUIRED) {
           const el = form.elements[name] || document.getElementById(name);
           if (!el || !String(el.value || "").trim()) {
@@ -928,10 +929,14 @@
           }
         }
 
+        // 2) Gather raw form values
         const fd = Object.fromEntries(new FormData(form).entries());
-        const mode = modeFromCallType(fd.call_type);
-        const productId = (productSel?.value || fd.product || "").toLowerCase().trim();
-        const buyerId = buyerCanon(fd.buyer_behaviour);
+
+        // 3) Canonicalise key fields used by the backend
+        const mode = modeFromCallType(fd.call_type);                 // "direct" | "partner"
+        const productId = (productSel?.value || fd.product || "")
+          .toLowerCase().trim();                                     // e.g. "connectivity"
+        const buyerId = buyerCanon(fd.buyer_behaviour);              // e.g. "early-adopter"
 
         if (!productId) {
           validateField("product");
@@ -945,19 +950,19 @@
         if (diagJson) diagJson.textContent = "";
 
         try {
-          // Pass entire form to script generator
-          const fd = Object.fromEntries(new FormData(form).entries());
+          // 4) Build payload: include EVERYTHING from the form, then override canonical fields
           const body = {
             kind: "call-script",
-            basePrefix, // reuse module-scoped basePrefix
+            basePrefix,                     // module-scoped helper
             variables: {
-              ...fd,
-              mode,
+              ...fd,                        // seller/prospect/company, USPs, context, next_step, tone, length, etc.
+              mode,                         // canonical overrides:
               product: productId,
               buyerType: buyerId,
             },
           };
 
+          // 5) Send to API
           const resp = await fetch("/api/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -969,16 +974,16 @@
             throw new Error(`API ${resp.status}: ${errTxt}`);
           }
 
+          // 6) Handle OK
           const data = await resp.json();
           const script = data?.script?.text || "";
           const tips = data?.script?.tips || [];
 
-          // ---------- Update UI ----------
+          // Update UI
           outputEl.textContent = script;
           outputMeta.textContent =
             `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${fd.buyer_behaviour || "—"} · ${fd.call_type || "—"}`;
 
-          // tips
           tipsList.innerHTML = "";
           tips.forEach((t) => {
             const li = document.createElement("li");
@@ -1010,6 +1015,7 @@
           setBusy(false);
         }
       });
+
 
       // ---------- Init ----------
       (async function init() {
