@@ -9,6 +9,21 @@ const VERSION = "v3-markdown-first-2025-08-20-patch8";
 /* eslint-disable no-console */
 try { console.log(`[${VERSION}] module loaded`); } catch {}
 
+function trimToTargetWords(text = "", target = 0) {
+  const t = String(text || "").trim();
+  if (!target || target < 50) return t;
+  const words = t.split(/\s+/);
+  const max = Math.round(target * 1.15);   // allow a little headroom
+  if (words.length <= max) return t;
+
+  // Trim on sentence/paragraph boundary if possible
+  const clipped = words.slice(0, max).join(" ");
+  const boundary = clipped.lastIndexOf(". ");
+  const paraBreak = clipped.lastIndexOf("\n\n");
+  const cut = Math.max(boundary, paraBreak);
+  return (cut > 0 ? clipped.slice(0, cut + 1) : clipped).trim();
+}
+
 function extractText(res) {
   if (!res) return "";
   if (typeof res === "string") return res;
@@ -352,8 +367,10 @@ module.exports = async function (context, req) {
       const llmRes = await callModel({
         system: `You are a highly effective UK B2B salesperson writing a sales call script.
 MANDATES:
-- Do not use pleasantries such as "I hope you are well" or "I hope you are having a great day".
-- Always follow the provided structure and headings.`,
+- Always follow the provided structure and headings.
+STRICT BANS: 
+- Pleasantries like "I hope you are well", "Are you well?", "Hope you're well", "How are you?", "Trust you're well", "Having a great day", etc.
+- Over-familiar chit-chat, Americanisms, or small talk fillers.`
         prompt,
         temperature: 0.6,
       });
