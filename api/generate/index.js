@@ -1,14 +1,14 @@
-// index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-08-19
+// api/generate/index.js
+// Clean handler for /api/generate
+// Version: v3-markdown-first-2025-08-20
 
 const fs = require("fs");
 const path = require("path");
 const { z } = require("zod");
 
-// ------------------------ Utils & helpers ------------------------
-const VERSION = "v3-markdown-first-2025-08-19";
+const VERSION = "v3-markdown-first-2025-08-20";
 
-// Extract assistant text from various SDK shapes
+// ------------------------ helpers ------------------------
 function extractText(res) {
   if (!res) return "";
   if (typeof res === "string") return res;
@@ -21,10 +21,9 @@ function extractText(res) {
   return "";
 }
 
-// Call Azure OpenAI (preferred) or OpenAI
 async function callModel({ system, prompt, temperature }) {
-  const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-  const azKey = process.env.AZURE_OPENAI_API_KEY;
+  const azEndpoint   = process.env.AZURE_OPENAI_ENDPOINT;
+  const azKey        = process.env.AZURE_OPENAI_API_KEY;
   const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
   const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-02-15-preview";
 
@@ -43,7 +42,7 @@ async function callModel({ system, prompt, temperature }) {
     return data;
   }
 
-  const oaKey = process.env.OPENAI_API_KEY;
+  const oaKey   = process.env.OPENAI_API_KEY;
   const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
   if (oaKey) {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -60,7 +59,7 @@ async function callModel({ system, prompt, temperature }) {
     return data;
   }
 
-  // No model configured -> return null (frontend will still see 200 with empty text)
+  // No model configured
   return null;
 }
 
@@ -70,7 +69,7 @@ function ensureThanksClose(text) {
   return (t + (t.endsWith("\n") ? "" : "\n") + "Thank you for your time.").trim();
 }
 
-// ------------------------ Canonicalisers ------------------------
+// ------------------------ canonicalisers ------------------------
 const toModeId = (v = "") => (String(v).toLowerCase().startsWith("p") ? "partner" : "direct");
 const toBuyerTypeId = (v = "") => {
   const s = String(v).toLowerCase();
@@ -99,11 +98,11 @@ const toProductId = (v = "") => {
   return s.replace(/[^\w]+/g, "_").replace(/_{2,}/g, "_").replace(/^_|_$/g, "");
 };
 
-// ------------------------ Markdown prompt builder ------------------------
+// ------------------------ prompt builder ------------------------
 function buildPromptFromMarkdown({ templateMd, seller, prospect, productLabel, buyerType, valueProposition, context, nextStep }) {
-  const usp = (valueProposition || "").trim() || "(none provided)";
+  const usp   = (valueProposition || "").trim() || "(none provided)";
   const other = (context || "").trim() || "(none provided)";
-  const cta = (nextStep || "").trim() || "(use suggested_next_step from the template if present; otherwise propose a sensible next step)";
+  const cta   = (nextStep || "").trim() || "(use suggested_next_step from the template if present; otherwise propose a sensible next step)";
 
   return `
 You are a highly effective UK B2B salesperson.
@@ -137,7 +136,7 @@ Provide exactly 3 concise, practical tips (numbered 1., 2., 3.).
 `;
 }
 
-// ------------------------ Legacy packs (kept intact) ------------------------
+// ------------------------ legacy packs support ------------------------
 let PACKS_CACHE = null;
 function loadPacks() {
   if (PACKS_CACHE) return PACKS_CACHE;
@@ -159,14 +158,12 @@ function loadPacks() {
   throw new Error(`packs.json not found. Tried:\n- ${tried.join("\n- ")}`);
 }
 
-// Legacy request schema
 const BodySchema = z.object({
   pack: z.string().min(1),
   template: z.string().min(1),
   variables: z.record(z.any()).default({}),
 });
 
-// Simple legacy token replacement
 function compileTemplate(tpl, vars) {
   if (typeof tpl !== "string") return "";
   const rep = (key) => {
@@ -176,10 +173,10 @@ function compileTemplate(tpl, vars) {
   };
   return tpl
     .replace(/{{\s*([\w.]+)\s*}}/g, (_, key) => rep(key))
-    .replace(/{\s*([\w.]+)\s*}/g, (_, key) => rep(key));
+    .replace(/{\s*([\w.]+)\s*}/g,  (_, key) => rep(key));
 }
 
-// ------------------------ Azure Function entry ------------------------
+// ------------------------ function entry ------------------------
 module.exports = async function (context, req) {
   const cors = {
     "Access-Control-Allow-Origin": "*",
@@ -190,13 +187,13 @@ module.exports = async function (context, req) {
   const hostHeader = (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0] || "";
   const isLocalDev = /localhost|127\.0\.0\.1|app\.github\.dev$/i.test(hostHeader);
 
-  // OPTIONS preflight
+  // OPTIONS
   if (req.method === "OPTIONS") {
     context.res = { status: 204, headers: cors };
     return;
   }
 
-  // Health check on GET
+  // Health
   if (req.method === "GET") {
     context.res = { status: 200, headers: cors, body: { ok: true, route: "generate", version: VERSION } };
     return;
@@ -207,7 +204,7 @@ module.exports = async function (context, req) {
     return;
   }
 
-  // Auth: require SWA auth in cloud; bypass in local/Codespaces
+  // Auth (require in cloud, bypass locally)
   const principalHeader = req.headers["x-ms-client-principal"];
   if (!principalHeader && !isLocalDev) {
     context.res = { status: 401, headers: cors, body: { error: "Not authenticated", version: VERSION } };
@@ -218,37 +215,32 @@ module.exports = async function (context, req) {
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const kind = String(body?.kind || "").toLowerCase();
 
-    // ========== New call-script (Markdown-first) ==========
+    // ========== call-script (Markdown-first) ==========
     if (kind === "call-script") {
       const v = body.variables || body || {};
       const productId = toProductId(v.product || body.product);
       const buyerType = toBuyerTypeId(v.buyerType || body.buyerType);
-      const mode = toModeId(v.mode || body.mode || "direct");
+      const mode      = toModeId(v.mode || body.mode || "direct");
 
       if (!productId || !buyerType || !mode) {
         context.res = { status: 400, headers: cors, body: { error: "Missing product / buyerType / mode", version: VERSION } };
         return;
       }
 
-      // Build Codespaces/SWA content URL
-      // NOTE: Static content is rooted at "/", so DO NOT prepend basePrefix.
-      let origin;
-
-      if (isLocalDev) {
-        // In Codespaces / local SWA CLI, fetch directly from localhost
-        origin = "http://localhost:4280";
-      } else {
-        // In production (Azure), use the real host
-        origin = `https://${hostHeader}`;
-      }
+      // Build content URL
+      const basePrefix = String(body.basePrefix || "").replace(/\/+$/, "");
+      // In Codespaces/SWA CLI we must fetch the static content from the web origin (4280)
+      const origin = hostHeader.includes("localhost")
+        ? "http://localhost:4280"
+        : `https://${hostHeader}`;
 
       const contentRoot = `${origin}${basePrefix}/content/call-library/v1/${mode}/${productId}`;
       const mdUrl = `${contentRoot}/${buyerType}.md`;
 
       context.log(`[${VERSION}] [CallLib] GET ${mdUrl}`);
 
-      // ---- FETCH THE BUYER-TYPE MARKDOWN (safe against TDZ) ----
-      let templateMd = ""; // declare first to avoid TDZ anywhere below
+      // TDZ-proof: declare first, then assign after fetch succeeds
+      let templateMd = "";
 
       const resMd = await fetch(mdUrl, {
         headers: {
@@ -260,10 +252,8 @@ module.exports = async function (context, req) {
         redirect: "follow",
       });
 
-      // Read the body ONCE, no matter success/fail
       const bodyText = await resMd.text().catch(() => "");
 
-      // If the file isn't there, return a clear 404 with a sample
       if (!resMd.ok) {
         context.res = {
           status: 404,
@@ -278,14 +268,13 @@ module.exports = async function (context, req) {
         };
         return;
       }
-    // Success: assign AFTER we've guaranteed resMd.ok and body read
-      templateMd = bodyText;
 
+      templateMd = bodyText;
 
       const productLabel = productId.replace(/[_-]+/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
       const prompt = buildPromptFromMarkdown({
         templateMd,
-        seller: { name: v.seller_name, company: v.seller_company },
+        seller:   { name: v.seller_name,   company: v.seller_company },
         prospect: { name: v.prospect_name, role: v.prospect_role, company: v.prospect_company },
         productLabel,
         buyerType,
@@ -312,12 +301,13 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // ========== Legacy packs path (unchanged) ==========
+    // ========== legacy packs ==========
     const parsed = BodySchema.safeParse(body);
     if (!parsed.success) {
       context.res = { status: 400, headers: cors, body: { error: "Invalid request body", version: VERSION } };
       return;
     }
+
     const { pack, template, variables } = parsed.data;
     const { packs } = loadPacks();
     const packDef = packs[pack];
@@ -327,7 +317,7 @@ module.exports = async function (context, req) {
     }
 
     const tplDef = packDef.templates?.[template] || {};
-    const system = tplDef.system ?? packDef.default?.system ?? "";
+    const system      = tplDef.system ?? packDef.default?.system ?? "";
     const temperature = tplDef.temperature ?? packDef.default?.temperature ?? 0.4;
     const templateStr = typeof tplDef === "string" ? tplDef : String(tplDef.prompt || "");
     const compiledPrompt = templateStr ? compileTemplate(templateStr, variables) : "";
