@@ -1,87 +1,74 @@
 // web/src/lib/callLibrary.js
+// Clean version – always fetches the flat index.json (no /direct or /partner subpaths)
 
 export const canonical = {
   mode(v) {
     return String(v || "").toLowerCase().startsWith("p") ? "partner" : "direct";
   },
   buyer(v) {
-    const s = String(v || "").toLowerCase();
+    const s = String(v || "").toLowerCase().trim();
     if (s.startsWith("innovator")) return "innovator";
     if (s.startsWith("early adopter")) return "early-adopter";
     if (s.startsWith("early majority")) return "early-majority";
-    if (s.startsWith("late majority"))  return "late-majority";
+    if (s.startsWith("late majority")) return "late-majority";
     if (s.startsWith("sceptic") || s.startsWith("skeptic")) return "sceptic";
     return "early-majority";
   },
 };
 
+// Figure out whether we’re being served from a subpath (e.g. /web/, /foo/…)
 function basePrefixFromPath() {
-  // supports /, /<repo>, /first-call-script-v2.html (single-file preview)
   const parts = (location.pathname || "").split("/");
-  // if the last segment looks like a file (has a dot), no base prefix
-  if (parts[parts.length - 1]?.includes?.(".")) return "";
+  // if last segment looks like a file (has .html etc), drop it
+  if (parts[parts.length - 1].includes(".")) {
+    parts.pop();
+  }
+  // first part after leading slash is the base prefix if non-empty
   return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
 }
 
-async function fetchJson(url) {
-  const r = await fetch(url, { cache: "no-store" });
-  if (!r.ok) return null;
-  try { return await r.json(); } catch { return null; }
-}
-
 /**
- * Load product index.
- * Supports BOTH:
- *   1) ./content/call-library/v1/{mode}/index.json           (array at products)
- *   2) ./content/call-library/v1/index.json                  (top-level products[])
- *   3) ./content/call-library/v1/index.json with {products:{direct:[],partner:[]}}
- *   4) Rare: {direct:{products:[]}}, {partner:{products:[]}}
- *
- * Always returns { products: [...] } where each item has at least { id, label, path? }.
+ * Fetch the master product index.
+ * Expected structure: { products: [ {id, label, …}, … ] }
  */
-export async function getIndex(mode = "direct") {
-  const m = canonical.mode(mode);
+export async function getIndex() {
   const basePrefix = basePrefixFromPath();
-  const root = `${location.origin}${basePrefix}/content/call-library/v1`;
+  const url = `${location.origin}${basePrefix}/content/call-library/v1/index.json?nocache=${Date.now()}`;
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) {
+    throw new Error(`Failed to fetch index.json (${r.status}) from ${url}`);
+  }
+  const data = await r.json();
 
-  // 1) Try mode-scoped file first
-  const modeUrl = `${root}/${m}/index.json?nocache=${Date.now()}`;
-  const modeJson = await fetchJson(modeUrl);
-  if (modeJson && Array.isArray(modeJson.products)) {
-    return { products: modeJson.products };
+  if (Array.isArray(data?.products)) {
+    return data; // shape: { products: [...] }
   }
 
-  // 2/3/4) Try single index.json with a few possible shapes
-  const singleUrl = `${root}/index.json?nocache=${Date.now()}`;
-  const data = await fetchJson(singleUrl) || {};
-
-  if (Array.isArray(data.products)) {
-    return { products: data.products };
+  // fallback if someone nested under .direct or .partner
+  if (Array.isArray(data?.direct?.products)) {
+    return { products: data.direct.products };
+  }
+  if (Array.isArray(data?.partner?.products)) {
+    return { products: data.partner.products };
   }
 
-  if (data.products && (Array.isArray(data.products[m]))) {
-    return { products: data.products[m] };
-  }
-
-  const directProducts = data?.direct?.products;
-  const partnerProducts = data?.partner?.products;
-  if (Array.isArray(directProducts) || Array.isArray(partnerProducts)) {
-    return { products: Array.isArray(directProducts) ? directProducts : (partnerProducts || []) };
-  }
-
-  console.error(`[callLibrary.getIndex] No products found. Tried:`, modeUrl, 'and', singleUrl, 'Got:', data);
   return { products: [] };
 }
 
 /**
- * Load a template markdown file.
- * Always loads: ./content/call-library/v1/{mode}/{product}/{buyer}.md
+ * Load a specific Markdown template for {mode, product, buyer}.
+ * Always resolves to ./content/call-library/v1/{mode}/{product}/{buyer}.md
  */
 export async function loadTemplate({ mode, product, buyer }) {
-  const m = canonical.mode(mode);
   const basePrefix = basePrefixFromPath();
-  const url = `${location.origin}${basePrefix}/content/call-library/v1/${m}/${String(product || "").toLowerCase().trim()}/${canonical.buyer(buyer)}.md?nocache=${Date.now()}`;
+  const safeMode = canonical.mode(mode);
+  const safeBuyer = canonical.buyer(buyer);
+  const safeProduct = String(product || "").toLowerCase().replace(/\s+/g, "-");
+
+  const url = `${location.origin}${basePrefix}/content/call-library/v1/${safeMode}/${safeProduct}/${safeBuyer}.md?nocache=${Date.now()}`;
   const r = await fetch(url, { cache: "no-store" });
-  if (!r.ok) throw new Error(`Failed to fetch template (${r.status}) from ${url}`);
+  if (!r.ok) {
+    throw new Error(`Failed to fetch template (${r.status}) from ${url}`);
+  }
   return await r.text();
 }
