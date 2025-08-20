@@ -1,10 +1,10 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-08-20-patch2 (A-first with guarded client override)
+// Version: v3-markdown-first-2025-08-20-patch3 (A-first with guarded client override)
 
 const { z } = require("zod");
 
 // ---------- helpers ----------
-const VERSION = "v3-markdown-first-2025-08-20-patch2";
+const VERSION = "v3-markdown-first-2025-08-20-patch3";
 
 /* eslint-disable no-console */
 try { console.log(`[${VERSION}] module loaded`); } catch {}
@@ -178,10 +178,24 @@ module.exports = async function (context, req) {
       }
 
       const basePrefix = String(body.basePrefix || "").replace(/\/+$/, "");
-      const proto = (req.headers["x-forwarded-proto"] || "http").split(",")[0];
-      const originHost = (hostHeader || "localhost:4280").trim();
-      const origin = `${proto}://${originHost}`;
-      const mdUrl = `${origin}${basePrefix}/content/call-library/v1/${mode}/${productId}/${buyerType}.md`;
+      const proto = (req.headers["x-forwarded-proto"] || "https").split(",")[0];
+      const envBase = (process.env.CALL_LIB_BASE || "").trim().replace(/\/+$/, "");
+      const host = (req.headers["x-forwarded-host"] || req.headers.host || "localhost:4280").split(",")[0].trim();
+
+      // choose base in priority: env > body > same host
+      let base;
+      if (envBase) {
+        base = /^https?:\/\//i.test(envBase)
+          ? envBase
+          : `${proto}://${host}${envBase.startsWith("/") ? "" : "/"}${envBase}`;
+      } else if (basePrefix) {
+        base = `${proto}://${host}${basePrefix.startsWith("/") ? "" : "/"}${basePrefix}`;
+      } else {
+        base = `${proto}://${host}`;
+      }
+
+      const mdUrl = `${base}/content/call-library/v1/${mode}/${productId}/${buyerType}.md`;
+      context.log(`[${VERSION}] [CallLib] GET ${mdUrl}`);
 
       // ---- Guarded client override (Option B) with A-first default ----
       const allowClientTpl = process.env.ALLOW_CLIENT_TEMPLATE === "1";
@@ -198,7 +212,6 @@ module.exports = async function (context, req) {
         templateMdText = clientTemplate;
         context.log(`[${VERSION}] Using client-supplied template markdown (override)`);
       } else {
-        context.log(`[${VERSION}] [CallLib] GET ${mdUrl}`);
         const resMd = await fetch(mdUrl, {
           headers: {
             cookie: req.headers.cookie || "",
