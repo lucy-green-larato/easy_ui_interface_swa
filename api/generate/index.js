@@ -1,13 +1,11 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-08-20-patch1
+// Version: v3-markdown-first-2025-08-20-patch2 (A-first with guarded client override)
 
 const { z } = require("zod");
 
 // ---------- helpers ----------
-const VERSION = "v3-markdown-first-2025-08-20-patch1";
+const VERSION = "v3-markdown-first-2025-08-20-patch2";
 
-// breadcrumb to prove module evaluated without crashing
-// (If the error happens before this log, it's a require-time crash in a different file.)
 /* eslint-disable no-console */
 try { console.log(`[${VERSION}] module loaded`); } catch {}
 
@@ -76,10 +74,10 @@ const toBuyerTypeId = (v = "") => {
 const toProductId = (v = "") => {
   const s = String(v).toLowerCase().trim();
   const map = {
-    "connectivity": "connectivity",
-    "cybersecurity": "cybersecurity",
+    connectivity: "connectivity",
+    cybersecurity: "cybersecurity",
     "artificial intelligence": "ai",
-    "ai": "ai",
+    ai: "ai",
     "hardware/software": "hardware_software",
     "hardware & software": "hardware_software",
     "it solutions": "it_solutions",
@@ -183,37 +181,48 @@ module.exports = async function (context, req) {
       const origin = isLocalDev ? "http://localhost:4280" : `https://${hostHeader}`;
       const mdUrl = `${origin}${basePrefix}/content/call-library/v1/${mode}/${productId}/${buyerType}.md`;
 
-      context.log(`[${VERSION}] [CallLib] GET ${mdUrl}`);
+      // ---- Guarded client override (Option B) with A-first default ----
+      const allowClientTpl = process.env.ALLOW_CLIENT_TEMPLATE === "1";
+      const clientTemplate = allowClientTpl
+        ? String(body.templateMdText || body.templateMd || "").trim()
+        : "";
 
-      const resMd = await fetch(mdUrl, {
-        headers: {
-          cookie: req.headers.cookie || "",
-          "x-ms-client-principal": principalHeader || "",
-          "cache-control": "no-cache",
-        },
-        cache: "no-store",
-        redirect: "follow",
-      });
-
-      const bodyText = await resMd.text().catch(() => "");
-
-      if (!resMd.ok) {
-        context.res = {
-          status: 404,
-          headers: cors,
-          body: {
-            error: "Call library markdown not found",
-            detail: `${mode}/${productId}/${buyerType}.md`,
-            tried: mdUrl,
-            version: VERSION,
-            sample: bodyText.slice(0, 200),
+      let templateMdText = "";
+      if (clientTemplate) {
+        if (clientTemplate.length > 256 * 1024) {
+          context.res = { status: 413, headers: cors, body: { error: "Template too large", version: VERSION } };
+          return;
+        }
+        templateMdText = clientTemplate;
+        context.log(`[${VERSION}] Using client-supplied template markdown (override)`);
+      } else {
+        context.log(`[${VERSION}] [CallLib] GET ${mdUrl}`);
+        const resMd = await fetch(mdUrl, {
+          headers: {
+            cookie: req.headers.cookie || "",
+            "x-ms-client-principal": principalHeader || "",
+            "cache-control": "no-cache",
           },
-        };
-        return;
+          cache: "no-store",
+          redirect: "follow",
+        });
+        const bodyText = await resMd.text().catch(() => "");
+        if (!resMd.ok) {
+          context.res = {
+            status: 404,
+            headers: cors,
+            body: {
+              error: "Call library markdown not found",
+              detail: `${mode}/${productId}/${buyerType}.md`,
+              tried: mdUrl,
+              version: VERSION,
+              sample: bodyText.slice(0, 200),
+            },
+          };
+          return;
+        }
+        templateMdText = bodyText;
       }
-
-      // Assign only after successful fetch
-      const templateMdText = bodyText;
 
       const productLabel = productId.replace(/[_-]+/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
       const prompt = buildPromptFromMarkdown({
