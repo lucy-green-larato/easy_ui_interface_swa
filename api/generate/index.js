@@ -178,7 +178,9 @@ module.exports = async function (context, req) {
       }
 
       const basePrefix = String(body.basePrefix || "").replace(/\/+$/, "");
-      const origin = isLocalDev ? "http://localhost:4280" : `https://${hostHeader}`;
+      const proto = (req.headers["x-forwarded-proto"] || "http").split(",")[0];
+      const originHost = (hostHeader || "localhost:4280").trim();
+      const origin = `${proto}://${originHost}`;
       const mdUrl = `${origin}${basePrefix}/content/call-library/v1/${mode}/${productId}/${buyerType}.md`;
 
       // ---- Guarded client override (Option B) with A-first default ----
