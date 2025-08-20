@@ -506,6 +506,8 @@
     // ---- FIX: define basePrefix at module scope and reuse everywhere ----
     const basePrefix = (() => {
       const parts = (location.pathname || "").split("/");
+      const last = parts[parts.length - 1] || "";
+      if (last.includes(".")) return "";
       return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
     })();
 
