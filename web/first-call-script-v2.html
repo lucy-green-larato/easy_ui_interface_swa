@@ -20,7 +20,9 @@
       --bg: #f7f7f9;
     }
 
-    body { background: var(--bg) }
+    body {
+      background: var(--bg)
+    }
 
     .layout {
       display: grid;
@@ -31,10 +33,23 @@
       width: 100%;
     }
 
-    @media (max-width:1200px) { .layout { grid-template-columns: 1fr; } }
+    @media (max-width:1200px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+    }
 
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3) }
-    @media (max-width: 800px) { .grid-2 { grid-template-columns: 1fr } }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-3)
+    }
+
+    @media (max-width: 800px) {
+      .grid-2 {
+        grid-template-columns: 1fr
+      }
+    }
 
     /* Readable script box */
     .output {
@@ -50,14 +65,28 @@
       letter-spacing: .005em;
     }
 
-    .tips-card ul { margin: .5rem 0 0; padding-left: 1.25rem }
-    .tips-card ul li { margin: .25rem 0 }
+    .tips-card ul {
+      margin: .5rem 0 0;
+      padding-left: 1.25rem
+    }
 
-    .panel .card h3 { margin: 0 0 .5rem 0 }
+    .tips-card ul li {
+      margin: .25rem 0
+    }
 
-    .intel-grid { display: grid; grid-template-columns: 1fr !important; gap: var(--space-3) }
+    .panel .card h3 {
+      margin: 0 0 .5rem 0
+    }
 
-    input, select, textarea {
+    .intel-grid {
+      display: grid;
+      grid-template-columns: 1fr !important;
+      gap: var(--space-3)
+    }
+
+    input,
+    select,
+    textarea {
       width: 100%;
       padding: 10px 12px;
       border-radius: 8px;
@@ -66,7 +95,10 @@
       outline: none;
       transition: box-shadow .15s ease, border-color .15s ease;
     }
-    input:focus, select:focus, textarea:focus {
+
+    input:focus,
+    select:focus,
+    textarea:focus {
       box-shadow: 0 0 0 2px rgba(36, 88, 230, .35);
       border-color: var(--accent);
     }
@@ -80,35 +112,114 @@
       background: #fff;
       border-bottom: 1px solid #e5e7eb;
     }
-    .app-header .header-left { display: flex; align-items: center; gap: 10px; }
-    .app-header .logo { height: 24px; width: auto; }
-    .app-header .brand-text { line-height: 1.15; }
-    .app-header .app-title { font-size: 1rem; font-weight: 600; margin: 0; }
-    .app-header .kicker { margin: 0; color: #6b7280; font-size: .85rem; }
-    .app-header .header-right { display: flex; align-items: center; gap: 12px; }
+
+    .app-header .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .app-header .logo {
+      height: 24px;
+      width: auto;
+    }
+
+    .app-header .brand-text {
+      line-height: 1.15;
+    }
+
+    .app-header .app-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    .app-header .kicker {
+      margin: 0;
+      color: #6b7280;
+      font-size: .85rem;
+    }
+
+    .app-header .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
 
     /* Compact pill (selector + remember) */
     .calltype-mini {
-      display: flex; align-items: center; gap: 8px;
-      padding: 4px 8px; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 8px;
+      border: 1px solid #e5e7eb;
+      border-radius: 999px;
+      background: #fff;
     }
-    .calltype-mini .mini-label { color: #6b7280; font-size: .85rem; }
+
+    .calltype-mini .mini-label {
+      color: #6b7280;
+      font-size: .85rem;
+    }
+
     .calltype-mini select {
-      appearance: none; border: none; background: #f9fafb;
-      padding: 2px 8px; border-radius: 999px; font-size: .85rem;
+      appearance: none;
+      border: none;
+      background: #f9fafb;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: .85rem;
     }
-    .calltype-mini .remember { display: flex; align-items: center; gap: 6px; font-size: .85rem; color: #374151; }
+
+    .calltype-mini .remember {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .85rem;
+      color: #374151;
+    }
 
     /* Subtle status chip */
-    .model-note { color: #374151; font-size: .85rem; padding: 4px 10px; border: 1px solid #e5e7eb; border-radius: 999px; background: #f9fafb; }
-    .model-note .label { color: #6b7280; margin-right: 6px; }
+    .model-note {
+      color: #374151;
+      font-size: .85rem;
+      padding: 4px 10px;
+      border: 1px solid #e5e7eb;
+      border-radius: 999px;
+      background: #f9fafb;
+    }
+
+    .model-note .label {
+      color: #6b7280;
+      margin-right: 6px;
+    }
 
     /* Optional user badge */
-    .badge { display: flex; align-items: center; gap: 6px; color: #374151; font-size: .85rem; }
-    .badge svg { width: 16px; height: 16px; stroke: #6b7280; fill: none; stroke-width: 1.5; }
+    .badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #374151;
+      font-size: .85rem;
+    }
 
-    .is-hidden { display: none !important; }
-    .error-inline { color: #b91c1c; font-size: .85rem; margin-left: 8px; }
+    .badge svg {
+      width: 16px;
+      height: 16px;
+      stroke: #6b7280;
+      fill: none;
+      stroke-width: 1.5;
+    }
+
+    .is-hidden {
+      display: none !important;
+    }
+
+    .error-inline {
+      color: #b91c1c;
+      font-size: .85rem;
+      margin-left: 8px;
+    }
   </style>
 </head>
 
@@ -325,7 +436,7 @@
         </div>
       </div>
     </section>
-  
+
     <!-- Script Pop-out Modal -->
     <dialog id="script-modal" class="modal">
       <button id="close-modal" class="btn">Close ×</button>
@@ -389,7 +500,7 @@
     window.addEventListener('unhandledrejection', e => console.error('[unhandledrejection]', e.reason));
     console.log('[FCSv2] module boot');
     // DEBUG END
-    import { getIndex, loadTemplate, canonical } from "./src/lib/callLibrary.js";
+    import { getIndex, loadTemplate, canonical } from "./src/lib/callLibrary.js?v=fix6";
     console.log('[FCSv2] imports loaded');
 
     const modeFromCallType = (v) => canonical.mode(v);
@@ -674,35 +785,54 @@
 
       // ---------- Product registry ----------
       async function populateProductsForMode(mode) {
+        const sel = document.getElementById('product');
+        if (!sel) return;
+
+        sel.innerHTML = `<option value="">Loading…</option>`;
+
         try {
           const idx = await getIndex(mode);
           const items = Array.isArray(idx?.products) ? idx.products : [];
-          if (!productSel) return;
+
+          if (!items.length) {
+            sel.innerHTML = `<option value="">No products found</option>`;
+            console.warn('[Product] index.json loaded but empty', idx);
+            return;
+          }
+
           const saved = (form?.elements?.product?.value || '').trim().toLowerCase();
-          productSel.innerHTML = '<option value="" disabled>Select…</option>';
-          items.forEach((item) => {
+          sel.innerHTML = '<option value="" disabled>Select…</option>';
+
+          for (const item of items) {
             const idLike = item.id ?? item.slug ?? item.value ?? item.key ?? item.name ?? item.label;
             const label = item.label ?? item.name ?? String(idLike ?? '');
             const val = String(idLike || '').trim().toLowerCase().replace(/\s+/g, '-');
-            if (!val) return;
+            if (!val) continue;
+
             const opt = document.createElement('option');
-            opt.value = val; opt.textContent = label;
+            opt.value = val;
+            opt.textContent = label;
             if (saved && (saved === val || saved === String(label).toLowerCase())) opt.selected = true;
-            productSel.appendChild(opt);
-          });
-          if (!productSel.value) productSel.options[0].selected = true;
-          validateField(productSel);
+            sel.appendChild(opt);
+          }
+
+          if (!sel.value) sel.options[0].selected = true;
+
+          validateField(sel);
           if (buyerBehSel?.value) {
-            const label = productSel?.options?.[productSel.selectedIndex]?.text || productSel.value || '';
+            const label = sel?.options?.[sel.selectedIndex]?.text || sel.value || '';
             renderIntel(label, buyerBehSel.value);
           }
           refreshSubmitState();
-          console.info('[Product] index loaded for', mode, 'count =', items.length);
-        } catch (e) {
-          console.error('[Product] Failed to load index for mode', mode, e);
-          if (productSel) productSel.innerHTML = '<option value="">Select…</option>';
+
+          console.info('[Product] index loaded OK, count =', items.length);
+        } catch (err) {
+          console.error('[Product] Failed to load index.json', err);
+          sel.innerHTML = `<option value="">Error loading products</option>`;
+          setStatus('Could not load products index. See console for details.', 'error');
         }
       }
+
 
       // ---------- Events ----------
       const onChangeRecalcIntel = () => {
@@ -794,7 +924,7 @@
         const fd = Object.fromEntries(new FormData(form).entries());
         const mode = modeFromCallType(fd.call_type);
         const productId = (productSel?.value || fd.product || "").toLowerCase().trim();
-        const buyerId = buyerCanon(fd.buyer_behaviour);  
+        const buyerId = buyerCanon(fd.buyer_behaviour);
 
         // FINAL BODY (note: includes value_proposition, context, next_step, tone, length)
         const body = {
@@ -856,7 +986,7 @@
               context: fd.context || "",
               next_step: fd.next_step || "",
               tone: fd.tone || "",
-              length: fd.length || "" 
+              length: fd.length || ""
             },
           };
 
@@ -957,4 +1087,5 @@
   </script>
 
 </body>
+
 </html>
