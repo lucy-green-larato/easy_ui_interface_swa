@@ -1,10 +1,10 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-08-20-patch5 (strict buyer; safe base; host mapping; guarded override)
+// Version: v3-markdown-first-2025-08-20-patch6 (strict buyer; safe base; host mapping; guarded override; tone+length)
 
 const { z } = require("zod");
 
 // ---------- helpers ----------
-const VERSION = "v3-markdown-first-2025-08-20-patch5";
+const VERSION = "v3-markdown-first-2025-08-20-patch6";
 
 /* eslint-disable no-console */
 try { console.log(`[${VERSION}] module loaded`); } catch {}
@@ -106,20 +106,34 @@ function ensureThanksClose(text) {
   return (t + (t.endsWith("\n") ? "" : "\n") + "Thank you for your time.").trim();
 }
 
-function buildPromptFromMarkdown({ templateMdText, seller, prospect, productLabel, buyerType, valueProposition, context, nextStep }) {
+// map UI label -> approximate word target
+function parseTargetLength(label = "") {
+  const s = String(label).toLowerCase();
+  if (s.includes("150")) return 150;
+  if (s.includes("300")) return 300;
+  if (s.includes("450")) return 450;
+  if (s.includes("650")) return 650;
+  // default to your current middle option
+  return 300;
+}
+
+function buildPromptFromMarkdown({ templateMdText, seller, prospect, productLabel, buyerType, valueProposition, context, nextStep, tone, targetWords }) {
   const usp   = (valueProposition || "").trim() || "(none provided)";
   const other = (context || "").trim() || "(none provided)";
   const cta   = (nextStep || "").trim() || "(use suggested_next_step from the template if present; otherwise propose a sensible next step)";
+  const toneLine = tone ? `Write in a "${tone}" tone.\n` : "";
+  const lengthLine = targetWords ? `Aim for about ${targetWords} words (±10%).\n` : "";
+
   return `
 You are a highly effective UK B2B salesperson.
 
-Use the Markdown template below as the skeleton for the call. Preserve the section headings and overall order. Fill the content so it reads as a natural, spoken conversation.
+${toneLine}${lengthLine}Use the Markdown template below as the skeleton for the call. Preserve the section headings and overall order. Fill the content so it reads as a natural, spoken conversation.
 
 MANDATES:
 - British business English; no US slang; no assumptive closes.
 - Open with a brief personal introduction from ${seller.name} at ${seller.company} to ${prospect.name} (${prospect.role} at ${prospect.company}).
 - Reference observations from similar businesses; do not assume the prospect’s current state.
-- Elegantly weave the USPs and Other points where they make sense in context (not all must be used).
+- Elegantly weave the USPs and Other points where they make sense in context (do not ignore them if provided).
 - Include one specific, relevant customer example with measurable results.
 - Handle common objections factually and without pressure.
 - For the "Next Step": use the salesperson’s input if provided; otherwise, if the template includes an HTML comment <!-- suggested_next_step: ... --> use that; otherwise propose a clear, low-friction next step.
@@ -186,7 +200,6 @@ module.exports = async function (context, req) {
       function mapBuyerStrict(x) {
         const s = String(x || "").trim().toLowerCase();
         if (!s) return null;
-        // allow "earlyadopter" / "earlyadopter " etc.
         const normalized = s.replace(/\s+/g, " ").trim().replace(/\s*-\s*/g, "-");
         if (normalized.startsWith("innovator")) return "innovator";
         if (normalized.startsWith("early-adopter") || normalized.startsWith("early adopter") || normalized.startsWith("earlyadopter")) return "early-adopter";
@@ -198,6 +211,8 @@ module.exports = async function (context, req) {
       const buyerType = mapBuyerStrict(rawBuyer);
 
       const mode = toModeId(v.mode || body.mode || "direct");
+      const tone = String(v.tone || body.tone || "").trim();
+      const targetWords = parseTargetLength(v.length || body.length);
 
       if (!productId || !buyerType || !mode) {
         context.res = {
@@ -318,6 +333,8 @@ module.exports = async function (context, req) {
         valueProposition: v.value_proposition,
         context: v.context,
         nextStep: v.next_step,
+        tone,
+        targetWords,
       });
 
       const llmRes = await callModel({
