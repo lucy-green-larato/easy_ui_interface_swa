@@ -918,7 +918,7 @@
       form && form.addEventListener("submit", async (e) => {
         e.preventDefault();
 
-        // 1) Required fields check
+        // 1) Required fields quick check
         for (const name of REQUIRED) {
           const el = form.elements[name] || document.getElementById(name);
           if (!el || !String(el.value || "").trim()) {
@@ -929,14 +929,29 @@
           }
         }
 
-        // 2) Gather raw form values
-        const fd = Object.fromEntries(new FormData(form).entries());
+        // 2) Read all values explicitly (no FormData surprises)
+        const values = {
+          call_type: (callTypeSel?.value || "").trim(),
+          seller_name: (form.elements.seller_name?.value || "").trim(),
+          seller_company: (form.elements.seller_company?.value || "").trim(),
+          prospect_name: (form.elements.prospect_name?.value || "").trim(),
+          prospect_role: (form.elements.prospect_role?.value || "").trim(),
+          prospect_company: (form.elements.prospect_company?.value || "").trim(),
 
-        // 3) Canonicalise key fields used by the backend
-        const mode = modeFromCallType(fd.call_type);                 // "direct" | "partner"
-        const productId = (productSel?.value || fd.product || "")
-          .toLowerCase().trim();                                     // e.g. "connectivity"
-        const buyerId = buyerCanon(fd.buyer_behaviour);              // e.g. "early-adopter"
+          // selects / textareas
+          product: (productSel?.value || form.elements.product?.value || "").trim(),
+          buyer_behaviour: (buyerBehSel?.value || form.elements.buyer_behaviour?.value || "").trim(),
+          tone: (form.elements.tone?.value || "").trim(),
+          length: (form.elements.length?.value || "").trim(),
+          value_proposition: (form.elements.value_proposition?.value || "").trim(),
+          context: (form.elements.context?.value || "").trim(),
+          next_step: (form.elements.next_step?.value || "").trim(),
+        };
+
+        // 3) Canonical values used by backend
+        const mode = modeFromCallType(values.call_type);                   // "direct" | "partner"
+        const productId = String(values.product).toLowerCase().trim();         // e.g. "connectivity"
+        const buyerId = buyerCanon(values.buyer_behaviour);                  // e.g. "early-adopter"
 
         if (!productId) {
           validateField("product");
@@ -944,25 +959,32 @@
           return;
         }
 
+        // 4) Base prefix (never ends with .html)
+        const basePrefix = (() => {
+          const parts = (location.pathname || "").split("/");
+          const last = parts[parts.length - 1] || "";
+          if (last.includes(".")) return "";              // e.g. /first-call-script-v2.html
+          return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
+        })();
+
         setBusy(true);
         setStatus("Generating call script…");
         if (diag) diag.open = false;
         if (diagJson) diagJson.textContent = "";
 
         try {
-          // 4) Build payload: include EVERYTHING from the form, then override canonical fields
+          // 5) Build payload with EVERYTHING
           const body = {
             kind: "call-script",
-            basePrefix,                     // module-scoped helper
+            basePrefix,
             variables: {
-              ...fd,                        // seller/prospect/company, USPs, context, next_step, tone, length, etc.
-              mode,                         // canonical overrides:
+              ...values,
+              mode,
               product: productId,
               buyerType: buyerId,
             },
           };
 
-          // 5) Send to API
           const resp = await fetch("/api/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -974,15 +996,14 @@
             throw new Error(`API ${resp.status}: ${errTxt}`);
           }
 
-          // 6) Handle OK
           const data = await resp.json();
           const script = data?.script?.text || "";
           const tips = data?.script?.tips || [];
 
-          // Update UI
+          // ---------- Update UI ----------
           outputEl.textContent = script;
           outputMeta.textContent =
-            `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${fd.buyer_behaviour || "—"} · ${fd.call_type || "—"}`;
+            `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
 
           tipsList.innerHTML = "";
           tips.forEach((t) => {
@@ -999,8 +1020,8 @@
           addActivity({
             time: nowTime(),
             product: productId,
-            buyer_behaviour: fd.buyer_behaviour || "—",
-            length: fd.length || "—",
+            buyer_behaviour: values.buyer_behaviour || "—",
+            length: values.length || "—",
           });
 
           setStatus("Done. (Generated from API)");
@@ -1008,14 +1029,10 @@
           document.getElementById("output-title")?.focus();
         } catch (err) {
           setStatus("Could not generate a call script. See Diagnostics for details.", "error");
-          if (diag) {
-            diag.open = true;
-            diagJson.textContent = String(err?.message || err);
-          }
+          if (diag) { diag.open = true; diagJson.textContent = String(err?.message || err); }
           setBusy(false);
         }
       });
-
 
       // ---------- Init ----------
       (async function init() {
