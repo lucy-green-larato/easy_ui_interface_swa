@@ -645,7 +645,7 @@
         const blob = new Blob([text], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = filename;
-        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
       }
 
       // ---------- Product registry ----------
@@ -703,7 +703,6 @@
         onChangeRecalcIntel(); saveForm(); refreshSubmitState();
       });
 
-      const toggleIntelBtn = document.getElementById('toggle-intel');
       toggleIntelBtn?.addEventListener('click', () => {
         const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
         toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
@@ -711,7 +710,6 @@
         toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
       });
 
-      const toggleTipsBtn = document.getElementById('toggle-tips');
       toggleTipsBtn?.addEventListener('click', () => {
         const expanded = toggleTipsBtn.getAttribute('aria-expanded') === 'true';
         const willHide = expanded;
@@ -719,22 +717,17 @@
         applyTipsVisibility();
       });
 
-      const saveNotesBtn = document.getElementById('save-notes');
       saveNotesBtn?.addEventListener('click', saveNotes);
-
-      const downloadNotesBtn = document.getElementById('download-notes');
       downloadNotesBtn?.addEventListener('click', () => {
         const who = (form?.elements?.prospect_name?.value || 'prospect').trim().replace(/\s+/g, '-');
         downloadText(`call-notes_${who}_${new Date().toISOString().slice(0, 10)}.txt`, notesArea.value || '');
       });
 
-      const copyBtn = document.getElementById('copy');
       copyBtn?.addEventListener('click', async () => {
         const txt = outputEl?.textContent || ''; if (!txt.trim()) return;
         await navigator.clipboard.writeText(txt); setStatus('Copied to clipboard.');
       });
 
-      const popoutBtn = document.getElementById('popout');
       popoutBtn?.addEventListener('click', () => {
         const txt = (outputEl?.textContent || '').trim();
         if (!txt) { setStatus('No script to pop out yet.', 'error'); return; }
