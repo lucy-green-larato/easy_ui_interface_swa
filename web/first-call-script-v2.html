@@ -6,6 +6,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Tools · First Call Script (v2)</title>
   <link rel="stylesheet" href="./styles.css?v=fix4" />
+
+  <!-- Markdown renderer + sanitizer -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+
   <style>
     :root {
       --right-min: 280px;
@@ -53,7 +58,7 @@
 
     /* Readable script box */
     .output {
-      white-space: pre-wrap;
+      white-space: normal;           /* allow HTML layout */
       background: #fff;
       color: #111827;
       border: 1px solid #e5e7eb;
@@ -64,6 +69,10 @@
       font: 16.5px/1.7 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
       letter-spacing: .005em;
     }
+
+    .output h1, .output h2, .output h3 { margin: .4rem 0 .2rem; }
+    .output p { margin: .4rem 0; }
+    .output ul, .output ol { margin: .4rem 0 .4rem 1.25rem; }
 
     .tips-card ul {
       margin: .5rem 0 0;
@@ -402,7 +411,8 @@
             <div class="meta" id="output-meta" aria-live="polite" style="color:var(--text-2);font-size:.9rem"></div>
           </div>
         </div>
-        <pre id="output" class="output" tabindex="0" aria-label="Generated script will appear here"></pre>
+        <!-- CHANGED: pre → div to allow rendered HTML -->
+        <div id="output" class="output" tabindex="0" aria-label="Generated script will appear here"></div>
 
         <div class="tips-card card" style="margin-top:var(--space-4)">
           <div class="row-between">
@@ -440,7 +450,8 @@
     <!-- Script Pop-out Modal -->
     <dialog id="script-modal" class="modal">
       <button id="close-modal" class="btn">Close ×</button>
-      <pre id="modal-script"></pre>
+      <!-- CHANGED: pre → div to allow rendered HTML -->
+      <div id="modal-script" class="output" style="min-height:auto"></div>
     </dialog>
 
     <!-- RIGHT -->
@@ -500,10 +511,11 @@
     window.addEventListener('unhandledrejection', e => console.error('[unhandledrejection]', e.reason));
     console.log('[FCSv2] module boot');
     // DEBUG END
+
     import { getIndex, loadTemplate, canonical } from "./src/lib/callLibrary.js?v=fix6";
     console.log('[FCSv2] imports loaded');
 
-    // ---- FIX: define basePrefix at module scope and reuse everywhere ----
+    // ---- define basePrefix once at module scope ----
     const basePrefix = (() => {
       const parts = (location.pathname || "").split("/");
       const last = parts[parts.length - 1] || "";
@@ -553,7 +565,6 @@
       const buyerBehSel = document.getElementById('buyer_behaviour');
       const toggleIntelBtn = document.getElementById('toggle-intel');
       const intelBody = document.getElementById('intel-body');
-      const scriptOutput = document.getElementById('output');
 
       const callTypeSel = document.getElementById('call_type');
       const rememberCallType = document.getElementById('remember_call_type');
@@ -566,20 +577,29 @@
       let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
 
       const nowTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
       if (popoutBtn) {
         popoutBtn.addEventListener("click", () => {
-          const scriptOutput = document.getElementById('output'); // adjust if yours is named differently
-          if (scriptOutput) {
-            modalScript.textContent = scriptOutput.textContent;
-            modal.showModal();
-          }
+          const html = outputEl?.innerHTML || '';
+          if (!html.trim()) { setStatus('No script to pop out yet.', 'error'); return; }
+          const meta = (outputMeta?.textContent || '').trim();
+          const w = window.open('', '_blank', 'noopener,noreferrer');
+          if (!w) return;
+          w.document.write(`<!doctype html><meta charset="utf-8"><title>Script</title>
+          <style>
+            body{font:16.5px/1.7 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica Neue,Arial;padding:24px;background:#fff;color:#111}
+            .meta{color:#6b7280;font-size:.9rem;margin-bottom:12px}
+            .bar{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-bottom:8px}
+            button{padding:.4rem .6rem;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;cursor:pointer}
+          </style>
+          <div class="bar"><button onclick="window.print()">Print</button><button onclick="navigator.clipboard.writeText(document.body.innerText)">Copy</button></div>
+          <div class="meta">${meta}</div>
+          <div>${html}</div>`);
+          w.document.close();
         });
       }
 
-      if (closeModal) {
-        closeModal.addEventListener("click", () => modal.close());
-      }
-
+      if (closeModal) closeModal.addEventListener("click", () => modal.close());
 
       function setBusy(isBusy) {
         if (submitBtn) submitBtn.disabled = isBusy || !allRequiredFilled(form);
@@ -623,8 +643,8 @@
         const id = el.id || el.name || '';
         const errorEl = document.getElementById(`${id}_error`) || (id === 'call_type' ? document.getElementById('call_type_error') : null);
         let value = '';
-        if (el === productSel) value = (productSel.value || '').trim();
-        else if (el === buyerBehSel) value = (buyerBehSel.value || '').trim();
+        if (id === 'product') value = (productSel.value || '').trim();
+        else if (id === 'buyer_behaviour') value = (buyerBehSel.value || '').trim();
         else if (id === 'call_type') value = (callTypeSel?.value || '').trim();
         else value = (el.value || '').trim();
         const valid = !!value;
@@ -642,7 +662,7 @@
       }
       function clearFormState() { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
 
-      // ---------- Buyer needs ----------
+      // ---------- Buyer needs (unchanged functional logic) ----------
       const norm = s => String(s || '').toLowerCase().trim();
       const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
       function getKeyInsensitive(obj, requested) {
@@ -799,12 +819,12 @@
         sel.innerHTML = `<option value="">Loading…</option>`;
 
         try {
-          // FIX: pass basePrefix so getIndex fetches from the correct sub-path
+          // pass basePrefix so getIndex fetches from the correct sub-path
           const idx = await getIndex(mode, basePrefix);
           const items =
             Array.isArray(idx?.products) ? idx.products :
-              Array.isArray(idx?.items) ? idx.items :
-                Array.isArray(idx) ? idx : [];
+            Array.isArray(idx?.items) ? idx.items :
+            Array.isArray(idx) ? idx : [];
 
           if (!items.length) {
             sel.innerHTML = `<option value="">No products found</option>`;
@@ -844,7 +864,6 @@
           setStatus('Could not load products index. See console for details.', 'error');
         }
       }
-
 
       // ---------- Events ----------
       const onChangeRecalcIntel = () => {
@@ -890,35 +909,15 @@
       });
 
       copyBtn?.addEventListener('click', async () => {
-        const txt = outputEl?.textContent || ''; if (!txt.trim()) return;
+        const txt = outputEl?.innerText || ''; if (!txt.trim()) return;
         await navigator.clipboard.writeText(txt); setStatus('Copied to clipboard.');
       });
 
-      popoutBtn?.addEventListener('click', () => {
-        const txt = (outputEl?.textContent || '').trim();
-        if (!txt) { setStatus('No script to pop out yet.', 'error'); return; }
-        const meta = (outputMeta?.textContent || '').trim();
-        const w = window.open('', '_blank', 'noopener,noreferrer');
-        if (!w) return;
-        w.document.write(`<!doctype html><meta charset="utf-8"><title>Script</title>
-          <style>
-            body{font:16.5px/1.7 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica Neue,Arial;padding:24px;background:#fff;color:#111}
-            .meta{color:#6b7280;font-size:.9rem;margin-bottom:12px}
-            pre{white-space:pre-wrap;border:1px solid #e5e7eb;border-radius:12px;padding:20px}
-            .bar{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-bottom:8px}
-            button{padding:.4rem .6rem;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;cursor:pointer}
-          </style>
-          <div class="bar"><button onclick="window.print()">Print</button><button onclick="navigator.clipboard.writeText(document.querySelector('pre').textContent)">Copy</button></div>
-          <div class="meta">${meta}</div>
-          <pre>${txt.replace(/[<>&]/g, s => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[s]))}</pre>`);
-        w.document.close();
-      });
-
-      // ---------- Submit: API-first (server fetches library Markdown) ----------
+      // ---------- Submit: API-first ----------
       form && form.addEventListener("submit", async (e) => {
         e.preventDefault();
 
-        // 1) Required fields quick check
+        // Required fields quick check
         for (const name of REQUIRED) {
           const el = form.elements[name] || document.getElementById(name);
           if (!el || !String(el.value || "").trim()) {
@@ -929,7 +928,7 @@
           }
         }
 
-        // 2) Read all values explicitly (no FormData surprises)
+        // Read all values explicitly (no FormData surprises)
         const values = {
           call_type: (callTypeSel?.value || "").trim(),
           seller_name: (form.elements.seller_name?.value || "").trim(),
@@ -938,7 +937,6 @@
           prospect_role: (form.elements.prospect_role?.value || "").trim(),
           prospect_company: (form.elements.prospect_company?.value || "").trim(),
 
-          // selects / textareas
           product: (productSel?.value || form.elements.product?.value || "").trim(),
           buyer_behaviour: (buyerBehSel?.value || form.elements.buyer_behaviour?.value || "").trim(),
           tone: (form.elements.tone?.value || "").trim(),
@@ -948,10 +946,10 @@
           next_step: (form.elements.next_step?.value || "").trim(),
         };
 
-        // 3) Canonical values used by backend
-        const mode = modeFromCallType(values.call_type);                   // "direct" | "partner"
-        const productId = String(values.product).toLowerCase().trim();         // e.g. "connectivity"
-        const buyerId = buyerCanon(values.buyer_behaviour);                  // e.g. "early-adopter"
+        // Canonical values used by backend
+        const mode = modeFromCallType(values.call_type);            // "direct" | "partner"
+        const productId = String(values.product).toLowerCase().trim();  // e.g. "connectivity"
+        const buyerId = buyerCanon(values.buyer_behaviour);         // e.g. "early-adopter"
 
         if (!productId) {
           validateField("product");
@@ -959,21 +957,13 @@
           return;
         }
 
-        // 4) Base prefix (never ends with .html)
-        const basePrefix = (() => {
-          const parts = (location.pathname || "").split("/");
-          const last = parts[parts.length - 1] || "";
-          if (last.includes(".")) return "";              // e.g. /first-call-script-v2.html
-          return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
-        })();
-
         setBusy(true);
         setStatus("Generating call script…");
         if (diag) diag.open = false;
         if (diagJson) diagJson.textContent = "";
 
         try {
-          // 5) Build payload with EVERYTHING
+          // Build payload with EVERYTHING
           const body = {
             kind: "call-script",
             basePrefix,
@@ -1000,8 +990,10 @@
           const script = data?.script?.text || "";
           const tips = data?.script?.tips || [];
 
-          // ---------- Update UI ----------
-          outputEl.textContent = script;
+          // ✅ Render Markdown safely
+          const html = DOMPurify.sanitize(marked.parse(script));
+          outputEl.innerHTML = html;
+
           outputMeta.textContent =
             `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
 
@@ -1017,6 +1009,10 @@
           lastOutput = script;
           localStorage.setItem(OUTPUT_KEY, lastOutput);
 
+          // populate modal with same rendered HTML
+          modalScript.innerHTML = html;
+
+          // Log activity
           addActivity({
             time: nowTime(),
             product: productId,
@@ -1067,7 +1063,9 @@
         if (downloadBtn) downloadBtn.disabled = !hasText;
         if (submitBtn) submitBtn.disabled = !allRequiredFilled(form);
 
-        loadNotes();
+        // Notes
+        const loadNotesSafe = () => { try { notesArea.value = localStorage.getItem(notesKey()) || ''; } catch {} };
+        loadNotesSafe();
 
         document.addEventListener('input', (e) => {
           if (e.target.closest('#' + FORM_ID)) { validateField(e.target); saveForm(); refreshSubmitState(); }
@@ -1078,5 +1076,4 @@
   </script>
 
 </body>
-
 </html>
