@@ -25,20 +25,24 @@ async function callModel({ system, prompt, temperature }) {
   const azEndpoint   = process.env.AZURE_OPENAI_ENDPOINT;
   const azKey        = process.env.AZURE_OPENAI_API_KEY;
   const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-  const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-02-15-preview";
+  const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
 
   if (azEndpoint && azKey && azDeployment) {
     const url = `${azEndpoint.replace(/\/+$/, "")}/openai/deployments/${encodeURIComponent(azDeployment)}/chat/completions?api-version=${encodeURIComponent(azApiVersion)}`;
     const r = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "api-key": azKey },
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": azKey,
+        "User-Agent": `inside-track-tools/${VERSION}`
+      },
       body: JSON.stringify({
         temperature,
         messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
       }),
     });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data?.error?.message || r.statusText);
+    if (!r.ok) throw new Error(data?.error?.message || r.statusText || "Azure OpenAI request failed");
     return data;
   }
 
@@ -47,7 +51,11 @@ async function callModel({ system, prompt, temperature }) {
   if (oaKey) {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${oaKey}` },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${oaKey}`,
+        "User-Agent": `inside-track-tools/${VERSION}`
+      },
       body: JSON.stringify({
         model: oaModel,
         temperature,
@@ -55,7 +63,7 @@ async function callModel({ system, prompt, temperature }) {
       }),
     });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data?.error?.message || r.statusText);
+    if (!r.ok) throw new Error(data?.error?.message || r.statusText || "OpenAI request failed");
     return data;
   }
   return null; // no model configured
@@ -63,7 +71,7 @@ async function callModel({ system, prompt, temperature }) {
 
 const toModeId = (v = "") => (String(v).toLowerCase().startsWith("p") ? "partner" : "direct");
 
-// NOTE: keep this for other paths, but we will NOT use its defaulting for call-script.
+// NOTE: kept for backward-compat in other routes (not used for call-script strict mapping).
 const toBuyerTypeId = (v = "") => {
   const s = String(v).toLowerCase();
   if (s.startsWith("innovator")) return "innovator";
@@ -178,11 +186,13 @@ module.exports = async function (context, req) {
       function mapBuyerStrict(x) {
         const s = String(x || "").trim().toLowerCase();
         if (!s) return null;
-        if (s.startsWith("innovator")) return "innovator";
-        if (s.startsWith("early adopter")) return "early-adopter";
-        if (s.startsWith("early majority")) return "early-majority";
-        if (s.startsWith("late majority"))  return "late-majority";
-        if (s.startsWith("sceptic") || s.startsWith("skeptic")) return "sceptic";
+        // allow "earlyadopter" / "earlyadopter " etc.
+        const normalized = s.replace(/\s+/g, " ").trim().replace(/\s*-\s*/g, "-");
+        if (normalized.startsWith("innovator")) return "innovator";
+        if (normalized.startsWith("early-adopter") || normalized.startsWith("early adopter") || normalized.startsWith("earlyadopter")) return "early-adopter";
+        if (normalized.startsWith("early-majority") || normalized.startsWith("early majority") || normalized.startsWith("earlymajority")) return "early-majority";
+        if (normalized.startsWith("late-majority")  || normalized.startsWith("late majority")  || normalized.startsWith("latemajority"))  return "late-majority";
+        if (normalized.startsWith("sceptic") || normalized.startsWith("skeptic")) return "sceptic";
         return null;
       }
       const buyerType = mapBuyerStrict(rawBuyer);
