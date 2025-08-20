@@ -1,10 +1,10 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-08-20-patch4 (A-first; guarded client override; smart local host mapping)
+// Version: v3-markdown-first-2025-08-20-patch5 (strict buyer; safe base; host mapping; guarded override)
 
 const { z } = require("zod");
 
 // ---------- helpers ----------
-const VERSION = "v3-markdown-first-2025-08-20-patch4";
+const VERSION = "v3-markdown-first-2025-08-20-patch5";
 
 /* eslint-disable no-console */
 try { console.log(`[${VERSION}] module loaded`); } catch {}
@@ -62,6 +62,8 @@ async function callModel({ system, prompt, temperature }) {
 }
 
 const toModeId = (v = "") => (String(v).toLowerCase().startsWith("p") ? "partner" : "direct");
+
+// NOTE: keep this for other paths, but we will NOT use its defaulting for call-script.
 const toBuyerTypeId = (v = "") => {
   const s = String(v).toLowerCase();
   if (s.startsWith("innovator")) return "innovator";
@@ -71,6 +73,7 @@ const toBuyerTypeId = (v = "") => {
   if (s.startsWith("sceptic") || s.startsWith("skeptic")) return "sceptic";
   return "early-majority";
 };
+
 const toProductId = (v = "") => {
   const s = String(v).toLowerCase().trim();
   const map = {
@@ -169,11 +172,33 @@ module.exports = async function (context, req) {
     if (kind === "call-script") {
       const v = body.variables || body || {};
       const productId = toProductId(v.product || body.product);
-      const buyerType = toBuyerTypeId(v.buyerType || body.buyerType);
-      const mode      = toModeId(v.mode || body.mode || "direct");
+
+      // STRICT buyer-type mapping (no silent default)
+      const rawBuyer = v.buyerType || body.buyerType || v.buyer_behaviour || body.buyer_behaviour || "";
+      function mapBuyerStrict(x) {
+        const s = String(x || "").trim().toLowerCase();
+        if (!s) return null;
+        if (s.startsWith("innovator")) return "innovator";
+        if (s.startsWith("early adopter")) return "early-adopter";
+        if (s.startsWith("early majority")) return "early-majority";
+        if (s.startsWith("late majority"))  return "late-majority";
+        if (s.startsWith("sceptic") || s.startsWith("skeptic")) return "sceptic";
+        return null;
+      }
+      const buyerType = mapBuyerStrict(rawBuyer);
+
+      const mode = toModeId(v.mode || body.mode || "direct");
 
       if (!productId || !buyerType || !mode) {
-        context.res = { status: 400, headers: cors, body: { error: "Missing product / buyerType / mode", version: VERSION } };
+        context.res = {
+          status: 400,
+          headers: cors,
+          body: {
+            error: "Missing or invalid product / buyerType / mode",
+            received: { product: productId || null, buyerType: rawBuyer || null, mode: v.mode || body.mode || null },
+            version: VERSION
+          }
+        };
         return;
       }
 
@@ -181,9 +206,11 @@ module.exports = async function (context, req) {
       const protoHdr = (req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
       const hostHdr  = (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
       const envBase  = (process.env.CALL_LIB_BASE || "").trim().replace(/\/+$/, "");
-      const bodyBase = String(body.basePrefix || "").trim().replace(/\/+$/, "");
+      const rawBase  = String(body.basePrefix || "").trim().replace(/\/+$/, "");
+      // allow only clean path prefixes; reject things that look like files (/foo.html)
+      const bodyBase = (/^\/[a-z0-9/_-]*$/i.test(rawBase) && !/\.[a-z0-9]+$/i.test(rawBase)) ? rawBase : "";
 
-      // Map Functions host (7071) -> Static host (4280) in local dev (works for localhost and Codespaces).
+      // Map Functions host (7071) -> Static host (4280) in local dev (localhost & Codespaces).
       function mapToStaticHost(h) {
         if (!isLocalDev || !h) return h;
         if (/^7071-/.test(h)) return h.replace(/^7071-/, "4280-"); // Codespaces style
@@ -289,6 +316,15 @@ module.exports = async function (context, req) {
         temperature: 0.6,
       });
 
+      if (!llmRes) {
+        context.res = {
+          status: 503,
+          headers: cors,
+          body: { error: "No model configured", hint: "Set OPENAI_API_KEY or AZURE_OPENAI_* in local.settings.json / App Settings", version: VERSION }
+        };
+        return;
+      }
+
       const output = extractText(llmRes) || "";
       const [scriptTextRaw, tipsBlock] = output.split("**Sales tips for colleagues conducting similar calls**");
       const scriptText = ensureThanksClose((scriptTextRaw || "").trim());
@@ -307,7 +343,6 @@ module.exports = async function (context, req) {
       context.res = { status: 400, headers: cors, body: { error: "Invalid request body", version: VERSION } };
       return;
     }
-    // If you actually use packs.json, keep your existing implementation here.
     context.res = { status: 200, headers: cors, body: { output: "", preview: "", version: VERSION } };
   } catch (err) {
     context.log.error(`[${VERSION}] Unhandled error: ${err?.stack || err}`);
