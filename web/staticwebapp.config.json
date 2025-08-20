@@ -1,5 +1,8 @@
 {
   "routes": [
+    { "route": "/", "rewrite": "/first-call-script-v2.html" },
+    { "route": "/first-call-script-v2", "rewrite": "/first-call-script-v2.html" },
+
     {
       "route": "/content/call-library/*",
       "allowedRoles": ["anonymous", "authenticated"],
@@ -10,8 +13,9 @@
       "allowedRoles": ["anonymous", "authenticated"]
     }
   ],
+
   "navigationFallback": {
-    "rewrite": "/index.html",
+    "rewrite": "/first-call-script-v2.html",
     "exclude": [
       "/api/*",
       "/content/*",
@@ -20,6 +24,11 @@
       "/robots.txt"
     ]
   },
+
+  "responseOverrides": {
+    "404": { "rewrite": "/first-call-script-v2.html" }
+  },
+
   "mimeTypes": {
     ".md": "text/markdown; charset=utf-8",
     ".mdx": "text/markdown; charset=utf-8",
