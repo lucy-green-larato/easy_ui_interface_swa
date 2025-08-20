@@ -1,10 +1,10 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-08-20-patch6 (strict buyer; safe base; host mapping; guarded override; no-pleasantries; dedup-close)
+// Version: v3-markdown-first-2025-08-20-patch8 (aliases for USPs/other/next; no-dup close; strict buyer; safe base; host mapping; guarded override)
 
 const { z } = require("zod");
 
 // ---------- helpers ----------
-const VERSION = "v3-markdown-first-2025-08-20-patch6";
+const VERSION = "v3-markdown-first-2025-08-20-patch8";
 
 /* eslint-disable no-console */
 try { console.log(`[${VERSION}] module loaded`); } catch {}
@@ -25,20 +25,24 @@ async function callModel({ system, prompt, temperature }) {
   const azEndpoint   = process.env.AZURE_OPENAI_ENDPOINT;
   const azKey        = process.env.AZURE_OPENAI_API_KEY;
   const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-  const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-02-15-preview";
+  const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
 
   if (azEndpoint && azKey && azDeployment) {
     const url = `${azEndpoint.replace(/\/+$/, "")}/openai/deployments/${encodeURIComponent(azDeployment)}/chat/completions?api-version=${encodeURIComponent(azApiVersion)}`;
     const r = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "api-key": azKey },
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": azKey,
+        "User-Agent": `inside-track-tools/${VERSION}`
+      },
       body: JSON.stringify({
         temperature,
         messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
       }),
     });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data?.error?.message || r.statusText);
+    if (!r.ok) throw new Error(data?.error?.message || r.statusText || "Azure OpenAI request failed");
     return data;
   }
 
@@ -47,7 +51,11 @@ async function callModel({ system, prompt, temperature }) {
   if (oaKey) {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${oaKey}` },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${oaKey}`,
+        "User-Agent": `inside-track-tools/${VERSION}`
+      },
       body: JSON.stringify({
         model: oaModel,
         temperature,
@@ -55,7 +63,7 @@ async function callModel({ system, prompt, temperature }) {
       }),
     });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data?.error?.message || r.statusText);
+    if (!r.ok) throw new Error(data?.error?.message || r.statusText || "OpenAI request failed");
     return data;
   }
   return null; // no model configured
@@ -63,7 +71,7 @@ async function callModel({ system, prompt, temperature }) {
 
 const toModeId = (v = "") => (String(v).toLowerCase().startsWith("p") ? "partner" : "direct");
 
-// NOTE: keep this for other paths, but we will NOT use its defaulting for call-script.
+// Kept for compatibility in other routes
 const toBuyerTypeId = (v = "") => {
   const s = String(v).toLowerCase();
   if (s.startsWith("innovator")) return "innovator";
@@ -92,39 +100,52 @@ const toProductId = (v = "") => {
   return s.replace(/[^\w]+/g, "_").replace(/_{2,}/g, "_").replace(/^_|_$/g, "");
 };
 
-// Ensure single "Thank you for your time."
+// Add "Thank you for your time." only if missing
 function ensureThanksClose(text) {
-  let t = String(text || "").trim();
-  t = t.replace(/Thank you for your time\.?$/gi, "").trim(); // strip trailing duplicate
-  return (t + (t.endsWith("\n") ? "" : "\n") + "Thank you for your time.").trim();
+  const t = String(text || "").trim();
+  if (/thank you for your time\.?$/i.test(t)) return t;
+  return t + (t.endsWith("\n") ? "" : "\n") + "Thank you for your time.";
 }
 
-function buildPromptFromMarkdown({ templateMdText, seller, prospect, productLabel, buyerType, valueProposition, context, nextStep }) {
+// Optional: parse UI length label to a target word count (not required by your request, harmless if present)
+function parseTargetLength(label = "") {
+  const s = String(label).toLowerCase();
+  if (s.includes("150")) return 150;
+  if (s.includes("300")) return 300;
+  if (s.includes("450")) return 450;
+  if (s.includes("650")) return 650;
+  return 300;
+}
+
+function buildPromptFromMarkdown({ templateMdText, seller, prospect, productLabel, buyerType, valueProposition, context, nextStep, tone, targetWords }) {
   const usp   = (valueProposition || "").trim() || "(none provided)";
   const other = (context || "").trim() || "(none provided)";
   const cta   = (nextStep || "").trim() || "(use suggested_next_step from the template if present; otherwise propose a sensible next step)";
+  const toneLine   = tone ? `Write in a "${tone}" tone.\n` : "";
+  const lengthLine = targetWords ? `Aim for about ${targetWords} words (±10%).\n` : "";
+
   return `
 You are a highly effective UK B2B salesperson.
 
-Use the Markdown template below as the skeleton for the call. Preserve the section headings and overall order. Fill the content so it reads as a natural, spoken conversation.
+${toneLine}${lengthLine}Use the Markdown template below as the skeleton for the call. Preserve the section headings and overall order. Fill the content so it reads as a natural, spoken conversation.
 
 MANDATES:
 - British business English; no US slang; no assumptive closes.
-- Do NOT start with pleasantries like "I hope you are well".
-- Always begin with the salesperson’s introduction (name + company).
+- Do NOT use stock pleasantries like "I hope you are well" or similar.
+- Open with a brief personal introduction from ${seller.name} at ${seller.company} to ${prospect.name} (${prospect.role} at ${prospect.company}).
 - Reference observations from similar businesses; do not assume the prospect’s current state.
-- Elegantly weave the USPs and Other points where they make sense in context (not all must be used).
+- Elegantly weave the USPs and Other points where they make sense in context; do not ignore them if provided.
 - Include one specific, relevant customer example with measurable results.
 - Handle common objections factually and without pressure.
 - For the "Next Step": use the salesperson’s input if provided; otherwise, if the template includes an HTML comment <!-- suggested_next_step: ... --> use that; otherwise propose a clear, low-friction next step.
-- End the "Close" with exactly once: "Thank you for your time."
+- End the "Close" with: "Thank you for your time."
 
 Buyer type: ${buyerType}
 Product: ${productLabel}
 
 USPs (from salesperson): ${usp}
 Other points to consider: ${other}
-Requested Next Step (if any): ${nextStep || "(none)"}
+Requested Next Step (if any): ${cta}
 
 --- BEGIN TEMPLATE ---
 ${templateMdText}
@@ -175,20 +196,26 @@ module.exports = async function (context, req) {
       const v = body.variables || body || {};
       const productId = toProductId(v.product || body.product);
 
-      // STRICT buyer-type mapping
-      const rawBuyer = v.buyerType || body.buyerType || "";
+      // STRICT buyer-type mapping (no silent default)
+      const rawBuyer = v.buyerType || body.buyerType || v.buyer_behaviour || body.buyer_behaviour || "";
       function mapBuyerStrict(x) {
         const s = String(x || "").trim().toLowerCase();
         if (!s) return null;
-        if (s.startsWith("innovator")) return "innovator";
-        if (s.startsWith("early adopter")) return "early-adopter";
-        if (s.startsWith("early majority")) return "early-majority";
-        if (s.startsWith("late majority"))  return "late-majority";
-        if (s.startsWith("sceptic") || s.startsWith("skeptic")) return "sceptic";
+        const normalized = s.replace(/\s+/g, " ").trim().replace(/\s*-\s*/g, "-");
+        if (normalized.startsWith("innovator")) return "innovator";
+        if (normalized.startsWith("early-adopter") || normalized.startsWith("early adopter") || normalized.startsWith("earlyadopter")) return "early-adopter";
+        if (normalized.startsWith("early-majority") || normalized.startsWith("early majority") || normalized.startsWith("earlymajority")) return "early-majority";
+        if (normalized.startsWith("late-majority")  || normalized.startsWith("late majority")  || normalized.startsWith("latemajority"))  return "late-majority";
+        if (normalized.startsWith("sceptic") || normalized.startsWith("skeptic")) return "sceptic";
         return null;
       }
       const buyerType = mapBuyerStrict(rawBuyer);
+
       const mode = toModeId(v.mode || body.mode || "direct");
+
+      // Optional tone/length if your UI sends them
+      const tone = String(v.tone || body.tone || "").trim();
+      const targetWords = parseTargetLength(v.length || body.length);
 
       if (!productId || !buyerType || !mode) {
         context.res = {
@@ -203,16 +230,17 @@ module.exports = async function (context, req) {
         return;
       }
 
-      // --- base for library fetch ---
+      // --- resolve base for call-library fetches (no hardcoding) ---
       const protoHdr = (req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
       const hostHdr  = (req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
       const envBase  = (process.env.CALL_LIB_BASE || "").trim().replace(/\/+$/, "");
       const rawBase  = String(body.basePrefix || "").trim().replace(/\/+$/, "");
       const bodyBase = (/^\/[a-z0-9/_-]*$/i.test(rawBase) && !/\.[a-z0-9]+$/i.test(rawBase)) ? rawBase : "";
 
+      // Map Functions host (7071) -> Static host (4280) in local dev (localhost & Codespaces).
       function mapToStaticHost(h) {
         if (!isLocalDev || !h) return h;
-        if (/^7071-/.test(h)) return h.replace(/^7071-/, "4280-");
+        if (/^7071-/.test(h)) return h.replace(/^7071-/, "4280-"); // Codespaces style
         const m = h.match(/^(.*?):(\d+)$/);
         if (m && m[2] === "7071") return `${m[1]}:4280`;
         return h;
@@ -235,6 +263,7 @@ module.exports = async function (context, req) {
       const mdUrl = `${base}/content/call-library/v1/${mode}/${productId}/${buyerType}.md`;
       context.log(`[${VERSION}] [CallLib] GET ${mdUrl}`);
 
+      // Optional: local retry helper to correct proto/port if needed
       async function fetchWithLocalFallback(url, init) {
         try { return await fetch(url, init); }
         catch (e) {
@@ -252,7 +281,7 @@ module.exports = async function (context, req) {
         }
       }
 
-      // Guarded client override
+      // ---- Guarded client override (Option B) with A-first default ----
       const allowClientTpl = process.env.ALLOW_CLIENT_TEMPLATE === "1";
       const clientTemplate = allowClientTpl
         ? String(body.templateMdText || body.templateMd || "").trim()
@@ -295,6 +324,14 @@ module.exports = async function (context, req) {
         templateMdText = bodyText;
       }
 
+      // ------- ALIASES so USPs/Other/Next always arrive -------
+      const valueProposition =
+        v.value_proposition || v.usp || v.proposition || body.value_proposition || body.usp || body.proposition || "";
+      const otherContext =
+        v.context || v.other_points || body.context || body.other_points || "";
+      const nextStep =
+        v.next_step || v.call_to_action || body.next_step || body.call_to_action || "";
+
       const productLabel = productId.replace(/[_-]+/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
       const prompt = buildPromptFromMarkdown({
         templateMdText,
@@ -302,14 +339,15 @@ module.exports = async function (context, req) {
         prospect: { name: v.prospect_name, role: v.prospect_role, company: v.prospect_company },
         productLabel,
         buyerType,
-        valueProposition: v.value_proposition,
-        context: v.context || v.other_points
-        context: v.context,
-        nextStep: v.next_step || v.call_to_action,
+        valueProposition,
+        context: otherContext,
+        nextStep,
+        tone,
+        targetWords,
       });
 
       const llmRes = await callModel({
-        system: `You are a highly effective UK B2B salesperson writing a sales call script that delivers value for the prospect.
+        system: `You are a highly effective UK B2B salesperson writing a sales call script.
 MANDATES:
 - Do not use pleasantries such as "I hope you are well" or "I hope you are having a great day".
 - Always follow the provided structure and headings.`,
