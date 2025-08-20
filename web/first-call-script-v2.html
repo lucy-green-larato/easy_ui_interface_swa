@@ -503,6 +503,12 @@
     import { getIndex, loadTemplate, canonical } from "./src/lib/callLibrary.js?v=fix6";
     console.log('[FCSv2] imports loaded');
 
+    // ---- FIX: define basePrefix at module scope and reuse everywhere ----
+    const basePrefix = (() => {
+      const parts = (location.pathname || "").split("/");
+      return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
+    })();
+
     const modeFromCallType = (v) => canonical.mode(v);
     const buyerCanon = (v) => canonical.buyer(v);
 
@@ -615,7 +621,7 @@
         const id = el.id || el.name || '';
         const errorEl = document.getElementById(`${id}_error`) || (id === 'call_type' ? document.getElementById('call_type_error') : null);
         let value = '';
-        if (el === productSel) value = (productSel.value || '').trim();
+               if (el === productSel) value = (productSel.value || '').trim();
         else if (el === buyerBehSel) value = (buyerBehSel.value || '').trim();
         else if (id === 'call_type') value = (callTypeSel?.value || '').trim();
         else value = (el.value || '').trim();
@@ -791,8 +797,12 @@
         sel.innerHTML = `<option value="">Loading…</option>`;
 
         try {
-          const idx = await getIndex(mode);
-          const items = Array.isArray(idx?.products) ? idx.products : [];
+          // FIX: pass basePrefix so getIndex fetches from the correct sub-path
+          const idx = await getIndex(mode, basePrefix);
+          const items =
+            Array.isArray(idx?.products) ? idx.products :
+            Array.isArray(idx?.items)    ? idx.items :
+            Array.isArray(idx)           ? idx : [];
 
           if (!items.length) {
             sel.innerHTML = `<option value="">No products found</option>`;
@@ -916,42 +926,10 @@
           }
         }
 
-        const basePrefix = (() => {
-          const parts = (location.pathname || "").split("/");
-          return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
-        })();
-
         const fd = Object.fromEntries(new FormData(form).entries());
         const mode = modeFromCallType(fd.call_type);
         const productId = (productSel?.value || fd.product || "").toLowerCase().trim();
         const buyerId = buyerCanon(fd.buyer_behaviour);
-
-        // FINAL BODY (note: includes value_proposition, context, next_step, tone, length)
-        const body = {
-          kind: "call-script",
-          basePrefix,
-          variables: {
-            mode,
-            product: productId,
-            buyerType: buyerId,
-
-            // people/org
-            seller_name: fd.seller_name,
-            seller_company: fd.seller_company,
-            prospect_name: fd.prospect_name,
-            prospect_role: fd.prospect_role,
-            prospect_company: fd.prospect_company,
-
-            // salesperson inputs (these were missing before)
-            value_proposition: fd.value_proposition || "",
-            context: fd.context || "",
-            next_step: fd.next_step || "",
-
-            // optional prefs used by backend
-            tone: fd.tone || "",
-            length: fd.length || "",
-          },
-        };
 
         if (!productId) {
           validateField("product");
@@ -968,15 +946,11 @@
           // Build payload WITHOUT any template text (server will fetch)
           const body = {
             kind: "call-script",
-            // basePrefix helps the API find your static content root (keep this if you already have it above)
-            basePrefix: (() => {
-              const parts = (location.pathname || "").split("/");
-              return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
-            })(),
+            basePrefix, // reuse module-scoped basePrefix
             variables: {
               mode,
-              product: productSel?.value || fd.product || "",
-              buyerType: buyerCanon(fd.buyer_behaviour),
+              product: productId,
+              buyerType: buyerId,
               seller_name: fd.seller_name,
               seller_company: fd.seller_company,
               prospect_name: fd.prospect_name,
