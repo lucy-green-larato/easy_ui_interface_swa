@@ -303,14 +303,15 @@ module.exports = async function (context, req) {
         productLabel,
         buyerType,
         valueProposition: v.value_proposition,
+        context: v.context || v.other_points
         context: v.context,
-        nextStep: v.next_step,
+        nextStep: v.next_step || v.call_to_action,
       });
 
       const llmRes = await callModel({
         system: `You are a highly effective UK B2B salesperson writing a sales call script that delivers value for the prospect.
 MANDATES:
-- Do not use pleasantries such as "I hope you are well".
+- Do not use pleasantries such as "I hope you are well" or "I hope you are having a great day".
 - Always follow the provided structure and headings.`,
         prompt,
         temperature: 0.6,
