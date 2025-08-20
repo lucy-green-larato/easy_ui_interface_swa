@@ -16,7 +16,6 @@
   "scripts": {
     "validate:calllib": "ajv validate -s ./schemas/call-library.schema.json -d './web/content/call-library/v1/**/*.json'"
   },
-  "main": "index.js",
   "keywords": [],
   "author": "",
   "license": "ISC",
