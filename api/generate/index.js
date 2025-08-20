@@ -193,7 +193,10 @@ module.exports = async function (context, req) {
 
     // ---------- Markdown-first route ----------
     if (kind === "call-script") {
-      const v = body.variables || body || {};
+      const v = {
+        ...(body || {}),
+        ...BodySchema(body.variables || {}),
+      }
       const productId = toProductId(v.product || body.product);
 
       // STRICT buyer-type mapping (no silent default)
