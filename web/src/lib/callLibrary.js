@@ -59,16 +59,25 @@ export async function getIndex() {
  * Load a specific Markdown template for {mode, product, buyer}.
  * Always resolves to ./content/call-library/v1/{mode}/{product}/{buyer}.md
  */
-export async function loadTemplate({ mode, product, buyer }) {
+export async function getIndex(/* mode unused for flat index */) {
   const basePrefix = basePrefixFromPath();
-  const safeMode = canonical.mode(mode);
-  const safeBuyer = canonical.buyer(buyer);
-  const safeProduct = String(product || "").toLowerCase().replace(/\s+/g, "-");
-
-  const url = `${location.origin}${basePrefix}/content/call-library/v1/${safeMode}/${safeProduct}/${safeBuyer}.md?nocache=${Date.now()}`;
+  const url = `${location.origin}${basePrefix}/content/call-library/v1/index.json?nocache=${Date.now()}`;
   const r = await fetch(url, { cache: "no-store" });
   if (!r.ok) {
-    throw new Error(`Failed to fetch template (${r.status}) from ${url}`);
+    throw new Error(`Failed to fetch index.json (${r.status}) from ${url}`);
   }
-  return await r.text();
+  const data = await r.json();
+
+  // Normalise to always { products: [...] }
+  if (Array.isArray(data?.products)) {
+    return { products: data.products };
+  }
+  if (Array.isArray(data?.direct?.products)) {
+    return { products: data.direct.products };
+  }
+  if (Array.isArray(data?.partner?.products)) {
+    return { products: data.partner.products };
+  }
+  return { products: [] };
 }
+
