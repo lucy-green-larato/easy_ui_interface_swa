@@ -4,7 +4,7 @@
 const VERSION = "DEV-verify-2025-08-21-2"; // <-- bump this every edit
 try {
   console.log(`[${VERSION}] module loaded at ${new Date().toISOString()} cwd=${process.cwd()} dir=${__dirname}`);
-} catch {}
+} catch { }
 
 const { z } = require("zod");
 
@@ -100,18 +100,18 @@ function extractText(res) {
     if (res.choices && res.choices[0] && res.choices[0].message && res.choices[0].message.content) {
       return String(res.choices[0].message.content);
     }
-  } catch (e) {}
+  } catch (e) { }
   try {
     if (res.output_text) return String(res.output_text);
     if (res.output) return String(res.output);
     if (res.text) return String(res.text);
     if (res.message) return String(res.message);
-  } catch (e) {}
+  } catch (e) { }
   try {
     if (res.data && res.data.choices && res.data.choices[0] && res.data.choices[0].message && res.data.choices[0].message.content) {
       return String(res.data.choices[0].message.content);
     }
-  } catch (e) {}
+  } catch (e) { }
   return "";
 }
 
@@ -144,7 +144,7 @@ async function callModel(opts) {
       }),
     });
     let data = {};
-    try { data = await r.json(); } catch (e) {}
+    try { data = await r.json(); } catch (e) { }
     if (!r.ok) throw new Error((data && data.error && data.error.message) || r.statusText || "Azure OpenAI request failed");
     return data;
   }
@@ -173,7 +173,7 @@ async function callModel(opts) {
       body: JSON.stringify(payload),
     });
     let data = {};
-    try { data = await r.json(); } catch (e) {}
+    try { data = await r.json(); } catch (e) { }
     if (!r.ok) throw new Error((data && data.error && data.error.message) || r.statusText || "OpenAI request failed");
     return data;
   }
@@ -355,7 +355,7 @@ function buildJsonPrompt(args) {
   const lengthHint = targetWords ? `Aim for about ${targetWords} words (±10%).` : "";
 
   return (
-`You are a highly effective UK B2B salesperson. 
+    `You are a highly effective UK B2B salesperson. 
 Write **valid JSON only** (no markdown, no prose outside JSON). 
 JSON schema:
 {
@@ -582,7 +582,7 @@ ${callNotes || "(none)"}`
               .replace(/\/\/7071-/, "//4280-");
             if (alt !== url) {
               context.log("[" + VERSION + "] [CallLib] retry -> " + alt);
-              try { return await fetch(alt, init); } catch (e2) {}
+              try { return await fetch(alt, init); } catch (e2) { }
             }
           }
           throw e;
@@ -613,7 +613,7 @@ ${callNotes || "(none)"}`
         });
 
         let bodyText = "";
-        try { bodyText = await resMd.text(); } catch (e) {}
+        try { bodyText = await resMd.text(); } catch (e) { }
 
         if (!resMd.ok) {
           context.res = {
@@ -678,17 +678,62 @@ ${callNotes || "(none)"}`
 
       if (validated && validated.success) {
         const S = validated.data.sections;
-        // precedence for next step: salesperson > template > assistant (already handled in prompt)
-        const md =
-          "## Opening\n" + ensureThanksClose(stripPleasantries(S.opening)).replace(/\s*thank you for your time\.?$/i, "") + "\n\n" +
+
+        // Build markdown from JSON sections
+        let scriptText =
+          "## Opening\n" + stripPleasantries(S.opening) + "\n\n" +
           "## Buyer Pain\n" + stripPleasantries(S.buyer_pain) + "\n\n" +
           "## Buyer Desire\n" + stripPleasantries(S.buyer_desire) + "\n\n" +
           "## Example Illustration\n" + stripPleasantries(S.example_illustration) + "\n\n" +
           "## Handling Objections\n" + stripPleasantries(S.handling_objections) + "\n\n" +
           "## Next Step\n" + stripPleasantries(S.next_step) + "\n";
 
-        const finalMd = targetWords ? trimToTargetWords(md, targetWords) : md;
-        context.res = { status: 200, headers: cors, body: { script: { text: finalMd, tips: validated.data.tips }, version: VERSION, usedModel: true, mode: "json" } };
+        // ——— Deterministic weaving (make sure inputs are present even if the model ignored them) ———
+        scriptText = ensureHeadings(scriptText);
+
+        // Next step: salesperson > template > assistant (JSON already chose, but hard-set if salesperson provided)
+        if (nextStep && String(nextStep).trim()) {
+          scriptText = replaceSection(scriptText, "Next Step", String(nextStep).trim());
+        }
+
+        // USPs under Buyer Desire as a short bullet block
+        if (valueProposition && String(valueProposition).trim()) {
+          scriptText = injectBullets(
+            scriptText,
+            "Buyer Desire",
+            "Based on your priorities, we can emphasise:",
+            valueProposition
+          );
+        }
+
+        // Other points near the top of Opening
+        if (otherContext && String(otherContext).trim()) {
+          scriptText = injectBullets(
+            scriptText,
+            "Opening",
+            "I'll also make sure we cover:",
+            otherContext
+          );
+        }
+
+        // Length control AFTER weaving
+        if (targetWords) {
+          scriptText = trimToTargetWords(scriptText, targetWords);
+        }
+
+        // Clean closing line
+        scriptText = ensureThanksClose(scriptText);
+
+        context.res = {
+          status: 200,
+          headers: cors,
+          body: {
+            script: { text: scriptText, tips: validated.data.tips },
+            version: VERSION,
+            usedModel: true,
+            mode: "json"
+          }
+        };
         return;
       }
 
