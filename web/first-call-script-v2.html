@@ -196,6 +196,12 @@
       color: #374151;
     }
 
+    /* prevent the pill contents from wrapping */
+    .calltype-mini,
+    .calltype-mini .mini-label {
+      white-space: nowrap;
+    }
+
     /* Subtle status chip */
     .model-note {
       color: #374151;
@@ -248,7 +254,7 @@
       <img class="logo" src="./larato-logo.svg" alt="Larato" />
       <div class="brand-text">
         <h1 class="app-title">Inside Track Tools</h1>
-        <p class="kicker">First Call Script · v2</p>
+        <p class="kicker">Sales call scripting and emailing</p>
       </div>
     </div>
 
@@ -411,57 +417,69 @@
 
     <!-- MIDDLE -->
     <section class="panel middle">
-      <div class="output-card card">
-        <div class="row-between output-head">
-          <h2 id="output-title">Generated Script</h2>
+      <div class="row-between output-head">
+        <h2 id="output-title">Conversation Guide</h2>
+        <div class="row-between" style="gap:8px">
+          <button id="toggle-bullets" class="btn inline" type="button" aria-pressed="false">
+            Show bullet point script
+          </button>
+          <button id="popout" class="btn inline" type="button" title="Open script in a clean window">Pop-out</button>
+          <div class="meta" id="output-meta" aria-live="polite" style="color:var(--text-2);font-size:.9rem"></div>
+        </div>
+      </div>
+
+      <!-- CHANGED: pre → div to allow rendered HTML -->
+      <div id="output" class="output" tabindex="0" aria-label="Generated script will appear here"></div>
+
+      <div class="tips-card card" style="margin-top:var(--space-4)">
+        <div class="row-between">
+          <h3>Helpful tips</h3>
+          <button id="toggle-tips" class="btn inline" type="button" aria-expanded="true" aria-controls="tips-list">Hide
+            tips</button>
+        </div>
+        <ul id="tips-list"></ul>
+      </div>
+
+      <div class="bullets-card card" style="margin-top:var(--space-4)">
+        <div class="row-between">
+          <h3>Bullet overview</h3>
+          <button id="toggle-bullets" class="btn inline" type="button" aria-expanded="true"
+            aria-controls="bullets-list">Hide bullets</button>
+        </div>
+        <ul id="bullets-list"></ul>
+      </div>
+
+      <div id="outline-card" class="card" style="margin-top:var(--space-4)" hidden>
+        <div class="row-between">
+          <h3>Bullet view (for experienced reps)</h3>
+          <button id="toggle-outline" class="btn inline" type="button" aria-expanded="true"
+            aria-controls="outline-list">Hide</button>
+        </div>
+        <ul id="outline-list" style="margin:.5rem 0 0; padding-left:1.25rem"></ul>
+      </div>
+
+      <div class="notes-card card" style="margin-top:var(--space-4)">
+        <div class="row-between">
+          <h3>Call notes</h3>
           <div class="row-between" style="gap:8px">
-            <button id="popout" class="btn inline" type="button" title="Open script in a clean window">Pop-out</button>
-            <div class="meta" id="output-meta" aria-live="polite" style="color:var(--text-2);font-size:.9rem"></div>
+            <button id="save-notes" class="btn inline" type="button">Save notes</button>
+            <button id="download-notes" class="btn inline" type="button">Download .txt</button>
+            <button id="make-followup" class="btn inline" type="button">Create follow-up email</button>
           </div>
         </div>
-        <!-- CHANGED: pre → div to allow rendered HTML -->
-        <div id="output" class="output" tabindex="0" aria-label="Generated script will appear here"></div>
+        <textarea id="notes" rows="6"
+          placeholder="Type notes during the call. Saved locally on this device."></textarea>
+        <p class="muted" style="margin-top:.5rem">Notes are stored locally (this browser only).</p>
+      </div>
 
-        <div class="tips-card card" style="margin-top:var(--space-4)">
-          <div class="row-between">
-            <h3>Helpful tips</h3>
-            <button id="toggle-tips" class="btn inline" type="button" aria-expanded="true"
-              aria-controls="tips-list">Hide tips</button>
-          </div>
-          <ul id="tips-list"></ul>
-        </div>
-
-        <div id="outline-card" class="card" style="margin-top:var(--space-4)" hidden>
-          <div class="row-between">
-            <h3>Bullet view (for experienced reps)</h3>
-            <button id="toggle-outline" class="btn inline" type="button" aria-expanded="true"
-              aria-controls="outline-list">Hide</button>
-          </div>
-          <ul id="outline-list" style="margin:.5rem 0 0; padding-left:1.25rem"></ul>
-        </div>
-
-        <div class="notes-card card" style="margin-top:var(--space-4)">
-          <div class="row-between">
-            <h3>Call notes</h3>
-            <div class="row-between" style="gap:8px">
-              <button id="save-notes" class="btn inline" type="button">Save notes</button>
-              <button id="download-notes" class="btn inline" type="button">Download .txt</button>
-              <button id="make-followup" class="btn inline" type="button">Create follow-up email</button>
-            </div>
-          </div>
-          <textarea id="notes" rows="6"
-            placeholder="Type notes during the call. Saved locally on this device."></textarea>
-          <p class="muted" style="margin-top:.5rem">Notes are stored locally (this browser only).</p>
-        </div>
-
-        <div class="change-log" style="margin-top:var(--space-4)">
-          <h3>What changed</h3>
-          <ul id="delta-log" class="delta" aria-live="polite"></ul>
-        </div>
-        <div class="activity" style="margin-top:var(--space-4)">
-          <h3>Recent activity</h3>
-          <ol id="activity-log" class="activity-log" aria-live="polite" style="margin:0;padding-left:1.25rem"></ol>
-        </div>
+      <div class="change-log" style="margin-top:var(--space-4)">
+        <h3>What changed</h3>
+        <ul id="delta-log" class="delta" aria-live="polite"></ul>
+      </div>
+      <div class="activity" style="margin-top:var(--space-4)">
+        <h3>Recent activity</h3>
+        <ol id="activity-log" class="activity-log" aria-live="polite" style="margin:0;padding-left:1.25rem"></ol>
+      </div>
       </div>
     </section>
 
@@ -534,8 +552,22 @@
       return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
     })();
 
+    // UI refs (module scope)
+    const popoutBtn = document.getElementById("popout");
+    const notesArea = document.getElementById("notes");
+    const toggleBulletsBtn = document.getElementById("toggle-bullets");
+
+    // NEW: bullet-view state (module scope)
+    let bulletMode = false;
+    let lastRender = { html: "", bulletsHtml: "" };
+
+    // canonical helpers
     const modeFromCallType = (v) => canonical.mode(v);
     const buyerCanon = (v) => canonical.buyer(v);
+
+    (function () {
+      // ...the rest of your code stays as-is inside this IIFE...
+    })();
 
     (function () {
       const FORM_ID = 'script-form';
@@ -556,6 +588,8 @@
       const downloadBtn = document.getElementById('download');
       const outputEl = document.getElementById('output');
       const tipsList = document.getElementById('tips-list');
+      const bulletsList = document.getElementById('bullets-list');
+      const toggleBulletsBtn = document.getElementById('toggle-bullets');
       const toggleTipsBtn = document.getElementById('toggle-tips');
       const popoutBtn = document.getElementById('popout');
       const notesArea = document.getElementById('notes');
@@ -571,7 +605,6 @@
       const modal = document.getElementById('script-modal');
       const closeModal = document.getElementById('close-modal');
       const modalScript = document.getElementById('modal-script');
-
       const productSel = document.getElementById('product');
       const buyerBehSel = document.getElementById('buyer_behaviour');
       const toggleIntelBtn = document.getElementById('toggle-intel');
@@ -625,27 +658,6 @@
       let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
 
       const nowTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-      if (popoutBtn) {
-        popoutBtn.addEventListener("click", () => {
-          const html = outputEl?.innerHTML || '';
-          if (!html.trim()) { setStatus('No script to pop out yet.', 'error'); return; }
-          const meta = (outputMeta?.textContent || '').trim();
-          const w = window.open('', '_blank', 'noopener,noreferrer');
-          if (!w) return;
-          w.document.write(`<!doctype html><meta charset="utf-8"><title>Script</title>
-          <style>
-            body{font:16.5px/1.7 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica Neue,Arial;padding:24px;background:#fff;color:#111}
-            .meta{color:#6b7280;font-size:.9rem;margin-bottom:12px}
-            .bar{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-bottom:8px}
-            button{padding:.4rem .6rem;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;cursor:pointer}
-          </style>
-          <div class="bar"><button onclick="window.print()">Print</button><button onclick="navigator.clipboard.writeText(document.body.innerText)">Copy</button></div>
-          <div class="meta">${meta}</div>
-          <div>${html}</div>`);
-          w.document.close();
-        });
-      }
 
       if (closeModal) closeModal.addEventListener("click", () => modal.close());
 
@@ -950,6 +962,19 @@
         applyTipsVisibility();
       });
 
+      if (toggleBulletsBtn) {
+        toggleBulletsBtn.addEventListener('click', () => {
+          bulletMode = !bulletMode;
+          toggleBulletsBtn.setAttribute('aria-pressed', String(bulletMode));
+          toggleBulletsBtn.textContent = bulletMode ? 'Show full script' : 'Show bullet point script';
+          const html = bulletMode ? (lastRender.bulletsHtml || '') : (lastRender.html || '');
+          if (html) {
+            outputEl.innerHTML = html;
+            modalScript.innerHTML = html;
+          }
+        });
+      }
+
       // Outline toggle (mirrors Tips toggle)
       (() => {
         const btn = document.getElementById('toggle-outline');
@@ -1138,6 +1163,89 @@
               current = { title, paras: [], list: [] };
             };
 
+            function oneSentence(s, max = 220) {
+              const txt = String(s || "").replace(/\s+/g, " ").trim();
+              if (!txt) return "";
+              const m = txt.match(/^(.{1,220}?[.!?])(\s|$)/);
+              return (m ? m[1] : txt.slice(0, max)).trim();
+            }
+
+            function sentencesWithNumbers(s, limit = 2) {
+              const txt = String(s || "");
+              const parts = txt.split(/(?<=[.!?])\s+/);
+              const hits = parts.filter(x => /\b(\d{1,3}(,\d{3})*|\d+%|£\d+)/.test(x));
+              return hits.slice(0, limit).map(x => x.trim());
+            }
+
+            function buildBulletOverviewFromScript(rawMd) {
+              // relies on your existing parseSections(raw)
+              const secs = parseSections(rawMd || "");
+              // quick lookup by title
+              const by = Object.create(null);
+              for (const s of secs) by[(s.title || "").toLowerCase()] = s;
+
+              const bullets = [];
+
+              // Opening → first sentence
+              if (by["opening"]) {
+                const t = oneSentence(by["opening"].paras.join(" ").trim());
+                if (t) bullets.push(t);
+              }
+
+              // Buyer Pain → list items or sentences
+              if (by["buyer pain"]) {
+                if (by["buyer pain"].list.length) {
+                  bullets.push(...by["buyer pain"].list.slice(0, 3));
+                } else {
+                  const t = oneSentence(by["buyer pain"].paras.join(" ").trim());
+                  if (t) bullets.push(t);
+                }
+              }
+
+              // Buyer Desire → list items or first sentence
+              if (by["buyer desire"]) {
+                if (by["buyer desire"].list.length) {
+                  bullets.push(...by["buyer desire"].list.slice(0, 3));
+                } else {
+                  const t = oneSentence(by["buyer desire"].paras.join(" ").trim());
+                  if (t) bullets.push(t);
+                }
+              }
+
+              // Example Illustration → prefer metrics sentences
+              if (by["example illustration"]) {
+                const para = by["example illustration"].paras.join(" ").trim();
+                const metricLines = sentencesWithNumbers(para, 2);
+                if (metricLines.length) {
+                  bullets.push(...metricLines);
+                } else {
+                  const t = oneSentence(para);
+                  if (t) bullets.push("Example: " + t);
+                }
+              }
+
+              // Handling Objections → up to 3 bullets (or one-liner)
+              if (by["handling objections"]) {
+                if (by["handling objections"].list.length) {
+                  bullets.push(...by["handling objections"].list.slice(0, 3));
+                } else {
+                  const t = oneSentence(by["handling objections"].paras.join(" ").trim());
+                  if (t) bullets.push("Objections: " + t);
+                }
+              }
+
+              // Next Step → capture the ask explicitly
+              if (by["next step"]) {
+                const t = oneSentence((by["next step"].paras.join(" ") || by["next step"].list.join("; ")).trim());
+                if (t) bullets.push("Next step: " + t);
+              }
+
+              // fallback if empty
+              if (!bullets.length) bullets.push("No bulletable content found in the generated script.");
+
+              return bullets;
+            }
+
             // Map aliases -> canonical
             const CANON = new Map([
               ["opening", "Opening"],
@@ -1221,6 +1329,49 @@
               }
               return null;
             }
+            function firstSentence(s) {
+              const t = String(s || '').replace(/\s+/g, ' ').trim();
+              const m = t.match(/.*?[.!?](\s|$)/);
+              return (m ? m[0] : t).trim();
+            }
+
+            function renderBulletScriptFromSections(sections, order) {
+              const esc = (x) => String(x || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+              const blocks = [];
+              for (const name of order) {
+                const sec = sections.find(s => String(s.title).toLowerCase() === name.toLowerCase());
+                if (!sec) continue;
+
+                const pts = [];
+                // Lead with a short summary using the first sentence of the first paragraph (if any)
+                if (sec.paras && sec.paras.length) {
+                  const fs = firstSentence(sec.paras.join(' '));
+                  if (fs) pts.push(fs);
+                }
+                // Include any bullets that the section already has
+                if (sec.list && sec.list.length) {
+                  pts.push(...sec.list);
+                }
+
+                // Ensure Next Step shows clearly as a single bullet
+                if (name === 'Next Step' && !pts.length && sec.paras && sec.paras.length) {
+                  pts.push(sec.paras.join(' ').trim());
+                }
+
+                const items = pts
+                  .map(x => x && `<li>${esc(x)}</li>`)
+                  .filter(Boolean)
+                  .join('');
+
+                if (items) {
+                  blocks.push(`<section class="script-sec">
+        <h3>${esc(name)}</h3>
+        <ul>${items}</ul>
+      </section>`);
+                }
+              }
+              return `<div class="script-body">${blocks.join('')}</div>`;
+            }
 
             const blocks = [];
             const found = [];
@@ -1262,6 +1413,25 @@
           const rendered = renderSections(script, values /* pass form values so Next Step can fallback */);
           outputEl.innerHTML = rendered.html;
           modalScript.innerHTML = rendered.html;
+          // Prepare bullet-point version from the same parsed sections
+          const sectionsForBullets = (function () {
+            // reuse the same parser used by renderSections
+            return parseSections(script);
+          })();
+          const bulletsHtml = renderBulletScriptFromSections(sectionsForBullets, REQUIRED_CANON);
+
+          // keep both views in memory
+          lastRender = { html: rendered.html, bulletsHtml };
+
+          // Build and show the bullet overview from the actual script markdown we received
+          const overview = buildBulletOverviewFromScript(script);
+          bulletsList.innerHTML = "";
+          overview.forEach(b => {
+            const li = document.createElement("li");
+            li.textContent = b;
+            bulletsList.appendChild(li);
+          });
+
           // Guard-rail: if we recognised none of the required sections, show a clear error
           if (!rendered.found || rendered.found.length === 0) {
             throw new Error("The generated script did not contain the expected '##' headings. Please try again.");
@@ -1271,6 +1441,64 @@
             `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
 
           console.info("[ScriptSections] found:", rendered.found, "missing:", rendered.missing);
+
+          // POP-OUT (robust, scope-independent)
+          (() => {
+            const btn = document.getElementById("popout");
+            if (!btn) return;
+
+            btn.addEventListener("click", () => {
+              // Read current rendered HTML directly from the DOM (or from lastRender if you keep it)
+              const outputEl = document.getElementById("output");
+              const metaEl = document.getElementById("output-meta");
+
+              const html =
+                (window.bulletMode && window.lastRender?.bulletsHtml) ||
+                (window.lastRender?.html) ||
+                (outputEl?.innerHTML || "");
+
+              if (!html || !html.trim()) {
+                const statusEl = document.getElementById("status");
+                if (statusEl) { statusEl.textContent = "No script to pop out yet."; statusEl.dataset.kind = "error"; }
+                return;
+              }
+
+              const meta = (metaEl?.textContent || "").trim();
+
+              const win = window.open("", "_blank", "noopener,noreferrer");
+              if (!win) {
+                const statusEl = document.getElementById("status");
+                if (statusEl) { statusEl.textContent = "Pop-out was blocked by the browser."; statusEl.dataset.kind = "error"; }
+                return;
+              }
+
+              const doc = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Conversation Guide</title>
+<style>
+  body{font:16.5px/1.7 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica Neue,Arial;padding:24px;background:#fff;color:#111}
+  .meta{color:#6b7280;font-size:.9rem;margin-bottom:12px}
+  .bar{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-bottom:8px}
+  button{padding:.4rem .6rem;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="bar">
+    <button onclick="window.print()">Print</button>
+    <button onclick="navigator.clipboard.writeText(document.body.innerText)">Copy</button>
+  </div>
+  <div class="meta">${meta}</div>
+  <div>${html}</div>
+</body>
+</html>`;
+
+              win.document.open();
+              win.document.write(doc);
+              win.document.close();
+            });
+          })();
 
           // tips
           tipsList.innerHTML = "";
