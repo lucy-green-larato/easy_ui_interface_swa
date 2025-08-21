@@ -419,10 +419,6 @@ module.exports = async function (context, req) {
     const body = incoming || {};
     const kind = String((body && body.kind) || "").toLowerCase();
 
-    // Debug visibility of payload
-    try { context.log("[" + VERSION + "] [DEBUG] Raw body:", JSON.stringify(body, null, 2)); } catch (e) { }
-    try { context.log("[" + VERSION + "] [DEBUG] Variables:", JSON.stringify(body && body.variables ? body.variables : {}, null, 2)); } catch (e) { }
-
     function buildFollowupPrompt({ seller, prospect, tone, scriptMdText, callNotes }) {
       return (
         `You are a UK B2B salesperson. Draft a concise follow-up email after a discovery call.
@@ -713,8 +709,6 @@ ${callNotes || "(none)"}`
         prompt: prompt,
         temperature: 0.6,
       });
-
-      context.log("[" + VERSION + "] model used =", llmRes ? "yes" : "no");
 
       if (!llmRes) {
         context.res = { status: 503, headers: cors, body: { error: "No model configured", hint: "Set OPENAI_API_KEY or AZURE_OPENAI_* in App Settings", version: VERSION, usedModel: false } };
