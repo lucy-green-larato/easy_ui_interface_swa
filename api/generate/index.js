@@ -5,6 +5,58 @@ const { z } = require("zod");
 
 /* ========================= Helpers / Utilities ========================= */
 
+function splitList(s) {
+  return String(s || "")
+    .split(/\r?\n|;|,|·|•|—|- /)   // newlines, semicolons, commas, bullets, " - "
+    .map(t => t.trim())
+    .filter(Boolean);
+}
+
+function ensureHeadings(text) {
+  let out = String(text || "").trim();
+  const required = [
+    "Opening", "Buyer Pain", "Buyer Desire",
+    "Example Illustration", "Handling Objections", "Next Step"
+  ];
+  for (const h of required) {
+    const rx = new RegExp(`(^|\\n)##\\s*${h.replace(/\s+/g, "\\s+")}\\b`, "i");
+    if (!rx.test(out)) out += `\n\n## ${h}\n`;
+  }
+  return out;
+}
+
+// Replace entire section body with `md` (keeps the "## {name}" heading).
+function replaceSection(text, name, md) {
+  const h = name.replace(/\s+/g, "\\s+");
+  const rx = new RegExp(
+    `(^|\\n)##\\s*${h}\\b[\\t ]*\\n[\\s\\S]*?(?=\\n##\\s*[A-Za-z]|$)`,
+    "i"
+  );
+  if (rx.test(text)) {
+    return text.replace(rx, (_, pfx) => `${pfx}## ${name}\n\n${md.trim()}\n`);
+  }
+  // If not found, append section.
+  return `${text.trim()}\n\n## ${name}\n\n${md.trim()}\n`;
+}
+
+// Insert an intro + bullets immediately after the section heading (preserves existing content).
+function injectBullets(text, name, intro, items) {
+  const list = splitList(items);
+  if (list.length === 0) return text;
+
+  const introLine = intro ? `${intro.trim()}\n` : "";
+  const bullets = list.map(x => `- ${x}`).join("\n");
+  const injection = `${introLine}${bullets}\n\n`;
+
+  const h = name.replace(/\s+/g, "\\s+");
+  const rx = new RegExp(`(^|\\n)(##\\s*${h}\\b[\\t ]*\\n)`, "i");
+  if (rx.test(text)) {
+    return text.replace(rx, (_, pfx, headingLine) => `${pfx}${headingLine}${injection}`);
+  }
+  // If section missing (shouldn’t be after ensureHeadings), append.
+  return `${text.trim()}\n\n## ${name}\n\n${injection}`;
+}
+
 // JSON the model should return
 const ScriptJsonSchema = z.object({
   sections: z.object({
@@ -229,32 +281,35 @@ function buildPromptFromMarkdown(args) {
   const tone = args.tone || "";
   const targetWords = args.targetWords || 0;
 
-  const toneLine = tone ? 'Write in a "' + tone + '" tone.\n' : "";
-  const lengthLine = targetWords ? "Aim for about " + targetWords + " words (±10%).\n" : "";
+  const toneLine = tone ? `Write the script in a ${tone} tone. Use this tone consistently across all sections.\n` : "";
+  const lengthLine = targetWords ? `The final script must be ~${targetWords} words (±10%).\n` : "";
+
+  const mandates =
+    "MANDATES:\n" +
+    "- Use professional British business English; no Americanisms; no assumptive closes.\n" +
+    "- Never include pleasantries or check-ins such as \"I hope you are well\", \"Are you well?\", \"Hope you're doing well\", \"How are you?\", \"Trust you are well\". Start directly.\n" +
+    "- Open with: Hello " + prospect.name + ", it’s " + seller.name + " from " + seller.company + ".\n" +
+    "- Reference observations from similar businesses; do not assume the prospect’s current state.\n" +
+    "- Include one specific, relevant customer example with measurable results.\n" +
+    "- Handle common objections factually and without pressure.\n" +
+    "- You MUST incorporate the salesperson inputs where sensible:\n" +
+    "  - **USPs**: weave as short bullets or sentences inside **Buyer Desire** or **Example Illustration** where they support the flow.\n" +
+    "  - **Other points to consider**: integrate into **Opening** or **Buyer Pain** as brief bullets/sentences.\n" +
+    "  - **Requested Next Step**: the **## Next Step** section MUST use the salesperson’s input verbatim if provided.\n" +
+    "- Use these exact markdown headings, each on its own line and in this order:\n" +
+    "  ## Opening\n" +
+    "  ## Buyer Pain\n" +
+    "  ## Buyer Desire\n" +
+    "  ## Example Illustration\n" +
+    "  ## Handling Objections\n" +
+    "  ## Next Step\n" +
+    "- Do not change, rename, bold, add punctuation to, or re-level these headings. They must begin with '## ' exactly.\n";
 
   return (
     "You are a highly effective UK B2B salesperson.\n\n" +
     toneLine + lengthLine +
-    // *** enforce headings explicitly ***
-    "Use these exact markdown headings, each on its own line and in this order:\n" +
-    "## Opening\n" +
-    "## Buyer Pain\n" +
-    "## Buyer Desire\n" +
-    "## Example Illustration\n" +
-    "## Handling Objections\n" +
-    "## Next Step\n" +
-    "Do not change, rename, bold, add punctuation to, or re-level these headings. They must begin with '## ' exactly.\n\n" +
-
     "Use the Markdown template below as the skeleton for the call. Preserve the section headings and overall order. Fill the content so it reads as a natural, spoken conversation.\n\n" +
-    "MANDATES:\n" +
-    "- Use professional British business English; no Americanisms; no assumptive closes.\n" +
-    "- Never include pleasantries or check-ins such as \"I hope you are well\", \"Are you well?\", \"Hope you're doing well\", \"How are you?\", \"Trust you are well\". Start directly.\n" +
-    "- Open with: Hi " + prospect.name + ", it’s " + seller.name + " from " + seller.company + ".\n" +
-    "- Reference observations from similar businesses; do not assume the prospect’s current state.\n" +
-    "- Elegantly weave the USPs and Other points where they make sense in context; do not ignore them if provided.\n" +
-    "- Include one specific, relevant customer example with measurable results.\n" +
-    "- Handle common objections factually and without pressure.\n" +
-    '- For the "Next Step": use the salesperson’s input if provided; otherwise, if the template includes <!-- suggested_next_step: ... --> use that; otherwise propose a clear, low-friction next step.\n' +
+    mandates +
     "Buyer type: " + buyerType + "\n" +
     "Product: " + productLabel + "\n\n" +
     "USPs (from salesperson): " + (valueProposition || "(none provided)") + "\n" +
@@ -609,14 +664,52 @@ module.exports = async function (context, req) {
       const tipsBlock = (parts[1] || "");
 
       // 1) Remove pleasantries
+      // 1) Remove pleasantries
       var scriptText = stripPleasantries(scriptTextRaw);
 
       // 2) Ensure exactly one closing line
       scriptText = ensureThanksClose(scriptText);
 
-      // 3) Enforce target length if set
+      // 3) Enforce target length (gentle)
       if (targetWords) {
         scriptText = trimToTargetWords(scriptText, targetWords);
+      }
+
+      // 4) Ensure all canonical headings exist (anchors for injections)
+      scriptText = ensureHeadings(scriptText);
+
+      // 5) Weave salesperson inputs deterministically
+      try {
+        // a) Next Step: if salesperson provided one, hard-set that section
+        if (nextStep && String(nextStep).trim()) {
+          scriptText = replaceSection(
+            scriptText,
+            "Next Step",
+            String(nextStep).trim()
+          );
+        }
+
+        // b) USPs: inject under Buyer Desire as a short bullet block
+        if (valueProposition && String(valueProposition).trim()) {
+          scriptText = injectBullets(
+            scriptText,
+            "Buyer Desire",
+            "Based on your priorities, we can emphasise:",
+            valueProposition
+          );
+        }
+
+        // c) Other points: inject near the top of Opening
+        if (otherContext && String(otherContext).trim()) {
+          scriptText = injectBullets(
+            scriptText,
+            "Opening",
+            "I'll also make sure we cover:",
+            otherContext
+          );
+        }
+      } catch (e) {
+        context.log("[weave] failed:", e && e.message ? e.message : e);
       }
 
       // tips: parse simple numbered list
