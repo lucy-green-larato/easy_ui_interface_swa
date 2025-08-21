@@ -360,12 +360,12 @@
             </div>
 
             <div class="field">
-              <label for="length">Length</label>
-              <select id="length" name="length">
-                <option>~150 words (≈1 min)</option>
-                <option selected>~300 words (≈2–3 min)</option>
-                <option>~450 words (≈3–4 min)</option>
-                <option>~650 words (≈4–5 min)</option>
+              <label for="script_length">Length</label>
+              <select id="script_length" name="script_length">
+                <option>~150 words</option>
+                <option selected>~300 words</option>
+                <option>~450 words</option>
+                <option>~650 words</option>
               </select>
             </div>
           </div>
@@ -437,6 +437,7 @@
             <div class="row-between" style="gap:8px">
               <button id="save-notes" class="btn inline" type="button">Save notes</button>
               <button id="download-notes" class="btn inline" type="button">Download .txt</button>
+              <button id="make-followup" class="btn inline" type="button">Create follow-up email</button>
             </div>
           </div>
           <textarea id="notes" rows="6"
@@ -514,14 +515,7 @@
 
   <!-- === SCRIPT: glue UI to Library + API-first generation === -->
   <script type="module">
-    // DEBUG START
-    window.addEventListener('error', e => console.error('[window.onerror]', e.error || e.message || e));
-    window.addEventListener('unhandledrejection', e => console.error('[unhandledrejection]', e.reason));
-    console.log('[FCSv2] module boot');
-    // DEBUG END
-
     import { getIndex, loadTemplate, canonical } from "./src/lib/callLibrary.js?v=fix6";
-    console.log('[FCSv2] imports loaded');
 
     // ---- define basePrefix once at module scope ----
     const basePrefix = (() => {
@@ -580,6 +574,42 @@
 
       const userBadge = document.getElementById('user-badge');
       const userEmail = document.getElementById('user-email');
+      
+      document.getElementById('make-followup')?.addEventListener('click', async () => {
+  try {
+    const payload = {
+      kind: 'call-followup',
+      basePrefix,
+      variables: {
+        seller_name: (form.elements.seller_name?.value || "").trim(),
+        seller_company: (form.elements.seller_company?.value || "").trim(),
+        prospect_name: (form.elements.prospect_name?.value || "").trim(),
+        prospect_role: (form.elements.prospect_role?.value || "").trim(),
+        prospect_company: (form.elements.prospect_company?.value || "").trim(),
+        tone: (form.elements.tone?.value || "").trim(),
+      },
+      scriptMdText: localStorage.getItem('first_call_script_v2.last_output') || "", // last model output text
+      callNotes: (notesArea?.value || "")
+    };
+
+    setStatus('Building follow-up email…');
+    const r = await fetch('/api/generate', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || 'Could not build follow-up');
+
+    // Show in modal for easy copy
+    modalScript.innerText = data?.followup?.email || 'No email produced.';
+    modal.showModal();
+    setStatus('Follow-up ready.');
+  } catch (e) {
+    setStatus('Could not build follow-up email', 'error');
+    diag.open = true; diagJson.textContent = String(e?.message || e);
+  }
+});
 
       let intel = null;
       let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
@@ -948,7 +978,7 @@
           product: (productSel?.value || form.elements.product?.value || "").trim(),
           buyer_behaviour: (buyerBehSel?.value || form.elements.buyer_behaviour?.value || "").trim(),
           tone: (form.elements.tone?.value || "").trim(),
-          length: (form.elements.length?.value || "").trim(),
+          script_length: (form.elements.script_length?.value || "").trim(),
           value_proposition: (form.elements.value_proposition?.value || "").trim(),
           context: (form.elements.context?.value || "").trim(),
           next_step: (form.elements.next_step?.value || "").trim(),
