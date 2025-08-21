@@ -431,6 +431,15 @@
           <ul id="tips-list"></ul>
         </div>
 
+        <div id="outline-card" class="card" style="margin-top:var(--space-4)" hidden>
+          <div class="row-between">
+            <h3>Bullet view (for experienced reps)</h3>
+            <button id="toggle-outline" class="btn inline" type="button" aria-expanded="true"
+              aria-controls="outline-list">Hide</button>
+          </div>
+          <ul id="outline-list" style="margin:.5rem 0 0; padding-left:1.25rem"></ul>
+        </div>
+
         <div class="notes-card card" style="margin-top:var(--space-4)">
           <div class="row-between">
             <h3>Call notes</h3>
@@ -574,42 +583,43 @@
 
       const userBadge = document.getElementById('user-badge');
       const userEmail = document.getElementById('user-email');
-      
+
+
       document.getElementById('make-followup')?.addEventListener('click', async () => {
-  try {
-    const payload = {
-      kind: 'call-followup',
-      basePrefix,
-      variables: {
-        seller_name: (form.elements.seller_name?.value || "").trim(),
-        seller_company: (form.elements.seller_company?.value || "").trim(),
-        prospect_name: (form.elements.prospect_name?.value || "").trim(),
-        prospect_role: (form.elements.prospect_role?.value || "").trim(),
-        prospect_company: (form.elements.prospect_company?.value || "").trim(),
-        tone: (form.elements.tone?.value || "").trim(),
-      },
-      scriptMdText: localStorage.getItem('first_call_script_v2.last_output') || "", // last model output text
-      callNotes: (notesArea?.value || "")
-    };
+        try {
+          const payload = {
+            kind: 'call-followup',
+            basePrefix,
+            variables: {
+              seller_name: (form.elements.seller_name?.value || "").trim(),
+              seller_company: (form.elements.seller_company?.value || "").trim(),
+              prospect_name: (form.elements.prospect_name?.value || "").trim(),
+              prospect_role: (form.elements.prospect_role?.value || "").trim(),
+              prospect_company: (form.elements.prospect_company?.value || "").trim(),
+              tone: (form.elements.tone?.value || "").trim(),
+            },
+            scriptMdText: localStorage.getItem('first_call_script_v2.last_output') || "", // last model output text
+            callNotes: (notesArea?.value || "")
+          };
 
-    setStatus('Building follow-up email…');
-    const r = await fetch('/api/generate', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data?.error || 'Could not build follow-up');
+          setStatus('Building follow-up email…');
+          const r = await fetch('/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await r.json();
+          if (!r.ok) throw new Error(data?.error || 'Could not build follow-up');
 
-    // Show in modal for easy copy
-    modalScript.innerText = data?.followup?.email || 'No email produced.';
-    modal.showModal();
-    setStatus('Follow-up ready.');
-  } catch (e) {
-    setStatus('Could not build follow-up email', 'error');
-    diag.open = true; diagJson.textContent = String(e?.message || e);
-  }
-});
+          // Show in modal for easy copy
+          modalScript.innerText = data?.followup?.email || 'No email produced.';
+          modal.showModal();
+          setStatus('Follow-up ready.');
+        } catch (e) {
+          setStatus('Could not build follow-up email', 'error');
+          diag.open = true; diagJson.textContent = String(e?.message || e);
+        }
+      });
 
       let intel = null;
       let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
@@ -940,6 +950,19 @@
         applyTipsVisibility();
       });
 
+      // Outline toggle (mirrors Tips toggle)
+      (() => {
+        const btn = document.getElementById('toggle-outline');
+        const list = document.getElementById('outline-list');
+        if (!btn || !list) return;
+        btn.addEventListener('click', () => {
+          const expanded = btn.getAttribute('aria-expanded') === 'true';
+          btn.setAttribute('aria-expanded', String(!expanded));
+          btn.textContent = expanded ? 'Show' : 'Hide';
+          list.hidden = expanded;
+        });
+      })();
+
       saveNotesBtn?.addEventListener('click', saveNotes);
       downloadNotesBtn?.addEventListener('click', () => {
         const who = (form?.elements?.prospect_name?.value || 'prospect').trim().replace(/\s+/g, '-');
@@ -1041,6 +1064,25 @@
           const data = await resp.json();
           const script = data?.script?.text || "";
           const tips = data?.script?.tips || [];
+          // Outline render
+          const outline = (data?.script?.outline || []).filter(s => s && s.trim());
+          const outlineList = document.getElementById('outline-list');
+          const outlineCard = document.getElementById('outline-card');
+
+          if (outlineList && outlineCard) {
+            outlineList.innerHTML = "";
+            if (outline.length) {
+              outlineCard.hidden = false;
+              outline.forEach(b => {
+                const li = document.createElement('li');
+                li.textContent = b;
+                outlineList.appendChild(li);
+              });
+            } else {
+              outlineCard.hidden = true; // JSON-fallback or no outline
+            }
+          }
+
           // Guard-rail: empty script from API
           if (!script || !script.trim()) {
             throw new Error("Empty script returned from API");
