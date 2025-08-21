@@ -1574,6 +1574,211 @@
         });
       })();
     })();
+    /* ============ Fallback / Safety Footer Patch ============ */
+    /* 1) Bullet renderer + toggle (global so scope never breaks) */
+    if (typeof window.renderBulletScriptFromSections !== "function") {
+      window.renderBulletScriptFromSections = function (sections, values = {}) {
+        const getFirstSentence = (s = "") => {
+          const m = String(s).trim().match(/^(.+?[.!?])(\s|$)/);
+          return (m ? m[1] : s).trim();
+        };
+        const find = (title) =>
+          (sections || []).find(
+            (s) => String(s.title).toLowerCase() === String(title).toLowerCase()
+          );
+
+        const bullets = [];
+
+        // Opening
+        const opening = find("Opening");
+        if (opening) {
+          const line =
+            getFirstSentence(opening.paras?.[0] || "") ||
+            getFirstSentence(opening.list?.[0] || "");
+          if (line) bullets.push(`• ${line}`);
+        }
+
+        // Buyer Pain
+        const pain = find("Buyer Pain");
+        if (pain) {
+          if (pain.list?.length) {
+            pain.list.slice(0, 4).forEach((li) => bullets.push(`• Pain: ${li}`));
+          } else {
+            const p = getFirstSentence(pain.paras?.[0] || "");
+            if (p) bullets.push(`• Pain: ${p}`);
+          }
+        }
+
+        // Buyer Desire (+ weave USPs / other points)
+        const desire = find("Buyer Desire");
+        if (desire) {
+          const d = getFirstSentence(desire.paras?.[0] || desire.list?.[0] || "");
+          if (d) bullets.push(`• Desire: ${d}`);
+        }
+        const usp = (values?.value_proposition || "").trim();
+        if (usp) bullets.push(`• USP to emphasise: ${usp}`);
+        const other = (values?.context || "").trim();
+        if (other) bullets.push(`• Also cover: ${other}`);
+
+        // Example Illustration
+        const ex = find("Example Illustration");
+        if (ex) {
+          const joined = [...(ex.paras || []), ...(ex.list || [])].join(" ");
+          const metric =
+            (joined.match(/\b\d{1,3}%|\b\d+\s*(days?|weeks?|tickets?)\b/i) || [])[0] ||
+            "";
+          const s = getFirstSentence(joined);
+          bullets.push(`• Example: ${s}${metric ? ` (notable: ${metric})` : ""}`);
+        }
+
+        // Handling Objections
+        const obj = find("Handling Objections");
+        if (obj) {
+          if (obj.list?.length) {
+            obj.list.slice(0, 3).forEach((li) => bullets.push(`• Handle: ${li}`));
+          } else {
+            const s = getFirstSentence(obj.paras?.[0] || "");
+            if (s) bullets.push(`• Handle: ${s}`);
+          }
+        }
+
+        // Next Step (salesperson takes precedence)
+        const nextPref = (values?.next_step || "").trim();
+        const nextFromScript = getFirstSentence(find("Next Step")?.paras?.[0] || "");
+        bullets.push(
+          `• Next step: ${nextPref || nextFromScript || "agree a low-friction next action"}`
+        );
+
+        return `<div class="script-body"><h3>Bullet point script</h3><ul>${bullets.map((b) => `<li>${b}</li>`).join("")
+          }</ul></div>`;
+      };
+    }
+
+    if (typeof window.attachBulletToggle !== "function") {
+      window.attachBulletToggle = function (outputEl, modalScript) {
+        const btn = document.getElementById("toggle-bullets");
+        if (!btn) return;
+        btn.textContent = "Show bullet point script";
+        btn.onclick = () => {
+          window.bulletMode = !window.bulletMode;
+          btn.textContent = window.bulletMode
+            ? "Hide bullet point script"
+            : "Show bullet point script";
+          const html = window.bulletMode
+            ? (window.lastRender?.bulletsHtml || "<p>No bullet script available.</p>")
+            : (window.lastRender?.html || "");
+          if (outputEl) outputEl.innerHTML = html;
+          if (modalScript) modalScript.innerHTML = html;
+        };
+      };
+    }
+
+    /* 2) After each generation, cache both views and (re)wire toggle.
+       Drop this “hook” safely: it runs after your existing submit handler
+       sets #output. If you already do this in your handler, this becomes a no-op.
+    */
+    (function ensurePostRenderHook() {
+      if (window.__bulletHookInstalled) return;
+      window.__bulletHookInstalled = true;
+
+      // Small observer to detect script replacement and build bullets once
+      const outputEl = document.getElementById("output");
+      const modalScript = document.getElementById("modal-script");
+      if (!outputEl) return;
+
+      const buildOnce = () => {
+        try {
+          // If your code already set window.lastOutput (raw markdown), prefer that:
+          const rawMd = (window.lastOutput || "").trim();
+          if (!rawMd) return; // wait until your submit handler runs
+
+          // Your app already has parseSections(raw) in scope; re-use if present.
+          let sections = null;
+          if (typeof parseSections === "function") {
+            sections = parseSections(rawMd);
+          } else {
+            // No parser visible? Then skip building bullets.
+            return;
+          }
+
+          // Form values (for USP/context/next step in bullets)
+          const form = document.getElementById("script-form");
+          const values = form
+            ? Object.fromEntries(new FormData(form).entries())
+            : {};
+
+          const bulletsHtml =
+            window.renderBulletScriptFromSections(sections, values) || "";
+          if (!window.lastRender) window.lastRender = {};
+          // If your submit handler already set lastRender.html, keep it.
+          window.lastRender.bulletsHtml = bulletsHtml;
+
+          // Wire the toggle (id=toggle-bullets)
+          window.attachBulletToggle(outputEl, modalScript);
+        } catch (e) {
+          console.warn("[bullet-hook] ", e);
+        }
+      };
+
+      // Observe changes to #output and run once after first real content
+      const obs = new MutationObserver(() => {
+        const html = (outputEl.innerHTML || "").trim();
+        if (html.length > 20) {
+          buildOnce();
+          obs.disconnect();
+        }
+      });
+      obs.observe(outputEl, { subtree: true, childList: true });
+    })();
+
+    /* 3) Pop-out should print whichever view is active */
+    (function rebindPopout() {
+      const btn = document.getElementById("popout");
+      if (!btn) return;
+      btn.onclick = null; // remove any previous inline handler
+      btn.addEventListener("click", () => {
+        const outputEl = document.getElementById("output");
+        const metaEl = document.getElementById("output-meta");
+
+        const html =
+          (window.bulletMode && window.lastRender?.bulletsHtml) ||
+          window.lastRender?.html ||
+          (outputEl?.innerHTML || "");
+        if (!html || !html.trim()) return;
+
+        const meta = (metaEl?.textContent || "").trim();
+        const w = window.open("", "_blank", "noopener,noreferrer");
+        if (!w) return;
+        w.document.open();
+        w.document.write(`<!doctype html>
+<meta charset="utf-8"><title>Conversation Guide</title>
+<style>
+  body{font:16.5px/1.7 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica Neue,Arial;padding:24px;background:#fff;color:#111}
+  .meta{color:#6b7280;font-size:.9rem;margin-bottom:12px}
+  .bar{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-bottom:8px}
+  button{padding:.4rem .6rem;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;cursor:pointer}
+</style>
+<div class="bar"><button onclick="window.print()">Print</button>
+<button onclick="navigator.clipboard.writeText(document.body.innerText)">Copy</button></div>
+<div class="meta">${meta}</div>
+<div>${html}</div>`);
+        w.document.close();
+      });
+    })();
+
+    /* 4) Hide tips card when empty (id tips-list, container .tips-card) */
+    (function hideEmptyTips() {
+      const tipsList = document.getElementById("tips-list");
+      const card = document.querySelector(".tips-card");
+      if (!tipsList || !card) return;
+      const obs = new MutationObserver(() => {
+        const has = tipsList.children.length > 0;
+        card.classList.toggle("is-hidden", !has);
+      });
+      obs.observe(tipsList, { childList: true });
+      // run once on load
+      card.classList.toggle("is-hidden", tipsList.children.length === 0);
+    })();
   </script>
 
 </body>
