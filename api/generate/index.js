@@ -5,6 +5,25 @@ const { z } = require("zod");
 
 /* ========================= Helpers / Utilities ========================= */
 
+// JSON the model should return
+const ScriptJsonSchema = z.object({
+  sections: z.object({
+    opening: z.string().min(20),
+    buyer_pain: z.string().min(20),
+    buyer_desire: z.string().min(20),
+    example_illustration: z.string().min(20),
+    handling_objections: z.string().min(10),
+    next_step: z.string().min(5),
+  }),
+  // Meta for transparency (optional, but handy for debugging)
+  integration_notes: z.object({
+    usps_used: z.array(z.string()).optional(),
+    other_points_used: z.array(z.string()).optional(),
+    next_step_source: z.enum(["salesperson", "template", "assistant"]).optional()
+  }).optional(),
+  tips: z.array(z.string()).min(3).max(3)
+});
+
 const VERSION = "v3-markdown-first-2025-08-20-patch8-fixed";
 
 /* eslint-disable no-console */
@@ -53,7 +72,7 @@ async function callModel(opts) {
       },
       body: JSON.stringify({
         temperature: temperature,
-        response_format: opts.response_format,   // <— add this line
+        response_format: opts.response_format,   // <— Json with markdown path fallback
         messages: [
           { role: "system", content: system },
           { role: "user", content: prompt }
@@ -250,6 +269,79 @@ function buildPromptFromMarkdown(args) {
   );
 }
 
+function buildJsonPrompt(args) {
+  const {
+    templateMdText = "",
+    seller = { name: "", company: "" },
+    prospect = { name: "", role: "", company: "" },
+    productLabel = "",
+    buyerType = "",
+    valueProposition = "",
+    context = "",
+    nextStep = "",
+    tone = "",
+    targetWords = 0
+  } = args;
+
+  const toneLine = tone ? `TONE: ${tone}.\n` : "";
+  const lengthLine = targetWords ? `LENGTH: Aim ~${targetWords} words overall (±10%).\n` : "";
+
+  return (
+`You are a highly effective UK B2B salesperson.
+
+${toneLine}${lengthLine}SYNTHESIS GOAL:
+Blend the researched guidance from the template (below) with the salesperson’s inputs. Treat the template as research notes, not text to copy. Rewrite everything in the requested tone.
+
+INTEGRATION POLICY:
+- USPs (from salesperson): evaluate and weave them where they add value. Common placements:
+  • Opening (credibility/anchor),
+  • Buyer Desire (capability fit),
+  • Example Illustration (proof),
+  • Handling Objections (evidence to reassure).
+  Never dump a list; integrate naturally. Skip any USP that would be redundant.
+- Other points (from salesperson): weave where they logically fit; do not bolt them on at the end.
+- Next step: if the salesperson provided one, USE IT verbatim (lightly polish allowed). Otherwise, use a sensible next step drawn from the template or propose a low-friction next action.
+- Never assume the prospect’s current state; speak in hypotheticals/observations from similar firms.
+- No pleasantries (“hope you are well”, etc).
+
+OUTPUT FORMAT:
+Return ONLY valid JSON matching this shape:
+{
+  "sections": {
+    "opening": string,
+    "buyer_pain": string,
+    "buyer_desire": string,
+    "example_illustration": string,
+    "handling_objections": string,
+    "next_step": string
+  },
+  "tips": [string, string, string],
+  "integration_notes": {
+    "usps_used": string[],
+    "other_points_used": string[],
+    "next_step_source": "salesperson"|"template"|"assistant"
+  }
+}
+
+STYLE & LENGTH:
+- Opening: start with "Hi ${prospect.name}, it’s ${seller.name} from ${seller.company}."
+- Use UK business English.
+- Distribute words roughly: Opening 15–20%; Buyer Pain 20%; Buyer Desire 20%; Example 20%; Objections 10–15%; Next Step 5–10%.
+- Keep content concise and spoken.
+
+CONTEXT:
+Buyer type: ${buyerType}
+Product: ${productLabel}
+USPs (salesperson): ${valueProposition || "(none)"}
+Other points: ${context || "(none)"}
+Requested next step: ${nextStep || "(none)"}
+
+--- TEMPLATE (research notes; do not copy sentences) ---
+${templateMdText}
+--- END TEMPLATE ---
+`
+  );
+}
 
 /* ----------------------------- Legacy schema ---------------------------- */
 
