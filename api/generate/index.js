@@ -355,7 +355,7 @@ function buildJsonPrompt(args) {
   const lengthHint = targetWords ? `Aim for about ${targetWords} words (±10%).` : "";
 
   return (
-`You are a highly effective UK B2B salesperson. 
+    `You are a highly effective UK B2B salesperson. 
 Write **valid JSON only** (no markdown, no prose outside JSON). 
 JSON schema:
 {
@@ -644,6 +644,7 @@ ${callNotes || "(none)"}`
       const productLabel = String(productId || "").replace(/[_-]+/g, " ").replace(/\b\w/g, function (m) { return m.toUpperCase(); });
 
       // Build prompt (includes salesperson inputs)
+      const suggestedNext = pluckSuggestedNextStep(templateMdText);
       // ---------- JSON-FIRST PATH ----------
       const jsonPrompt = buildJsonPrompt({
         templateMdText,
@@ -654,8 +655,8 @@ ${callNotes || "(none)"}`
         valueProposition,
         context: otherContext,
         nextStep,
-        suggestedNext,
-        tone,
+        suggestedNext,                 
+        tone: effectiveTone,           // use the resolved tone
         targetWords
       });
 
@@ -824,7 +825,7 @@ ${callNotes || "(none)"}`
           scriptText = scriptText.replace(/{{\s*next_step\s*}}/gi, finalNext);
         }
       }
-      
+
       // 6) Ensure a single clean closing line at the very end
       scriptText = ensureThanksClose(scriptText);
 
