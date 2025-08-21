@@ -746,7 +746,18 @@ ${callNotes || "(none)"}`
         scriptText = trimToTargetWords(scriptText, targetWords);
       }
 
-      // 5) Ensure a single clean closing line at the very end
+      //5) After you compute scriptText (and before sending the response)
+      if (/{{\s*next_step\s*}}/i.test(scriptText)) {
+        const finalNext =
+          (nextStep && nextStep.trim()) ||
+          (suggestedNext && suggestedNext.trim()) ||
+          "";
+        if (finalNext) {
+          scriptText = scriptText.replace(/{{\s*next_step\s*}}/gi, finalNext);
+        }
+      }
+      
+      // 6) Ensure a single clean closing line at the very end
       scriptText = ensureThanksClose(scriptText);
 
       // ───────────────── POST-PROCESS END ─────────────────
