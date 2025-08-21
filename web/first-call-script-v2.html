@@ -997,6 +997,15 @@
             templateMdText: templateText
           };
 
+          // DEBUG: inspect the values and outbound body
+          console.log("[FCSv2] values at submit:", values);
+          console.log("[FCSv2] POST /api/generate body:", body);
+          // Also surface it in the Diagnostics panel so you can see it without the console
+          if (diag && diagJson) {
+            diag.open = true;
+            diagJson.textContent = JSON.stringify({ values, body }, null, 2);
+          }
+
           const resp = await fetch("/api/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1123,157 +1132,157 @@
 
           function toKey(s) { return String(s || "").trim().toLowerCase(); }
 
-        function renderSections(raw, valuesForFallback) {
-          const sections = parseSections(raw);
+          function renderSections(raw, valuesForFallback) {
+            const sections = parseSections(raw);
 
-          // Build a lookup map from many possible aliases -> the actual captured section
-          const byAlias = new Map();  // alias(lowercased) -> section
-          for (const sec of sections) {
-            const titleLc = toKey(sec.title);
-            // index by its own title
-            if (!byAlias.has(titleLc)) byAlias.set(titleLc, sec);
-            // and by split words combos to be forgiving
-            // (not strictly necessary, aliases below are the main thing)
-          }
-
-          // Helper: get the first available section that matches any alias set
-          function getByAliases(canonName) {
-            const aliases = SECTION_ALIASES[canonName] || [canonName];
-            for (const a of aliases) {
-              const hit = byAlias.get(toKey(a));
-              if (hit) return hit;
-              // also allow "contains" to catch small pluralisation differences
-              for (const [k, v] of byAlias.entries()) {
-                if (k.includes(toKey(a)) || toKey(a).includes(k)) return v;
-              }
+            // Build a lookup map from many possible aliases -> the actual captured section
+            const byAlias = new Map();  // alias(lowercased) -> section
+            for (const sec of sections) {
+              const titleLc = toKey(sec.title);
+              // index by its own title
+              if (!byAlias.has(titleLc)) byAlias.set(titleLc, sec);
+              // and by split words combos to be forgiving
+              // (not strictly necessary, aliases below are the main thing)
             }
-            return null;
-          }
 
-          const blocks = [];
-          const found = [];
-          const missing = [];
+            // Helper: get the first available section that matches any alias set
+            function getByAliases(canonName) {
+              const aliases = SECTION_ALIASES[canonName] || [canonName];
+              for (const a of aliases) {
+                const hit = byAlias.get(toKey(a));
+                if (hit) return hit;
+                // also allow "contains" to catch small pluralisation differences
+                for (const [k, v] of byAlias.entries()) {
+                  if (k.includes(toKey(a)) || toKey(a).includes(k)) return v;
+                }
+              }
+              return null;
+            }
 
-          for (const canonName of REQUIRED_CANON) {
-            const sec = getByAliases(canonName);
-            if (sec) {
-              found.push(canonName);
-              const body = [
-                ...sec.paras.map(p => `<p>${strongify(escapeHtml(p))}</p>`),
-                ...(sec.list.length
-                  ? [`<ul>${sec.list.map(li => `<li>${strongify(escapeHtml(li))}</li>`).join("")}</ul>`]
-                  : [])
-              ].join("");
-              blocks.push(`<section class="script-sec"><h3>${escapeHtml(canonName)}</h3>${body}</section>`);
-            } else {
-              missing.push(canonName);
-              // Friendly fallbacks:
-              if (canonName === "Next Step") {
-                const nx = valuesForFallback?.next_step || "";
-                const p = nx
-                  ? `<p>${strongify(escapeHtml(nx))}</p>`
-                  : `<p class="muted">Not provided in the generated script.</p>`;
-                blocks.push(`<section class="script-sec is-missing"><h3>Next Step</h3>${p}</section>`);
+            const blocks = [];
+            const found = [];
+            const missing = [];
+
+            for (const canonName of REQUIRED_CANON) {
+              const sec = getByAliases(canonName);
+              if (sec) {
+                found.push(canonName);
+                const body = [
+                  ...sec.paras.map(p => `<p>${strongify(escapeHtml(p))}</p>`),
+                  ...(sec.list.length
+                    ? [`<ul>${sec.list.map(li => `<li>${strongify(escapeHtml(li))}</li>`).join("")}</ul>`]
+                    : [])
+                ].join("");
+                blocks.push(`<section class="script-sec"><h3>${escapeHtml(canonName)}</h3>${body}</section>`);
               } else {
-                blocks.push(`<section class="script-sec is-missing"><h3>${escapeHtml(canonName)}</h3><p class="muted">Not provided in the generated script.</p></section>`);
+                missing.push(canonName);
+                // Friendly fallbacks:
+                if (canonName === "Next Step") {
+                  const nx = valuesForFallback?.next_step || "";
+                  const p = nx
+                    ? `<p>${strongify(escapeHtml(nx))}</p>`
+                    : `<p class="muted">Not provided in the generated script.</p>`;
+                  blocks.push(`<section class="script-sec is-missing"><h3>Next Step</h3>${p}</section>`);
+                } else {
+                  blocks.push(`<section class="script-sec is-missing"><h3>${escapeHtml(canonName)}</h3><p class="muted">Not provided in the generated script.</p></section>`);
+                }
               }
             }
+
+            return {
+              html: `<div class="script-body">${blocks.join("")}</div>`,
+              found, missing
+            };
           }
 
-          return {
-            html: `<div class="script-body">${blocks.join("")}</div>`,
-            found, missing
-          };
+          // ---- render to DOM ----
+          const rendered = renderSections(script, values /* pass form values so Next Step can fallback */);
+          outputEl.innerHTML = rendered.html;
+          modalScript.innerHTML = rendered.html;
+          // Guard-rail: if we recognised none of the required sections, show a clear error
+          if (!rendered.found || rendered.found.length === 0) {
+            throw new Error("The generated script did not contain the expected '##' headings. Please try again.");
+          }
+
+          outputMeta.textContent =
+            `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
+
+          console.info("[ScriptSections] found:", rendered.found, "missing:", rendered.missing);
+
+          // tips
+          tipsList.innerHTML = "";
+          (tips || []).forEach((t) => {
+            const li = document.createElement("li");
+            li.textContent = t;
+            tipsList.appendChild(li);
+          });
+
+          // delta + activity (unchanged)
+          const delta = computeDelta(lastOutput, script);
+          renderDelta(delta);
+          lastOutput = script;
+          localStorage.setItem(OUTPUT_KEY, lastOutput);
+
+          addActivity({
+            time: nowTime(),
+            product: productId,
+            buyer_behaviour: values.buyer_behaviour || "—",
+            length: values.length || "—",
+          });
+
+          setStatus("Done. (Generated from API)");
+          setBusy(false);
+          document.getElementById("output-title")?.focus();
+        } catch (err) {
+          setStatus("Could not generate a call script. See Diagnostics for details.", "error");
+          if (diag) { diag.open = true; diagJson.textContent = String(err?.message || err); }
+          setBusy(false);
+        }
+      });
+
+      // ---------- Init ----------
+      (async function init() {
+        // Optional: populate user badge (no-op if not signed in)
+        try {
+          const me = await fetch('/.auth/me', { cache: 'no-store' });
+          const j = await me.json();
+          const email = j?.clientPrincipal?.userDetails || j?.clientPrincipal?.identityProvider || '';
+          if (email && userBadge && userEmail) { userEmail.textContent = email; userBadge.classList.remove('is-hidden'); }
+        } catch { }
+
+        // Buyer needs preload
+        try {
+          const res = await fetch(INTEL_URL, { cache: 'no-store' });
+          const raw = await res.json();
+          intel = normaliseIntel(raw);
+        } catch { intel = { products: {} }; }
+
+        loadForm(); loadCallPref();
+        const currentMode = modeFromCallType(callTypeSel?.value || 'direct');
+        await populateProductsForMode(currentMode);
+
+        if (productSel?.value && buyerBehSel?.value) {
+          const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
+          renderIntel(label, buyerBehSel.value);
         }
 
-        // ---- render to DOM ----
-        const rendered = renderSections(script, values /* pass form values so Next Step can fallback */);
-      outputEl.innerHTML = rendered.html;
-      modalScript.innerHTML = rendered.html;
-      // Guard-rail: if we recognised none of the required sections, show a clear error
-      if (!rendered.found || rendered.found.length === 0) {
-        throw new Error("The generated script did not contain the expected '##' headings. Please try again.");
-      }
+        applyTipsVisibility();
 
-      outputMeta.textContent =
-        `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
+        const hasText = !!(outputEl?.textContent?.trim());
+        if (copyBtn) copyBtn.disabled = !hasText;
+        if (downloadBtn) downloadBtn.disabled = !hasText;
+        if (submitBtn) submitBtn.disabled = !allRequiredFilled(form);
 
-      console.info("[ScriptSections] found:", rendered.found, "missing:", rendered.missing);
+        // Notes
+        const loadNotesSafe = () => { try { notesArea.value = localStorage.getItem(notesKey()) || ''; } catch { } };
+        loadNotesSafe();
 
-      // tips
-      tipsList.innerHTML = "";
-      (tips || []).forEach((t) => {
-        const li = document.createElement("li");
-        li.textContent = t;
-        tipsList.appendChild(li);
-      });
-
-      // delta + activity (unchanged)
-      const delta = computeDelta(lastOutput, script);
-      renderDelta(delta);
-      lastOutput = script;
-      localStorage.setItem(OUTPUT_KEY, lastOutput);
-
-      addActivity({
-        time: nowTime(),
-        product: productId,
-        buyer_behaviour: values.buyer_behaviour || "—",
-        length: values.length || "—",
-      });
-
-      setStatus("Done. (Generated from API)");
-      setBusy(false);
-      document.getElementById("output-title")?.focus();
-    } catch (err) {
-      setStatus("Could not generate a call script. See Diagnostics for details.", "error");
-      if (diag) { diag.open = true; diagJson.textContent = String(err?.message || err); }
-      setBusy(false);
-    }
-    });
-
-    // ---------- Init ----------
-    (async function init() {
-      // Optional: populate user badge (no-op if not signed in)
-      try {
-        const me = await fetch('/.auth/me', { cache: 'no-store' });
-        const j = await me.json();
-        const email = j?.clientPrincipal?.userDetails || j?.clientPrincipal?.identityProvider || '';
-        if (email && userBadge && userEmail) { userEmail.textContent = email; userBadge.classList.remove('is-hidden'); }
-      } catch { }
-
-      // Buyer needs preload
-      try {
-        const res = await fetch(INTEL_URL, { cache: 'no-store' });
-        const raw = await res.json();
-        intel = normaliseIntel(raw);
-      } catch { intel = { products: {} }; }
-
-      loadForm(); loadCallPref();
-      const currentMode = modeFromCallType(callTypeSel?.value || 'direct');
-      await populateProductsForMode(currentMode);
-
-      if (productSel?.value && buyerBehSel?.value) {
-        const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
-        renderIntel(label, buyerBehSel.value);
-      }
-
-      applyTipsVisibility();
-
-      const hasText = !!(outputEl?.textContent?.trim());
-      if (copyBtn) copyBtn.disabled = !hasText;
-      if (downloadBtn) downloadBtn.disabled = !hasText;
-      if (submitBtn) submitBtn.disabled = !allRequiredFilled(form);
-
-      // Notes
-      const loadNotesSafe = () => { try { notesArea.value = localStorage.getItem(notesKey()) || ''; } catch { } };
-      loadNotesSafe();
-
-      document.addEventListener('input', (e) => {
-        if (e.target.closest('#' + FORM_ID)) { validateField(e.target); saveForm(); refreshSubmitState(); }
-        if (e.target === callTypeSel) saveCallPrefIfRequested();
-      });
+        document.addEventListener('input', (e) => {
+          if (e.target.closest('#' + FORM_ID)) { validateField(e.target); saveForm(); refreshSubmitState(); }
+          if (e.target === callTypeSel) saveCallPrefIfRequested();
+        });
+      })();
     })();
-    }) ();
   </script>
 
 </body>
