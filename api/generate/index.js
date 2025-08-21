@@ -1,10 +1,10 @@
 // index.js – Azure Function handler for /api/generate
 // Version: v3-markdown-first-2025-08-20-patch8-fixed (normalized vars; strict buyer; safe base; logs; sanitizer; length trim)
 
-const VERSION = "DEV-verify-2025-08-21-1"; // <-- bump this every edit
+const VERSION = "DEV-verify-2025-08-21-2"; // <-- bump this every edit
 try {
   console.log(`[${VERSION}] module loaded at ${new Date().toISOString()} cwd=${process.cwd()} dir=${__dirname}`);
-} catch { }
+} catch {}
 
 const { z } = require("zod");
 
@@ -93,9 +93,6 @@ const ScriptJsonSchema = z.object({
   tips: z.array(z.string()).min(3).max(3)
 });
 
-/* eslint-disable no-console */
-try { console.log("[" + VERSION + "] module loaded"); } catch (e) { }
-
 function extractText(res) {
   if (!res) return "";
   if (typeof res === "string") return res;
@@ -103,18 +100,18 @@ function extractText(res) {
     if (res.choices && res.choices[0] && res.choices[0].message && res.choices[0].message.content) {
       return String(res.choices[0].message.content);
     }
-  } catch (e) { }
+  } catch (e) {}
   try {
     if (res.output_text) return String(res.output_text);
     if (res.output) return String(res.output);
     if (res.text) return String(res.text);
     if (res.message) return String(res.message);
-  } catch (e) { }
+  } catch (e) {}
   try {
     if (res.data && res.data.choices && res.data.choices[0] && res.data.choices[0].message && res.data.choices[0].message.content) {
       return String(res.data.choices[0].message.content);
     }
-  } catch (e) { }
+  } catch (e) {}
   return "";
 }
 
@@ -128,6 +125,7 @@ async function callModel(opts) {
   const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
   const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
 
+  // ---- Azure path (NO response_format) ----
   if (azEndpoint && azKey && azDeployment) {
     const url = azEndpoint.replace(/\/+$/, "") + "/openai/deployments/" + encodeURIComponent(azDeployment) + "/chat/completions?api-version=" + encodeURIComponent(azApiVersion);
     const r = await fetch(url, {
@@ -138,8 +136,7 @@ async function callModel(opts) {
         "User-Agent": "inside-track-tools/" + VERSION
       },
       body: JSON.stringify({
-        temperature: temperature,
-        response_format: opts.response_format,   // <— Json with markdown path fallback
+        temperature,
         messages: [
           { role: "system", content: system },
           { role: "user", content: prompt }
@@ -147,14 +144,25 @@ async function callModel(opts) {
       }),
     });
     let data = {};
-    try { data = await r.json(); } catch (e) { }
+    try { data = await r.json(); } catch (e) {}
     if (!r.ok) throw new Error((data && data.error && data.error.message) || r.statusText || "Azure OpenAI request failed");
     return data;
   }
 
+  // ---- OpenAI path (response_format allowed) ----
   const oaKey = process.env.OPENAI_API_KEY;
   const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
   if (oaKey) {
+    const payload = {
+      model: oaModel,
+      temperature,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: prompt }
+      ],
+    };
+    if (opts.response_format) payload.response_format = opts.response_format;
+
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -162,18 +170,10 @@ async function callModel(opts) {
         "Authorization": "Bearer " + oaKey,
         "User-Agent": "inside-track-tools/" + VERSION
       },
-      body: JSON.stringify({
-        model: oaModel,
-        temperature: temperature,
-        response_format: opts.response_format,   // <— add this line
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: prompt }
-        ],
-      }),
+      body: JSON.stringify(payload),
     });
     let data = {};
-    try { data = await r.json(); } catch (e) { }
+    try { data = await r.json(); } catch (e) {}
     if (!r.ok) throw new Error((data && data.error && data.error.message) || r.statusText || "OpenAI request failed");
     return data;
   }
@@ -355,7 +355,7 @@ function buildJsonPrompt(args) {
   const lengthHint = targetWords ? `Aim for about ${targetWords} words (±10%).` : "";
 
   return (
-    `You are a highly effective UK B2B salesperson. 
+`You are a highly effective UK B2B salesperson. 
 Write **valid JSON only** (no markdown, no prose outside JSON). 
 JSON schema:
 {
@@ -560,7 +560,7 @@ ${callNotes || "(none)"}`
 
       var base;
       if (envBase) {
-        base = /^https?:\/\//i.test(envBase)
+        base = /^https?:\/\/+/i.test(envBase)
           ? envBase
           : (proto + "://" + resolvedHost + (envBase.indexOf("/") === 0 ? "" : "/") + envBase);
       } else if (bodyBase) {
@@ -582,7 +582,7 @@ ${callNotes || "(none)"}`
               .replace(/\/\/7071-/, "//4280-");
             if (alt !== url) {
               context.log("[" + VERSION + "] [CallLib] retry -> " + alt);
-              try { return await fetch(alt, init); } catch (e2) { }
+              try { return await fetch(alt, init); } catch (e2) {}
             }
           }
           throw e;
@@ -613,7 +613,7 @@ ${callNotes || "(none)"}`
         });
 
         let bodyText = "";
-        try { bodyText = await resMd.text(); } catch (e) { }
+        try { bodyText = await resMd.text(); } catch (e) {}
 
         if (!resMd.ok) {
           context.res = {
@@ -643,8 +643,9 @@ ${callNotes || "(none)"}`
       // Human label for product
       const productLabel = String(productId || "").replace(/[_-]+/g, " ").replace(/\b\w/g, function (m) { return m.toUpperCase(); });
 
-      // Build prompt (includes salesperson inputs)
+      // Compute suggestedNext once (for both JSON and fallback)
       const suggestedNext = pluckSuggestedNextStep(templateMdText);
+
       // ---------- JSON-FIRST PATH ----------
       const jsonPrompt = buildJsonPrompt({
         templateMdText,
@@ -655,7 +656,7 @@ ${callNotes || "(none)"}`
         valueProposition,
         context: otherContext,
         nextStep,
-        suggestedNext,                 
+        suggestedNext,
         tone: effectiveTone,           // use the resolved tone
         targetWords
       });
@@ -691,50 +692,6 @@ ${callNotes || "(none)"}`
         return;
       }
 
-
-      function buildFollowupPrompt({ seller, prospect, tone, scriptMdText, callNotes }) {
-        return (
-          `You are a UK B2B salesperson. Draft a concise follow-up email after a discovery call.
-
-Tone: ${tone || "Professional (corporate)"}.
-Output: Plain text email with:
-- Subject line
-- Greeting ("Hello ${prospect.name},")
-- 2–3 short paragraphs that stitch together (1) the prepared call talking points and (2) the salesperson's call notes (prioritise the notes)
-- A single clear next step
-- Signature as "${seller.name}, ${seller.company}"
-
-Prepared talking points (from the script the rep used on the call):
-${scriptMdText || "(none)"}
-
-Salesperson's notes (verbatim):
-${callNotes || "(none)"}`
-        );
-      }
-
-      if (kind === 'call-followup') {
-        const vars = { ...(body || {}), ...(body.variables || {}) };
-        const prompt = buildFollowupPrompt({
-          seller: { name: vars.seller_name || "", company: vars.seller_company || "" },
-          prospect: { name: vars.prospect_name || "", role: vars.prospect_role || "", company: vars.prospect_company || "" },
-          tone: vars.tone || "",
-          scriptMdText: String(body.scriptMdText || ""),
-          callNotes: String(body.callNotes || "")
-        });
-
-        const llmRes = await callModel({
-          system: "You write crisp UK business emails. No pleasantries. Keep it short and specific.",
-          prompt,
-          temperature: 0.5,
-        });
-
-        const email = extractText(llmRes) || "";
-        context.res = { status: 200, headers: cors, body: { followup: { email }, version: VERSION } };
-        return;
-      }
-
-      const suggestedNext = pluckSuggestedNextStep(templateMdText);
-
       // ---------- FALLBACK: MARKDOWN-FIRST (your existing path) ----------
       const prompt = buildPromptFromMarkdown({
         templateMdText: templateMdText,
@@ -745,6 +702,7 @@ ${callNotes || "(none)"}`
         valueProposition: valueProposition,
         context: otherContext,
         nextStep: nextStep,
+        suggestedNext: suggestedNext,
         tone: effectiveTone,
         targetWords: targetWords,
       });
@@ -815,14 +773,14 @@ ${callNotes || "(none)"}`
         scriptText = trimToTargetWords(scriptText, targetWords);
       }
 
-      //5) After you compute scriptText (and before sending the response)
+      // 5) If any {{next_step}} remained, resolve again (belt & braces)
       if (/{{\s*next_step\s*}}/i.test(scriptText)) {
-        const finalNext =
+        const finalNext2 =
           (nextStep && nextStep.trim()) ||
           (suggestedNext && suggestedNext.trim()) ||
           "";
-        if (finalNext) {
-          scriptText = scriptText.replace(/{{\s*next_step\s*}}/gi, finalNext);
+        if (finalNext2) {
+          scriptText = scriptText.replace(/{{\s*next_step\s*}}/gi, finalNext2);
         }
       }
 
