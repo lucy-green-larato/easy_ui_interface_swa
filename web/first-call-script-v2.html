@@ -7,10 +7,6 @@
   <title>Inside Track Tools · First Call Script (v2)</title>
   <link rel="stylesheet" href="./styles.css?v=fix4" />
 
-  <!-- Markdown renderer + sanitizer -->
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
-
   <style>
     :root {
       --right-min: 280px;
@@ -58,7 +54,8 @@
 
     /* Readable script box */
     .output {
-      white-space: normal;           /* allow HTML layout */
+      white-space: normal;
+      /* allow HTML layout */
       background: #fff;
       color: #111827;
       border: 1px solid #e5e7eb;
@@ -70,9 +67,20 @@
       letter-spacing: .005em;
     }
 
-    .output h1, .output h2, .output h3 { margin: .4rem 0 .2rem; }
-    .output p { margin: .4rem 0; }
-    .output ul, .output ol { margin: .4rem 0 .4rem 1.25rem; }
+    .output h1,
+    .output h2,
+    .output h3 {
+      margin: .4rem 0 .2rem;
+    }
+
+    .output p {
+      margin: .4rem 0;
+    }
+
+    .output ul,
+    .output ol {
+      margin: .4rem 0 .4rem 1.25rem;
+    }
 
     .tips-card ul {
       margin: .5rem 0 0;
@@ -823,8 +831,8 @@
           const idx = await getIndex(mode, basePrefix);
           const items =
             Array.isArray(idx?.products) ? idx.products :
-            Array.isArray(idx?.items) ? idx.items :
-            Array.isArray(idx) ? idx : [];
+              Array.isArray(idx?.items) ? idx.items :
+                Array.isArray(idx) ? idx : [];
 
           if (!items.length) {
             sel.innerHTML = `<option value="">No products found</option>`;
@@ -990,29 +998,43 @@
           const script = data?.script?.text || "";
           const tips = data?.script?.tips || [];
 
-          // ✅ Render Markdown safely
-          const html = DOMPurify.sanitize(marked.parse(script));
-          outputEl.innerHTML = html;
+          // Render Markdown-like headings into styled HTML (regex-based)
+          if (script && script.trim()) {
+            let html = script.trim()
+              .replace(/^## (.*)$/gm, "<h3>$1</h3>")            // Convert ## Headings → <h3>
+              .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>") // **Bold**
+              .replace(/\n\n+/g, "</p><p>")                      // Paragraph breaks
+              .replace(/\n-\s?/g, "<br>• ");                     // Bulleted lists
 
-          outputMeta.textContent =
-            `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
+            // Wrap in a container so we can style it
+            html = `<div class="script-body"><p>${html}</p></div>`;
 
+            // Write to the main output and the pop-out modal
+            outputEl.innerHTML = html;
+            modalScript.innerHTML = html;
+
+            // Meta text (unchanged)
+            outputMeta.textContent =
+              `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
+
+            // Scroll into view
+            outputEl.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+
+          // Tips
           tipsList.innerHTML = "";
-          tips.forEach((t) => {
+          (tips || []).forEach((t) => {
             const li = document.createElement("li");
             li.textContent = t;
             tipsList.appendChild(li);
           });
 
+          // Delta + activity (unchanged)
           const delta = computeDelta(lastOutput, script);
           renderDelta(delta);
           lastOutput = script;
           localStorage.setItem(OUTPUT_KEY, lastOutput);
 
-          // populate modal with same rendered HTML
-          modalScript.innerHTML = html;
-
-          // Log activity
           addActivity({
             time: nowTime(),
             product: productId,
@@ -1064,7 +1086,7 @@
         if (submitBtn) submitBtn.disabled = !allRequiredFilled(form);
 
         // Notes
-        const loadNotesSafe = () => { try { notesArea.value = localStorage.getItem(notesKey()) || ''; } catch {} };
+        const loadNotesSafe = () => { try { notesArea.value = localStorage.getItem(notesKey()) || ''; } catch { } };
         loadNotesSafe();
 
         document.addEventListener('input', (e) => {
@@ -1076,4 +1098,5 @@
   </script>
 
 </body>
+
 </html>
