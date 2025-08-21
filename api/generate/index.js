@@ -84,13 +84,13 @@ const ScriptJsonSchema = z.object({
     handling_objections: z.string().min(10),
     next_step: z.string().min(5),
   }),
-  // Meta for transparency (optional, but handy for debugging)
   integration_notes: z.object({
     usps_used: z.array(z.string()).optional(),
     other_points_used: z.array(z.string()).optional(),
     next_step_source: z.enum(["salesperson", "template", "assistant"]).optional()
   }).optional(),
-  tips: z.array(z.string()).min(3).max(3)
+  tips: z.array(z.string()).min(3).max(3),
+  summary_bullets: z.array(z.string()).min(6).max(12)  // NEW: concise outline
 });
 
 function extractText(res) {
@@ -351,12 +351,12 @@ function buildJsonPrompt(args) {
   const suggestedNext = String(args.suggestedNext || "").trim();
   const tone = args.tone || "Professional (corporate)";
   const targetWords = Number(args.targetWords || 0);
-
   const lengthHint = targetWords ? `Aim for about ${targetWords} words (±10%).` : "";
 
   return (
     `You are a highly effective UK B2B salesperson. 
-Write **valid JSON only** (no markdown, no prose outside JSON). 
+Write **valid JSON only** (no markdown; no text outside JSON).
+
 JSON schema:
 {
   "sections": {
@@ -372,20 +372,18 @@ JSON schema:
     "other_points_used": string[]?,
     "next_step_source": "salesperson" | "template" | "assistant"?
   },
-  "tips": [string, string, string]     // exactly 3 concise tips
+  "tips": [string, string, string],    // exactly 3 concise tips
+  "summary_bullets": string[]          // 6–12 crisp bullets summarising the call flow for an experienced rep
 }
 
 Constraints:
 - Tone: ${tone}.
-- UK business English only. No Americanisms. No pleasantries like "Hope you're well", "How are you?", etc.
+- UK business English only. No Americanisms. No pleasantries (“Hope you’re well”, “How are you?”, etc.).
+- Do not use filler lines like “Is there anything else I can help with?”
 - Open with: "Hi ${prospect.name}, it’s ${seller.name} from ${seller.company}."
-- Use these conceptual sections (your JSON keys map to them):
-  opening, buyer_pain, buyer_desire, example_illustration, handling_objections, next_step
-- Weave the salesperson inputs (USPs & Other points) naturally in relevant sections; don’t dump them as a list.
-- Next step precedence:
-  1) If salesperson provided next step, use it.
-  2) Else if template has <!-- suggested_next_step: ... --> use it.
-  3) Else propose a clear, low-friction next step.
+- Sections to cover (your JSON keys map to these): opening, buyer_pain, buyer_desire, example_illustration, handling_objections, next_step.
+- **Weave** the salesperson inputs (USPs & Other points) into the most relevant sections **as natural sentences**. Do **not** dump them as separate bullet lists.
+- Next step precedence: (1) salesperson-provided; else (2) template <!-- suggested_next_step -->; else (3) a clear, low-friction next step.
 - Include one specific, relevant customer example with measurable results.
 - ${lengthHint}
 
@@ -397,7 +395,7 @@ Context for you to incorporate:
 - Salesperson requested next step (optional): ${nextStep || "(none)"}
 - Template suggested next step (optional): ${suggestedNext || "(none)"}
 
-Template you may mine for ideas (do not copy headings literally; your output is JSON):
+Template to mine for ideas (don’t copy headings; your output is JSON):
 --- TEMPLATE START ---
 ${templateMdText}
 --- TEMPLATE END ---
@@ -678,57 +676,25 @@ ${callNotes || "(none)"}`
 
       if (validated && validated.success) {
         const S = validated.data.sections;
-
-        // Build markdown from JSON sections
-        let scriptText =
-          "## Opening\n" + stripPleasantries(S.opening) + "\n\n" +
+        const md =
+          "## Opening\n" + ensureThanksClose(stripPleasantries(S.opening)).replace(/\s*thank you for your time\.?$/i, "") + "\n\n" +
           "## Buyer Pain\n" + stripPleasantries(S.buyer_pain) + "\n\n" +
           "## Buyer Desire\n" + stripPleasantries(S.buyer_desire) + "\n\n" +
           "## Example Illustration\n" + stripPleasantries(S.example_illustration) + "\n\n" +
           "## Handling Objections\n" + stripPleasantries(S.handling_objections) + "\n\n" +
           "## Next Step\n" + stripPleasantries(S.next_step) + "\n";
 
-        // ——— Deterministic weaving (make sure inputs are present even if the model ignored them) ———
-        scriptText = ensureHeadings(scriptText);
-
-        // Next step: salesperson > template > assistant (JSON already chose, but hard-set if salesperson provided)
-        if (nextStep && String(nextStep).trim()) {
-          scriptText = replaceSection(scriptText, "Next Step", String(nextStep).trim());
-        }
-
-        // USPs under Buyer Desire as a short bullet block
-        if (valueProposition && String(valueProposition).trim()) {
-          scriptText = injectBullets(
-            scriptText,
-            "Buyer Desire",
-            "Based on your priorities, we can emphasise:",
-            valueProposition
-          );
-        }
-
-        // Other points near the top of Opening
-        if (otherContext && String(otherContext).trim()) {
-          scriptText = injectBullets(
-            scriptText,
-            "Opening",
-            "I'll also make sure we cover:",
-            otherContext
-          );
-        }
-
-        // Length control AFTER weaving
-        if (targetWords) {
-          scriptText = trimToTargetWords(scriptText, targetWords);
-        }
-
-        // Clean closing line
-        scriptText = ensureThanksClose(scriptText);
+        const finalMd = targetWords ? trimToTargetWords(md, targetWords) : md;
 
         context.res = {
           status: 200,
           headers: cors,
           body: {
-            script: { text: scriptText, tips: validated.data.tips },
+            script: {
+              text: finalMd,
+              tips: validated.data.tips,
+              outline: validated.data.summary_bullets || []   // <— NEW
+            },
             version: VERSION,
             usedModel: true,
             mode: "json"
@@ -794,23 +760,44 @@ ${callNotes || "(none)"}`
         scriptText = replaceSection(scriptText, "Next Step", String(nextStep).trim());
       }
 
-      // 3) Deterministically weave salesperson inputs
-      if (valueProposition && String(valueProposition).trim()) {
-        scriptText = injectBullets(
-          scriptText,
-          "Buyer Desire",
-          "Based on your priorities, we can emphasise:",
-          valueProposition
-        );
+      // Utility: turn "a; b; c" into "a, b and c"
+      function toSentenceList(raw) {
+        const items = String(raw || "")
+          .split(/\r?\n|;|,|·|•|—|- /)
+          .map(s => s.trim())
+          .filter(Boolean);
+        if (items.length === 0) return "";
+        if (items.length === 1) return items[0];
+        if (items.length === 2) return items[0] + " and " + items[1];
+        return items.slice(0, -1).join(", ") + " and " + items.slice(-1);
       }
 
+      // Insert one sentence after the first paragraph of a named section
+      function weaveSentenceIntoSection(text, sectionName, sentence) {
+        if (!sentence) return text;
+        const h = sectionName.replace(/\s+/g, "\\s+");
+        const rx = new RegExp(`(^|\\n)##\\s*${h}\\b[\\t ]*\\n([\\s\\S]*?)(?=\\n##\\s*[A-Za-z]|$)`, "i");
+        const m = text.match(rx);
+        if (!m) return text;
+
+        const full = m[0];
+        const body = m[2] || "";
+        const parts = body.split(/\n{2,}/); // paragraphs
+        if (parts.length === 0) return text;
+
+        parts[0] = parts[0].trim() + (parts[0].trim().endsWith(".") ? " " : ". ") + sentence.trim();
+        const newBody = parts.join("\n\n");
+        return text.replace(full, m[1] + "## " + sectionName + "\n" + newBody);
+      }
+
+      // 3) Deterministically weave salesperson inputs as prose
+      if (valueProposition && String(valueProposition).trim()) {
+        const sent = "From our side, we can bring " + toSentenceList(valueProposition) + ".";
+        scriptText = weaveSentenceIntoSection(scriptText, "Buyer Desire", sent);
+      }
       if (otherContext && String(otherContext).trim()) {
-        scriptText = injectBullets(
-          scriptText,
-          "Opening",
-          "I'll also make sure we cover:",
-          otherContext
-        );
+        const sent = "I’ll also make sure we cover " + toSentenceList(otherContext) + ".";
+        scriptText = weaveSentenceIntoSection(scriptText, "Opening", sent);
       }
 
       // 4) Length control AFTER we’ve woven content (so limit applies to the final script)
