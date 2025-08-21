@@ -74,6 +74,30 @@ function injectBullets(text, name, intro, items) {
   return `${text.trim()}\n\n## ${name}\n\n${injection}`;
 }
 
+function englishList(items) {
+  const arr = (items || []).map(s => String(s || "").trim()).filter(Boolean);
+  if (arr.length <= 1) return arr[0] || "";
+  return arr.slice(0, -1).join(", ") + " and " + arr[arr.length - 1];
+}
+
+function containsAny(haystack, items) {
+  const t = String(haystack || "").toLowerCase();
+  return (items || []).some(it => t.includes(String(it || "").toLowerCase()));
+}
+
+function injectSentences(text, name, sentences) {
+  const para = Array.isArray(sentences) ? sentences.join(" ") : String(sentences || "");
+  if (!para.trim()) return text;
+
+  const h = name.replace(/\s+/g, "\\s+");
+  const rx = new RegExp(`(^|\\n)(##\\s*${h}\\b[\\t ]*\\n)`, "i");
+  if (rx.test(text)) {
+    return text.replace(rx, (_, pfx, heading) => `${pfx}${heading}${para.trim()}\n\n`);
+  }
+  // If the section is missing (shouldn't be after ensureHeadings), append it.
+  return `${String(text || "").trim()}\n\n## ${name}\n\n${para.trim()}\n\n`;
+}
+
 // JSON the model should return
 const ScriptJsonSchema = z.object({
   sections: z.object({
@@ -790,15 +814,27 @@ ${callNotes || "(none)"}`
         return text.replace(full, m[1] + "## " + sectionName + "\n" + newBody);
       }
 
-      // 3) Deterministically weave salesperson inputs as prose
-      if (valueProposition && String(valueProposition).trim()) {
-        const sent = "From our side, we can bring " + toSentenceList(valueProposition) + ".";
-        scriptText = weaveSentenceIntoSection(scriptText, "Buyer Desire", sent);
+      // 3) Deterministically weave salesperson inputs (natural sentences, not bullets)
+      const uspsArr = splitList(valueProposition);
+      const otherArr = splitList(otherContext);
+
+      // Only inject if NONE of the terms appear already in the script (case-insensitive)
+      if (uspsArr.length && !containsAny(scriptText, uspsArr)) {
+        const list = englishList(uspsArr);
+        // Opening: a light, contextual bridge
+        const lineOpening = `From our side, we can also bring in ${list} where it’s the pragmatic fit.`;
+        // Buyer Desire: tie to outcomes/admin
+        const lineDesire = `If helpful, we can weave in ${list} so your team gets the outcome without extra admin.`;
+        scriptText = injectSentences(scriptText, "Opening", lineOpening);
+        scriptText = injectSentences(scriptText, "Buyer Desire", lineDesire);
       }
-      if (otherContext && String(otherContext).trim()) {
-        const sent = "I’ll also make sure we cover " + toSentenceList(otherContext) + ".";
-        scriptText = weaveSentenceIntoSection(scriptText, "Opening", sent);
+
+      if (otherArr.length && !containsAny(scriptText, otherArr)) {
+        const list = englishList(otherArr);
+        const line = `I’ll also make sure we cover ${list}.`;
+        scriptText = injectSentences(scriptText, "Opening", line);
       }
+
 
       // 4) Length control AFTER we’ve woven content (so limit applies to the final script)
       if (targetWords) {
