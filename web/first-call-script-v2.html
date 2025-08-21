@@ -1067,32 +1067,42 @@
               current = { title, paras: [], list: [] };
             };
 
-            // start with an Opening section if content starts cold
-            let firstNonEmpty = lines.find(l => l.trim());
-            if (firstNonEmpty && !firstNonEmpty.startsWith("## ")) startSection("Opening");
+            // Regex: accept "## Heading" (preferred) and capture any text after it on the same line
+            // Also tolerant to ### / bold (__ / **), but you can remove that if you want to be strict.
+            const HEADING_RX =
+              /^(?:#{2,}\s*|\*\*\s*|__\s*)?(opening|buyer pain|buyer desire|example illustration|handling objections|next step)\b[:\s]*?(.*)$/i;
+
+            // Start with "Opening" if first non-empty line is not a recognised heading
+            const firstNonEmpty = lines.find(l => l.trim());
+            if (firstNonEmpty && !HEADING_RX.test(firstNonEmpty.trim())) startSection("Opening");
 
             for (let rawLine of lines) {
               let line = rawLine.trim();
               if (!line) { inList = false; continue; }
 
-              // Accept ## / ###, or **Title** / __Title__, or "Title:" exactly matching our six sections
-              const headingMatch = line.match(
-                /^(?:#{2,}\s*|\*\*\s*|__\s*)?(opening|buyer pain|buyer desire|example illustration|handling objections|next step)\s*:?\s*(?:\*\*|__)?\s*$/i
-              );
-              if (headingMatch) {
-                const canon = headingMatch[1]
-                  .toLowerCase()
-                  .replace(/\b\w/g, c => c.toUpperCase()); // "buyer pain" -> "Buyer Pain"
-                startSection(canon);
+              // --- Heading line (may include first sentence on same line)
+              const m = line.match(HEADING_RX);
+              if (m) {
+                const canon = m[1].toLowerCase().replace(/\b\w/g, c => c.toUpperCase()); // e.g. "buyer pain" -> "Buyer Pain"
+                // close previous section if it had content
+                if (current && (current.paras.length || current.list.length)) sections.push(current);
+                current = { title: canon, paras: [], list: [] };
+                inList = false;
+
+                const rest = (m[2] || "").trim();     // text after the heading on the same line
+                if (rest) current.paras.push(rest);    // becomes first paragraph of this section
                 continue;
               }
 
+              // --- Bullet list item
               if (line.startsWith("- ")) {
                 if (!current) startSection("Opening");
                 current.list.push(line.slice(2).trim());
                 inList = true;
                 continue;
               }
+
+              // --- Normal paragraph line
               if (!current) startSection("Opening");
               current.paras.push(line);
               inList = false;
