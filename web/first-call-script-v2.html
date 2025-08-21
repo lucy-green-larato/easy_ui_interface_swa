@@ -998,30 +998,69 @@
           const script = data?.script?.text || "";
           const tips = data?.script?.tips || [];
 
-          // Render Markdown-like headings into styled HTML (regex-based)
-          if (script && script.trim()) {
-            let html = script.trim()
-              .replace(/^## (.*)$/gm, "<h3>$1</h3>")            // Convert ## Headings → <h3>
-              .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>") // **Bold**
-              .replace(/\n\n+/g, "</p><p>")                      // Paragraph breaks
-              .replace(/\n-\s?/g, "<br>• ");                     // Bulleted lists
+          // --- formatting helpers ---
+          const escapeHtml = (s) =>
+            String(s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+          const strongify = (s) =>
+            s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 
-            // Wrap in a container so we can style it
-            html = `<div class="script-body"><p>${html}</p></div>`;
+          function formatScript(raw) {
+            if (!raw) return "";
 
-            // Write to the main output and the pop-out modal
-            outputEl.innerHTML = html;
-            modalScript.innerHTML = html;
+            // 1) Normalise: force new lines before headings and list items even if API returned one long line
+            let s = String(raw)
+              .replace(/\r/g, "")
+              // ensure "… . ## Heading" → "\n\n## Heading"
+              .replace(/\s*##\s+/g, "\n\n## ")
+              // turn inline " - Item" into newline list items
+              .replace(/(\S)\s-\s(?=[A-Za-z0-9])/g, "$1\n- ")
+              // collapse stray spaces before newlines
+              .replace(/[ \t]+\n/g, "\n")
+              .trim();
 
-            // Meta text (unchanged)
-            outputMeta.textContent =
-              `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
+            const lines = s.split("\n");
+            const out = [];
+            let inList = false;
 
-            // Scroll into view
-            outputEl.scrollIntoView({ behavior: "smooth", block: "start" });
+            const closeList = () => { if (inList) { out.push("</ul>"); inList = false; } };
+
+            for (let line of lines) {
+              line = line.trim();
+              if (!line) { closeList(); continue; }
+
+              // Headings like "## Buyer Pain"
+              if (line.startsWith("## ")) {
+                closeList();
+                out.push(`<h3>${escapeHtml(line.slice(3))}</h3>`);
+                continue;
+              }
+
+              // List items "- Something"
+              if (line.startsWith("- ")) {
+                if (!inList) { out.push("<ul>"); inList = true; }
+                // bold inside list
+                out.push(`<li>${strongify(escapeHtml(line.slice(2)))}</li>`);
+                continue;
+              }
+
+              // Paragraph (with **bold** support)
+              closeList();
+              out.push(`<p>${strongify(escapeHtml(line))}</p>`);
+            }
+            closeList();
+
+            return `<div class="script-body">${out.join("")}</div>`;
           }
 
-          // Tips
+          // ---- render to DOM ----
+          const html = formatScript(script);
+          outputEl.innerHTML = html;
+          modalScript.innerHTML = html;
+
+          outputMeta.textContent =
+            `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
+
+          // tips
           tipsList.innerHTML = "";
           (tips || []).forEach((t) => {
             const li = document.createElement("li");
@@ -1029,7 +1068,7 @@
             tipsList.appendChild(li);
           });
 
-          // Delta + activity (unchanged)
+          // delta + activity (unchanged)
           const delta = computeDelta(lastOutput, script);
           renderDelta(delta);
           lastOutput = script;
