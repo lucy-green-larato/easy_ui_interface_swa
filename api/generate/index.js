@@ -208,7 +208,6 @@ toneLine + lengthLine +
 "- Include one specific, relevant customer example with measurable results.\n" +
 "- Handle common objections factually and without pressure.\n" +
 "- For the \"Next Step\": use the salesperson’s input if provided; otherwise, if the template includes <!-- suggested_next_step: ... --> use that; otherwise propose a clear, low-friction next step.\n" +
-"- End the \"Close\" with: \"Thank you for your time.\"\n\n" +
 "Buyer type: " + buyerType + "\n" +
 "Product: " + productLabel + "\n\n" +
 "USPs (from salesperson): " + (valueProposition || "(none provided)") + "\n" +
