@@ -1027,15 +1027,6 @@
             templateMdText: templateText
           };
 
-          // DEBUG: inspect the values and outbound body
-          console.log("[FCSv2] values at submit:", values);
-          console.log("[FCSv2] POST /api/generate body:", body);
-          // Also surface it in the Diagnostics panel so you can see it without the console
-          if (diag && diagJson) {
-            diag.open = true;
-            diagJson.textContent = JSON.stringify({ values, body }, null, 2);
-          }
-
           const resp = await fetch("/api/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
