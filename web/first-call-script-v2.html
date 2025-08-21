@@ -1011,6 +1011,10 @@
           const data = await resp.json();
           const script = data?.script?.text || "";
           const tips = data?.script?.tips || [];
+          // Guard-rail: empty script from API
+          if (!script || !script.trim()) {
+            throw new Error("Empty script returned from API");
+          }
 
           /* ---------- ROBUST SCRIPT RENDERER (alias-aware) ---------- */
           const SECTION_ALIASES = {
@@ -1071,11 +1075,18 @@
               let line = rawLine.trim();
               if (!line) { inList = false; continue; }
 
-              if (line.startsWith("## ")) {
-                const title = line.slice(3).trim();
-                startSection(title);
+              // Accept ## / ###, or **Title** / __Title__, or "Title:" exactly matching our six sections
+              const headingMatch = line.match(
+                /^(?:#{2,}\s*|\*\*\s*|__\s*)?(opening|buyer pain|buyer desire|example illustration|handling objections|next step)\s*:?\s*(?:\*\*|__)?\s*$/i
+              );
+              if (headingMatch) {
+                const canon = headingMatch[1]
+                  .toLowerCase()
+                  .replace(/\b\w/g, c => c.toUpperCase()); // "buyer pain" -> "Buyer Pain"
+                startSection(canon);
                 continue;
               }
+
               if (line.startsWith("- ")) {
                 if (!current) startSection("Opening");
                 current.list.push(line.slice(2).trim());
@@ -1160,6 +1171,10 @@
           const rendered = renderSections(script, values /* pass form values so Next Step can fallback */);
           outputEl.innerHTML = rendered.html;
           modalScript.innerHTML = rendered.html;
+          // Guard-rail: if we recognised none of the required sections, show a clear error
+          if (!rendered.found || rendered.found.length === 0) {
+            throw new Error("The generated script did not contain the expected '##' headings. Please try again.");
+          }
 
           outputMeta.textContent =
             `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
