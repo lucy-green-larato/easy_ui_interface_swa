@@ -440,24 +440,6 @@
         <ul id="tips-list"></ul>
       </div>
 
-      <div class="bullets-card card" style="margin-top:var(--space-4)">
-        <div class="row-between">
-          <h3>Bullet overview</h3>
-          <button id="toggle-bullets" class="btn inline" type="button" aria-expanded="true"
-            aria-controls="bullets-list">Hide bullets</button>
-        </div>
-        <ul id="bullets-list"></ul>
-      </div>
-
-      <div id="outline-card" class="card" style="margin-top:var(--space-4)" hidden>
-        <div class="row-between">
-          <h3>Bullet view (for experienced reps)</h3>
-          <button id="toggle-outline" class="btn inline" type="button" aria-expanded="true"
-            aria-controls="outline-list">Hide</button>
-        </div>
-        <ul id="outline-list" style="margin:.5rem 0 0; padding-left:1.25rem"></ul>
-      </div>
-
       <div class="notes-card card" style="margin-top:var(--space-4)">
         <div class="row-between">
           <h3>Call notes</h3>
@@ -552,1203 +534,723 @@
       return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
     })();
 
-    // UI refs (module scope)
-    const popoutBtn = document.getElementById("popout");
-    const notesArea = document.getElementById("notes");
-    const toggleBulletsBtn = document.getElementById("toggle-bullets");
-
-    // NEW: bullet-view state (module scope)
+    // ====== Module-scope state (shared by handlers) ======
     let bulletMode = false;
+    // keep a copy both locally and on window so Pop-out (separate scope) can read it
     let lastRender = { html: "", bulletsHtml: "" };
+    window.lastRender = lastRender;
+    window.bulletMode = bulletMode;
 
-    // canonical helpers
+    // --- small helpers used by renderers ---
+    const esc = (s) => String(s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const strongify = (s) => String(s || "").replace(/\*\*([^\*\n][\s\S]*?)\*\*/g, "<strong>$1</strong>");
+
+    // ---------- Parse generated markdown into sections (robust/alias-aware) ----------
+    const REQUIRED_CANON = [
+      "Opening",
+      "Buyer Pain",
+      "Buyer Desire",
+      "Example Illustration",
+      "Handling Objections",
+      "Next Step"
+    ];
+
+    const SECTION_ALIASES = {
+      "Opening": ["opening", "introduction"],
+      "Buyer Pain": ["buyer pain", "pains", "pain", "challenges", "problems"],
+      "Buyer Desire": ["buyer desire", "desire", "goals", "objectives", "what they want"],
+      "Example Illustration": ["example illustration", "example", "case study", "illustration"],
+      "Handling Objections": ["handling objections", "objections", "objection handling"],
+      "Next Step": ["next step", "next steps", "call to action", "cta"]
+    };
+
+    function normaliseMd(raw) {
+      return String(raw || "")
+        .replace(/\r/g, "")
+        .replace(/\s*##\s+/g, "\n\n## ")         // ensure blank line before headings
+        .replace(/(?:^|[^\n])\s-\s(?=\S)/g, m => (m.endsWith("- ") ? m : m.replace(/\s-\s/, "\n- ")))
+        .replace(/[ \t]+\n/g, "\n")
+        .trim();
+    }
+
+    function parseSections(raw) {
+      const s = normaliseMd(raw);
+      const lines = s.split("\n");
+
+      const sections = [];
+      let current = null;
+
+      const pushCurrent = () => { if (current && (current.paras.length || current.list.length)) sections.push(current); };
+      const start = (title) => { if (current) pushCurrent(); current = { title, paras: [], list: [] }; };
+
+      const CANON = new Map([
+        ["opening", "Opening"],
+        ["buyer pain", "Buyer Pain"], ["pains", "Buyer Pain"], ["pain", "Buyer Pain"],
+        ["buyer desire", "Buyer Desire"], ["desire", "Buyer Desire"], ["goals", "Buyer Desire"],
+        ["example illustration", "Example Illustration"], ["example", "Example Illustration"], ["case study", "Example Illustration"],
+        ["handling objections", "Handling Objections"], ["objections", "Handling Objections"],
+        ["next step", "Next Step"], ["next steps", "Next Step"], ["call to action", "Next Step"], ["cta", "Next Step"],
+      ]);
+
+      const HEADING_RX =
+        /^(?:#{2,}\s*|\*\*\s*|__\s*)?(opening|buyer pain|buyer desire|example illustration|handling objections|objections|next step|next steps|call to action|cta)\b[:\s-]*?(.*)$/i;
+
+      const firstNonEmpty = lines.find(l => l.trim());
+      if (firstNonEmpty) {
+        const m0 = firstNonEmpty.trim().match(HEADING_RX);
+        const canon0 = m0 ? CANON.get((m0[1] || "").toLowerCase().trim()) : null;
+        if (!canon0) start("Opening");
+      }
+
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+
+        const m = line.match(HEADING_RX);
+        if (m) {
+          const canon = CANON.get((m[1] || "").toLowerCase().trim());
+          if (canon) {
+            pushCurrent();
+            current = { title: canon, paras: [], list: [] };
+            const rest = (m[2] || "").trim();
+            if (rest) current.paras.push(rest);
+            continue;
+          }
+        }
+
+        if (line.startsWith("- ")) { if (!current) start("Opening"); current.list.push(line.slice(2).trim()); continue; }
+        if (!current) start("Opening");
+        current.paras.push(line);
+      }
+      pushCurrent();
+      return sections;
+    }
+
+    // ---------- Render full HTML from parsed sections ----------
+    function renderSectionsToHtml(rawMd, valuesForFallback) {
+      const sections = parseSections(rawMd);
+      const byKey = new Map(sections.map(s => [String(s.title).toLowerCase(), s]));
+
+      const blocks = [];
+      const found = [];
+      const missing = [];
+
+      const getByAliases = (canonName) => {
+        const aliases = SECTION_ALIASES[canonName] || [canonName];
+        for (const a of aliases) {
+          const hit = byKey.get(String(a).toLowerCase());
+          if (hit) return hit;
+          for (const [k, v] of byKey.entries()) {
+            if (k.includes(String(a).toLowerCase()) || String(a).toLowerCase().includes(k)) return v;
+          }
+        }
+        return null;
+      };
+
+      for (const canonName of REQUIRED_CANON) {
+        const sec = getByAliases(canonName);
+        if (sec) {
+          found.push(canonName);
+          const body = [
+            ...sec.paras.map(p => `<p>${strongify(esc(p))}</p>`),
+            ...(sec.list.length ? [`<ul>${sec.list.map(li => `<li>${strongify(esc(li))}</li>`).join("")}</ul>`] : [])
+          ].join("");
+          blocks.push(`<section class="script-sec"><h3>${esc(canonName)}</h3>${body}</section>`);
+        } else {
+          missing.push(canonName);
+          if (canonName === "Next Step") {
+            const nx = valuesForFallback?.next_step || "";
+            const p = nx ? `<p>${strongify(esc(nx))}</p>` : `<p class="muted">Not provided in the generated script.</p>`;
+            blocks.push(`<section class="script-sec is-missing"><h3>Next Step</h3>${p}</section>`);
+          } else {
+            blocks.push(`<section class="script-sec is-missing"><h3>${esc(canonName)}</h3><p class="muted">Not provided in the generated script.</p></section>`);
+          }
+        }
+      }
+
+      return {
+        html: `<div class="script-body">${blocks.join("")}</div>`,
+        found,
+        missing,
+        sections
+      };
+    }
+
+    // ---------- Render a concise “bullet point script” from parsed sections ----------
+    function firstSentence(s, max = 220) {
+      const txt = String(s || "").replace(/\s+/g, " ").trim();
+      if (!txt) return "";
+      const m = txt.match(/^(.{1,220}?[.!?])(\s|$)/);
+      return (m ? m[1] : txt.slice(0, max)).trim();
+    }
+    function sentencesWithNumbers(s, limit = 2) {
+      const parts = String(s || "").split(/(?<=[.!?])\s+/);
+      const hits = parts.filter(x => /\b(\d{1,3}(,\d{3})*|\d+%|£\d+)/.test(x));
+      return hits.slice(0, limit).map(x => x.trim());
+    }
+
+    function renderBulletScriptFromSections(sections) {
+      const by = Object.create(null);
+      for (const s of sections) by[(s.title || "").toLowerCase()] = s;
+
+      const bullets = [];
+
+      // Opening → first sentence
+      if (by["opening"]) {
+        const t = firstSentence(by["opening"].paras.join(" ").trim() || by["opening"].list[0] || "");
+        if (t) bullets.push(t);
+      }
+
+      // Buyer Pain → bullets or sentence
+      if (by["buyer pain"]) {
+        if (by["buyer pain"].list.length) bullets.push(...by["buyer pain"].list.slice(0, 3));
+        else {
+          const t = firstSentence(by["buyer pain"].paras.join(" ").trim());
+          if (t) bullets.push(t);
+        }
+      }
+
+      // Buyer Desire → bullets or sentence
+      if (by["buyer desire"]) {
+        if (by["buyer desire"].list.length) bullets.push(...by["buyer desire"].list.slice(0, 3));
+        else {
+          const t = firstSentence(by["buyer desire"].paras.join(" ").trim());
+          if (t) bullets.push(t);
+        }
+      }
+
+      // Example Illustration → prefer metrics if present
+      if (by["example illustration"]) {
+        const para = by["example illustration"].paras.join(" ").trim();
+        const metricLines = sentencesWithNumbers(para, 2);
+        if (metricLines.length) bullets.push(...metricLines);
+        else {
+          const t = firstSentence(para);
+          if (t) bullets.push("Example: " + t);
+        }
+      }
+
+      // Handling Objections
+      if (by["handling objections"]) {
+        if (by["handling objections"].list.length) bullets.push(...by["handling objections"].list.slice(0, 3));
+        else {
+          const t = firstSentence(by["handling objections"].paras.join(" ").trim());
+          if (t) bullets.push("Objections: " + t);
+        }
+      }
+
+      // Next Step
+      if (by["next step"]) {
+        const t = firstSentence((by["next step"].paras.join(" ") || by["next step"].list.join("; ")).trim());
+        if (t) bullets.push("Next step: " + t);
+      }
+
+      const items = bullets.map(b => `<li>${esc(b)}</li>`).join("");
+      return `<div class="script-body"><h3>Bullet point script</h3><ul>${items || "<li>No bulletable content found.</li>"}</ul></div>`;
+    }
+
+    // ====== Everything below is your existing UI logic, with a few safe tweaks ======
+    const FORM_ID = 'script-form';
+    const STORAGE_KEY = 'first_call_script_v2.form';
+    const ACTIVITY_KEY = 'first_call_script_v2.activity';
+    const OUTPUT_KEY = 'first_call_script_v2.last_output';
+    const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
+    const TIPS_HIDDEN_KEY = 'first_call_script_v2.tips_hidden';
+    const NOTES_KEY_PREFIX = 'first_call_script_v2.notes';
+    const INTEL_URL = './intel.json';
+
+    const REQUIRED = ['call_type', 'seller_name', 'seller_company', 'prospect_name', 'prospect_role', 'prospect_company', 'buyer_behaviour', 'product'];
+
+    // UI refs
+    const form = document.getElementById(FORM_ID);
+    const submitBtn = document.getElementById('submit');
+    const resetBtn = document.getElementById('reset');
+    const copyBtn = document.getElementById('copy');
+    const downloadBtn = document.getElementById('download');
+    const outputEl = document.getElementById('output');
+    const tipsList = document.getElementById('tips-list');
+    const toggleBulletsBtn = document.getElementById('toggle-bullets');
+    const toggleTipsBtn = document.getElementById('toggle-tips');
+    const popoutBtn = document.getElementById('popout');
+    const notesArea = document.getElementById('notes');
+    const saveNotesBtn = document.getElementById('save-notes');
+    const downloadNotesBtn = document.getElementById('download-notes');
+    const outputMeta = document.getElementById('output-meta');
+    const statusEl = document.getElementById('status');
+    const deltaLog = document.getElementById('delta-log');
+    const activityLog = document.getElementById('activity-log');
+    const activityTpl = document.getElementById('activity-item');
+    const diag = document.getElementById('diagnostics');
+    const diagJson = document.getElementById('diag-json');
+    const modal = document.getElementById('script-modal');
+    const closeModal = document.getElementById('close-modal');
+    const modalScript = document.getElementById('modal-script');
+    const productSel = document.getElementById('product');
+    const buyerBehSel = document.getElementById('buyer_behaviour');
+    const toggleIntelBtn = document.getElementById('toggle-intel');
+    const intelBody = document.getElementById('intel-body');
+
+    const callTypeSel = document.getElementById('call_type');
+    const rememberCallType = document.getElementById('remember_call_type');
+    const mapLabel = document.getElementById('map-label');
+    const userBadge = document.getElementById('user-badge');
+    const userEmail = document.getElementById('user-email');
+
     const modeFromCallType = (v) => canonical.mode(v);
     const buyerCanon = (v) => canonical.buyer(v);
+    const nowTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-    (function () {
-      // ...the rest of your code stays as-is inside this IIFE...
-    })();
+    if (closeModal) closeModal.addEventListener("click", () => modal.close());
 
-    (function () {
-      const FORM_ID = 'script-form';
-      const STORAGE_KEY = 'first_call_script_v2.form';
-      const ACTIVITY_KEY = 'first_call_script_v2.activity';
-      const OUTPUT_KEY = 'first_call_script_v2.last_output';
-      const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
-      const TIPS_HIDDEN_KEY = 'first_call_script_v2.tips_hidden';
-      const NOTES_KEY_PREFIX = 'first_call_script_v2.notes';
-      const INTEL_URL = './intel.json';
+    function setBusy(isBusy) {
+      if (submitBtn) submitBtn.disabled = isBusy || !allRequiredFilled(form);
+      if (resetBtn) resetBtn.disabled = isBusy;
+      const hasText = !!(outputEl?.textContent?.trim());
+      if (copyBtn) copyBtn.disabled = isBusy || !hasText;
+      if (downloadBtn) downloadBtn.disabled = isBusy || !hasText;
+      if (submitBtn) submitBtn.classList.toggle('busy', isBusy);
+    }
+    function setStatus(msg, kind = 'info') {
+      if (!statusEl) return; statusEl.textContent = msg; statusEl.dataset.kind = kind;
+    }
 
-      const REQUIRED = ['call_type', 'seller_name', 'seller_company', 'prospect_name', 'prospect_role', 'prospect_company', 'buyer_behaviour', 'product'];
+    function allRequiredFilled(formEl) {
+      if (!formEl) return false;
+      const labels = {
+        call_type: 'Direct or partner sales', seller_name: 'Your name', seller_company: 'Your company',
+        prospect_name: 'Prospect name', prospect_role: 'Prospect role', prospect_company: 'Prospect company',
+        buyer_behaviour: 'Buyer behaviour', product: 'Product'
+      };
+      const missing = [];
+      const getVal = (name) => {
+        if (name === 'product') return (productSel?.value || '').trim();
+        if (name === 'buyer_behaviour') return (buyerBehSel?.value || '').trim();
+        if (name === 'call_type') return (callTypeSel?.value || '').trim();
+        return (formEl.elements[name]?.value || '').trim();
+      };
+      for (const name of REQUIRED) { const val = getVal(name); if (!val) missing.push(labels[name] || name); }
+      if (missing.length) setStatus(`Please complete: ${missing.join(', ')}.`, 'error'); else setStatus('');
+      return missing.length === 0;
+    }
+    function refreshSubmitState() { if (submitBtn) submitBtn.disabled = !allRequiredFilled(form); }
 
-      const form = document.getElementById(FORM_ID);
-      const submitBtn = document.getElementById('submit');
-      const resetBtn = document.getElementById('reset');
-      const copyBtn = document.getElementById('copy');
-      const downloadBtn = document.getElementById('download');
-      const outputEl = document.getElementById('output');
-      const tipsList = document.getElementById('tips-list');
-      const bulletsList = document.getElementById('bullets-list');
-      const toggleBulletsBtn = document.getElementById('toggle-bullets');
-      const toggleTipsBtn = document.getElementById('toggle-tips');
-      const popoutBtn = document.getElementById('popout');
-      const notesArea = document.getElementById('notes');
-      const saveNotesBtn = document.getElementById('save-notes');
-      const downloadNotesBtn = document.getElementById('download-notes');
-      const outputMeta = document.getElementById('output-meta');
-      const statusEl = document.getElementById('status');
-      const deltaLog = document.getElementById('delta-log');
-      const activityLog = document.getElementById('activity-log');
-      const activityTpl = document.getElementById('activity-item');
-      const diag = document.getElementById('diagnostics');
-      const diagJson = document.getElementById('diag-json');
-      const modal = document.getElementById('script-modal');
-      const closeModal = document.getElementById('close-modal');
-      const modalScript = document.getElementById('modal-script');
-      const productSel = document.getElementById('product');
-      const buyerBehSel = document.getElementById('buyer_behaviour');
-      const toggleIntelBtn = document.getElementById('toggle-intel');
-      const intelBody = document.getElementById('intel-body');
+    function validateField(input) {
+      if (!input) return;
+      const el = (typeof input === 'string') ? (form.elements[input] || document.getElementById(input)) : input;
+      if (!el) return;
+      const id = el.id || el.name || '';
+      const errorEl = document.getElementById(`${id}_error`) || (id === 'call_type' ? document.getElementById('call_type_error') : null);
+      let value = '';
+      if (id === 'product') value = (productSel.value || '').trim();
+      else if (id === 'buyer_behaviour') value = (buyerBehSel.value || '').trim();
+      else if (id === 'call_type') value = (callTypeSel?.value || '').trim();
+      else value = (el.value || '').trim();
+      const valid = !!value;
+      if (!errorEl) return;
+      if (valid) { errorEl.textContent = ''; el.removeAttribute('aria-invalid'); el.classList.remove('invalid'); }
+      else { errorEl.textContent = id === 'call_type' ? 'Please choose a call type.' : 'This field is required.'; el.setAttribute('aria-invalid', 'true'); el.classList.add('invalid'); }
+    }
 
-      const callTypeSel = document.getElementById('call_type');
-      const rememberCallType = document.getElementById('remember_call_type');
-      const mapLabel = document.getElementById('map-label');
+    function saveForm() { if (!form) return; const fd = Object.fromEntries(new FormData(form).entries()); localStorage.setItem(STORAGE_KEY, JSON.stringify(fd)); }
+    function loadForm() { const raw = localStorage.getItem(STORAGE_KEY); if (!raw) return; try { const data = JSON.parse(raw); Object.entries(data).forEach(([k, v]) => { const el = form.elements[k] || document.getElementById(k); if (el) el.value = v; }); } catch { } }
 
-      const userBadge = document.getElementById('user-badge');
-      const userEmail = document.getElementById('user-email');
+    // ---------- Notes ----------
+    const notesKey = () => {
+      const pn = (form?.elements?.prospect_name?.value || '').trim().toLowerCase();
+      const pc = (form?.elements?.prospect_company?.value || '').trim().toLowerCase();
+      return `${NOTES_KEY_PREFIX}::${pc}::${pn}` || NOTES_KEY_PREFIX;
+    };
+    function loadNotes() { try { notesArea.value = localStorage.getItem(notesKey()) || ''; } catch { } }
+    function saveNotes() { try { localStorage.setItem(notesKey(), notesArea.value || ''); setStatus('Notes saved.'); } catch (e) { setStatus('Could not save notes.', 'error'); } }
+    function downloadText(filename, text) { const blob = new Blob([text], { type: 'text/plain' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove(); }
 
+    // ---------- Buyer needs (unchanged core) ----------
+    const norm = s => String(s || '').toLowerCase().trim();
+    const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
+    function getKeyInsensitive(obj, requested) {
+      if (!obj || typeof obj !== 'object') return null;
+      const want = norm(requested).replace(/\s+/g, '-');
+      for (const k of Object.keys(obj)) if (norm(k).replace(/\s+/g, '-') === want) return k;
+      for (const k of Object.keys(obj)) if (norm(k).includes(norm(requested))) return k;
+      return null;
+    }
+    const pEl = t => { const el = document.createElement('p'); el.textContent = t; return el; };
+    const setSlot = (id, arr = []) => { const slot = document.getElementById(id); const items = (arr.length ? arr : ['No data available for this selection.']); if (slot) slot.replaceChildren(...items.map(pEl)); };
+    const fillAll = arr => { setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr); setSlot('intel-proof', arr); setSlot('intel-objections', arr); setSlot('intel-ctas', arr); };
 
-      document.getElementById('make-followup')?.addEventListener('click', async () => {
-        try {
-          const payload = {
-            kind: 'call-followup',
-            basePrefix,
-            variables: {
-              seller_name: (form.elements.seller_name?.value || "").trim(),
-              seller_company: (form.elements.seller_company?.value || "").trim(),
-              prospect_name: (form.elements.prospect_name?.value || "").trim(),
-              prospect_role: (form.elements.prospect_role?.value || "").trim(),
-              prospect_company: (form.elements.prospect_company?.value || "").trim(),
-              tone: (form.elements.tone?.value || "").trim(),
-            },
-            scriptMdText: localStorage.getItem('first_call_script_v2.last_output') || "", // last model output text
-            callNotes: (notesArea?.value || "")
-          };
-
-          setStatus('Building follow-up email…');
-          const r = await fetch('/api/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+    function normaliseIntel(raw) {
+      if (!raw || typeof raw !== 'object') return { products: {} };
+      if (raw.products && typeof raw.products === 'object') return raw;
+      const out = { products: {} };
+      Object.entries(raw).forEach(([product, buyersObj]) => {
+        const behaviours = {};
+        if (buyersObj && typeof buyersObj === 'object') {
+          Object.entries(buyersObj).forEach(([behaviour, arr]) => {
+            const [priorities, pains, triggers, proof, objections, ctas] = Array.isArray(arr) ? arr : [];
+            behaviours[behaviour] = { priorities: toArr(priorities), pains: toArr(pains), triggers: toArr(triggers), proof: toArr(proof), objections: toArr(objections), ctas: toArr(ctas) };
           });
-          const data = await r.json();
-          if (!r.ok) throw new Error(data?.error || 'Could not build follow-up');
-
-          // Show in modal for easy copy
-          modalScript.innerText = data?.followup?.email || 'No email produced.';
-          modal.showModal();
-          setStatus('Follow-up ready.');
-        } catch (e) {
-          setStatus('Could not build follow-up email', 'error');
-          diag.open = true; diagJson.textContent = String(e?.message || e);
         }
+        out.products[product] = { behaviours };
       });
+      return out;
+    }
 
-      let intel = null;
-      let lastOutput = localStorage.getItem(OUTPUT_KEY) || '';
+    function renderIntel(productLabel, behaviourLabel) {
+      if (!intel) return;
+      const products = intel.products || {};
+      const productKey = getKeyInsensitive(products, productLabel);
+      const productNode = productKey ? products[productKey] : null;
+      if (!productNode) { fillAll([`No data available (unknown product).`]); return; }
 
-      const nowTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const pool = productNode.behaviours || productNode.buyers || {};
+      const key = getKeyInsensitive(pool, behaviourLabel);
+      const node = key ? pool[key] : (productNode.needs || null);
 
-      if (closeModal) closeModal.addEventListener("click", () => modal.close());
-
-      function setBusy(isBusy) {
-        if (submitBtn) submitBtn.disabled = isBusy || !allRequiredFilled(form);
-        if (resetBtn) resetBtn.disabled = isBusy;
-        const hasText = !!(outputEl?.textContent?.trim());
-        if (copyBtn) copyBtn.disabled = isBusy || !hasText;
-        if (downloadBtn) downloadBtn.disabled = isBusy || !hasText;
-        if (submitBtn) submitBtn.classList.toggle('busy', isBusy);
-      }
-      function setStatus(msg, kind = 'info') {
-        if (!statusEl) return; statusEl.textContent = msg; statusEl.dataset.kind = kind;
-      }
-
-      function allRequiredFilled(formEl) {
-        if (!formEl) return false;
-        const labels = {
-          call_type: 'Direct or partner sales', seller_name: 'Your name', seller_company: 'Your company',
-          prospect_name: 'Prospect name', prospect_role: 'Prospect role', prospect_company: 'Prospect company',
-          buyer_behaviour: 'Buyer behaviour', product: 'Product'
-        };
-        const missing = [];
-        const getVal = (name) => {
-          if (name === 'product') return (productSel?.value || '').trim();
-          if (name === 'buyer_behaviour') return (buyerBehSel?.value || '').trim();
-          if (name === 'call_type') return (callTypeSel?.value || '').trim();
-          return (formEl.elements[name]?.value || '').trim();
-        };
-        for (const name of REQUIRED) {
-          const val = getVal(name);
-          if (!val) missing.push(labels[name] || name);
-        }
-        if (missing.length) setStatus(`Please complete: ${missing.join(', ')}.`, 'error'); else setStatus('');
-        return missing.length === 0;
-      }
-      function refreshSubmitState() { if (submitBtn) submitBtn.disabled = !allRequiredFilled(form); }
-
-      function validateField(input) {
-        if (!input) return;
-        const el = (typeof input === 'string') ? (form.elements[input] || document.getElementById(input)) : input;
-        if (!el) return;
-        const id = el.id || el.name || '';
-        const errorEl = document.getElementById(`${id}_error`) || (id === 'call_type' ? document.getElementById('call_type_error') : null);
-        let value = '';
-        if (id === 'product') value = (productSel.value || '').trim();
-        else if (id === 'buyer_behaviour') value = (buyerBehSel.value || '').trim();
-        else if (id === 'call_type') value = (callTypeSel?.value || '').trim();
-        else value = (el.value || '').trim();
-        const valid = !!value;
-        if (!errorEl) return;
-        if (valid) { errorEl.textContent = ''; el.removeAttribute('aria-invalid'); el.classList.remove('invalid'); }
-        else { errorEl.textContent = id === 'call_type' ? 'Please choose a call type.' : 'This field is required.'; el.setAttribute('aria-invalid', 'true'); el.classList.add('invalid'); }
+      if (!node) {
+        const behavioursList = [...Object.keys(productNode.behaviours || {}), ...Object.keys(productNode.buyers || {})].join(', ') || '—';
+        fillAll([`No data for this behaviour. Available: ${behavioursList}`]);
+        return;
       }
 
-      function saveForm() { if (!form) return; const fd = Object.fromEntries(new FormData(form).entries()); localStorage.setItem(STORAGE_KEY, JSON.stringify(fd)); }
-      function loadForm() {
-        if (!form) return;
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return;
-        try { const data = JSON.parse(raw); Object.entries(data).forEach(([k, v]) => { const el = form.elements[k] || document.getElementById(k); if (el) el.value = v; }); } catch { }
-      }
-      function clearFormState() { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(ACTIVITY_KEY); }
+      const sections = {
+        priorities: toArr(node?.priorities ?? node?.Priorities),
+        pains: toArr(node?.pains ?? node?.Pains),
+        triggers: toArr(node?.triggers ?? node?.Triggers),
+        proof: toArr(node?.proof ?? node?.Proof ?? node?.value ?? node?.Value),
+        objections: toArr(node?.objections ?? node?.Objections),
+        ctas: toArr(node?.ctas ?? node?.CTAs ?? node?.callsToAction ?? node?.CallsToAction)
+      };
 
-      // ---------- Buyer needs (unchanged functional logic) ----------
-      const norm = s => String(s || '').toLowerCase().trim();
-      const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
-      function getKeyInsensitive(obj, requested) {
-        if (!obj || typeof obj !== 'object') return null;
-        const want = norm(requested).replace(/\s+/g, '-');
-        for (const k of Object.keys(obj)) if (norm(k).replace(/\s+/g, '-') === want) return k;
-        for (const k of Object.keys(obj)) if (norm(k).includes(norm(requested))) return k;
-        return null;
-      }
-      const pEl = t => { const el = document.createElement('p'); el.textContent = t; return el; };
-      const setSlot = (id, arr = []) => { const slot = document.getElementById(id); const items = (arr.length ? arr : ['No data available for this selection.']); if (slot) slot.replaceChildren(...items.map(pEl)); };
-      const fillAll = arr => { setSlot('intel-priorities', arr); setSlot('intel-pains', arr); setSlot('intel-triggers', arr); setSlot('intel-proof', arr); setSlot('intel-objections', arr); setSlot('intel-ctas', arr); };
+      const allEmpty = Object.values(sections).every(a => a.length === 0);
+      if (allEmpty) { fillAll(['No data available for this selection.']); return; }
 
-      function normaliseIntel(raw) {
-        if (!raw || typeof raw !== 'object') return { products: {} };
-        if (raw.products && typeof raw.products === 'object') return raw;
-        const out = { products: {} };
-        Object.entries(raw).forEach(([product, buyersObj]) => {
-          const behaviours = {};
-          if (buyersObj && typeof buyersObj === 'object') {
-            Object.entries(buyersObj).forEach(([behaviour, arr]) => {
-              const [priorities, pains, triggers, proof, objections, ctas] = Array.isArray(arr) ? arr : [];
-              behaviours[behaviour] = { priorities: toArr(priorities), pains: toArr(pains), triggers: toArr(triggers), proof: toArr(proof), objections: toArr(objections), ctas: toArr(ctas) };
-            });
-          }
-          out.products[product] = { behaviours };
-        });
-        return out;
-      }
+      setSlot('intel-priorities', sections.priorities);
+      setSlot('intel-pains', sections.pains);
+      setSlot('intel-triggers', sections.triggers);
+      setSlot('intel-proof', sections.proof);
+      setSlot('intel-objections', sections.objections);
+      setSlot('intel-ctas', sections.ctas);
+    }
 
-      function renderIntel(productLabel, behaviourLabel) {
-        if (!intel) return;
-        const products = intel.products || {};
-        const productKey = getKeyInsensitive(products, productLabel);
-        const productNode = productKey ? products[productKey] : null;
-        if (!productNode) { fillAll([`No data available (unknown product).`]); return; }
+    // ---------- Activity / delta ----------
+    function addActivity(entry) {
+      const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
+      list.unshift(entry);
+      localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0, 3)));
+      renderActivity();
+    }
+    function renderActivity() {
+      const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
+      if (!activityLog) return;
+      activityLog.innerHTML = '';
+      list.forEach(item => {
+        const node = activityTpl.content.cloneNode(true);
+        node.querySelector('.time').textContent = item.time;
+        node.querySelector('.product').textContent = item.product;
+        node.querySelector('.buyer').textContent = item.buyer_behaviour || item.buyer || '';
+        node.querySelector('.length').textContent = item.length || '';
+        activityLog.appendChild(node);
+      });
+    }
+    function computeDelta(oldText, newText) {
+      const oldLines = (oldText || '').split('\n'), newLines = (newText || '').split('\n');
+      let added = 0, removed = 0;
+      const oldSet = new Set(oldLines), newSet = new Set(newLines);
+      newLines.forEach(l => { if (!oldSet.has(l) && l.trim()) added++; });
+      oldLines.forEach(l => { if (!newSet.has(l) && l.trim()) removed++; });
+      return { added, removed };
+    }
+    function renderDelta(delta) {
+      if (!deltaLog) return;
+      deltaLog.innerHTML = '';
+      const a = document.createElement('li'); a.textContent = `+${delta.added} new line${delta.added === 1 ? '' : 's'}`;
+      const r = document.createElement('li'); r.textContent = `−${delta.removed} removed line${delta.removed === 1 ? '' : 's'}`;
+      deltaLog.appendChild(a); deltaLog.appendChild(r);
+    }
 
-        const pool = productNode.behaviours || productNode.buyers || {};
-        const key = getKeyInsensitive(pool, behaviourLabel);
-        const node = key ? pool[key] : (productNode.needs || null);
-
-        if (!node) {
-          const behavioursList = [...Object.keys(productNode.behaviours || {}), ...Object.keys(productNode.buyers || {})].join(', ') || '—';
-          fillAll([`No data for this behaviour. Available: ${behavioursList}`]);
-          return;
-        }
-
-        const sections = {
-          priorities: toArr(node?.priorities ?? node?.Priorities),
-          pains: toArr(node?.pains ?? node?.Pains),
-          triggers: toArr(node?.triggers ?? node?.Triggers),
-          proof: toArr(node?.proof ?? node?.Proof ?? node?.value ?? node?.Value),
-          objections: toArr(node?.objections ?? node?.Objections),
-          ctas: toArr(node?.ctas ?? node?.CTAs ?? node?.callsToAction ?? node?.CallsToAction)
-        };
-
-        const allEmpty = Object.values(sections).every(a => a.length === 0);
-        if (allEmpty) { fillAll(['No data available for this selection.']); return; }
-
-        setSlot('intel-priorities', sections.priorities);
-        setSlot('intel-pains', sections.pains);
-        setSlot('intel-triggers', sections.triggers);
-        setSlot('intel-proof', sections.proof);
-        setSlot('intel-objections', sections.objections);
-        setSlot('intel-ctas', sections.ctas);
-      }
-
-      // ---------- Activity / delta ----------
-      function addActivity(entry) {
-        const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
-        list.unshift(entry);
-        localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0, 3)));
-        renderActivity();
-      }
-      function renderActivity() {
-        const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
-        if (!activityLog) return;
-        activityLog.innerHTML = '';
-        list.forEach(item => {
-          const node = activityTpl.content.cloneNode(true);
-          node.querySelector('.time').textContent = item.time;
-          node.querySelector('.product').textContent = item.product;
-          node.querySelector('.buyer').textContent = item.buyer_behaviour || item.buyer || '';
-          node.querySelector('.length').textContent = item.length || '';
-          activityLog.appendChild(node);
-        });
-      }
-      function computeDelta(oldText, newText) {
-        const oldLines = (oldText || '').split('\n'), newLines = (newText || '').split('\n');
-        let added = 0, removed = 0;
-        const oldSet = new Set(oldLines), newSet = new Set(newLines);
-        newLines.forEach(l => { if (!oldSet.has(l) && l.trim()) added++; });
-        oldLines.forEach(l => { if (!newSet.has(l) && l.trim()) removed++; });
-        return { added, removed };
-      }
-      function renderDelta(delta) {
-        if (!deltaLog) return;
-        deltaLog.innerHTML = '';
-        const a = document.createElement('li'); a.textContent = `+${delta.added} new line${delta.added === 1 ? '' : 's'}`;
-        const r = document.createElement('li'); r.textContent = `−${delta.removed} removed line${delta.removed === 1 ? '' : 's'}`;
-        deltaLog.appendChild(a); deltaLog.appendChild(r);
-      }
-
-      // ---------- Header chip / remember ----------
-      function loadCallPref() {
-        try {
-          const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
-          if (pref?.call_type && callTypeSel && !callTypeSel.value) callTypeSel.value = pref.call_type;
-          if (pref?.remember === true && rememberCallType) rememberCallType.checked = true;
-        } catch { }
-        updateMapIndicator();
-      }
-      function saveCallPrefIfRequested() {
-        if (rememberCallType && rememberCallType.checked && callTypeSel && callTypeSel.value) {
-          localStorage.setItem(CALL_PREF_KEY, JSON.stringify({ remember: true, call_type: callTypeSel.value }));
-        } else if (rememberCallType && !rememberCallType.checked) {
-          localStorage.removeItem(CALL_PREF_KEY);
-        }
-        updateMapIndicator();
-      }
-      function updateMapIndicator() {
+    // ---------- Header chip / remember ----------
+    function loadCallPref() {
+      try {
         const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
-        if (mapLabel) mapLabel.textContent = pref?.call_type || (callTypeSel?.value || 'Not set');
+        if (pref?.call_type && callTypeSel && !callTypeSel.value) callTypeSel.value = pref.call_type;
+        if (pref?.remember === true && rememberCallType) rememberCallType.checked = true;
+      } catch { }
+      updateMapIndicator();
+    }
+    function saveCallPrefIfRequested() {
+      if (rememberCallType && rememberCallType.checked && callTypeSel && callTypeSel.value) {
+        localStorage.setItem(CALL_PREF_KEY, JSON.stringify({ remember: true, call_type: callTypeSel.value }));
+      } else if (rememberCallType && !rememberCallType.checked) {
+        localStorage.removeItem(CALL_PREF_KEY);
       }
+      updateMapIndicator();
+    }
+    function updateMapIndicator() {
+      const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
+      if (mapLabel) mapLabel.textContent = pref?.call_type || (callTypeSel?.value || 'Not set');
+    }
 
-      // ---------- Tips toggle ----------
-      function applyTipsVisibility() {
-        const hidden = localStorage.getItem(TIPS_HIDDEN_KEY) === '1';
-        tipsList.hidden = hidden;
-        toggleTipsBtn.setAttribute('aria-expanded', String(!hidden));
-        toggleTipsBtn.textContent = hidden ? 'Show tips' : 'Hide tips';
-      }
+    // ---------- Tips toggle + auto-hide when empty ----------
+    function applyTipsVisibility() {
+      const card = document.querySelector(".tips-card");
+      const hidden = localStorage.getItem(TIPS_HIDDEN_KEY) === '1';
+      tipsList.hidden = hidden;
+      toggleTipsBtn.textContent = hidden ? 'Show tips' : 'Hide tips';
+      toggleTipsBtn.setAttribute('aria-expanded', String(!hidden));
+      // hide the card if there are no tips
+      const has = tipsList.children.length > 0;
+      if (card) card.classList.toggle('is-hidden', !has);
+    }
 
-      // ---------- Notes ----------
-      const notesKey = () => {
-        const pn = (form?.elements?.prospect_name?.value || '').trim().toLowerCase();
-        const pc = (form?.elements?.prospect_company?.value || '').trim().toLowerCase();
-        return `${NOTES_KEY_PREFIX}::${pc}::${pn}` || NOTES_KEY_PREFIX;
-      };
-      function loadNotes() { try { notesArea.value = localStorage.getItem(notesKey()) || ''; } catch { } }
-      function saveNotes() { try { localStorage.setItem(notesKey(), notesArea.value || ''); setStatus('Notes saved.'); } catch (e) { setStatus('Could not save notes.', 'error'); } }
-      function downloadText(filename, text) {
-        const blob = new Blob([text], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = filename;
-        document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
-      }
+    // ---------- Events ----------
+    const onChangeRecalcIntel = () => {
+      const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
+      renderIntel(label, buyerBehSel?.value || '');
+    };
 
-      // ---------- Product registry ----------
-      async function populateProductsForMode(mode) {
-        const sel = document.getElementById('product');
-        if (!sel) return;
+    callTypeSel?.addEventListener('change', async () => {
+      validateField(callTypeSel);
+      saveForm(); updateMapIndicator(); refreshSubmitState();
+      const mode = modeFromCallType(callTypeSel.value) || 'direct';
+      await populateProductsForMode(mode);
+      validateField('product');
+    });
+    rememberCallType?.addEventListener('change', saveCallPrefIfRequested);
 
-        sel.innerHTML = `<option value="">Loading…</option>`;
+    productSel?.addEventListener('change', () => { validateField('product'); onChangeRecalcIntel(); saveForm(); refreshSubmitState(); });
+    buyerBehSel?.addEventListener('change', () => { onChangeRecalcIntel(); saveForm(); refreshSubmitState(); });
 
-        try {
-          // pass basePrefix so getIndex fetches from the correct sub-path
-          const idx = await getIndex(mode, basePrefix);
-          const items =
-            Array.isArray(idx?.products) ? idx.products :
-              Array.isArray(idx?.items) ? idx.items :
-                Array.isArray(idx) ? idx : [];
+    toggleIntelBtn?.addEventListener('click', () => {
+      const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
+      toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
+      if (intelBody) intelBody.hidden = expanded;
+      toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
+    });
 
-          if (!items.length) {
-            sel.innerHTML = `<option value="">No products found</option>`;
-            console.warn('[Product] index.json loaded but empty', idx);
-            return;
-          }
-
-          const saved = (form?.elements?.product?.value || '').trim().toLowerCase();
-          sel.innerHTML = '<option value="" disabled>Select…</option>';
-
-          for (const item of items) {
-            const idLike = item.id ?? item.slug ?? item.value ?? item.key ?? item.name ?? item.label;
-            const label = item.label ?? item.name ?? String(idLike ?? '');
-            const val = String(idLike || '').trim().toLowerCase().replace(/\s+/g, '-');
-            if (!val) continue;
-
-            const opt = document.createElement('option');
-            opt.value = val;
-            opt.textContent = label;
-            if (saved && (saved === val || saved === String(label).toLowerCase())) opt.selected = true;
-            sel.appendChild(opt);
-          }
-
-          if (!sel.value) sel.options[0].selected = true;
-
-          validateField(sel);
-          if (buyerBehSel?.value) {
-            const label = sel?.options?.[sel.selectedIndex]?.text || sel.value || '';
-            renderIntel(label, buyerBehSel.value);
-          }
-          refreshSubmitState();
-
-          console.info('[Product] index loaded OK, count =', items.length);
-        } catch (err) {
-          console.error('[Product] Failed to load index.json', err);
-          sel.innerHTML = `<option value="">Error loading products</option>`;
-          setStatus('Could not load products index. See console for details.', 'error');
-        }
-      }
-
-      // ---------- Events ----------
-      const onChangeRecalcIntel = () => {
-        const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
-        renderIntel(label, buyerBehSel?.value || '');
-      };
-
-      callTypeSel?.addEventListener('change', async () => {
-        validateField(callTypeSel);
-        saveForm(); updateMapIndicator(); refreshSubmitState();
-        const mode = modeFromCallType(callTypeSel.value) || 'direct';
-        await populateProductsForMode(mode);
-        validateField('product');
-      });
-      rememberCallType?.addEventListener('change', saveCallPrefIfRequested);
-
-      productSel?.addEventListener('change', () => {
-        validateField('product'); onChangeRecalcIntel(); saveForm(); refreshSubmitState();
-      });
-
-      buyerBehSel?.addEventListener('change', () => {
-        onChangeRecalcIntel(); saveForm(); refreshSubmitState();
-      });
-
-      toggleIntelBtn?.addEventListener('click', () => {
-        const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
-        toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
-        if (intelBody) intelBody.hidden = expanded;
-        toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
-      });
-
-      toggleTipsBtn?.addEventListener('click', () => {
-        const expanded = toggleTipsBtn.getAttribute('aria-expanded') === 'true';
-        const willHide = expanded;
+    if (toggleTipsBtn) {
+      toggleTipsBtn.addEventListener('click', () => {
+        const willHide = !(toggleTipsBtn.getAttribute('aria-expanded') === 'true');
         localStorage.setItem(TIPS_HIDDEN_KEY, willHide ? '1' : '0');
         applyTipsVisibility();
       });
+    }
 
-      if (toggleBulletsBtn) {
-        toggleBulletsBtn.addEventListener('click', () => {
-          bulletMode = !bulletMode;
-          toggleBulletsBtn.setAttribute('aria-pressed', String(bulletMode));
-          toggleBulletsBtn.textContent = bulletMode ? 'Show full script' : 'Show bullet point script';
-          const html = bulletMode ? (lastRender.bulletsHtml || '') : (lastRender.html || '');
-          if (html) {
-            outputEl.innerHTML = html;
-            modalScript.innerHTML = html;
-          }
-        });
-      }
-
-      // Outline toggle (mirrors Tips toggle)
-      (() => {
-        const btn = document.getElementById('toggle-outline');
-        const list = document.getElementById('outline-list');
-        if (!btn || !list) return;
-        btn.addEventListener('click', () => {
-          const expanded = btn.getAttribute('aria-expanded') === 'true';
-          btn.setAttribute('aria-expanded', String(!expanded));
-          btn.textContent = expanded ? 'Show' : 'Hide';
-          list.hidden = expanded;
-        });
-      })();
-
-      saveNotesBtn?.addEventListener('click', saveNotes);
-      downloadNotesBtn?.addEventListener('click', () => {
-        const who = (form?.elements?.prospect_name?.value || 'prospect').trim().replace(/\s+/g, '-');
-        downloadText(`call-notes_${who}_${new Date().toISOString().slice(0, 10)}.txt`, notesArea.value || '');
-      });
-
-      copyBtn?.addEventListener('click', async () => {
-        const txt = outputEl?.innerText || ''; if (!txt.trim()) return;
-        await navigator.clipboard.writeText(txt); setStatus('Copied to clipboard.');
-      });
-
-      // ---------- Submit: API-first ----------
-      form && form.addEventListener("submit", async (e) => {
-        e.preventDefault();
-
-        // Required fields quick check
-        for (const name of REQUIRED) {
-          const el = form.elements[name] || document.getElementById(name);
-          if (!el || !String(el.value || "").trim()) {
-            validateField(el);
-            el?.focus();
-            setStatus("Please complete required fields.", "error");
-            return;
-          }
+    if (toggleBulletsBtn) {
+      toggleBulletsBtn.addEventListener('click', () => {
+        bulletMode = !bulletMode;
+        window.bulletMode = bulletMode; // keep in sync for pop-out
+        toggleBulletsBtn.setAttribute('aria-pressed', String(bulletMode));
+        toggleBulletsBtn.textContent = bulletMode ? 'Show full script' : 'Show bullet point script';
+        const html = bulletMode ? (lastRender.bulletsHtml || '') : (lastRender.html || '');
+        if (html) {
+          outputEl.innerHTML = html;
+          modalScript.innerHTML = html;
         }
+      });
+    }
 
-        // Read all values explicitly (no FormData surprises)
-        const values = {
-          call_type: (callTypeSel?.value || "").trim(),
-          seller_name: (form.elements.seller_name?.value || "").trim(),
-          seller_company: (form.elements.seller_company?.value || "").trim(),
-          prospect_name: (form.elements.prospect_name?.value || "").trim(),
-          prospect_role: (form.elements.prospect_role?.value || "").trim(),
-          prospect_company: (form.elements.prospect_company?.value || "").trim(),
+    saveNotesBtn?.addEventListener('click', saveNotes);
+    downloadNotesBtn?.addEventListener('click', () => {
+      const who = (form?.elements?.prospect_name?.value || 'prospect').trim().replace(/\s+/g, '-');
+      downloadText(`call-notes_${who}_${new Date().toISOString().slice(0, 10)}.txt`, notesArea.value || '');
+    });
 
-          product: (productSel?.value || form.elements.product?.value || "").trim(),
-          buyer_behaviour: (buyerBehSel?.value || form.elements.buyer_behaviour?.value || "").trim(),
-          tone: (form.elements.tone?.value || "").trim(),
-          script_length: (form.elements.script_length?.value || "").trim(),
-          value_proposition: (form.elements.value_proposition?.value || "").trim(),
-          context: (form.elements.context?.value || "").trim(),
-          next_step: (form.elements.next_step?.value || "").trim(),
-        };
+    copyBtn?.addEventListener('click', async () => {
+      const txt = outputEl?.innerText || ''; if (!txt.trim()) return;
+      await navigator.clipboard.writeText(txt); setStatus('Copied to clipboard.');
+    });
 
-        // Canonical values used by backend
-        const mode = modeFromCallType(values.call_type);            // "direct" | "partner"
-        const productId = String(values.product).toLowerCase().trim();  // e.g. "connectivity"
-        const buyerId = buyerCanon(values.buyer_behaviour);         // e.g. "early-adopter"
+    // ---------- Product registry ----------
+    async function populateProductsForMode(mode) {
+      const sel = document.getElementById('product');
+      if (!sel) return;
 
-        if (!productId) {
-          validateField("product");
-          setStatus("Please choose a product.", "error");
+      sel.innerHTML = `<option value="">Loading…</option>`;
+      try {
+        const idx = await getIndex(mode, basePrefix);
+        const items = Array.isArray(idx?.products) ? idx.products : Array.isArray(idx?.items) ? idx.items : Array.isArray(idx) ? idx : [];
+
+        if (!items.length) {
+          sel.innerHTML = `<option value="">No products found</option>`;
+          console.warn('[Product] index.json loaded but empty', idx);
           return;
         }
 
-        setBusy(true);
-        setStatus("Generating call script…");
-        if (diag) diag.open = false;
-        if (diagJson) diagJson.textContent = "";
-
-        try {
-          // --- Fetch markdown template first ---
-          const mdUrl = `${basePrefix}/content/call-library/v1/${mode}/${productId}/${buyerId}.md`;
-          let templateText = "";
-          try {
-            const res = await fetch(mdUrl, { cache: "no-store" });
-            if (res.ok) {
-              templateText = await res.text();
-            } else {
-              console.warn("Could not load template", mdUrl, res.status);
-            }
-          } catch (err) {
-            console.error("Error fetching template", err);
-          }
-          // Build payload with EVERYTHING
-          const body = {
-            kind: "call-script",
-            basePrefix,
-            variables: {
-              ...values,
-              mode,
-              product: productId,
-              buyerType: buyerId,
-            },
-            templateMdText: templateText
-          };
-
-          const resp = await fetch("/api/generate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-
-          if (!resp.ok) {
-            const errTxt = await resp.text();
-            throw new Error(`API ${resp.status}: ${errTxt}`);
-          }
-
-          const data = await resp.json();
-          const script = data?.script?.text || "";
-          const tips = data?.script?.tips || [];
-          // Outline render
-          const outline = (data?.script?.outline || []).filter(s => s && s.trim());
-          const outlineList = document.getElementById('outline-list');
-          const outlineCard = document.getElementById('outline-card');
-
-          if (outlineList && outlineCard) {
-            outlineList.innerHTML = "";
-            if (outline.length) {
-              outlineCard.hidden = false;
-              outline.forEach(b => {
-                const li = document.createElement('li');
-                li.textContent = b;
-                outlineList.appendChild(li);
-              });
-            } else {
-              outlineCard.hidden = true; // JSON-fallback or no outline
-            }
-          }
-
-          // Guard-rail: empty script from API
-          if (!script || !script.trim()) {
-            throw new Error("Empty script returned from API");
-          }
-
-          /* ---------- ROBUST SCRIPT RENDERER (alias-aware) ---------- */
-          const SECTION_ALIASES = {
-            "Opening": ["opening", "introduction"],
-            "Buyer Pain": ["buyer pain", "pain", "pains", "challenges", "problems"],
-            "Buyer Desire": ["buyer desire", "desire", "goals", "objectives", "what they want"],
-            "Example Illustration": ["example illustration", "example", "case study", "illustration"],
-            "Handling Objections": ["handling objections", "objections"],
-            "Next Step": ["next step", "next steps", "call to action", "cta"]
-          };
-
-          // canonical order you want to show
-          const REQUIRED_CANON = [
-            "Opening",
-            "Buyer Pain",
-            "Buyer Desire",
-            "Example Illustration",
-            "Handling Objections",
-            "Next Step"
-          ];
-
-          const escapeHtml = (s) =>
-            String(s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-
-          const strongify = (s) =>
-            s.replace(/\*\*([^\*\n][\s\S]*?)\*\*/g, "<strong>$1</strong>");
-
-          function normalise(raw) {
-            return String(raw || "")
-              .replace(/\r/g, "")
-              .replace(/\s*##\s+/g, "\n\n## ")  // ensure line breaks before headings
-              .replace(/(?:^|[^\n])\s-\s(?=\S)/g, m => (m.endsWith("- ") ? m : m.replace(/\s-\s/, "\n- ")))
-              .replace(/[ \t]+\n/g, "\n")
-              .trim();
-          }
-
-          function parseSections(raw) {
-            const s = normalise(raw);
-            const lines = s.split("\n");
-
-            const sections = [];
-            let current = null;
-
-            const pushCurrent = () => {
-              if (current && (current.paras.length || current.list.length)) sections.push(current);
-            };
-            const startSection = (title) => {
-              if (current) pushCurrent();
-              current = { title, paras: [], list: [] };
-            };
-
-            function oneSentence(s, max = 220) {
-              const txt = String(s || "").replace(/\s+/g, " ").trim();
-              if (!txt) return "";
-              const m = txt.match(/^(.{1,220}?[.!?])(\s|$)/);
-              return (m ? m[1] : txt.slice(0, max)).trim();
-            }
-
-            function sentencesWithNumbers(s, limit = 2) {
-              const txt = String(s || "");
-              const parts = txt.split(/(?<=[.!?])\s+/);
-              const hits = parts.filter(x => /\b(\d{1,3}(,\d{3})*|\d+%|£\d+)/.test(x));
-              return hits.slice(0, limit).map(x => x.trim());
-            }
-
-            function buildBulletOverviewFromScript(rawMd) {
-              // relies on your existing parseSections(raw)
-              const secs = parseSections(rawMd || "");
-              // quick lookup by title
-              const by = Object.create(null);
-              for (const s of secs) by[(s.title || "").toLowerCase()] = s;
-
-              const bullets = [];
-
-              // Opening → first sentence
-              if (by["opening"]) {
-                const t = oneSentence(by["opening"].paras.join(" ").trim());
-                if (t) bullets.push(t);
-              }
-
-              // Buyer Pain → list items or sentences
-              if (by["buyer pain"]) {
-                if (by["buyer pain"].list.length) {
-                  bullets.push(...by["buyer pain"].list.slice(0, 3));
-                } else {
-                  const t = oneSentence(by["buyer pain"].paras.join(" ").trim());
-                  if (t) bullets.push(t);
-                }
-              }
-
-              // Buyer Desire → list items or first sentence
-              if (by["buyer desire"]) {
-                if (by["buyer desire"].list.length) {
-                  bullets.push(...by["buyer desire"].list.slice(0, 3));
-                } else {
-                  const t = oneSentence(by["buyer desire"].paras.join(" ").trim());
-                  if (t) bullets.push(t);
-                }
-              }
-
-              // Example Illustration → prefer metrics sentences
-              if (by["example illustration"]) {
-                const para = by["example illustration"].paras.join(" ").trim();
-                const metricLines = sentencesWithNumbers(para, 2);
-                if (metricLines.length) {
-                  bullets.push(...metricLines);
-                } else {
-                  const t = oneSentence(para);
-                  if (t) bullets.push("Example: " + t);
-                }
-              }
-
-              // Handling Objections → up to 3 bullets (or one-liner)
-              if (by["handling objections"]) {
-                if (by["handling objections"].list.length) {
-                  bullets.push(...by["handling objections"].list.slice(0, 3));
-                } else {
-                  const t = oneSentence(by["handling objections"].paras.join(" ").trim());
-                  if (t) bullets.push("Objections: " + t);
-                }
-              }
-
-              // Next Step → capture the ask explicitly
-              if (by["next step"]) {
-                const t = oneSentence((by["next step"].paras.join(" ") || by["next step"].list.join("; ")).trim());
-                if (t) bullets.push("Next step: " + t);
-              }
-
-              // fallback if empty
-              if (!bullets.length) bullets.push("No bulletable content found in the generated script.");
-
-              return bullets;
-            }
-
-            // Map aliases -> canonical
-            const CANON = new Map([
-              ["opening", "Opening"],
-              ["buyer pain", "Buyer Pain"], ["pains", "Buyer Pain"], ["pain", "Buyer Pain"],
-              ["buyer desire", "Buyer Desire"], ["desire", "Buyer Desire"], ["goals", "Buyer Desire"],
-              ["example illustration", "Example Illustration"], ["example", "Example Illustration"], ["case study", "Example Illustration"],
-              ["handling objections", "Handling Objections"], ["objections", "Handling Objections"], ["objection handling", "Handling Objections"],
-              ["next step", "Next Step"], ["next steps", "Next Step"], ["call to action", "Next Step"], ["cta", "Next Step"],
-            ]);
-
-            // STRICT: only match known headings; capture any same-line content
-            const HEADING_RX =
-              /^(?:#{2,}\s*|\*\*\s*|__\s*)?(opening|buyer pain|buyer desire|example illustration|handling objections|objections|next step|next steps|call to action|cta)\b[:\s-]*?(.*)$/i;
-
-            // If first non-empty line isn't a recognised heading, start with Opening
-            const firstNonEmpty = lines.find(l => l.trim());
-            if (firstNonEmpty) {
-              const m0 = firstNonEmpty.trim().match(HEADING_RX);
-              const canon0 = m0 ? CANON.get((m0[1] || "").toLowerCase().trim()) : null;
-              if (!canon0) startSection("Opening");
-            }
-
-            for (const rawLine of lines) {
-              const line = rawLine.trim();
-              if (!line) continue;
-
-              // Heading (with optional first sentence on same line)
-              const m = line.match(HEADING_RX);
-              if (m) {
-                const canon = CANON.get((m[1] || "").toLowerCase().trim());
-                if (canon) {
-                  pushCurrent();
-                  current = { title: canon, paras: [], list: [] };
-                  const rest = (m[2] || "").trim();
-                  if (rest) current.paras.push(rest);
-                  continue;
-                }
-              }
-
-              // Bullet item
-              if (line.startsWith("- ")) {
-                if (!current) startSection("Opening");
-                current.list.push(line.slice(2).trim());
-                continue;
-              }
-
-              // Normal paragraph
-              if (!current) startSection("Opening");
-              current.paras.push(line);
-            }
-
-            pushCurrent();
-            return sections;
-          }
-
-          function toKey(s) { return String(s || "").trim().toLowerCase(); }
-
-          function renderSections(raw, valuesForFallback) {
-            const sections = parseSections(raw);
-
-            // Build a lookup map from many possible aliases -> the actual captured section
-            const byAlias = new Map();  // alias(lowercased) -> section
-            for (const sec of sections) {
-              const titleLc = toKey(sec.title);
-              // index by its own title
-              if (!byAlias.has(titleLc)) byAlias.set(titleLc, sec);
-              // and by split words combos to be forgiving
-              // (not strictly necessary, aliases below are the main thing)
-            }
-
-            // Helper: get the first available section that matches any alias set
-            function getByAliases(canonName) {
-              const aliases = SECTION_ALIASES[canonName] || [canonName];
-              for (const a of aliases) {
-                const hit = byAlias.get(toKey(a));
-                if (hit) return hit;
-                // also allow "contains" to catch small pluralisation differences
-                for (const [k, v] of byAlias.entries()) {
-                  if (k.includes(toKey(a)) || toKey(a).includes(k)) return v;
-                }
-              }
-              return null;
-            }
-            function firstSentence(s) {
-              const t = String(s || '').replace(/\s+/g, ' ').trim();
-              const m = t.match(/.*?[.!?](\s|$)/);
-              return (m ? m[0] : t).trim();
-            }
-
-            function renderBulletScriptFromSections(sections, order) {
-              const esc = (x) => String(x || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-              const blocks = [];
-              for (const name of order) {
-                const sec = sections.find(s => String(s.title).toLowerCase() === name.toLowerCase());
-                if (!sec) continue;
-
-                const pts = [];
-                // Lead with a short summary using the first sentence of the first paragraph (if any)
-                if (sec.paras && sec.paras.length) {
-                  const fs = firstSentence(sec.paras.join(' '));
-                  if (fs) pts.push(fs);
-                }
-                // Include any bullets that the section already has
-                if (sec.list && sec.list.length) {
-                  pts.push(...sec.list);
-                }
-
-                // Ensure Next Step shows clearly as a single bullet
-                if (name === 'Next Step' && !pts.length && sec.paras && sec.paras.length) {
-                  pts.push(sec.paras.join(' ').trim());
-                }
-
-                const items = pts
-                  .map(x => x && `<li>${esc(x)}</li>`)
-                  .filter(Boolean)
-                  .join('');
-
-                if (items) {
-                  blocks.push(`<section class="script-sec">
-        <h3>${esc(name)}</h3>
-        <ul>${items}</ul>
-      </section>`);
-                }
-              }
-              return `<div class="script-body">${blocks.join('')}</div>`;
-            }
-
-            const blocks = [];
-            const found = [];
-            const missing = [];
-
-            for (const canonName of REQUIRED_CANON) {
-              const sec = getByAliases(canonName);
-              if (sec) {
-                found.push(canonName);
-                const body = [
-                  ...sec.paras.map(p => `<p>${strongify(escapeHtml(p))}</p>`),
-                  ...(sec.list.length
-                    ? [`<ul>${sec.list.map(li => `<li>${strongify(escapeHtml(li))}</li>`).join("")}</ul>`]
-                    : [])
-                ].join("");
-                blocks.push(`<section class="script-sec"><h3>${escapeHtml(canonName)}</h3>${body}</section>`);
-              } else {
-                missing.push(canonName);
-                // Friendly fallbacks:
-                if (canonName === "Next Step") {
-                  const nx = valuesForFallback?.next_step || "";
-                  const p = nx
-                    ? `<p>${strongify(escapeHtml(nx))}</p>`
-                    : `<p class="muted">Not provided in the generated script.</p>`;
-                  blocks.push(`<section class="script-sec is-missing"><h3>Next Step</h3>${p}</section>`);
-                } else {
-                  blocks.push(`<section class="script-sec is-missing"><h3>${escapeHtml(canonName)}</h3><p class="muted">Not provided in the generated script.</p></section>`);
-                }
-              }
-            }
-
-            return {
-              html: `<div class="script-body">${blocks.join("")}</div>`,
-              found, missing
-            };
-          }
-
-          // ---- render to DOM ----
-          const rendered = renderSections(script, values /* pass form values so Next Step can fallback */);
-          outputEl.innerHTML = rendered.html;
-          modalScript.innerHTML = rendered.html;
-          // Prepare bullet-point version from the same parsed sections
-          const sectionsForBullets = (function () {
-            // reuse the same parser used by renderSections
-            return parseSections(script);
-          })();
-          const bulletsHtml = renderBulletScriptFromSections(sectionsForBullets, REQUIRED_CANON);
-
-          // keep both views in memory
-          lastRender = { html: rendered.html, bulletsHtml };
-
-          // Build and show the bullet overview from the actual script markdown we received
-          const overview = buildBulletOverviewFromScript(script);
-          bulletsList.innerHTML = "";
-          overview.forEach(b => {
-            const li = document.createElement("li");
-            li.textContent = b;
-            bulletsList.appendChild(li);
-          });
-
-          // Guard-rail: if we recognised none of the required sections, show a clear error
-          if (!rendered.found || rendered.found.length === 0) {
-            throw new Error("The generated script did not contain the expected '##' headings. Please try again.");
-          }
-
-          outputMeta.textContent =
-            `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
-
-          console.info("[ScriptSections] found:", rendered.found, "missing:", rendered.missing);
-
-          // POP-OUT (robust, scope-independent)
-          (() => {
-            const btn = document.getElementById("popout");
-            if (!btn) return;
-
-            btn.addEventListener("click", () => {
-              // Read current rendered HTML directly from the DOM (or from lastRender if you keep it)
-              const outputEl = document.getElementById("output");
-              const metaEl = document.getElementById("output-meta");
-
-              const html =
-                (window.bulletMode && window.lastRender?.bulletsHtml) ||
-                (window.lastRender?.html) ||
-                (outputEl?.innerHTML || "");
-
-              if (!html || !html.trim()) {
-                const statusEl = document.getElementById("status");
-                if (statusEl) { statusEl.textContent = "No script to pop out yet."; statusEl.dataset.kind = "error"; }
-                return;
-              }
-
-              const meta = (metaEl?.textContent || "").trim();
-
-              const win = window.open("", "_blank", "noopener,noreferrer");
-              if (!win) {
-                const statusEl = document.getElementById("status");
-                if (statusEl) { statusEl.textContent = "Pop-out was blocked by the browser."; statusEl.dataset.kind = "error"; }
-                return;
-              }
-
-              const doc = `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Conversation Guide</title>
-<style>
-  body{font:16.5px/1.7 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica Neue,Arial;padding:24px;background:#fff;color:#111}
-  .meta{color:#6b7280;font-size:.9rem;margin-bottom:12px}
-  .bar{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-bottom:8px}
-  button{padding:.4rem .6rem;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;cursor:pointer}
-</style>
-</head>
-<body>
-  <div class="bar">
-    <button onclick="window.print()">Print</button>
-    <button onclick="navigator.clipboard.writeText(document.body.innerText)">Copy</button>
-  </div>
-  <div class="meta">${meta}</div>
-  <div>${html}</div>
-</body>
-</html>`;
-
-              win.document.open();
-              win.document.write(doc);
-              win.document.close();
-            });
-          })();
-
-          // tips
-          tipsList.innerHTML = "";
-          (tips || []).forEach((t) => {
-            const li = document.createElement("li");
-            li.textContent = t;
-            tipsList.appendChild(li);
-          });
-
-          // delta + activity (unchanged)
-          const delta = computeDelta(lastOutput, script);
-          renderDelta(delta);
-          lastOutput = script;
-          localStorage.setItem(OUTPUT_KEY, lastOutput);
-
-          addActivity({
-            time: nowTime(),
-            product: productId,
-            buyer_behaviour: values.buyer_behaviour || "—",
-            length: values.length || "—",
-          });
-
-          setStatus("Done. (Generated from API)");
-          setBusy(false);
-          document.getElementById("output-title")?.focus();
-        } catch (err) {
-          setStatus("Could not generate a call script. See Diagnostics for details.", "error");
-          if (diag) { diag.open = true; diagJson.textContent = String(err?.message || err); }
-          setBusy(false);
+        const saved = (form?.elements?.product?.value || '').trim().toLowerCase();
+        sel.innerHTML = '<option value="" disabled>Select…</option>';
+
+        for (const item of items) {
+          const idLike = item.id ?? item.slug ?? item.value ?? item.key ?? item.name ?? item.label;
+          const label = item.label ?? item.name ?? String(idLike ?? '');
+          const val = String(idLike || '').trim().toLowerCase().replace(/\s+/g, '-');
+          if (!val) continue;
+          const opt = document.createElement('option');
+          opt.value = val; opt.textContent = label;
+          if (saved && (saved === val || saved === String(label).toLowerCase())) opt.selected = true;
+          sel.appendChild(opt);
         }
-      });
 
-      // ---------- Init ----------
-      (async function init() {
-        // Optional: populate user badge (no-op if not signed in)
-        try {
-          const me = await fetch('/.auth/me', { cache: 'no-store' });
-          const j = await me.json();
-          const email = j?.clientPrincipal?.userDetails || j?.clientPrincipal?.identityProvider || '';
-          if (email && userBadge && userEmail) { userEmail.textContent = email; userBadge.classList.remove('is-hidden'); }
-        } catch { }
-
-        // Buyer needs preload
-        try {
-          const res = await fetch(INTEL_URL, { cache: 'no-store' });
-          const raw = await res.json();
-          intel = normaliseIntel(raw);
-        } catch { intel = { products: {} }; }
-
-        loadForm(); loadCallPref();
-        const currentMode = modeFromCallType(callTypeSel?.value || 'direct');
-        await populateProductsForMode(currentMode);
-
-        if (productSel?.value && buyerBehSel?.value) {
-          const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
+        if (!sel.value) sel.options[0].selected = true;
+        validateField(sel);
+        if (buyerBehSel?.value) {
+          const label = sel?.options?.[sel.selectedIndex]?.text || sel.value || '';
           renderIntel(label, buyerBehSel.value);
         }
+        refreshSubmitState();
+        console.info('[Product] index loaded OK, count =', items.length);
+      } catch (err) {
+        console.error('[Product] Failed to load index.json', err);
+        sel.innerHTML = `<option value="">Error loading products</option>`;
+        setStatus('Could not load products index. See console for details.', 'error');
+      }
+    }
 
-        applyTipsVisibility();
+    // ---------- Submit: API-first ----------
+    form && form.addEventListener("submit", async (e) => {
+      e.preventDefault();
 
-        const hasText = !!(outputEl?.textContent?.trim());
-        if (copyBtn) copyBtn.disabled = !hasText;
-        if (downloadBtn) downloadBtn.disabled = !hasText;
-        if (submitBtn) submitBtn.disabled = !allRequiredFilled(form);
+      for (const name of REQUIRED) {
+        const el = form.elements[name] || document.getElementById(name);
+        if (!el || !String(el.value || "").trim()) { validateField(el); el?.focus(); setStatus("Please complete required fields.", "error"); return; }
+      }
 
-        // Notes
-        const loadNotesSafe = () => { try { notesArea.value = localStorage.getItem(notesKey()) || ''; } catch { } };
-        loadNotesSafe();
+      const values = {
+        call_type: (callTypeSel?.value || "").trim(),
+        seller_name: (form.elements.seller_name?.value || "").trim(),
+        seller_company: (form.elements.seller_company?.value || "").trim(),
+        prospect_name: (form.elements.prospect_name?.value || "").trim(),
+        prospect_role: (form.elements.prospect_role?.value || "").trim(),
+        prospect_company: (form.elements.prospect_company?.value || "").trim(),
+        product: (productSel?.value || form.elements.product?.value || "").trim(),
+        buyer_behaviour: (buyerBehSel?.value || form.elements.buyer_behaviour?.value || "").trim(),
+        tone: (form.elements.tone?.value || "").trim(),
+        script_length: (form.elements.script_length?.value || "").trim(),
+        value_proposition: (form.elements.value_proposition?.value || "").trim(),
+        context: (form.elements.context?.value || "").trim(),
+        next_step: (form.elements.next_step?.value || "").trim(),
+      };
 
-        document.addEventListener('input', (e) => {
-          if (e.target.closest('#' + FORM_ID)) { validateField(e.target); saveForm(); refreshSubmitState(); }
-          if (e.target === callTypeSel) saveCallPrefIfRequested();
+      const mode = modeFromCallType(values.call_type);
+      const productId = String(values.product).toLowerCase().trim();
+      const buyerId = buyerCanon(values.buyer_behaviour);
+
+      if (!productId) { validateField("product"); setStatus("Please choose a product.", "error"); return; }
+
+      setBusy(true);
+      setStatus("Generating call script…");
+      if (diag) diag.open = false; if (diagJson) diagJson.textContent = "";
+
+      try {
+        const mdUrl = `${basePrefix}/content/call-library/v1/${mode}/${productId}/${buyerId}.md`;
+        let templateText = "";
+        try { const res = await fetch(mdUrl, { cache: "no-store" }); if (res.ok) templateText = await res.text(); } catch { }
+        const body = {
+          kind: "call-script",
+          basePrefix,
+          variables: { ...values, mode, product: productId, buyerType: buyerId },
+          templateMdText: templateText
+        };
+
+        const resp = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
         });
-      })();
-    })();
-    /* ============ Fallback / Safety Footer Patch ============ */
-    /* 1) Bullet renderer + toggle (global so scope never breaks) */
-    if (typeof window.renderBulletScriptFromSections !== "function") {
-      window.renderBulletScriptFromSections = function (sections, values = {}) {
-        const getFirstSentence = (s = "") => {
-          const m = String(s).trim().match(/^(.+?[.!?])(\s|$)/);
-          return (m ? m[1] : s).trim();
+        if (!resp.ok) { const errTxt = await resp.text(); throw new Error(`API ${resp.status}: ${errTxt}`); }
+
+        const data = await resp.json();
+        const script = data?.script?.text || "";
+        const tips = data?.script?.tips || [];
+
+        if (!script || !script.trim()) throw new Error("Empty script returned from API");
+
+        // Render full script + bullets from the same parse
+        const rendered = renderSectionsToHtml(script, values);
+        const bulletsHtml = renderBulletScriptFromSections(rendered.sections);
+
+        lastRender = { html: rendered.html, bulletsHtml };
+        window.lastRender = lastRender;            // keep pop-out in sync
+
+        // honour current toggle state
+        const htmlToShow = bulletMode ? bulletsHtml : rendered.html;
+        outputEl.innerHTML = htmlToShow;
+        modalScript.innerHTML = htmlToShow;
+
+        // meta line
+        outputMeta.textContent =
+          `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
+
+        // tips
+        tipsList.innerHTML = "";
+        (tips || []).forEach((t) => { const li = document.createElement("li"); li.textContent = t; tipsList.appendChild(li); });
+        applyTipsVisibility(); // hide/show tips card appropriately
+
+        // delta + activity
+        const old = localStorage.getItem(OUTPUT_KEY) || "";
+        const delta = computeDelta(old, script);
+        renderDelta(delta);
+        localStorage.setItem(OUTPUT_KEY, script);
+
+        addActivity({ time: nowTime(), product: productId, buyer_behaviour: values.buyer_behaviour || "—", length: values.length || "—" });
+
+        setStatus("Done. (Generated from API)");
+        setBusy(false);
+        document.getElementById("output-title")?.focus();
+      } catch (err) {
+        setStatus("Could not generate a call script. See Diagnostics for details.", "error");
+        if (diag) { diag.open = true; diagJson.textContent = String(err?.message || err); }
+        setBusy(false);
+      }
+    });
+
+    // ---------- Follow-up email ----------
+    document.getElementById('make-followup')?.addEventListener('click', async () => {
+      try {
+        const payload = {
+          kind: 'call-followup',
+          basePrefix,
+          variables: {
+            seller_name: (form.elements.seller_name?.value || "").trim(),
+            seller_company: (form.elements.seller_company?.value || "").trim(),
+            prospect_name: (form.elements.prospect_name?.value || "").trim(),
+            prospect_role: (form.elements.prospect_role?.value || "").trim(),
+            prospect_company: (form.elements.prospect_company?.value || "").trim(),
+            tone: (form.elements.tone?.value || "").trim(),
+          },
+          scriptMdText: localStorage.getItem('first_call_script_v2.last_output') || "",
+          callNotes: (notesArea?.value || "")
         };
-        const find = (title) =>
-          (sections || []).find(
-            (s) => String(s.title).toLowerCase() === String(title).toLowerCase()
-          );
 
-        const bullets = [];
+        setStatus('Building follow-up email…');
+        const r = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data?.error || 'Could not build follow-up');
 
-        // Opening
-        const opening = find("Opening");
-        if (opening) {
-          const line =
-            getFirstSentence(opening.paras?.[0] || "") ||
-            getFirstSentence(opening.list?.[0] || "");
-          if (line) bullets.push(`• ${line}`);
-        }
+        modalScript.innerText = data?.followup?.email || 'No email produced.';
+        modal.showModal();
+        setStatus('Follow-up ready.');
+      } catch (e) {
+        setStatus('Could not build follow-up email', 'error');
+        diag.open = true; diagJson.textContent = String(e?.message || e);
+      }
+    });
 
-        // Buyer Pain
-        const pain = find("Buyer Pain");
-        if (pain) {
-          if (pain.list?.length) {
-            pain.list.slice(0, 4).forEach((li) => bullets.push(`• Pain: ${li}`));
-          } else {
-            const p = getFirstSentence(pain.paras?.[0] || "");
-            if (p) bullets.push(`• Pain: ${p}`);
-          }
-        }
-
-        // Buyer Desire (+ weave USPs / other points)
-        const desire = find("Buyer Desire");
-        if (desire) {
-          const d = getFirstSentence(desire.paras?.[0] || desire.list?.[0] || "");
-          if (d) bullets.push(`• Desire: ${d}`);
-        }
-        const usp = (values?.value_proposition || "").trim();
-        if (usp) bullets.push(`• USP to emphasise: ${usp}`);
-        const other = (values?.context || "").trim();
-        if (other) bullets.push(`• Also cover: ${other}`);
-
-        // Example Illustration
-        const ex = find("Example Illustration");
-        if (ex) {
-          const joined = [...(ex.paras || []), ...(ex.list || [])].join(" ");
-          const metric =
-            (joined.match(/\b\d{1,3}%|\b\d+\s*(days?|weeks?|tickets?)\b/i) || [])[0] ||
-            "";
-          const s = getFirstSentence(joined);
-          bullets.push(`• Example: ${s}${metric ? ` (notable: ${metric})` : ""}`);
-        }
-
-        // Handling Objections
-        const obj = find("Handling Objections");
-        if (obj) {
-          if (obj.list?.length) {
-            obj.list.slice(0, 3).forEach((li) => bullets.push(`• Handle: ${li}`));
-          } else {
-            const s = getFirstSentence(obj.paras?.[0] || "");
-            if (s) bullets.push(`• Handle: ${s}`);
-          }
-        }
-
-        // Next Step (salesperson takes precedence)
-        const nextPref = (values?.next_step || "").trim();
-        const nextFromScript = getFirstSentence(find("Next Step")?.paras?.[0] || "");
-        bullets.push(
-          `• Next step: ${nextPref || nextFromScript || "agree a low-friction next action"}`
-        );
-
-        return `<div class="script-body"><h3>Bullet point script</h3><ul>${bullets.map((b) => `<li>${b}</li>`).join("")
-          }</ul></div>`;
-      };
-    }
-
-    if (typeof window.attachBulletToggle !== "function") {
-      window.attachBulletToggle = function (outputEl, modalScript) {
-        const btn = document.getElementById("toggle-bullets");
-        if (!btn) return;
-        btn.textContent = "Show bullet point script";
-        btn.onclick = () => {
-          window.bulletMode = !window.bulletMode;
-          btn.textContent = window.bulletMode
-            ? "Hide bullet point script"
-            : "Show bullet point script";
-          const html = window.bulletMode
-            ? (window.lastRender?.bulletsHtml || "<p>No bullet script available.</p>")
-            : (window.lastRender?.html || "");
-          if (outputEl) outputEl.innerHTML = html;
-          if (modalScript) modalScript.innerHTML = html;
-        };
-      };
-    }
-
-    /* 2) After each generation, cache both views and (re)wire toggle.
-       Drop this “hook” safely: it runs after your existing submit handler
-       sets #output. If you already do this in your handler, this becomes a no-op.
-    */
-    (function ensurePostRenderHook() {
-      if (window.__bulletHookInstalled) return;
-      window.__bulletHookInstalled = true;
-
-      // Small observer to detect script replacement and build bullets once
-      const outputEl = document.getElementById("output");
-      const modalScript = document.getElementById("modal-script");
-      if (!outputEl) return;
-
-      const buildOnce = () => {
-        try {
-          // If your code already set window.lastOutput (raw markdown), prefer that:
-          const rawMd = (window.lastOutput || "").trim();
-          if (!rawMd) return; // wait until your submit handler runs
-
-          // Your app already has parseSections(raw) in scope; re-use if present.
-          let sections = null;
-          if (typeof parseSections === "function") {
-            sections = parseSections(rawMd);
-          } else {
-            // No parser visible? Then skip building bullets.
-            return;
-          }
-
-          // Form values (for USP/context/next step in bullets)
-          const form = document.getElementById("script-form");
-          const values = form
-            ? Object.fromEntries(new FormData(form).entries())
-            : {};
-
-          const bulletsHtml =
-            window.renderBulletScriptFromSections(sections, values) || "";
-          if (!window.lastRender) window.lastRender = {};
-          // If your submit handler already set lastRender.html, keep it.
-          window.lastRender.bulletsHtml = bulletsHtml;
-
-          // Wire the toggle (id=toggle-bullets)
-          window.attachBulletToggle(outputEl, modalScript);
-        } catch (e) {
-          console.warn("[bullet-hook] ", e);
-        }
-      };
-
-      // Observe changes to #output and run once after first real content
-      const obs = new MutationObserver(() => {
-        const html = (outputEl.innerHTML || "").trim();
-        if (html.length > 20) {
-          buildOnce();
-          obs.disconnect();
-        }
-      });
-      obs.observe(outputEl, { subtree: true, childList: true });
-    })();
-
-    /* 3) Pop-out should print whichever view is active */
-    (function rebindPopout() {
-      const btn = document.getElementById("popout");
-      if (!btn) return;
-      btn.onclick = null; // remove any previous inline handler
-      btn.addEventListener("click", () => {
-        const outputEl = document.getElementById("output");
-        const metaEl = document.getElementById("output-meta");
-
+    // ---------- Pop-out (always prints whichever view is showing) ----------
+    if (popoutBtn) {
+      popoutBtn.onclick = () => {
+        const meta = (document.getElementById('output-meta')?.textContent || '').trim();
         const html =
           (window.bulletMode && window.lastRender?.bulletsHtml) ||
-          window.lastRender?.html ||
+          (window.lastRender?.html) ||
           (outputEl?.innerHTML || "");
-        if (!html || !html.trim()) return;
 
-        const meta = (metaEl?.textContent || "").trim();
+        if (!html || !html.trim()) {
+          setStatus("No script to pop out yet.", "error");
+          return;
+        }
+
         const w = window.open("", "_blank", "noopener,noreferrer");
-        if (!w) return;
+        if (!w) { setStatus("Pop-out was blocked by the browser.", "error"); return; }
         w.document.open();
         w.document.write(`<!doctype html>
 <meta charset="utf-8"><title>Conversation Guide</title>
@@ -1760,27 +1262,48 @@
 </style>
 <div class="bar"><button onclick="window.print()">Print</button>
 <button onclick="navigator.clipboard.writeText(document.body.innerText)">Copy</button></div>
-<div class="meta">${meta}</div>
+<div class="meta">${esc(meta)}</div>
 <div>${html}</div>`);
         w.document.close();
-      });
-    })();
+      };
+    }
 
-    /* 4) Hide tips card when empty (id tips-list, container .tips-card) */
-    (function hideEmptyTips() {
-      const tipsList = document.getElementById("tips-list");
-      const card = document.querySelector(".tips-card");
-      if (!tipsList || !card) return;
-      const obs = new MutationObserver(() => {
-        const has = tipsList.children.length > 0;
-        card.classList.toggle("is-hidden", !has);
+    // ---------- Init ----------
+    let intel = null;
+    (async function init() {
+      try {
+        const me = await fetch('/.auth/me', { cache: 'no-store' });
+        const j = await me.json();
+        const email = j?.clientPrincipal?.userDetails || j?.clientPrincipal?.identityProvider || '';
+        if (email && userBadge && userEmail) { userEmail.textContent = email; userBadge.classList.remove('is-hidden'); }
+      } catch { }
+
+      // Buyer needs preload
+      try { const res = await fetch(INTEL_URL, { cache: 'no-store' }); intel = normaliseIntel(await res.json()); }
+      catch { intel = { products: {} }; }
+
+      loadForm(); loadCallPref();
+      const currentMode = modeFromCallType(callTypeSel?.value || 'direct');
+      await populateProductsForMode(currentMode);
+      if (productSel?.value && buyerBehSel?.value) {
+        const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
+        renderIntel(label, buyerBehSel.value);
+      }
+
+      applyTipsVisibility();
+      const hasText = !!(outputEl?.textContent?.trim());
+      if (copyBtn) copyBtn.disabled = !hasText;
+      if (downloadBtn) downloadBtn.disabled = !hasText;
+      if (submitBtn) submitBtn.disabled = !allRequiredFilled(form);
+
+      loadNotes();
+
+      document.addEventListener('input', (e) => {
+        if (e.target.closest('#' + FORM_ID)) { validateField(e.target); saveForm(); refreshSubmitState(); }
+        if (e.target === callTypeSel) saveCallPrefIfRequested();
       });
-      obs.observe(tipsList, { childList: true });
-      // run once on load
-      card.classList.toggle("is-hidden", tipsList.children.length === 0);
     })();
   </script>
-
 </body>
 
 </html>
