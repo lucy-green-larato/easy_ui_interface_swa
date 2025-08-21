@@ -8,7 +8,7 @@ const { z } = require("zod");
 const VERSION = "v3-markdown-first-2025-08-20-patch8-fixed";
 
 /* eslint-disable no-console */
-try { console.log("[" + VERSION + "] module loaded"); } catch (e) {}
+try { console.log("[" + VERSION + "] module loaded"); } catch (e) { }
 
 function extractText(res) {
   if (!res) return "";
@@ -17,18 +17,18 @@ function extractText(res) {
     if (res.choices && res.choices[0] && res.choices[0].message && res.choices[0].message.content) {
       return String(res.choices[0].message.content);
     }
-  } catch (e) {}
+  } catch (e) { }
   try {
     if (res.output_text) return String(res.output_text);
     if (res.output) return String(res.output);
     if (res.text) return String(res.text);
     if (res.message) return String(res.message);
-  } catch (e) {}
+  } catch (e) { }
   try {
     if (res.data && res.data.choices && res.data.choices[0] && res.data.choices[0].message && res.data.choices[0].message.content) {
       return String(res.data.choices[0].message.content);
     }
-  } catch (e) {}
+  } catch (e) { }
   return "";
 }
 
@@ -37,8 +37,8 @@ async function callModel(opts) {
   const prompt = opts.prompt || "";
   const temperature = typeof opts.temperature === "number" ? opts.temperature : 0.6;
 
-  const azEndpoint   = process.env.AZURE_OPENAI_ENDPOINT;
-  const azKey        = process.env.AZURE_OPENAI_API_KEY;
+  const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
+  const azKey = process.env.AZURE_OPENAI_API_KEY;
   const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
   const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
 
@@ -57,12 +57,12 @@ async function callModel(opts) {
       }),
     });
     let data = {};
-    try { data = await r.json(); } catch (e) {}
+    try { data = await r.json(); } catch (e) { }
     if (!r.ok) throw new Error((data && data.error && data.error.message) || r.statusText || "Azure OpenAI request failed");
     return data;
   }
 
-  const oaKey   = process.env.OPENAI_API_KEY;
+  const oaKey = process.env.OPENAI_API_KEY;
   const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
   if (oaKey) {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -79,7 +79,7 @@ async function callModel(opts) {
       }),
     });
     let data = {};
-    try { data = await r.json(); } catch (e) {}
+    try { data = await r.json(); } catch (e) { }
     if (!r.ok) throw new Error((data && data.error && data.error.message) || r.statusText || "OpenAI request failed");
     return data;
   }
@@ -98,7 +98,7 @@ function mapBuyerStrict(x) {
   if (s.indexOf("innovator") === 0) return "innovator";
   if (s.indexOf("early-adopter") === 0 || s.indexOf("early adopter") === 0 || s.indexOf("earlyadopter") === 0) return "early-adopter";
   if (s.indexOf("early-majority") === 0 || s.indexOf("early majority") === 0 || s.indexOf("earlymajority") === 0) return "early-majority";
-  if (s.indexOf("late-majority") === 0  || s.indexOf("late majority") === 0  || s.indexOf("latemajority") === 0)  return "late-majority";
+  if (s.indexOf("late-majority") === 0 || s.indexOf("late majority") === 0 || s.indexOf("latemajority") === 0) return "late-majority";
   if (s.indexOf("sceptic") === 0 || s.indexOf("skeptic") === 0) return "sceptic";
   return null;
 }
@@ -130,11 +130,21 @@ function ensureThanksClose(text) {
 }
 
 // Gentle trim to ~target words, preferring sentence/paragraph boundaries
+// Never trim away canonical sections if they exist; otherwise do a gentle trim.
 function trimToTargetWords(text, target) {
   const t = String(text || "").trim();
   if (!target || target < 50) return t;
+
+  const required = [
+    "Opening", "Buyer Pain", "Buyer Desire", "Example Illustration", "Handling Objections", "Next Step"
+  ];
+  const hasAll = required.every(h =>
+    new RegExp("(^|\\n)##\\s*" + h.replace(/\s+/g, "\\s+") + "\\b", "i").test(t)
+  );
+  if (hasAll) return t; // preserve full structure
+
   const words = t.split(/\s+/);
-  const max = Math.round(target * 1.15); // allow slight headroom for cadence
+  const max = Math.round(target * 1.15);
   if (words.length <= max) return t;
 
   const clipped = words.slice(0, max).join(" ");
@@ -192,41 +202,41 @@ function buildPromptFromMarkdown(args) {
   const tone = args.tone || "";
   const targetWords = args.targetWords || 0;
 
-  const toneLine   = tone ? 'Write in a "' + tone + '" tone.\n' : "";
+  const toneLine = tone ? 'Write in a "' + tone + '" tone.\n' : "";
   const lengthLine = targetWords ? "Aim for about " + targetWords + " words (±10%).\n" : "";
   + "Use these exact markdown headings, each on its own line and in this order:\n" +
-+ "## Opening\n" +
-+ "## Buyer Pain\n" +
-+ "## Buyer Desire\n" +
-+ "## Example Illustration\n" +
-+ "## Handling Objections\n" +
-+ "## Next Step\n" +
-+ "Do not change, rename, bold, add punctuation to, or re-level these headings. They must begin with '## ' exactly.\n\n" ;
+    + "## Opening\n" +
+    + "## Buyer Pain\n" +
+    + "## Buyer Desire\n" +
+    + "## Example Illustration\n" +
+    + "## Handling Objections\n" +
+    + "## Next Step\n" +
+    + "Do not change, rename, bold, add punctuation to, or re-level these headings. They must begin with '## ' exactly.\n\n";
 
   return (
-" You are a highly effective UK B2B salesperson.\n\n" +
-toneLine + lengthLine +
-"Use the Markdown template below as the skeleton for the call. Preserve the section headings and overall order. Fill the content so it reads as a natural, spoken conversation.\n\n" +
-"MANDATES:\n" +
-"- Use professional British business English; no Americanisms; no assumptive closes.\n" +
-"- Never include pleasantries or check-ins such as \"I hope you are well\", \"Are you well?\", \"Hope you're doing well\", \"How are you?\", \"Trust you are well\". Start directly.\n" +
-"- Open with: Hi " + prospect.name + ", it’s " + seller.name + " from " + seller.company + ".\n" +
-"- Reference observations from similar businesses; do not assume the prospect’s current state.\n" +
-"- Elegantly weave the USPs and Other points where they make sense in context; do not ignore them if provided.\n" +
-"- Include one specific, relevant customer example with measurable results.\n" +
-"- Handle common objections factually and without pressure.\n" +
-"- For the \"Next Step\": use the salesperson’s input if provided; otherwise, if the template includes <!-- suggested_next_step: ... --> use that; otherwise propose a clear, low-friction next step.\n" +
-"Buyer type: " + buyerType + "\n" +
-"Product: " + productLabel + "\n\n" +
-"USPs (from salesperson): " + (valueProposition || "(none provided)") + "\n" +
-"Other points to consider: " + (context || "(none provided)") + "\n" +
-"Requested Next Step (if any): " + (nextStep || "(use suggested_next_step from the template if present; otherwise propose a sensible next step)") + "\n\n" +
-"--- BEGIN TEMPLATE ---\n" +
-templateMdText +
-"\n--- END TEMPLATE ---\n\n" +
-"After the script, add this heading and content:\n" +
-"**Sales tips for colleagues conducting similar calls**\n" +
-"Provide exactly 3 concise, practical tips (numbered 1., 2., 3.).\n"
+    " You are a highly effective UK B2B salesperson.\n\n" +
+    toneLine + lengthLine +
+    "Use the Markdown template below as the skeleton for the call. Preserve the section headings and overall order. Fill the content so it reads as a natural, spoken conversation.\n\n" +
+    "MANDATES:\n" +
+    "- Use professional British business English; no Americanisms; no assumptive closes.\n" +
+    "- Never include pleasantries or check-ins such as \"I hope you are well\", \"Are you well?\", \"Hope you're doing well\", \"How are you?\", \"Trust you are well\". Start directly.\n" +
+    "- Open with: Hi " + prospect.name + ", it’s " + seller.name + " from " + seller.company + ".\n" +
+    "- Reference observations from similar businesses; do not assume the prospect’s current state.\n" +
+    "- Elegantly weave the USPs and Other points where they make sense in context; do not ignore them if provided.\n" +
+    "- Include one specific, relevant customer example with measurable results.\n" +
+    "- Handle common objections factually and without pressure.\n" +
+    "- For the \"Next Step\": use the salesperson’s input if provided; otherwise, if the template includes <!-- suggested_next_step: ... --> use that; otherwise propose a clear, low-friction next step.\n" +
+    "Buyer type: " + buyerType + "\n" +
+    "Product: " + productLabel + "\n\n" +
+    "USPs (from salesperson): " + (valueProposition || "(none provided)") + "\n" +
+    "Other points to consider: " + (context || "(none provided)") + "\n" +
+    "Requested Next Step (if any): " + (nextStep || "(use suggested_next_step from the template if present; otherwise propose a sensible next step)") + "\n\n" +
+    "--- BEGIN TEMPLATE ---\n" +
+    templateMdText +
+    "\n--- END TEMPLATE ---\n\n" +
+    "After the script, add this heading and content:\n" +
+    "**Sales tips for colleagues conducting similar calls**\n" +
+    "Provide exactly 3 concise, practical tips (numbered 1., 2., 3.).\n"
   );
 }
 
@@ -251,8 +261,8 @@ module.exports = async function (context, req) {
   const isLocalDev = /localhost|127\.0\.0\.1|app\.github\.dev|githubpreview\.dev/i.test(hostHeader);
 
   if (req.method === "OPTIONS") { context.res = { status: 204, headers: cors }; return; }
-  if (req.method === "GET")     { context.res = { status: 200, headers: cors, body: { ok: true, route: "generate", version: VERSION } }; return; }
-  if (req.method !== "POST")    { context.res = { status: 405, headers: cors, body: { error: "Method Not Allowed", version: VERSION } }; return; }
+  if (req.method === "GET") { context.res = { status: 200, headers: cors, body: { ok: true, route: "generate", version: VERSION } }; return; }
+  if (req.method !== "POST") { context.res = { status: 405, headers: cors, body: { error: "Method Not Allowed", version: VERSION } }; return; }
 
   const principalHeader = req.headers ? req.headers["x-ms-client-principal"] : "";
   if (!principalHeader && !isLocalDev) {
@@ -272,8 +282,8 @@ module.exports = async function (context, req) {
     const kind = String((body && body.kind) || "").toLowerCase();
 
     // Debug visibility of payload
-    try { context.log("[" + VERSION + "] [DEBUG] Raw body:", JSON.stringify(body, null, 2)); } catch (e) {}
-    try { context.log("[" + VERSION + "] [DEBUG] Variables:", JSON.stringify(body && body.variables ? body.variables : {}, null, 2)); } catch (e) {}
+    try { context.log("[" + VERSION + "] [DEBUG] Raw body:", JSON.stringify(body, null, 2)); } catch (e) { }
+    try { context.log("[" + VERSION + "] [DEBUG] Variables:", JSON.stringify(body && body.variables ? body.variables : {}, null, 2)); } catch (e) { }
 
     // ---------- Markdown-first route ----------
     if (kind === "call-script") {
@@ -286,12 +296,12 @@ module.exports = async function (context, req) {
 
       // canonical IDs
       const productId = toProductId(vars.product || body.product);
-      const rawBuyer  = vars.buyerType || body.buyerType || vars.buyer_behaviour || body.buyer_behaviour || "";
+      const rawBuyer = vars.buyerType || body.buyerType || vars.buyer_behaviour || body.buyer_behaviour || "";
       const buyerType = mapBuyerStrict(rawBuyer);
-      const mode      = toModeId(vars.mode || body.mode || "direct");
+      const mode = toModeId(vars.mode || body.mode || "direct");
 
       // tone / target words
-      const tone        = String(vars.tone || body.tone || "").trim();
+      const tone = String(vars.tone || body.tone || "").trim();
       const targetWords = parseTargetLength(vars.length || body.length);
 
       if (!productId || !buyerType || !mode) {
@@ -309,9 +319,9 @@ module.exports = async function (context, req) {
 
       // --- resolve base for call-library fetches ---
       const protoHdr = (req.headers && req.headers["x-forwarded-proto"]) ? String(req.headers["x-forwarded-proto"]).split(",")[0].trim() : "";
-      const hostHdr  = (req.headers && (req.headers["x-forwarded-host"] || req.headers.host)) ? String(req.headers["x-forwarded-host"] || req.headers.host).split(",")[0].trim() : "";
-      const envBase  = (process.env.CALL_LIB_BASE || "").trim().replace(/\/+$/, "");
-      const rawBase  = (body.basePrefix ? String(body.basePrefix) : "").trim().replace(/\/+$/, "");
+      const hostHdr = (req.headers && (req.headers["x-forwarded-host"] || req.headers.host)) ? String(req.headers["x-forwarded-host"] || req.headers.host).split(",")[0].trim() : "";
+      const envBase = (process.env.CALL_LIB_BASE || "").trim().replace(/\/+$/, "");
+      const rawBase = (body.basePrefix ? String(body.basePrefix) : "").trim().replace(/\/+$/, "");
       const bodyBase = (/^\/[a-z0-9/_-]*$/i.test(rawBase) && !/\.[a-z0-9]+$/i.test(rawBase)) ? rawBase : "";
 
       function mapToStaticHost(h) {
@@ -349,7 +359,7 @@ module.exports = async function (context, req) {
               .replace(/\/\/7071-/, "//4280-");
             if (alt !== url) {
               context.log("[" + VERSION + "] [CallLib] retry -> " + alt);
-              try { return await fetch(alt, init); } catch (e2) {}
+              try { return await fetch(alt, init); } catch (e2) { }
             }
           }
           throw e;
@@ -380,7 +390,7 @@ module.exports = async function (context, req) {
         });
 
         let bodyText = "";
-        try { bodyText = await resMd.text(); } catch (e) {}
+        try { bodyText = await resMd.text(); } catch (e) { }
 
         if (!resMd.ok) {
           context.res = {
@@ -408,12 +418,12 @@ module.exports = async function (context, req) {
         (vars.next_step || vars.call_to_action || body.next_step || body.call_to_action || "");
 
       // Human label for product
-      const productLabel = String(productId || "").replace(/[_-]+/g, " ").replace(/\b\w/g, function(m){ return m.toUpperCase(); });
+      const productLabel = String(productId || "").replace(/[_-]+/g, " ").replace(/\b\w/g, function (m) { return m.toUpperCase(); });
 
       // Build prompt (includes salesperson inputs)
       const prompt = buildPromptFromMarkdown({
         templateMdText: templateMdText,
-        seller:   { name: vars.seller_name || "",   company: vars.seller_company || "" },
+        seller: { name: vars.seller_name || "", company: vars.seller_company || "" },
         prospect: { name: vars.prospect_name || "", role: vars.prospect_role || "", company: vars.prospect_company || "" },
         productLabel: productLabel,
         buyerType: buyerType,
@@ -428,17 +438,20 @@ module.exports = async function (context, req) {
       const llmRes = await callModel({
         system:
           "You are a highly effective UK B2B salesperson writing a sales call script.\n" +
-          "STRICT BANS (never include): pleasantries like \"I hope you are well\", \"Are you well?\", \"How are you?\", \"Hope you're well\", \"Trust you're well\""+
+          "STRICT BANS (never include): pleasantries like \"I hope you are well\", \"Are you well?\", \"How are you?\", \"Hope you're well\", \"Trust you're well\"" +
           "STYLE: UK business English. Follow the provided structure and headings exactly.",
         prompt: prompt,
         temperature: 0.6,
       });
 
+      context.log("[" + VERSION + "] model used =", llmRes ? "yes" : "no");
+
       if (!llmRes) {
         context.res = {
           status: 503,
           headers: cors,
-          body: { error: "No model configured", hint: "Set OPENAI_API_KEY or AZURE_OPENAI_* in local.settings.json / App Settings", version: VERSION }
+          body: { error: "No model configured", hint: "Set OPENAI_API_KEY or AZURE_OPENAI_* in local.settings.json / App Settings", version: VERSION },
+          body: { script: { text: scriptText, tips: tips }, version: VERSION, usedModel: !!llmRes }
         };
         return;
       }
