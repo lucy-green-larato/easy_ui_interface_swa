@@ -338,6 +338,73 @@ function buildPromptFromMarkdown(args) {
   );
 }
 
+// Build JSON-only prompt (model must return JSON matching ScriptJsonSchema)
+function buildJsonPrompt(args) {
+  const templateMdText = args.templateMdText || "";
+  const seller = args.seller || { name: "", company: "" };
+  const prospect = args.prospect || { name: "", role: "", company: "" };
+  const productLabel = args.productLabel || "";
+  const buyerType = args.buyerType || "";
+  const valueProposition = String(args.valueProposition || "").trim();
+  const otherContext = String(args.context || "").trim();
+  const nextStep = String(args.nextStep || "").trim();
+  const suggestedNext = String(args.suggestedNext || "").trim();
+  const tone = args.tone || "Professional (corporate)";
+  const targetWords = Number(args.targetWords || 0);
+
+  const lengthHint = targetWords ? `Aim for about ${targetWords} words (±10%).` : "";
+
+  return (
+`You are a highly effective UK B2B salesperson. 
+Write **valid JSON only** (no markdown, no prose outside JSON). 
+JSON schema:
+{
+  "sections": {
+    "opening": string,                 // min 20 chars
+    "buyer_pain": string,              // min 20
+    "buyer_desire": string,            // min 20
+    "example_illustration": string,    // min 20
+    "handling_objections": string,     // min 10
+    "next_step": string                // min 5
+  },
+  "integration_notes": {
+    "usps_used": string[]?,
+    "other_points_used": string[]?,
+    "next_step_source": "salesperson" | "template" | "assistant"?
+  },
+  "tips": [string, string, string]     // exactly 3 concise tips
+}
+
+Constraints:
+- Tone: ${tone}.
+- UK business English only. No Americanisms. No pleasantries like "Hope you're well", "How are you?", etc.
+- Open with: "Hi ${prospect.name}, it’s ${seller.name} from ${seller.company}."
+- Use these conceptual sections (your JSON keys map to them):
+  opening, buyer_pain, buyer_desire, example_illustration, handling_objections, next_step
+- Weave the salesperson inputs (USPs & Other points) naturally in relevant sections; don’t dump them as a list.
+- Next step precedence:
+  1) If salesperson provided next step, use it.
+  2) Else if template has <!-- suggested_next_step: ... --> use it.
+  3) Else propose a clear, low-friction next step.
+- Include one specific, relevant customer example with measurable results.
+- ${lengthHint}
+
+Context for you to incorporate:
+- Product: ${productLabel}
+- Buyer type: ${buyerType}
+- Salesperson USPs (optional): ${valueProposition || "(none)"}
+- Other points to cover (optional): ${otherContext || "(none)"}
+- Salesperson requested next step (optional): ${nextStep || "(none)"}
+- Template suggested next step (optional): ${suggestedNext || "(none)"}
+
+Template you may mine for ideas (do not copy headings literally; your output is JSON):
+--- TEMPLATE START ---
+${templateMdText}
+--- TEMPLATE END ---
+`
+  );
+}
+
 /* ----------------------------- Legacy schema ---------------------------- */
 
 const BodySchema = z.object({
@@ -587,6 +654,7 @@ ${callNotes || "(none)"}`
         valueProposition,
         context: otherContext,
         nextStep,
+        suggestedNext,
         tone,
         targetWords
       });
