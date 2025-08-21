@@ -194,6 +194,14 @@ function buildPromptFromMarkdown(args) {
 
   const toneLine   = tone ? 'Write in a "' + tone + '" tone.\n' : "";
   const lengthLine = targetWords ? "Aim for about " + targetWords + " words (±10%).\n" : "";
+  + "Use these exact markdown headings, each on its own line and in this order:\n" +
++ "## Opening\n" +
++ "## Buyer Pain\n" +
++ "## Buyer Desire\n" +
++ "## Example Illustration\n" +
++ "## Handling Objections\n" +
++ "## Next Step\n" +
++ "Do not change, rename, bold, add punctuation to, or re-level these headings. They must begin with '## ' exactly.\n\n" ;
 
   return (
 " You are a highly effective UK B2B salesperson.\n\n" +
