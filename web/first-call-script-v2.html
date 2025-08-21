@@ -971,6 +971,19 @@
         if (diagJson) diagJson.textContent = "";
 
         try {
+          // --- Fetch markdown template first ---
+          const mdUrl = `${basePrefix}/content/call-library/v1/${mode}/${productId}/${buyerId}.md`;
+          let templateText = "";
+          try {
+            const res = await fetch(mdUrl, { cache: "no-store" });
+            if (res.ok) {
+              templateText = await res.text();
+            } else {
+              console.warn("Could not load template", mdUrl, res.status);
+            }
+          } catch (err) {
+            console.error("Error fetching template", err);
+          }
           // Build payload with EVERYTHING
           const body = {
             kind: "call-script",
