@@ -422,7 +422,24 @@ module.exports = async function (context, req) {
   const isLocalDev = /localhost|127\.0\.0\.1|app\.github\.dev|githubpreview\.dev/i.test(hostHeader);
 
   if (req.method === "OPTIONS") { context.res = { status: 204, headers: cors }; return; }
-  if (req.method === "GET") { context.res = { status: 200, headers: cors, body: { ok: true, route: "generate", version: VERSION, cwd: process.cwd, devserverUrl: process.env.SWA_CLI_DEBUG_PROXY || ""} }; return; }
+  if (req.method === "GET") 
+    { context.res = {
+    status: 200,
+    headers: {
+      ...cors,
+      "x-debug-version": VERSION,
+      "x-debug-pid": String(process.pid),
+    },
+    body: {
+      ok: true,
+      route: "generate",
+      version: VERSION,
+      cwd: process.cwd(),
+      dir: __dirname,
+      hostHeader: String((req.headers && (req.headers["x-forwarded-host"] || req.headers.host)) || ""),
+      node: process.version
+    } 
+  }; return; }
   if (req.method !== "POST") { context.res = { status: 405, headers: cors, body: { error: "Method Not Allowed", version: VERSION } }; return; }
 
   const principalHeader = req.headers ? req.headers["x-ms-client-principal"] : "";
