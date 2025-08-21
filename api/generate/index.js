@@ -1,6 +1,11 @@
 // index.js – Azure Function handler for /api/generate
 // Version: v3-markdown-first-2025-08-20-patch8-fixed (normalized vars; strict buyer; safe base; logs; sanitizer; length trim)
 
+const VERSION = "DEV-verify-2025-08-21-1"; // <-- bump this every edit
+try {
+  console.log(`[${VERSION}] module loaded at ${new Date().toISOString()} cwd=${process.cwd()} dir=${__dirname}`);
+} catch {}
+
 const { z } = require("zod");
 
 /* ========================= Helpers / Utilities ========================= */
@@ -75,8 +80,6 @@ const ScriptJsonSchema = z.object({
   }).optional(),
   tips: z.array(z.string()).min(3).max(3)
 });
-
-const VERSION = "v3-markdown-first-2025-08-20-patch8-fixed";
 
 /* eslint-disable no-console */
 try { console.log("[" + VERSION + "] module loaded"); } catch (e) { }
@@ -419,7 +422,7 @@ module.exports = async function (context, req) {
   const isLocalDev = /localhost|127\.0\.0\.1|app\.github\.dev|githubpreview\.dev/i.test(hostHeader);
 
   if (req.method === "OPTIONS") { context.res = { status: 204, headers: cors }; return; }
-  if (req.method === "GET") { context.res = { status: 200, headers: cors, body: { ok: true, route: "generate", version: VERSION } }; return; }
+  if (req.method === "GET") { context.res = { status: 200, headers: cors, body: { ok: true, route: "generate", version: VERSION, cwd: process.cwd, devserverUrl: process.env.SWA_CLI_DEBUG_PROXY || ""} }; return; }
   if (req.method !== "POST") { context.res = { status: 405, headers: cors, body: { error: "Method Not Allowed", version: VERSION } }; return; }
 
   const principalHeader = req.headers ? req.headers["x-ms-client-principal"] : "";
