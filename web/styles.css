@@ -332,3 +332,20 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   font-size: 1rem;
   color: #111827;
 }
+/* === Script output formatting === */
+.script-body h3 {
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+  font-size: 1.1rem;
+  color: #111827;
+}
+.script-body p {
+  margin: 0.6em 0;
+  line-height: 1.6;
+}
+.script-body ul {
+  margin: 0.5em 0 0.75em 1.25rem;
+}
+.script-body li { margin: 0.25em 0; }
+.script-body strong { font-weight: 600; }
+.script-body { font-size: 1rem; color: #111827; }
