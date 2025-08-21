@@ -700,25 +700,57 @@ ${callNotes || "(none)"}`
 
       if (validated && validated.success) {
         const S = validated.data.sections;
-        const md =
-          "## Opening\n" + ensureThanksClose(stripPleasantries(S.opening)).replace(/\s*thank you for your time\.?$/i, "") + "\n\n" +
+
+        // 1) assemble markdown from JSON sections
+        let md =
+          "## Opening\n" + stripPleasantries(S.opening).replace(/\s*thank you for your time\.?$/i, "") + "\n\n" +
           "## Buyer Pain\n" + stripPleasantries(S.buyer_pain) + "\n\n" +
           "## Buyer Desire\n" + stripPleasantries(S.buyer_desire) + "\n\n" +
           "## Example Illustration\n" + stripPleasantries(S.example_illustration) + "\n\n" +
           "## Handling Objections\n" + stripPleasantries(S.handling_objections) + "\n\n" +
           "## Next Step\n" + stripPleasantries(S.next_step) + "\n";
 
-        const finalMd = targetWords ? trimToTargetWords(md, targetWords) : md;
+        // 2) ensure canonical anchors exist so injections have a target
+        md = ensureHeadings(md);
 
+        // 3) deterministic weaving of salesperson inputs (same as fallback)
+        //    a) Next Step: salesperson > template > assistant (we hard-set if provided)
+        if (nextStep && String(nextStep).trim()) {
+          md = replaceSection(md, "Next Step", String(nextStep).trim());
+        }
+
+        //    b) USPs under Buyer Desire (intro + bullets)
+        if (valueProposition && String(valueProposition).trim()) {
+          md = injectBullets(
+            md,
+            "Buyer Desire",
+            "Based on your priorities, we can emphasise:",
+            valueProposition
+          );
+        }
+
+        //    c) Other points under Opening (intro + bullets)
+        if (otherContext && String(otherContext).trim()) {
+          md = injectBullets(
+            md,
+            "Opening",
+            "I'll also make sure we cover:",
+            otherContext
+          );
+        }
+
+        // 4) final tidy-up: length control and a single clean close line
+        if (targetWords) {
+          md = trimToTargetWords(md, targetWords);
+        }
+        md = ensureThanksClose(md);
+
+        // 5) return (tips from JSON are preserved)
         context.res = {
           status: 200,
           headers: cors,
           body: {
-            script: {
-              text: finalMd,
-              tips: validated.data.tips,
-              outline: validated.data.summary_bullets || []   // <— NEW
-            },
+            script: { text: md, tips: validated.data.tips },
             version: VERSION,
             usedModel: true,
             mode: "json"
