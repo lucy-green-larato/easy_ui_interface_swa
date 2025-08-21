@@ -74,6 +74,40 @@ function injectBullets(text, name, intro, items) {
   return `${text.trim()}\n\n## ${name}\n\n${injection}`;
 }
 
+// --- Natural weaving helpers (no bullets) ---
+function toOxford(items) {
+  const a = (items || []).map(s => String(s).trim()).filter(Boolean);
+  if (a.length <= 1) return a.join("");
+  if (a.length === 2) return `${a[0]} and ${a[1]}`;
+  return `${a.slice(0, -1).join(", ")}, and ${a[a.length - 1]}`;
+}
+
+function ensureSentence(s) {
+  const t = String(s || "").trim();
+  if (!t) return "";
+  return /[.!?]$/.test(t) ? t : t + ".";
+}
+
+// Get current section body
+function getSectionBody(text, name) {
+  const h = name.replace(/\s+/g, "\\s+");
+  const rx = new RegExp(
+    `(^|\\n)##\\s*${h}\\b[\\t ]*\\n([\\s\\S]*?)(?=\\n##\\s*[A-Za-z]|$)`,
+    "i"
+  );
+  const m = String(text || "").match(rx);
+  return m ? String(m[2] || "").trim() : "";
+}
+
+// Append a sentence to a section (keeps existing content)
+function appendSentenceToSection(text, name, sentence) {
+  const body = getSectionBody(text, name);
+  const newBody = body
+    ? (body + (/\n$/.test(body) ? "" : "\n") + "\n" + ensureSentence(sentence))
+    : ensureSentence(sentence);
+  return replaceSection(text, name, newBody);
+}
+
 function englishList(items) {
   const arr = (items || []).map(s => String(s || "").trim()).filter(Boolean);
   if (arr.length <= 1) return arr[0] || "";
@@ -342,7 +376,7 @@ function buildPromptFromMarkdown(args) {
     "MANDATES:\n" +
     "- Use professional British business English; no Americanisms; no assumptive closes.\n" +
     "- Never include pleasantries or check-ins such as \"I hope you are well\", \"Are you well?\", \"Hope you're doing well\", \"How are you?\", \"Trust you are well\". Start directly.\n" +
-    "- Open with: Hi " + prospect.name + ", it’s " + seller.name + " from " + seller.company + ".\n" +
+    "- Open with: Hello " + prospect.name + ", it’s " + seller.name + " from " + seller.company + ".\n" +
     "- Elegantly weave the USPs and Other points where they make sense in context; do not ignore them if provided.\n" +
     "- Include one specific, relevant customer example with measurable results.\n" +
     "- Handle common objections factually and without pressure.\n" +
@@ -404,7 +438,7 @@ Constraints:
 - Tone: ${tone}.
 - UK business English only. No Americanisms. No pleasantries (“Hope you’re well”, “How are you?”, etc.).
 - Do not use filler lines like “Is there anything else I can help with?”
-- Open with: "Hi ${prospect.name}, it’s ${seller.name} from ${seller.company}."
+- Open with: "Hello ${prospect.name}, it’s ${seller.name} from ${seller.company}."
 - Sections to cover (your JSON keys map to these): opening, buyer_pain, buyer_desire, example_illustration, handling_objections, next_step.
 - **Weave** the salesperson inputs (USPs & Other points) into the most relevant sections **as natural sentences**. Do **not** dump them as separate bullet lists.
 - Next step precedence: (1) salesperson-provided; else (2) template <!-- suggested_next_step -->; else (3) a clear, low-friction next step.
@@ -701,7 +735,7 @@ ${callNotes || "(none)"}`
       if (validated && validated.success) {
         const S = validated.data.sections;
 
-        // 1) assemble markdown from JSON sections
+        // 1) assemble markdown from JSON sections (no pleasantries, no stray “Thank you…” in Opening)
         let md =
           "## Opening\n" + stripPleasantries(S.opening).replace(/\s*thank you for your time\.?$/i, "") + "\n\n" +
           "## Buyer Pain\n" + stripPleasantries(S.buyer_pain) + "\n\n" +
@@ -713,44 +747,41 @@ ${callNotes || "(none)"}`
         // 2) ensure canonical anchors exist so injections have a target
         md = ensureHeadings(md);
 
-        // 3) deterministic weaving of salesperson inputs (same as fallback)
-        //    a) Next Step: salesperson > template > assistant (we hard-set if provided)
+        // 3) Next Step precedence: salesperson > template suggestion > assistant text
         if (nextStep && String(nextStep).trim()) {
           md = replaceSection(md, "Next Step", String(nextStep).trim());
+        } else if (suggestedNext && String(suggestedNext).trim()) {
+          md = replaceSection(md, "Next Step", String(suggestedNext).trim());
         }
 
-        //    b) USPs under Buyer Desire (intro + bullets)
+        // 4) Weave salesperson inputs as NATURAL sentences (no bullet dumping)
         if (valueProposition && String(valueProposition).trim()) {
-          md = injectBullets(
-            md,
-            "Buyer Desire",
-            "Based on your priorities, we can emphasise:",
-            valueProposition
-          );
+          const uspItems = splitList(valueProposition);
+          if (uspItems.length) {
+            // e.g. “In terms of differentiators, we can emphasise Starlink for remote connectivity.”
+            const uspSentence = `In terms of differentiators, we can emphasise ${toOxford(uspItems)}`;
+            md = appendSentenceToSection(md, "Buyer Desire", uspSentence);
+          }
         }
-
-        //    c) Other points under Opening (intro + bullets)
         if (otherContext && String(otherContext).trim()) {
-          md = injectBullets(
-            md,
-            "Opening",
-            "I'll also make sure we cover:",
-            otherContext
-          );
+          const ctxItems = splitList(otherContext);
+          if (ctxItems.length) {
+            // e.g. “We'll also cover contract portability and self-serve provisioning.”
+            const ctxSentence = `We'll also cover ${toOxford(ctxItems)}`;
+            md = appendSentenceToSection(md, "Opening", ctxSentence);
+          }
         }
 
-        // 4) final tidy-up: length control and a single clean close line
-        if (targetWords) {
-          md = trimToTargetWords(md, targetWords);
-        }
-        md = ensureThanksClose(md);
+        // 5) Length control AFTER weaving, then ensure a single clean closing line
+        let woven = targetWords ? trimToTargetWords(md, targetWords) : md;
+        const finalMd = ensureThanksClose(woven);
 
-        // 5) return (tips from JSON are preserved)
+        // 6) Return
         context.res = {
           status: 200,
           headers: cors,
           body: {
-            script: { text: md, tips: validated.data.tips },
+            script: { text: finalMd, tips: validated.data.tips },
             version: VERSION,
             usedModel: true,
             mode: "json"
@@ -846,27 +877,21 @@ ${callNotes || "(none)"}`
         return text.replace(full, m[1] + "## " + sectionName + "\n" + newBody);
       }
 
-      // 3) Deterministically weave salesperson inputs (natural sentences, not bullets)
-      const uspsArr = splitList(valueProposition);
-      const otherArr = splitList(otherContext);
-
-      // Only inject if NONE of the terms appear already in the script (case-insensitive)
-      if (uspsArr.length && !containsAny(scriptText, uspsArr)) {
-        const list = englishList(uspsArr);
-        // Opening: a light, contextual bridge
-        const lineOpening = `From our side, we can also bring in ${list} where it’s the pragmatic fit.`;
-        // Buyer Desire: tie to outcomes/admin
-        const lineDesire = `If helpful, we can weave in ${list} so your team gets the outcome without extra admin.`;
-        scriptText = injectSentences(scriptText, "Opening", lineOpening);
-        scriptText = injectSentences(scriptText, "Buyer Desire", lineDesire);
+      // 3) Weave salesperson inputs as natural sentences (no bullets)
+      if (valueProposition && String(valueProposition).trim()) {
+        const uspItems = splitList(valueProposition);
+        if (uspItems.length) {
+          const uspSentence = `In terms of differentiators, we can emphasise ${toOxford(uspItems)}`;
+          scriptText = appendSentenceToSection(scriptText, "Buyer Desire", uspSentence);
+        }
       }
-
-      if (otherArr.length && !containsAny(scriptText, otherArr)) {
-        const list = englishList(otherArr);
-        const line = `I’ll also make sure we cover ${list}.`;
-        scriptText = injectSentences(scriptText, "Opening", line);
+      if (otherContext && String(otherContext).trim()) {
+        const ctxItems = splitList(otherContext);
+        if (ctxItems.length) {
+          const ctxSentence = `We'll also cover ${toOxford(ctxItems)}`;
+          scriptText = appendSentenceToSection(scriptText, "Opening", ctxSentence);
+        }
       }
-
 
       // 4) Length control AFTER we’ve woven content (so limit applies to the final script)
       if (targetWords) {
