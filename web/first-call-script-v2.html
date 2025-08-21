@@ -998,67 +998,151 @@
           const script = data?.script?.text || "";
           const tips = data?.script?.tips || [];
 
-          // --- formatting helpers ---
+          /* ---------- ROBUST SCRIPT RENDERER ---------- */
+          const REQUIRED_ORDER = [
+            "Opening",
+            "Buyer Pain",
+            "Buyer Desire",
+            "Example Illustration",
+            "Value Proof",
+            "Objections",
+            "Next steps"
+          ];
+
           const escapeHtml = (s) =>
             String(s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
           const strongify = (s) =>
-            s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+            // only convert clearly matched **bold**; avoid runaway matches
+            s.replace(/\*\*([^\*\n][\s\S]*?)\*\*/g, "<strong>$1</strong>");
 
-          function formatScript(raw) {
-            if (!raw) return "";
-
-            // 1) Normalise: force new lines before headings and list items even if API returned one long line
-            let s = String(raw)
+          function normalise(raw) {
+            // Force line breaks before headings and bullets even if backend returns one long line
+            return String(raw || "")
               .replace(/\r/g, "")
-              // ensure "… . ## Heading" → "\n\n## Heading"
-              .replace(/\s*##\s+/g, "\n\n## ")
-              // turn inline " - Item" into newline list items
-              .replace(/(\S)\s-\s(?=[A-Za-z0-9])/g, "$1\n- ")
-              // collapse stray spaces before newlines
+              .replace(/\s*##\s+/g, "\n\n## ")  // "... ## Heading" -> "\n\n## Heading"
+              .replace(/(?:^|[^\n])\s-\s(?=\S)/g, m => (m.endsWith("- ") ? m : m.replace(/\s-\s/, "\n- "))) // " - item" -> "\n- item"
               .replace(/[ \t]+\n/g, "\n")
               .trim();
+          }
 
+          function parseSections(raw) {
+            const s = normalise(raw);
             const lines = s.split("\n");
-            const out = [];
+
+            const sections = [];
+            let current = null;
             let inList = false;
 
-            const closeList = () => { if (inList) { out.push("</ul>"); inList = false; } };
-
-            for (let line of lines) {
-              line = line.trim();
-              if (!line) { closeList(); continue; }
-
-              // Headings like "## Buyer Pain"
-              if (line.startsWith("## ")) {
-                closeList();
-                out.push(`<h3>${escapeHtml(line.slice(3))}</h3>`);
-                continue;
+            const pushCurrent = () => {
+              if (current) {
+                if (!current.paras.length && !current.list.length) return;
+                sections.push(current);
               }
+            };
 
-              // List items "- Something"
-              if (line.startsWith("- ")) {
-                if (!inList) { out.push("<ul>"); inList = true; }
-                // bold inside list
-                out.push(`<li>${strongify(escapeHtml(line.slice(2)))}</li>`);
-                continue;
+            const startSection = (title) => {
+              if (current) {
+                if (inList) inList = false;
+                pushCurrent();
               }
+              current = { title, paras: [], list: [] };
+            };
 
-              // Paragraph (with **bold** support)
-              closeList();
-              out.push(`<p>${strongify(escapeHtml(line))}</p>`);
+            // If the very first token looks like plain text starting with "Opening", treat it as a section
+            // Otherwise we’ll create "Opening" from the first paragraph block
+            let firstNonEmpty = lines.find(l => l.trim());
+            if (firstNonEmpty && !firstNonEmpty.startsWith("## ")) {
+              if (/^opening\b/i.test(firstNonEmpty.trim())) {
+                startSection("Opening");
+              } else {
+                startSection("Opening");
+              }
             }
-            closeList();
 
-            return `<div class="script-body">${out.join("")}</div>`;
+            for (let rawLine of lines) {
+              let line = rawLine.trim();
+              if (!line) { inList = false; continue; }
+
+              if (line.startsWith("## ")) {
+                const title = line.slice(3).trim();
+                startSection(title);
+                continue;
+              }
+
+              if (line.startsWith("- ")) {
+                if (!current) startSection("Opening");
+                current.list.push(line.slice(2).trim());
+                inList = true;
+                continue;
+              }
+
+              if (!current) startSection("Opening");
+              current.paras.push(line);
+              inList = false;
+            }
+            pushCurrent();
+
+            return sections;
+          }
+
+          function renderSections(raw) {
+            const sections = parseSections(raw);
+
+            // Map by lowercase title for lookup
+            const map = new Map(
+              sections.map(s => [s.title.toLowerCase(), s])
+            );
+
+            // Helper to fuzzy-find a section by common aliases
+            const get = (name) => {
+              const key = name.toLowerCase();
+              if (map.has(key)) return map.get(key);
+              // fuzzy aliases
+              for (const [k, v] of map.entries()) {
+                if (k.includes(key) || key.includes(k)) return v; // e.g. "next step" vs "next steps"
+              }
+              return null;
+            };
+
+            const found = [];
+            const missing = [];
+
+            const blocks = [];
+            for (const wanted of REQUIRED_ORDER) {
+              const sec = get(wanted);
+              if (sec) {
+                found.push(wanted);
+                const body = [
+                  ...sec.paras.map(p => `<p>${strongify(escapeHtml(p))}</p>`),
+                  ...(sec.list.length
+                    ? [`<ul>${sec.list.map(li => `<li>${strongify(escapeHtml(li))}</li>`).join("")}</ul>`]
+                    : [])
+                ].join("");
+                blocks.push(`<section class="script-sec"><h3>${escapeHtml(sec.title)}</h3>${body}</section>`);
+              } else {
+                missing.push(wanted);
+                // Don’t invent content — show a placeholder to make the gap explicit
+                blocks.push(`<section class="script-sec is-missing"><h3>${escapeHtml(wanted)}</h3><p class="muted">Not provided in the generated script.</p></section>`);
+              }
+            }
+
+            return {
+              html: `<div class="script-body">${blocks.join("")}</div>`,
+              found, missing
+            };
           }
 
           // ---- render to DOM ----
-          const html = formatScript(script);
-          outputEl.innerHTML = html;
-          modalScript.innerHTML = html;
+          const rendered = renderSections(script);
+          outputEl.innerHTML = rendered.html;
+          modalScript.innerHTML = rendered.html;
 
           outputMeta.textContent =
             `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
+
+          // Show a tiny diagnostics line in the console so you can verify completeness
+          console.info("[ScriptSections] found:", rendered.found, "missing:", rendered.missing);
 
           // tips
           tipsList.innerHTML = "";
