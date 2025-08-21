@@ -1057,228 +1057,223 @@
 
             const sections = [];
             let current = null;
-            let inList = false;
 
             const pushCurrent = () => {
               if (current && (current.paras.length || current.list.length)) sections.push(current);
             };
             const startSection = (title) => {
-              if (current) { inList = false; pushCurrent(); }
+              if (current) pushCurrent();
               current = { title, paras: [], list: [] };
             };
 
-            // Map many aliases to your six canonical titles
+            // Map aliases -> canonical
             const CANON = new Map([
               ["opening", "Opening"],
               ["buyer pain", "Buyer Pain"], ["pains", "Buyer Pain"], ["pain", "Buyer Pain"],
               ["buyer desire", "Buyer Desire"], ["desire", "Buyer Desire"], ["goals", "Buyer Desire"],
               ["example illustration", "Example Illustration"], ["example", "Example Illustration"], ["case study", "Example Illustration"],
               ["handling objections", "Handling Objections"], ["objections", "Handling Objections"], ["objection handling", "Handling Objections"],
-              ["next step", "Next Step"], ["next steps", "Next Step"], ["call to action", "Next Step"], ["cta", "Next Step"]
+              ["next step", "Next Step"], ["next steps", "Next Step"], ["call to action", "Next Step"], ["cta", "Next Step"],
             ]);
 
-            // Accept ##/###/bold and capture text after heading on same line
+            // STRICT: only match known headings; capture any same-line content
             const HEADING_RX =
-              /^(?:#{2,}\s*|\*\*\s*|__\s*)?([A-Za-z ]+?)\b[:\s]*?(.*)$/;
+              /^(?:#{2,}\s*|\*\*\s*|__\s*)?(opening|buyer pain|buyer desire|example illustration|handling objections|objections|next step|next steps|call to action|cta)\b[:\s-]*?(.*)$/i;
 
             // If first non-empty line isn't a recognised heading, start with Opening
             const firstNonEmpty = lines.find(l => l.trim());
             if (firstNonEmpty) {
               const m0 = firstNonEmpty.trim().match(HEADING_RX);
-              const key0 = m0 ? (m0[1] || "").toLowerCase().trim() : "";
-              if (!CANON.has(key0)) startSection("Opening");
+              const canon0 = m0 ? CANON.get((m0[1] || "").toLowerCase().trim()) : null;
+              if (!canon0) startSection("Opening");
             }
 
-            for (let rawLine of lines) {
-              let line = rawLine.trim();
-              if (!line) { inList = false; continue; }
+            for (const rawLine of lines) {
+              const line = rawLine.trim();
+              if (!line) continue;
 
-              // --- Heading line (with optional first sentence on same line)
+              // Heading (with optional first sentence on same line)
               const m = line.match(HEADING_RX);
               if (m) {
-                const key = (m[1] || "").toLowerCase().trim();
-                const canon = CANON.get(key);
+                const canon = CANON.get((m[1] || "").toLowerCase().trim());
                 if (canon) {
-                  if (current && (current.paras.length || current.list.length)) sections.push(current);
+                  pushCurrent();
                   current = { title: canon, paras: [], list: [] };
-                  inList = false;
                   const rest = (m[2] || "").trim();
                   if (rest) current.paras.push(rest);
                   continue;
                 }
               }
 
-              // --- Bullet list item
+              // Bullet item
               if (line.startsWith("- ")) {
                 if (!current) startSection("Opening");
                 current.list.push(line.slice(2).trim());
-                inList = true;
                 continue;
               }
 
-              // --- Normal paragraph
+              // Normal paragraph
               if (!current) startSection("Opening");
               current.paras.push(line);
-              inList = false;
             }
-            pushCurrent();
 
+            pushCurrent();
             return sections;
           }
 
           function toKey(s) { return String(s || "").trim().toLowerCase(); }
 
-          function renderSections(raw, valuesForFallback) {
-            const sections = parseSections(raw);
+        function renderSections(raw, valuesForFallback) {
+          const sections = parseSections(raw);
 
-            // Build a lookup map from many possible aliases -> the actual captured section
-            const byAlias = new Map();  // alias(lowercased) -> section
-            for (const sec of sections) {
-              const titleLc = toKey(sec.title);
-              // index by its own title
-              if (!byAlias.has(titleLc)) byAlias.set(titleLc, sec);
-              // and by split words combos to be forgiving
-              // (not strictly necessary, aliases below are the main thing)
-            }
+          // Build a lookup map from many possible aliases -> the actual captured section
+          const byAlias = new Map();  // alias(lowercased) -> section
+          for (const sec of sections) {
+            const titleLc = toKey(sec.title);
+            // index by its own title
+            if (!byAlias.has(titleLc)) byAlias.set(titleLc, sec);
+            // and by split words combos to be forgiving
+            // (not strictly necessary, aliases below are the main thing)
+          }
 
-            // Helper: get the first available section that matches any alias set
-            function getByAliases(canonName) {
-              const aliases = SECTION_ALIASES[canonName] || [canonName];
-              for (const a of aliases) {
-                const hit = byAlias.get(toKey(a));
-                if (hit) return hit;
-                // also allow "contains" to catch small pluralisation differences
-                for (const [k, v] of byAlias.entries()) {
-                  if (k.includes(toKey(a)) || toKey(a).includes(k)) return v;
-                }
+          // Helper: get the first available section that matches any alias set
+          function getByAliases(canonName) {
+            const aliases = SECTION_ALIASES[canonName] || [canonName];
+            for (const a of aliases) {
+              const hit = byAlias.get(toKey(a));
+              if (hit) return hit;
+              // also allow "contains" to catch small pluralisation differences
+              for (const [k, v] of byAlias.entries()) {
+                if (k.includes(toKey(a)) || toKey(a).includes(k)) return v;
               }
-              return null;
             }
+            return null;
+          }
 
-            const blocks = [];
-            const found = [];
-            const missing = [];
+          const blocks = [];
+          const found = [];
+          const missing = [];
 
-            for (const canonName of REQUIRED_CANON) {
-              const sec = getByAliases(canonName);
-              if (sec) {
-                found.push(canonName);
-                const body = [
-                  ...sec.paras.map(p => `<p>${strongify(escapeHtml(p))}</p>`),
-                  ...(sec.list.length
-                    ? [`<ul>${sec.list.map(li => `<li>${strongify(escapeHtml(li))}</li>`).join("")}</ul>`]
-                    : [])
-                ].join("");
-                blocks.push(`<section class="script-sec"><h3>${escapeHtml(canonName)}</h3>${body}</section>`);
+          for (const canonName of REQUIRED_CANON) {
+            const sec = getByAliases(canonName);
+            if (sec) {
+              found.push(canonName);
+              const body = [
+                ...sec.paras.map(p => `<p>${strongify(escapeHtml(p))}</p>`),
+                ...(sec.list.length
+                  ? [`<ul>${sec.list.map(li => `<li>${strongify(escapeHtml(li))}</li>`).join("")}</ul>`]
+                  : [])
+              ].join("");
+              blocks.push(`<section class="script-sec"><h3>${escapeHtml(canonName)}</h3>${body}</section>`);
+            } else {
+              missing.push(canonName);
+              // Friendly fallbacks:
+              if (canonName === "Next Step") {
+                const nx = valuesForFallback?.next_step || "";
+                const p = nx
+                  ? `<p>${strongify(escapeHtml(nx))}</p>`
+                  : `<p class="muted">Not provided in the generated script.</p>`;
+                blocks.push(`<section class="script-sec is-missing"><h3>Next Step</h3>${p}</section>`);
               } else {
-                missing.push(canonName);
-                // Friendly fallbacks:
-                if (canonName === "Next Step") {
-                  const nx = valuesForFallback?.next_step || "";
-                  const p = nx
-                    ? `<p>${strongify(escapeHtml(nx))}</p>`
-                    : `<p class="muted">Not provided in the generated script.</p>`;
-                  blocks.push(`<section class="script-sec is-missing"><h3>Next Step</h3>${p}</section>`);
-                } else {
-                  blocks.push(`<section class="script-sec is-missing"><h3>${escapeHtml(canonName)}</h3><p class="muted">Not provided in the generated script.</p></section>`);
-                }
+                blocks.push(`<section class="script-sec is-missing"><h3>${escapeHtml(canonName)}</h3><p class="muted">Not provided in the generated script.</p></section>`);
               }
             }
-
-            return {
-              html: `<div class="script-body">${blocks.join("")}</div>`,
-              found, missing
-            };
           }
 
-          // ---- render to DOM ----
-          const rendered = renderSections(script, values /* pass form values so Next Step can fallback */);
-          outputEl.innerHTML = rendered.html;
-          modalScript.innerHTML = rendered.html;
-          // Guard-rail: if we recognised none of the required sections, show a clear error
-          if (!rendered.found || rendered.found.length === 0) {
-            throw new Error("The generated script did not contain the expected '##' headings. Please try again.");
-          }
-
-          outputMeta.textContent =
-            `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
-
-          console.info("[ScriptSections] found:", rendered.found, "missing:", rendered.missing);
-
-          // tips
-          tipsList.innerHTML = "";
-          (tips || []).forEach((t) => {
-            const li = document.createElement("li");
-            li.textContent = t;
-            tipsList.appendChild(li);
-          });
-
-          // delta + activity (unchanged)
-          const delta = computeDelta(lastOutput, script);
-          renderDelta(delta);
-          lastOutput = script;
-          localStorage.setItem(OUTPUT_KEY, lastOutput);
-
-          addActivity({
-            time: nowTime(),
-            product: productId,
-            buyer_behaviour: values.buyer_behaviour || "—",
-            length: values.length || "—",
-          });
-
-          setStatus("Done. (Generated from API)");
-          setBusy(false);
-          document.getElementById("output-title")?.focus();
-        } catch (err) {
-          setStatus("Could not generate a call script. See Diagnostics for details.", "error");
-          if (diag) { diag.open = true; diagJson.textContent = String(err?.message || err); }
-          setBusy(false);
+          return {
+            html: `<div class="script-body">${blocks.join("")}</div>`,
+            found, missing
+          };
         }
+
+        // ---- render to DOM ----
+        const rendered = renderSections(script, values /* pass form values so Next Step can fallback */);
+      outputEl.innerHTML = rendered.html;
+      modalScript.innerHTML = rendered.html;
+      // Guard-rail: if we recognised none of the required sections, show a clear error
+      if (!rendered.found || rendered.found.length === 0) {
+        throw new Error("The generated script did not contain the expected '##' headings. Please try again.");
+      }
+
+      outputMeta.textContent =
+        `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
+
+      console.info("[ScriptSections] found:", rendered.found, "missing:", rendered.missing);
+
+      // tips
+      tipsList.innerHTML = "";
+      (tips || []).forEach((t) => {
+        const li = document.createElement("li");
+        li.textContent = t;
+        tipsList.appendChild(li);
       });
 
-      // ---------- Init ----------
-      (async function init() {
-        // Optional: populate user badge (no-op if not signed in)
-        try {
-          const me = await fetch('/.auth/me', { cache: 'no-store' });
-          const j = await me.json();
-          const email = j?.clientPrincipal?.userDetails || j?.clientPrincipal?.identityProvider || '';
-          if (email && userBadge && userEmail) { userEmail.textContent = email; userBadge.classList.remove('is-hidden'); }
-        } catch { }
+      // delta + activity (unchanged)
+      const delta = computeDelta(lastOutput, script);
+      renderDelta(delta);
+      lastOutput = script;
+      localStorage.setItem(OUTPUT_KEY, lastOutput);
 
-        // Buyer needs preload
-        try {
-          const res = await fetch(INTEL_URL, { cache: 'no-store' });
-          const raw = await res.json();
-          intel = normaliseIntel(raw);
-        } catch { intel = { products: {} }; }
+      addActivity({
+        time: nowTime(),
+        product: productId,
+        buyer_behaviour: values.buyer_behaviour || "—",
+        length: values.length || "—",
+      });
 
-        loadForm(); loadCallPref();
-        const currentMode = modeFromCallType(callTypeSel?.value || 'direct');
-        await populateProductsForMode(currentMode);
+      setStatus("Done. (Generated from API)");
+      setBusy(false);
+      document.getElementById("output-title")?.focus();
+    } catch (err) {
+      setStatus("Could not generate a call script. See Diagnostics for details.", "error");
+      if (diag) { diag.open = true; diagJson.textContent = String(err?.message || err); }
+      setBusy(false);
+    }
+    });
 
-        if (productSel?.value && buyerBehSel?.value) {
-          const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
-          renderIntel(label, buyerBehSel.value);
-        }
+    // ---------- Init ----------
+    (async function init() {
+      // Optional: populate user badge (no-op if not signed in)
+      try {
+        const me = await fetch('/.auth/me', { cache: 'no-store' });
+        const j = await me.json();
+        const email = j?.clientPrincipal?.userDetails || j?.clientPrincipal?.identityProvider || '';
+        if (email && userBadge && userEmail) { userEmail.textContent = email; userBadge.classList.remove('is-hidden'); }
+      } catch { }
 
-        applyTipsVisibility();
+      // Buyer needs preload
+      try {
+        const res = await fetch(INTEL_URL, { cache: 'no-store' });
+        const raw = await res.json();
+        intel = normaliseIntel(raw);
+      } catch { intel = { products: {} }; }
 
-        const hasText = !!(outputEl?.textContent?.trim());
-        if (copyBtn) copyBtn.disabled = !hasText;
-        if (downloadBtn) downloadBtn.disabled = !hasText;
-        if (submitBtn) submitBtn.disabled = !allRequiredFilled(form);
+      loadForm(); loadCallPref();
+      const currentMode = modeFromCallType(callTypeSel?.value || 'direct');
+      await populateProductsForMode(currentMode);
 
-        // Notes
-        const loadNotesSafe = () => { try { notesArea.value = localStorage.getItem(notesKey()) || ''; } catch { } };
-        loadNotesSafe();
+      if (productSel?.value && buyerBehSel?.value) {
+        const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
+        renderIntel(label, buyerBehSel.value);
+      }
 
-        document.addEventListener('input', (e) => {
-          if (e.target.closest('#' + FORM_ID)) { validateField(e.target); saveForm(); refreshSubmitState(); }
-          if (e.target === callTypeSel) saveCallPrefIfRequested();
-        });
-      })();
+      applyTipsVisibility();
+
+      const hasText = !!(outputEl?.textContent?.trim());
+      if (copyBtn) copyBtn.disabled = !hasText;
+      if (downloadBtn) downloadBtn.disabled = !hasText;
+      if (submitBtn) submitBtn.disabled = !allRequiredFilled(form);
+
+      // Notes
+      const loadNotesSafe = () => { try { notesArea.value = localStorage.getItem(notesKey()) || ''; } catch { } };
+      loadNotesSafe();
+
+      document.addEventListener('input', (e) => {
+        if (e.target.closest('#' + FORM_ID)) { validateField(e.target); saveForm(); refreshSubmitState(); }
+        if (e.target === callTypeSel) saveCallPrefIfRequested();
+      });
     })();
+    }) ();
   </script>
 
 </body>
