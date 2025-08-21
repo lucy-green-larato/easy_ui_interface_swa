@@ -1067,31 +1067,45 @@
               current = { title, paras: [], list: [] };
             };
 
-            // Regex: accept "## Heading" (preferred) and capture any text after it on the same line
-            // Also tolerant to ### / bold (__ / **), but you can remove that if you want to be strict.
-            const HEADING_RX =
-              /^(?:#{2,}\s*|\*\*\s*|__\s*)?(opening|buyer pain|buyer desire|example illustration|handling objections|next step)\b[:\s]*?(.*)$/i;
+            // Map many aliases to your six canonical titles
+            const CANON = new Map([
+              ["opening", "Opening"],
+              ["buyer pain", "Buyer Pain"], ["pains", "Buyer Pain"], ["pain", "Buyer Pain"],
+              ["buyer desire", "Buyer Desire"], ["desire", "Buyer Desire"], ["goals", "Buyer Desire"],
+              ["example illustration", "Example Illustration"], ["example", "Example Illustration"], ["case study", "Example Illustration"],
+              ["handling objections", "Handling Objections"], ["objections", "Handling Objections"], ["objection handling", "Handling Objections"],
+              ["next step", "Next Step"], ["next steps", "Next Step"], ["call to action", "Next Step"], ["cta", "Next Step"]
+            ]);
 
-            // Start with "Opening" if first non-empty line is not a recognised heading
+            // Accept ##/###/bold and capture text after heading on same line
+            const HEADING_RX =
+              /^(?:#{2,}\s*|\*\*\s*|__\s*)?([A-Za-z ]+?)\b[:\s]*?(.*)$/;
+
+            // If first non-empty line isn't a recognised heading, start with Opening
             const firstNonEmpty = lines.find(l => l.trim());
-            if (firstNonEmpty && !HEADING_RX.test(firstNonEmpty.trim())) startSection("Opening");
+            if (firstNonEmpty) {
+              const m0 = firstNonEmpty.trim().match(HEADING_RX);
+              const key0 = m0 ? (m0[1] || "").toLowerCase().trim() : "";
+              if (!CANON.has(key0)) startSection("Opening");
+            }
 
             for (let rawLine of lines) {
               let line = rawLine.trim();
               if (!line) { inList = false; continue; }
 
-              // --- Heading line (may include first sentence on same line)
+              // --- Heading line (with optional first sentence on same line)
               const m = line.match(HEADING_RX);
               if (m) {
-                const canon = m[1].toLowerCase().replace(/\b\w/g, c => c.toUpperCase()); // e.g. "buyer pain" -> "Buyer Pain"
-                // close previous section if it had content
-                if (current && (current.paras.length || current.list.length)) sections.push(current);
-                current = { title: canon, paras: [], list: [] };
-                inList = false;
-
-                const rest = (m[2] || "").trim();     // text after the heading on the same line
-                if (rest) current.paras.push(rest);    // becomes first paragraph of this section
-                continue;
+                const key = (m[1] || "").toLowerCase().trim();
+                const canon = CANON.get(key);
+                if (canon) {
+                  if (current && (current.paras.length || current.list.length)) sections.push(current);
+                  current = { title: canon, paras: [], list: [] };
+                  inList = false;
+                  const rest = (m[2] || "").trim();
+                  if (rest) current.paras.push(rest);
+                  continue;
+                }
               }
 
               // --- Bullet list item
@@ -1102,7 +1116,7 @@
                 continue;
               }
 
-              // --- Normal paragraph line
+              // --- Normal paragraph
               if (!current) startSection("Opening");
               current.paras.push(line);
               inList = false;
