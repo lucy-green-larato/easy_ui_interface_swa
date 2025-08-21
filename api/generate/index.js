@@ -287,7 +287,7 @@ function buildJsonPrompt(args) {
   const lengthLine = targetWords ? `LENGTH: Aim ~${targetWords} words overall (±10%).\n` : "";
 
   return (
-`You are a highly effective UK B2B salesperson.
+    `You are a highly effective UK B2B salesperson.
 
 ${toneLine}${lengthLine}SYNTHESIS GOAL:
 Blend the researched guidance from the template (below) with the salesperson’s inputs. Treat the template as research notes, not text to copy. Rewrite everything in the requested tone.
@@ -524,6 +524,55 @@ module.exports = async function (context, req) {
       const productLabel = String(productId || "").replace(/[_-]+/g, " ").replace(/\b\w/g, function (m) { return m.toUpperCase(); });
 
       // Build prompt (includes salesperson inputs)
+      // ---------- JSON-FIRST PATH ----------
+      const jsonPrompt = buildJsonPrompt({
+        templateMdText,
+        seller: { name: vars.seller_name || "", company: vars.seller_company || "" },
+        prospect: { name: vars.prospect_name || "", role: vars.prospect_role || "", company: vars.prospect_company || "" },
+        productLabel,
+        buyerType,
+        valueProposition,
+        context: otherContext,
+        nextStep,
+        tone,
+        targetWords
+      });
+
+      // Optional: log the first chunk of the prompt to verify variables are in
+      try { context.log("[" + VERSION + "] [PROMPT JSON] " + jsonPrompt.slice(0, 1200)); } catch (e) { }
+
+      let llmJsonRes = null, parsed = null, validated = null;
+      try {
+        llmJsonRes = await callModel({
+          system: "You are a precise assistant that outputs valid JSON only. Never include markdown or prose outside JSON.",
+          prompt: jsonPrompt,
+          temperature: 0.6,
+          response_format: { type: "json_object" }
+        });
+        const raw = extractText(llmJsonRes) || "";
+        parsed = JSON.parse(raw);
+        validated = ScriptJsonSchema.safeParse(parsed);
+      } catch (e) {
+        validated = { success: false, error: e };
+      }
+
+      if (validated && validated.success) {
+        const S = validated.data.sections;
+        // precedence for next step: salesperson > template > assistant (already handled in prompt)
+        const md =
+          "## Opening\n" + ensureThanksClose(stripPleasantries(S.opening)).replace(/\s*thank you for your time\.?$/i, "") + "\n\n" +
+          "## Buyer Pain\n" + stripPleasantries(S.buyer_pain) + "\n\n" +
+          "## Buyer Desire\n" + stripPleasantries(S.buyer_desire) + "\n\n" +
+          "## Example Illustration\n" + stripPleasantries(S.example_illustration) + "\n\n" +
+          "## Handling Objections\n" + stripPleasantries(S.handling_objections) + "\n\n" +
+          "## Next Step\n" + stripPleasantries(S.next_step) + "\n";
+
+        const finalMd = targetWords ? trimToTargetWords(md, targetWords) : md;
+        context.res = { status: 200, headers: cors, body: { script: { text: finalMd, tips: validated.data.tips }, version: VERSION, usedModel: true, mode: "json" } };
+        return;
+      }
+
+      // ---------- FALLBACK: MARKDOWN-FIRST (your existing path) ----------
       const prompt = buildPromptFromMarkdown({
         templateMdText: templateMdText,
         seller: { name: vars.seller_name || "", company: vars.seller_company || "" },
@@ -537,7 +586,6 @@ module.exports = async function (context, req) {
         targetWords: targetWords,
       });
 
-      // Call LLM
       const llmRes = await callModel({
         system:
           "You are a highly effective UK B2B salesperson writing a sales call script.\n" +
@@ -550,12 +598,7 @@ module.exports = async function (context, req) {
       context.log("[" + VERSION + "] model used =", llmRes ? "yes" : "no");
 
       if (!llmRes) {
-        context.res = {
-          status: 503,
-          headers: cors,
-          body: { error: "No model configured", hint: "Set OPENAI_API_KEY or AZURE_OPENAI_* in local.settings.json / App Settings", version: VERSION },
-          body: { script: { text: scriptText, tips: tips }, version: VERSION, usedModel: !!llmRes }
-        };
+        context.res = { status: 503, headers: cors, body: { error: "No model configured", hint: "Set OPENAI_API_KEY or AZURE_OPENAI_* in App Settings", version: VERSION, usedModel: false } };
         return;
       }
 
@@ -588,7 +631,7 @@ module.exports = async function (context, req) {
         }
       }
 
-      context.res = { status: 200, headers: cors, body: { script: { text: scriptText, tips: tips }, version: VERSION } };
+      context.res = { status: 200, headers: cors, body: { script: { text: scriptText, tips }, version: VERSION, usedModel: true, mode: "markdown" } };
       return;
     }
 
