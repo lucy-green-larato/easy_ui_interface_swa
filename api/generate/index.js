@@ -53,7 +53,11 @@ async function callModel(opts) {
       },
       body: JSON.stringify({
         temperature: temperature,
-        messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+        response_format: opts.response_format,   // <— add this line
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: prompt }
+        ],
       }),
     });
     let data = {};
@@ -75,7 +79,11 @@ async function callModel(opts) {
       body: JSON.stringify({
         model: oaModel,
         temperature: temperature,
-        messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+        response_format: opts.response_format,   // <— add this line
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: prompt }
+        ],
       }),
     });
     let data = {};
@@ -204,18 +212,20 @@ function buildPromptFromMarkdown(args) {
 
   const toneLine = tone ? 'Write in a "' + tone + '" tone.\n' : "";
   const lengthLine = targetWords ? "Aim for about " + targetWords + " words (±10%).\n" : "";
-  + "Use these exact markdown headings, each on its own line and in this order:\n" +
-    + "## Opening\n" +
-    + "## Buyer Pain\n" +
-    + "## Buyer Desire\n" +
-    + "## Example Illustration\n" +
-    + "## Handling Objections\n" +
-    + "## Next Step\n" +
-    + "Do not change, rename, bold, add punctuation to, or re-level these headings. They must begin with '## ' exactly.\n\n";
 
   return (
-    " You are a highly effective UK B2B salesperson.\n\n" +
+    "You are a highly effective UK B2B salesperson.\n\n" +
     toneLine + lengthLine +
+    // *** enforce headings explicitly ***
+    "Use these exact markdown headings, each on its own line and in this order:\n" +
+    "## Opening\n" +
+    "## Buyer Pain\n" +
+    "## Buyer Desire\n" +
+    "## Example Illustration\n" +
+    "## Handling Objections\n" +
+    "## Next Step\n" +
+    "Do not change, rename, bold, add punctuation to, or re-level these headings. They must begin with '## ' exactly.\n\n" +
+
     "Use the Markdown template below as the skeleton for the call. Preserve the section headings and overall order. Fill the content so it reads as a natural, spoken conversation.\n\n" +
     "MANDATES:\n" +
     "- Use professional British business English; no Americanisms; no assumptive closes.\n" +
@@ -225,7 +235,7 @@ function buildPromptFromMarkdown(args) {
     "- Elegantly weave the USPs and Other points where they make sense in context; do not ignore them if provided.\n" +
     "- Include one specific, relevant customer example with measurable results.\n" +
     "- Handle common objections factually and without pressure.\n" +
-    "- For the \"Next Step\": use the salesperson’s input if provided; otherwise, if the template includes <!-- suggested_next_step: ... --> use that; otherwise propose a clear, low-friction next step.\n" +
+    '- For the "Next Step": use the salesperson’s input if provided; otherwise, if the template includes <!-- suggested_next_step: ... --> use that; otherwise propose a clear, low-friction next step.\n' +
     "Buyer type: " + buyerType + "\n" +
     "Product: " + productLabel + "\n\n" +
     "USPs (from salesperson): " + (valueProposition || "(none provided)") + "\n" +
@@ -239,6 +249,7 @@ function buildPromptFromMarkdown(args) {
     "Provide exactly 3 concise, practical tips (numbered 1., 2., 3.).\n"
   );
 }
+
 
 /* ----------------------------- Legacy schema ---------------------------- */
 
