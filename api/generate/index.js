@@ -1,7 +1,7 @@
 // index.js – Azure Function handler for /api/generate
 // Version: v3-markdown-first-2025-08-20-patch8-fixed (normalized vars; strict buyer; safe base; logs; sanitizer; length trim)
 
-const VERSION = "DEV-verify-2025-08-21-2"; // <-- bump this every edit
+const VERSION = "DEV-verify-2025-08-22-qual-integration-1"; // <-- bump this every edit
 try {
   console.log(`[${VERSION}] module loaded at ${new Date().toISOString()} cwd=${process.cwd()} dir=${__dirname}`);
 } catch { }
@@ -375,7 +375,7 @@ function buildPromptFromMarkdown(args) {
     "Use the Markdown template below as the skeleton for the call. Preserve the section headings and overall order. Fill the content so it reads as a natural, spoken conversation.\n\n" +
     "MANDATES:\n" +
     "- Use professional British business English; no Americanisms; no assumptive closes.\n" +
-    "- Never include pleasantries or check-ins such as \"I hope you are well\", \"Are you well?\", \"Hope you're doing well\", \"How are you?\", \"Trust you are well\". Start directly.\n" +
+    "- Never include pleasantries or check-ins such as \"I hope you are well\", \"Are you well?\", \"How are you?\", \"Hope you're doing well\", \"How are you today?\", \"Trust you are well\". Start directly.\n" +
     "- Open with: Hello " + prospect.name + ", it’s " + seller.name + " from " + seller.company + ".\n" +
     "- Elegantly weave the USPs and Other points where they make sense in context; do not ignore them if provided.\n" +
     "- Include one specific, relevant customer example with measurable results.\n" +
@@ -459,6 +459,179 @@ ${templateMdText}
 --- TEMPLATE END ---
 `
   );
+}
+
+/* ---------------------- NEW small helpers for packs --------------------- */
+
+function linesToList(x){ return (Array.isArray(x)?x:String(x||"").split(/\r?\n/)).map(s=>String(s).trim()).filter(Boolean); }
+function numOrNull(x){ const n = Number(x); return Number.isFinite(n) ? n : null; }
+
+/* -------------------- Prompt builders: qualification/prioritisation -------------------- */
+
+function buildQualificationPrompt(v){
+  const diffs = linesToList(v.differentiation_points || v.differentiation || v.usps);
+  const prereqs = linesToList(v.technical_prerequisites || v.technical_prereqs);
+  const sources = linesToList(v.sources || v.sources_raw);
+
+  return `
+System / Role
+You are a top-performing UK B2B technology salesperson. You sell your own proposition to prospects identified by this tool. Apply guidance differently for direct vs channel motions. Use UK spelling and a professional, concise tone.
+
+Non-negotiables
+- Be specific and evidenced; if data is missing, write "Not found" and state how to source it.
+- No assumptions or generalisations. Tie judgements to a concrete fact from the inputs.
+- Keep headings exactly as specified.
+
+Seller context
+- proposition_name: ${v.proposition_name || "Not provided"}
+- proposition_type: ${v.proposition_type || "Not provided"}
+- typical_deal_size_gbp: ${numOrNull(v.typical_deal_size_gbp) ?? "Not provided"}
+- differentiation_points: ${diffs.join("; ") || "Not provided"}
+- technical_prerequisites: ${prereqs.join("; ") || "Not provided"}
+- territory_or_segment_focus: ${v.territory_or_segment_focus || "Not provided"}
+- sales_motion: ${v.sales_motion || "direct|channel|hybrid (Not provided)"}
+
+Prospect inputs
+- company_name: ${v.company || "Not provided"}
+- company_registration_number: ${v.company_registration_number || "Not provided"}
+- company_website_url: ${v.website || "Not provided"}
+- industry_or_segment: ${v.industry || "Not provided"}
+- sources: ${sources.join(", ") || "(none)"}
+
+What to analyse
+1) Company profile
+   - Size (employees, revenue); segment.
+   - Current tech stack & compatibility with the proposition.
+   - Business model, GTM, stated growth strategy; where the proposition maps best.
+   - Recent commercial performance: revenue, profit, gross & operating margin, cash, net debt; risks/opportunities.
+   - Seniority/authority of contacts (decision-makers vs influencers).
+
+2) Pain points
+   - Concrete challenges and urgency; quantified impact if unresolved.
+   - Evidence from reports/accounts that corroborate the pain and timing.
+
+3) Budget and spend
+   - Capacity to invest; affordability vs typical_deal_size_gbp.
+   - Budget status and commercial model (CAPEX/OPEX).
+
+4) Decision process
+   - Buying committee, approval gates, procurement path, who signs and when.
+
+5) Competition
+   - Incumbents/alternatives; satisfaction level; switching triggers; seller differentiation.
+
+6) Motion-specific checks
+   a) Direct
+      - Buying committee depth; urgency signals; pilot/PoC design & success criteria; security review; procurement steps.
+   b) Channel
+      - Partner map (distributor/reseller/MSP); registration status; economics (margin, services attach, rebates/MDF);
+        enablement (demo, plays, references); risks (conflict/territory/discounting).
+
+7) Trade show signals (if provided)
+   - Events attended; estimated budget & opportunity yield; audience relevance.
+
+Required calculations (use two-year accounts if present)
+- Revenue YoY %, 2-year CAGR %.
+- Gross margin % and operating margin % for both years; direction of travel.
+- Cash ratio, current ratio, net debt / equity.
+- Health flag: Strong | Watch | Weak with one-line justification.
+
+Frameworks
+- BANT: Budget, Authority, Need, Timeline → Pass | Borderline | Fail each.
+- CGP TCI BA: add succinct notes.
+
+Output format (plain text, in this exact order)
+## Executive summary (≤120 words)
+## Evidence (bullets with source & metric)
+## BANT verdict (with one-line rationale each)
+## CGP TCI BA notes (bullets under each letter)
+## Motion plan
+- If direct: PoC/pilot plan, stakeholders to secure, timeline to contract.
+- If channel: partner actions, enablement gaps, MDF/joint campaign options.
+## Risks and blockers (with mitigations)
+## Next actions (3 for next 14 days; 3 for next 30 days)
+## JSON
+Provide a JSON block with:
+{
+  "company": "${v.company || ""}",
+  "reg_no": "${v.company_registration_number || ""}",
+  "sales_motion": "${v.sales_motion || ""}",
+  "icp_fit_score_0_5": <int>,
+  "need_severity_0_5": <int>,
+  "budget_confidence_0_5": <int>,
+  "authority_strength_0_5": <int>,
+  "timeline_urgency_0_5": <int>,
+  "financial_health": {
+    "revenue_yoy_pct": <number>,
+    "cagr_2y_pct": <number>,
+    "gm_pct": {"y1": <number>, "y2": <number>},
+    "op_margin_pct": {"y1": <number>, "y2": <number>},
+    "cash_ratio": <number>,
+    "current_ratio": <number>,
+    "net_debt_to_equity": <number>,
+    "health_flag": "Strong|Watch|Weak"
+  },
+  "motion_specific": {
+    "direct": {
+      "poc_defined": true|false,
+      "security_review_status": "Not started|Planned|In progress|Complete",
+      "implementation_complexity_0_5": <int>
+    },
+    "channel": {
+      "partner_type": "Distributor|Reseller|MSP|VAR",
+      "deal_registration": "Not submitted|Submitted|Accepted|Rejected",
+      "mdf_window_days": <int|null>,
+      "margin_stack_ok": true|false,
+      "conflict_risk": "None|Possible|High"
+    }
+  },
+  "bant": {"B":"Pass|Borderline|Fail","A":"...","N":"...","T":"..."},
+  "key_risks": ["..."],
+  "next_actions": ["..."]
+}
+`.trim();
+}
+
+function buildPrioritisationPrompt(v){
+  // v.opportunities_json should be a JSON array of the qualification JSONs
+  const list = String(v.opportunities_json || "[]");
+  return `
+System / Role
+You are a portfolio-level assessor for a UK technology sales pipeline. Produce an evidence-based priority order across opportunities, adjusting for sales motion (direct vs channel). UK spelling; concise, commercial tone.
+
+Inputs
+- opportunities_json: ${list}
+
+Method
+1) Normalise each 0–5 factor. Mark "Data gap" if missing and apply −10% confidence penalty for that record.
+2) PRIORITY_SCORE (0–100):
+   (20 * icp_fit) + (20 * need_severity) + (12 * timeline_urgency) + (12 * authority_strength) +
+   (10 * budget_confidence) + (10 * strategic_value) + (6 * competition_advantage) +
+   (5 * data_confidence) + (5 * delivery_complexity_inverse).
+3) Motion adjustments
+   - Channel: up to +10 for partner_commitment, deal_registration_status, mdf_timebound_fit, channel_economics; −5 if conflict_risk=High.
+   - Direct: up to +10 for poc_clarity, sponsor_strength, procurement_path_clarity.
+4) Time-bound boosters: +1 momentum if high intent in last 30 days; +1 timeline if event within 45 days.
+5) 2×2 mapping: Value = avg(icp_fit, need_severity, strategic_value); Momentum = avg(timeline, authority, budget).
+   Q1 High/High = High priority; Q2 High/Low = Nurture; Q3 Low/High = Fast-qualify; Q4 Low/Low = Deprioritise.
+6) Financial guardrail: if health_flag=Weak and budget_confidence ≤2, cap at 49 unless authority ≥4 and phased plan exists.
+
+Output (plain text)
+## Portfolio summary (≤130 words)
+## Ranked (top 20)
+Rank | Company | Motion | Priority score | Quadrant | Value | Momentum | Key driver | Risk flag
+## Actions by bucket
+- High priority (Q1): 3 actions this week
+- Nurture (Q2): 3 unlock steps
+- Fast-qualify (Q3): 3 quick tests
+- Deprioritise (Q4): park + re-open signal
+## JSON
+{
+  "generated_on": "YYYY-MM-DD",
+  "ranked": [ { "company":"...", "sales_motion":"...", "priority_score":0, "quadrant":"Q1|Q2|Q3|Q4", "value_score":0, "momentum_score":0, "key_driver":"...", "risk_flag":"None|Budget|Authority|Timing|WeakFinancials|DataGap|ChannelConflict", "notes":"..." } ],
+  "buckets": { "Q1_actions": ["..."], "Q2_actions": ["..."], "Q3_actions": ["..."], "Q4_actions": ["..."] }
+}
+`.trim();
 }
 
 /* ----------------------------- Legacy schema ---------------------------- */
@@ -930,13 +1103,49 @@ ${callNotes || "(none)"}`
       return;
     }
 
-    // ---------- Legacy packs route ----------
-    const parsed = BodySchema.safeParse(body);
-    if (!parsed.success) {
-      context.res = { status: 400, headers: cors, body: { error: "Invalid request body", version: VERSION } };
+    // ---------- Packs route (text responses for qualification/prioritisation) ----------
+    {
+      const parsedPacks = BodySchema.safeParse(body);
+      if (!parsedPacks.success) {
+        context.res = { status: 400, headers: cors, body: { error: "Invalid request body", version: VERSION } };
+        return;
+      }
+      const { pack, template, variables } = parsedPacks.data;
+
+      if (pack === "uk_b2b_sales_core") {
+        let prompt = "";
+        const which = String(template || "").toLowerCase();
+
+        if (which === "opportunity_qualification") {
+          prompt = buildQualificationPrompt(variables || {});
+        } else if (which === "opportunity_prioritisation") {
+          prompt = buildPrioritisationPrompt(variables || {});
+        } else {
+          // Preserve old behaviour for unknown templates within this pack
+          context.res = { status: 200, headers: cors, body: { output: "", preview: "", version: VERSION } };
+          return;
+        }
+
+        const llmRes = await callModel({
+          system: "You are a precise UK B2B sales analyst. Use British English. No pleasantries. Output exactly the sections requested.",
+          prompt,
+          temperature: 0.5
+        });
+
+        const text = stripPleasantries(extractText(llmRes) || "").trim();
+        context.res = {
+          status: 200,
+          headers: { ...cors, "Content-Type": "text/plain; charset=utf-8" },
+          body: text || "(no content)"
+        };
+        return;
+      }
+
+      // For non-matching packs, keep legacy neutral response to avoid breaking anything else
+      context.res = { status: 200, headers: cors, body: { output: "", preview: "", version: VERSION } };
       return;
     }
-    context.res = { status: 200, headers: cors, body: { output: "", preview: "", version: VERSION } };
+
   } catch (err) {
     context.log.error("[" + VERSION + "] Unhandled error: " + (err && err.stack ? err.stack : err));
     context.res = { status: 500, headers: cors, body: { error: "Server error", detail: String(err && err.message ? err.message : err), version: VERSION } };
