@@ -349,3 +349,24 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
 .script-body li { margin: 0.25em 0; }
 .script-body strong { font-weight: 600; }
 .script-body { font-size: 1rem; color: #111827; }
+
+/* --- Mobile header & sales-model fixes --- */
+.field-calltype-xs { display: none; }
+
+/* Let the header wrap on small screens and hide non-essential bits */
+@media (max-width: 680px) {
+  .app-header { flex-wrap: wrap; align-items: flex-start; padding: 8px 12px; }
+  .app-header .header-left { flex: 1 1 100%; min-width: 0; }
+  .app-header .header-right { flex: 1 1 100%; order: 2; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-start; margin-top: 8px; }
+  .app-header .brand-text .app-title { font-size: .95rem; }
+  .app-header .brand-text .kicker { font-size: .8rem; }
+
+  /* Save space in the pill on phones */
+  .calltype-mini .mini-label { display: none; }
+  .model-note, .badge { display: none; }
+
+  /* Prefer the in-form control on phones */
+  .calltype-mini { display: none; }
+  .field-calltype-xs { display: block; }
+}
+
