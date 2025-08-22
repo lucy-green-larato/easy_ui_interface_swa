@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Tools · First Call Script (v2)</title>
   <link rel="stylesheet" href="./styles.css?v=fix4" />
-
   <style>
     :root {
       --right-min: 280px;
@@ -36,7 +35,7 @@
 
     @media (max-width:1200px) {
       .layout {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr
       }
     }
 
@@ -46,16 +45,14 @@
       gap: var(--space-3)
     }
 
-    @media (max-width: 800px) {
+    @media (max-width:800px) {
       .grid-2 {
         grid-template-columns: 1fr
       }
     }
 
-    /* Readable script box */
     .output {
       white-space: normal;
-      /* allow HTML layout */
       background: #fff;
       color: #111827;
       border: 1px solid #e5e7eb;
@@ -64,22 +61,22 @@
       min-height: 260px;
       outline: none;
       font: 16.5px/1.7 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-      letter-spacing: .005em;
+      letter-spacing: .005em
     }
 
     .output h1,
     .output h2,
     .output h3 {
-      margin: .4rem 0 .2rem;
+      margin: .4rem 0 .2rem
     }
 
     .output p {
-      margin: .4rem 0;
+      margin: .4rem 0
     }
 
     .output ul,
     .output ol {
-      margin: .4rem 0 .4rem 1.25rem;
+      margin: .4rem 0 .4rem 1.25rem
     }
 
     .tips-card ul {
@@ -110,60 +107,59 @@
       border: 1px solid var(--surface-3);
       background: #fff;
       outline: none;
-      transition: box-shadow .15s ease, border-color .15s ease;
+      transition: box-shadow .15s ease, border-color .15s ease
     }
 
     input:focus,
     select:focus,
     textarea:focus {
       box-shadow: 0 0 0 2px rgba(36, 88, 230, .35);
-      border-color: var(--accent);
+      border-color: var(--accent)
     }
 
-    /* Header (match screenshot) */
     .app-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       padding: 10px 16px;
       background: #fff;
-      border-bottom: 1px solid #e5e7eb;
+      border-bottom: 1px solid #e5e7eb
     }
 
     .app-header .header-left {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 10px
     }
 
     .app-header .logo {
       height: 24px;
-      width: auto;
+      width: auto
     }
 
     .app-header .brand-text {
-      line-height: 1.15;
+      line-height: 1.15
     }
 
     .app-header .app-title {
       font-size: 1rem;
       font-weight: 600;
-      margin: 0;
+      margin: 0
     }
 
     .app-header .kicker {
       margin: 0;
       color: #6b7280;
-      font-size: .85rem;
+      font-size: .85rem
     }
 
     .app-header .header-right {
       display: flex;
       align-items: center;
       gap: 12px;
+      flex-wrap: wrap
     }
 
-    /* Compact pill (selector + remember) */
     .calltype-mini {
       display: flex;
       align-items: center;
@@ -171,12 +167,12 @@
       padding: 4px 8px;
       border: 1px solid #e5e7eb;
       border-radius: 999px;
-      background: #fff;
+      background: #fff
     }
 
     .calltype-mini .mini-label {
       color: #6b7280;
-      font-size: .85rem;
+      font-size: .85rem
     }
 
     .calltype-mini select {
@@ -185,7 +181,7 @@
       background: #f9fafb;
       padding: 2px 8px;
       border-radius: 999px;
-      font-size: .85rem;
+      font-size: .85rem
     }
 
     .calltype-mini .remember {
@@ -193,37 +189,34 @@
       align-items: center;
       gap: 6px;
       font-size: .85rem;
-      color: #374151;
+      color: #374151
     }
 
-    /* prevent the pill contents from wrapping */
     .calltype-mini,
     .calltype-mini .mini-label {
-      white-space: nowrap;
+      white-space: nowrap
     }
 
-    /* Subtle status chip */
     .model-note {
       color: #374151;
       font-size: .85rem;
       padding: 4px 10px;
       border: 1px solid #e5e7eb;
       border-radius: 999px;
-      background: #f9fafb;
+      background: #f9fafb
     }
 
     .model-note .label {
       color: #6b7280;
-      margin-right: 6px;
+      margin-right: 6px
     }
 
-    /* Optional user badge */
     .badge {
       display: flex;
       align-items: center;
       gap: 6px;
       color: #374151;
-      font-size: .85rem;
+      font-size: .85rem
     }
 
     .badge svg {
@@ -231,32 +224,56 @@
       height: 16px;
       stroke: #6b7280;
       fill: none;
-      stroke-width: 1.5;
+      stroke-width: 1.5
     }
 
     .is-hidden {
-      display: none !important;
+      display: none !important
     }
 
     .error-inline {
       color: #b91c1c;
       font-size: .85rem;
-      margin-left: 8px;
+      margin-left: 8px
     }
 
-    /* TEMP: hide bullet-view + pop-out controls (functionality kept in code) */
+    /* Mobile sales-model fallback */
+    .field-calltype-xs {
+      display: none
+    }
+
+    @media (max-width:640px) {
+      .calltype-mini {
+        display: none
+      }
+
+      .field-calltype-xs {
+        display: block
+      }
+    }
+
+    /* TEMP: hide bullet-view + pop-out controls (functionality intact) */
     #toggle-bullets,
     .bullets-card,
     #outline-card,
     #popout {
-      display: none !important;
+      display: none !important
+    }
+
+    /* Output action row */
+    .output-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+      margin-top: 8px
     }
   </style>
 </head>
 
 <body>
 
-  <!-- HEADER (matches screenshot) -->
+  <!-- HEADER -->
   <header class="app-header" role="banner">
     <div class="header-left">
       <img class="logo" src="./larato-logo.svg" alt="Larato" />
@@ -265,7 +282,6 @@
         <p class="kicker">Sales call scripting and emailing</p>
       </div>
     </div>
-
     <div class="header-right">
       <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
         <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
@@ -275,8 +291,7 @@
           <option>Partner</option>
         </select>
         <label class="remember">
-          <input type="checkbox" id="remember_call_type" form="script-form" />
-          Remember
+          <input type="checkbox" id="remember_call_type" form="script-form" /> Remember
         </label>
         <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
       </div>
@@ -285,6 +300,8 @@
         <span class="label">Sales model in use:</span>
         <strong id="map-label">Direct</strong>
       </span>
+
+      <button id="help" class="btn inline" type="button" title="About this tool">Help</button>
 
       <span id="user-badge" class="badge is-hidden" aria-live="polite" aria-atomic="true">
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -296,7 +313,7 @@
     </div>
   </header>
 
-  <!-- LAYOUT: Form | Script | Buyer needs -->
+  <!-- LAYOUT -->
   <main id="main" class="layout" role="main">
     <!-- LEFT -->
     <section class="panel left" aria-label="Form">
@@ -420,8 +437,7 @@
             <span class="spinner" aria-hidden="true"></span>
           </button>
           <button id="reset" class="btn" type="button">Reset</button>
-          <button id="copy" class="btn" type="button" disabled>Copy</button>
-          <button id="download" class="btn" type="button" disabled>Download .txt</button>
+          <!-- (old Copy/Download moved under script) -->
         </div>
 
         <div id="status" class="status" role="status" aria-live="polite"></div>
@@ -439,16 +455,20 @@
       <div class="row-between output-head">
         <h2 id="output-title">Conversation Guide</h2>
         <div class="row-between" style="gap:8px">
-          <button id="toggle-bullets" class="btn inline" type="button" aria-pressed="false">
-            Show bullet point script
-          </button>
+          <button id="toggle-bullets" class="btn inline" type="button" aria-pressed="false">Show bullet point
+            script</button>
           <button id="popout" class="btn inline" type="button" title="Open script in a clean window">Pop-out</button>
           <div class="meta" id="output-meta" aria-live="polite" style="color:var(--text-2);font-size:.9rem"></div>
         </div>
       </div>
 
-      <!-- CHANGED: pre → div to allow rendered HTML -->
       <div id="output" class="output" tabindex="0" aria-label="Generated script will appear here"></div>
+
+      <!-- Output actions under the script -->
+      <div class="output-actions">
+        <button id="copy-script" class="btn inline" type="button" disabled>Copy script</button>
+        <button id="download-script" class="btn inline" type="button" disabled>Download script</button>
+      </div>
 
       <div class="tips-card card" style="margin-top:var(--space-4)">
         <div class="row-between">
@@ -481,14 +501,86 @@
         <h3>Recent activity</h3>
         <ol id="activity-log" class="activity-log" aria-live="polite" style="margin:0;padding-left:1.25rem"></ol>
       </div>
-      </div>
     </section>
 
     <!-- Script Pop-out Modal -->
     <dialog id="script-modal" class="modal">
       <button id="close-modal" class="btn">Close ×</button>
-      <!-- CHANGED: pre → div to allow rendered HTML -->
       <div id="modal-script" class="output" style="min-height:auto"></div>
+    </dialog>
+
+    <!-- Help Modal -->
+    <dialog id="help-modal" class="modal">
+      <div class="card" style="max-width:700px">
+        <div class="row-between" style="align-items:center">
+          <h3 style="margin:0">About this tool</h3>
+          <button id="help-close" class="btn inline" type="button">Close ×</button>
+        </div>
+        <p><strong>Inside Track Tools – Sales call scripting and emailing</strong> helps you prepare a sharp,
+          buyer-centred conversation guide for sales calls, and then turn your call notes into a concise follow-up
+          email. It blends your inputs (prospect, product, USPs, context and desired next step) with our call-library
+          templates and current buyer intelligence to produce a script you can use immediately.</p>
+
+        <h3>How to use it</h3>
+        <ol>
+          <li><strong>Set the sales model:</strong> choose <em>Direct</em> or <em>Partner</em> at the top.</li>
+          <li><strong>Complete Call details:</strong> your name/company and the prospect’s name, role and company.</li>
+          <li><strong>Targeting:</strong> pick the <em>Product</em> and <em>Buyer behaviour</em>. The <em>Buyer
+              needs</em> panel on the right updates to match.</li>
+          <li><strong>Script preferences:</strong> choose tone and length. Add:
+            <ul>
+              <li><strong>Unique Selling Points</strong> – the core advantages you want emphasised.</li>
+              <li><strong>Other points to cover</strong> – any extra themes or constraints.</li>
+              <li><strong>Your desired next step</strong> – if you have a preferred CTA.</li>
+            </ul>
+          </li>
+          <li><strong>Generate script:</strong> click <em>Generate script</em>. The <em>Conversation Guide</em> appears
+            in the middle, with clear sections (Opening, Buyer Pain, Buyer Desire, Example, Objections, Next Step).</li>
+          <li><strong>Use it:</strong> copy or download the script using the buttons under the guide. The tips card
+            gives three quick coaching pointers.</li>
+          <li><strong>During the call:</strong> type into <em>Call notes</em> (saved locally in your browser).</li>
+          <li><strong>After the call:</strong> click <em>Create follow-up email</em> to generate a short, crisp email
+            that stitches together your script and notes.</li>
+        </ol>
+
+        <h3>What the tool assures</h3>
+        <ul>
+          <li>These tools save you time and assure that every call you make is the best it could be.</li>
+          <li></li>All scripts follow proven best practice sales methods focused on delivering value to the prospect in ways that build trust and lead to well qualified opportunities.</li>
+          <li>You can choose from a professoinal, more corporate tone of language, or a warmer one if you prefer.</li>
+          <li>Uses your <em>Next step</em> if provided. If not, it uses the follow up from the researched sales pitches that are centred on what prospects have said they would value.</li>
+          <li>The scripts produced are an elegant blend of your requirements for the call and the researched sales pitches.</li>
+        </ul>
+
+        <h3>Where the insights come from</h3>
+        <p><strong>Buyer information and behaviours </strong> are refreshed <strong>monthly</strong>. The underlying <strong>sales pitches are researched every six months</strong> across
+          technology buyers and indirect channel players. Together, this gives you a <strong>gold-standard</strong> view
+          of current commercial status, pains, priorities, triggers, proof points, objections and CTAs for each buyer behaviour.</p>
+
+        <h3>Tips for best results</h3>
+        <ul>
+          <li>Be specific in USPs (e.g., “Starlink for remote sites; pooled mobile data across teams”).</li>
+          <li>Use <em>Other points</em> for constraints (timelines, budget signals, existing suppliers) to steer the
+            tone.</li>
+          <li>Always enter a practical <em>Next step</em> if you have one; it takes precedence.</li>
+        </ul>
+
+        <h3>Privacy & storage</h3>
+        <ul>
+          <li><em>Call notes</em> are stored locally in your browser only.</li>
+          <li>The script is generated server-side; if you see a 401 error, sign in again via the Diagnostics link.</li>
+        </ul>
+
+        <h3>Troubleshooting</h3>
+        <ul>
+          <li>If a required field is missing, the status bar will say what to complete.</li>
+          <li>If generation fails, open <em>Diagnostics</em> to view the error and try again.</li>
+          <li>Product list empty? Check you’ve selected the correct sales model (Direct/Partner).</li>
+        </ul>
+
+        <h3>Feedback</h3>
+        <p>We want these tools to be the best for you. If you have ideas for improvements or suggestions that would make this even more valuable to you, please contact us through our website.</p>
+      </div>
     </dialog>
 
     <!-- RIGHT -->
@@ -541,11 +633,11 @@
     </li>
   </template>
 
-  <!-- === SCRIPT: glue UI to Library + API-first generation === -->
+  <!-- === SCRIPT === -->
   <script type="module">
     import { getIndex, loadTemplate, canonical } from "./src/lib/callLibrary.js?v=fix6";
 
-    // ---- define basePrefix once at module scope ----
+    /* basePrefix for subpath hosting */
     const basePrefix = (() => {
       const parts = (location.pathname || "").split("/");
       const last = parts[parts.length - 1] || "";
@@ -553,27 +645,18 @@
       return parts.length > 1 && parts[1] ? `/${parts[1]}` : "";
     })();
 
-    // ====== Module-scope state (shared by handlers) ======
+    // State shared by views (keep on window for pop-out)
     let bulletMode = false;
-    // keep a copy both locally and on window so Pop-out (separate scope) can read it
     let lastRender = { html: "", bulletsHtml: "" };
-    window.lastRender = lastRender;
     window.bulletMode = bulletMode;
+    window.lastRender = lastRender;
 
-    // --- small helpers used by renderers ---
-    const esc = (s) => String(s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-    const strongify = (s) => String(s || "").replace(/\*\*([^\*\n][\s\S]*?)\*\*/g, "<strong>$1</strong>");
+    // Small helpers
+    const esc = s => String(s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const strongify = s => String(s || "").replace(/\*\*([^\*\n][\s\S]*?)\*\*/g, "<strong>$1</strong>");
 
-    // ---------- Parse generated markdown into sections (robust/alias-aware) ----------
-    const REQUIRED_CANON = [
-      "Opening",
-      "Buyer Pain",
-      "Buyer Desire",
-      "Example Illustration",
-      "Handling Objections",
-      "Next Step"
-    ];
-
+    // Canon/aliases
+    const REQUIRED_CANON = ["Opening", "Buyer Pain", "Buyer Desire", "Example Illustration", "Handling Objections", "Next Step"];
     const SECTION_ALIASES = {
       "Opening": ["opening", "introduction"],
       "Buyer Pain": ["buyer pain", "pains", "pain", "challenges", "problems"],
@@ -583,24 +666,22 @@
       "Next Step": ["next step", "next steps", "call to action", "cta"]
     };
 
+    /* Normalise + parse markdown into sections */
     function normaliseMd(raw) {
       return String(raw || "")
         .replace(/\r/g, "")
-        .replace(/\s*##\s+/g, "\n\n## ")         // ensure blank line before headings
+        .replace(/\s*##\s+/g, "\n\n## ")
         .replace(/(?:^|[^\n])\s-\s(?=\S)/g, m => (m.endsWith("- ") ? m : m.replace(/\s-\s/, "\n- ")))
         .replace(/[ \t]+\n/g, "\n")
         .trim();
     }
-
     function parseSections(raw) {
       const s = normaliseMd(raw);
       const lines = s.split("\n");
-
       const sections = [];
       let current = null;
-
       const pushCurrent = () => { if (current && (current.paras.length || current.list.length)) sections.push(current); };
-      const start = (title) => { if (current) pushCurrent(); current = { title, paras: [], list: [] }; };
+      const start = t => { if (current) pushCurrent(); current = { title: t, paras: [], list: [] }; };
 
       const CANON = new Map([
         ["opening", "Opening"],
@@ -610,9 +691,7 @@
         ["handling objections", "Handling Objections"], ["objections", "Handling Objections"],
         ["next step", "Next Step"], ["next steps", "Next Step"], ["call to action", "Next Step"], ["cta", "Next Step"],
       ]);
-
-      const HEADING_RX =
-        /^(?:#{2,}\s*|\*\*\s*|__\s*)?(opening|buyer pain|buyer desire|example illustration|handling objections|objections|next step|next steps|call to action|cta)\b[:\s-]*?(.*)$/i;
+      const HEADING_RX = /^(?:#{2,}\s*|\*\*\s*|__\s*)?(opening|buyer pain|buyer desire|example illustration|handling objections|objections|next step|next steps|call to action|cta)\b[:\s-]*?(.*)$/i;
 
       const firstNonEmpty = lines.find(l => l.trim());
       if (firstNonEmpty) {
@@ -636,7 +715,6 @@
             continue;
           }
         }
-
         if (line.startsWith("- ")) { if (!current) start("Opening"); current.list.push(line.slice(2).trim()); continue; }
         if (!current) start("Opening");
         current.paras.push(line);
@@ -645,27 +723,24 @@
       return sections;
     }
 
-    // ---------- Render full HTML from parsed sections ----------
+    /* Render sections -> HTML */
     function renderSectionsToHtml(rawMd, valuesForFallback) {
       const sections = parseSections(rawMd);
       const byKey = new Map(sections.map(s => [String(s.title).toLowerCase(), s]));
 
-      const blocks = [];
-      const found = [];
-      const missing = [];
-
       const getByAliases = (canonName) => {
         const aliases = SECTION_ALIASES[canonName] || [canonName];
         for (const a of aliases) {
-          const hit = byKey.get(String(a).toLowerCase());
-          if (hit) return hit;
+          const key = String(a).toLowerCase();
+          if (byKey.has(key)) return byKey.get(key);
           for (const [k, v] of byKey.entries()) {
-            if (k.includes(String(a).toLowerCase()) || String(a).toLowerCase().includes(k)) return v;
+            if (k.includes(key) || key.includes(k)) return v;
           }
         }
         return null;
       };
 
+      const blocks = []; const found = []; const missing = [];
       for (const canonName of REQUIRED_CANON) {
         const sec = getByAliases(canonName);
         if (sec) {
@@ -686,89 +761,26 @@
           }
         }
       }
-
-      return {
-        html: `<div class="script-body">${blocks.join("")}</div>`,
-        found,
-        missing,
-        sections
-      };
+      return { html: `<div class="script-body">${blocks.join("")}</div>`, found, missing, sections };
     }
 
-    // ---------- Render a concise “bullet point script” from parsed sections ----------
-    function firstSentence(s, max = 220) {
-      const txt = String(s || "").replace(/\s+/g, " ").trim();
-      if (!txt) return "";
-      const m = txt.match(/^(.{1,220}?[.!?])(\s|$)/);
-      return (m ? m[1] : txt.slice(0, max)).trim();
-    }
-    function sentencesWithNumbers(s, limit = 2) {
-      const parts = String(s || "").split(/(?<=[.!?])\s+/);
-      const hits = parts.filter(x => /\b(\d{1,3}(,\d{3})*|\d+%|£\d+)/.test(x));
-      return hits.slice(0, limit).map(x => x.trim());
-    }
-
+    /* Bullet view (kept for future) */
+    function firstSentence(s, max = 220) { const txt = String(s || "").replace(/\s+/g, " ").trim(); if (!txt) return ""; const m = txt.match(/^(.{1,220}?[.!?])(\s|$)/); return (m ? m[1] : txt.slice(0, max)).trim(); }
+    function sentencesWithNumbers(s, limit = 2) { const parts = String(s || "").split(/(?<=[.!?])\s+/); const hits = parts.filter(x => /\b(\d{1,3}(,\d{3})*|\d+%|£\d+)/.test(x)); return hits.slice(0, limit).map(x => x.trim()); }
     function renderBulletScriptFromSections(sections) {
-      const by = Object.create(null);
-      for (const s of sections) by[(s.title || "").toLowerCase()] = s;
-
+      const by = Object.create(null); for (const s of sections) by[(s.title || "").toLowerCase()] = s;
       const bullets = [];
-
-      // Opening → first sentence
-      if (by["opening"]) {
-        const t = firstSentence(by["opening"].paras.join(" ").trim() || by["opening"].list[0] || "");
-        if (t) bullets.push(t);
-      }
-
-      // Buyer Pain → bullets or sentence
-      if (by["buyer pain"]) {
-        if (by["buyer pain"].list.length) bullets.push(...by["buyer pain"].list.slice(0, 3));
-        else {
-          const t = firstSentence(by["buyer pain"].paras.join(" ").trim());
-          if (t) bullets.push(t);
-        }
-      }
-
-      // Buyer Desire → bullets or sentence
-      if (by["buyer desire"]) {
-        if (by["buyer desire"].list.length) bullets.push(...by["buyer desire"].list.slice(0, 3));
-        else {
-          const t = firstSentence(by["buyer desire"].paras.join(" ").trim());
-          if (t) bullets.push(t);
-        }
-      }
-
-      // Example Illustration → prefer metrics if present
-      if (by["example illustration"]) {
-        const para = by["example illustration"].paras.join(" ").trim();
-        const metricLines = sentencesWithNumbers(para, 2);
-        if (metricLines.length) bullets.push(...metricLines);
-        else {
-          const t = firstSentence(para);
-          if (t) bullets.push("Example: " + t);
-        }
-      }
-
-      // Handling Objections
-      if (by["handling objections"]) {
-        if (by["handling objections"].list.length) bullets.push(...by["handling objections"].list.slice(0, 3));
-        else {
-          const t = firstSentence(by["handling objections"].paras.join(" ").trim());
-          if (t) bullets.push("Objections: " + t);
-        }
-      }
-
-      // Next Step
-      if (by["next step"]) {
-        const t = firstSentence((by["next step"].paras.join(" ") || by["next step"].list.join("; ")).trim());
-        if (t) bullets.push("Next step: " + t);
-      }
-
+      if (by["opening"]) { const t = firstSentence(by["opening"].paras.join(" ").trim() || by["opening"].list[0] || ""); if (t) bullets.push(t); }
+      if (by["buyer pain"]) { if (by["buyer pain"].list.length) bullets.push(...by["buyer pain"].list.slice(0, 3)); else { const t = firstSentence(by["buyer pain"].paras.join(" ").trim()); if (t) bullets.push(t); } }
+      if (by["buyer desire"]) { if (by["buyer desire"].list.length) bullets.push(...by["buyer desire"].list.slice(0, 3)); else { const t = firstSentence(by["buyer desire"].paras.join(" ").trim()); if (t) bullets.push(t); } }
+      if (by["example illustration"]) { const para = by["example illustration"].paras.join(" ").trim(); const metricLines = sentencesWithNumbers(para, 2); if (metricLines.length) bullets.push(...metricLines); else { const t = firstSentence(para); if (t) bullets.push("Example: " + t); } }
+      if (by["handling objections"]) { if (by["handling objections"].list.length) bullets.push(...by["handling objections"].list.slice(0, 3)); else { const t = firstSentence(by["handling objections"].paras.join(" ").trim()); if (t) bullets.push("Objections: " + t); } }
+      if (by["next step"]) { const t = firstSentence((by["next step"].paras.join(" ") || by["next step"].list.join("; ")).trim()); if (t) bullets.push("Next step: " + t); }
       const items = bullets.map(b => `<li>${esc(b)}</li>`).join("");
       return `<div class="script-body"><h3>Bullet point script</h3><ul>${items || "<li>No bulletable content found.</li>"}</ul></div>`;
     }
 
-    // ====== Everything below is your existing UI logic, with a few safe tweaks ======
+    /* Keys */
     const FORM_ID = 'script-form';
     const STORAGE_KEY = 'first_call_script_v2.form';
     const ACTIVITY_KEY = 'first_call_script_v2.activity';
@@ -780,15 +792,14 @@
 
     const REQUIRED = ['call_type', 'seller_name', 'seller_company', 'prospect_name', 'prospect_role', 'prospect_company', 'buyer_behaviour', 'product'];
 
-    // UI refs
+    // Refs
     const form = document.getElementById(FORM_ID);
     const submitBtn = document.getElementById('submit');
     const resetBtn = document.getElementById('reset');
-    const copyBtn = document.getElementById('copy');
-    const downloadBtn = document.getElementById('download');
     const outputEl = document.getElementById('output');
+    const copyScriptBtn = document.getElementById('copy-script');
+    const downloadScriptBtn = document.getElementById('download-script');
     const tipsList = document.getElementById('tips-list');
-    const toggleBulletsBtn = document.getElementById('toggle-bullets');
     const toggleTipsBtn = document.getElementById('toggle-tips');
     const popoutBtn = document.getElementById('popout');
     const notesArea = document.getElementById('notes');
@@ -808,39 +819,37 @@
     const buyerBehSel = document.getElementById('buyer_behaviour');
     const toggleIntelBtn = document.getElementById('toggle-intel');
     const intelBody = document.getElementById('intel-body');
-
     const callTypeSel = document.getElementById('call_type');
     const callTypeSelXs = document.getElementById('call_type_xs');
     const rememberCallType = document.getElementById('remember_call_type');
     const mapLabel = document.getElementById('map-label');
+    const helpBtn = document.getElementById('help');
+    const helpModal = document.getElementById('help-modal');
+    const helpClose = document.getElementById('help-close');
     const userBadge = document.getElementById('user-badge');
     const userEmail = document.getElementById('user-email');
 
-    const modeFromCallType = (v) => canonical.mode(v);
-    const buyerCanon = (v) => canonical.buyer(v);
+    const modeFromCallType = v => canonical.mode(v);
+    const buyerCanon = v => canonical.buyer(v);
     const nowTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     if (closeModal) closeModal.addEventListener("click", () => modal.close());
+    if (helpBtn) helpBtn.addEventListener('click', () => helpModal?.showModal());
+    if (helpClose) helpClose.addEventListener('click', () => helpModal?.close());
 
     function setBusy(isBusy) {
       if (submitBtn) submitBtn.disabled = isBusy || !allRequiredFilled(form);
       if (resetBtn) resetBtn.disabled = isBusy;
       const hasText = !!(outputEl?.textContent?.trim());
-      if (copyBtn) copyBtn.disabled = isBusy || !hasText;
-      if (downloadBtn) downloadBtn.disabled = isBusy || !hasText;
+      if (copyScriptBtn) copyScriptBtn.disabled = isBusy || !hasText;
+      if (downloadScriptBtn) downloadScriptBtn.disabled = isBusy || !hasText;
       if (submitBtn) submitBtn.classList.toggle('busy', isBusy);
     }
-    function setStatus(msg, kind = 'info') {
-      if (!statusEl) return; statusEl.textContent = msg; statusEl.dataset.kind = kind;
-    }
+    function setStatus(msg, kind = 'info') { if (!statusEl) return; statusEl.textContent = msg; statusEl.dataset.kind = kind; }
 
     function allRequiredFilled(formEl) {
       if (!formEl) return false;
-      const labels = {
-        call_type: 'Direct or partner sales', seller_name: 'Your name', seller_company: 'Your company',
-        prospect_name: 'Prospect name', prospect_role: 'Prospect role', prospect_company: 'Prospect company',
-        buyer_behaviour: 'Buyer behaviour', product: 'Product'
-      };
+      const labels = { call_type: 'Direct or partner sales', seller_name: 'Your name', seller_company: 'Your company', prospect_name: 'Prospect name', prospect_role: 'Prospect role', prospect_company: 'Prospect company', buyer_behaviour: 'Buyer behaviour', product: 'Product' };
       const missing = [];
       const getVal = (name) => {
         if (name === 'product') return (productSel?.value || '').trim();
@@ -872,19 +881,18 @@
     }
 
     function saveForm() { if (!form) return; const fd = Object.fromEntries(new FormData(form).entries()); localStorage.setItem(STORAGE_KEY, JSON.stringify(fd)); }
-    function loadForm() { const raw = localStorage.getItem(STORAGE_KEY); if (!raw) return; try { const data = JSON.parse(raw); Object.entries(data).forEach(([k, v]) => { const el = form.elements[k] || document.getElementById(k); if (el) el.value = v; }); } catch { } }
+    function loadForm() {
+      const raw = localStorage.getItem(STORAGE_KEY); if (!raw) return;
+      try { const data = JSON.parse(raw); Object.entries(data).forEach(([k, v]) => { const el = form.elements[k] || document.getElementById(k); if (el) el.value = v; }); } catch { }
+    }
 
-    // ---------- Notes ----------
-    const notesKey = () => {
-      const pn = (form?.elements?.prospect_name?.value || '').trim().toLowerCase();
-      const pc = (form?.elements?.prospect_company?.value || '').trim().toLowerCase();
-      return `${NOTES_KEY_PREFIX}::${pc}::${pn}` || NOTES_KEY_PREFIX;
-    };
+    // Notes
+    const notesKey = () => { const pn = (form?.elements?.prospect_name?.value || '').trim().toLowerCase(); const pc = (form?.elements?.prospect_company?.value || '').trim().toLowerCase(); return `${NOTES_KEY_PREFIX}::${pc}::${pn}` || NOTES_KEY_PREFIX; };
     function loadNotes() { try { notesArea.value = localStorage.getItem(notesKey()) || ''; } catch { } }
     function saveNotes() { try { localStorage.setItem(notesKey(), notesArea.value || ''); setStatus('Notes saved.'); } catch (e) { setStatus('Could not save notes.', 'error'); } }
     function downloadText(filename, text) { const blob = new Blob([text], { type: 'text/plain' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove(); }
 
-    // ---------- Buyer needs (unchanged core) ----------
+    // Buyer needs
     const norm = s => String(s || '').toLowerCase().trim();
     const toArr = v => Array.isArray(v) ? v.filter(Boolean).map(String) : (v ? [String(v)] : []);
     function getKeyInsensitive(obj, requested) {
@@ -915,23 +923,20 @@
       return out;
     }
 
+    let intel = null;
     function renderIntel(productLabel, behaviourLabel) {
       if (!intel) return;
       const products = intel.products || {};
       const productKey = getKeyInsensitive(products, productLabel);
       const productNode = productKey ? products[productKey] : null;
-      if (!productNode) { fillAll([`No data available (unknown product).`]); return; }
-
+      if (!productNode) { fillAll(['No data available (unknown product).']); return; }
       const pool = productNode.behaviours || productNode.buyers || {};
       const key = getKeyInsensitive(pool, behaviourLabel);
       const node = key ? pool[key] : (productNode.needs || null);
-
       if (!node) {
         const behavioursList = [...Object.keys(productNode.behaviours || {}), ...Object.keys(productNode.buyers || {})].join(', ') || '—';
-        fillAll([`No data for this behaviour. Available: ${behavioursList}`]);
-        return;
+        fillAll([`No data for this behaviour. Available: ${behavioursList}`]); return;
       }
-
       const sections = {
         priorities: toArr(node?.priorities ?? node?.Priorities),
         pains: toArr(node?.pains ?? node?.Pains),
@@ -940,10 +945,8 @@
         objections: toArr(node?.objections ?? node?.Objections),
         ctas: toArr(node?.ctas ?? node?.CTAs ?? node?.callsToAction ?? node?.CallsToAction)
       };
-
       const allEmpty = Object.values(sections).every(a => a.length === 0);
       if (allEmpty) { fillAll(['No data available for this selection.']); return; }
-
       setSlot('intel-priorities', sections.priorities);
       setSlot('intel-pains', sections.pains);
       setSlot('intel-triggers', sections.triggers);
@@ -952,17 +955,14 @@
       setSlot('intel-ctas', sections.ctas);
     }
 
-    // ---------- Activity / delta ----------
+    // Activity / delta
     function addActivity(entry) {
       const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
-      list.unshift(entry);
-      localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0, 3)));
-      renderActivity();
+      list.unshift(entry); localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0, 3))); renderActivity();
     }
     function renderActivity() {
       const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
-      if (!activityLog) return;
-      activityLog.innerHTML = '';
+      if (!activityLog) return; activityLog.innerHTML = '';
       list.forEach(item => {
         const node = activityTpl.content.cloneNode(true);
         node.querySelector('.time').textContent = item.time;
@@ -988,7 +988,7 @@
       deltaLog.appendChild(a); deltaLog.appendChild(r);
     }
 
-    // ---------- Header chip / remember ----------
+    // Header chip / remember
     function loadCallPref() {
       try {
         const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
@@ -1010,19 +1010,18 @@
       if (mapLabel) mapLabel.textContent = pref?.call_type || (callTypeSel?.value || 'Not set');
     }
 
-    // ---------- Tips toggle + auto-hide when empty ----------
+    // Tips toggle + auto-hide
     function applyTipsVisibility() {
       const card = document.querySelector(".tips-card");
       const hidden = localStorage.getItem(TIPS_HIDDEN_KEY) === '1';
       tipsList.hidden = hidden;
       toggleTipsBtn.textContent = hidden ? 'Show tips' : 'Hide tips';
       toggleTipsBtn.setAttribute('aria-expanded', String(!hidden));
-      // hide the card if there are no tips
       const has = tipsList.children.length > 0;
       if (card) card.classList.toggle('is-hidden', !has);
     }
 
-    // ---------- Events ----------
+    // Events
     const onChangeRecalcIntel = () => {
       const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
       renderIntel(label, buyerBehSel?.value || '');
@@ -1037,49 +1036,29 @@
       validateField('product');
     });
 
-    // When the mobile field changes, mirror to the header pill and trigger its logic
-    callTypeSelXs?.addEventListener('change', () => {
+    // Mobile mirror (async to use await)
+    callTypeSelXs?.addEventListener('change', async () => {
       if (!callTypeSel) return;
       callTypeSel.value = callTypeSelXs.value;
       validateField(callTypeSel);
       saveForm(); updateMapIndicator(); refreshSubmitState();
       const mode = modeFromCallType(callTypeSel.value) || 'direct';
-      await populateProductsForMode(mode)
+      await populateProductsForMode(mode);
       callTypeSel.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    rememberCallType?.addEventListener('change', saveCallPrefIfRequested);
 
-    productSel?.addEventListener('change', () => { validateField('product'); onChangeRecalcIntel(); saveForm(); refreshSubmitState(); });
-    buyerBehSel?.addEventListener('change', () => { onChangeRecalcIntel(); saveForm(); refreshSubmitState(); });
-
-    toggleIntelBtn?.addEventListener('click', () => {
+    document.getElementById('toggle-intel')?.addEventListener('click', () => {
       const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
       toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
       if (intelBody) intelBody.hidden = expanded;
       toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
     });
 
-    if (toggleTipsBtn) {
-      toggleTipsBtn.addEventListener('click', () => {
-        const willHide = !(toggleTipsBtn.getAttribute('aria-expanded') === 'true');
-        localStorage.setItem(TIPS_HIDDEN_KEY, willHide ? '1' : '0');
-        applyTipsVisibility();
-      });
-    }
-
-    if (toggleBulletsBtn) {
-      toggleBulletsBtn.addEventListener('click', () => {
-        bulletMode = !bulletMode;
-        window.bulletMode = bulletMode; // keep in sync for pop-out
-        toggleBulletsBtn.setAttribute('aria-pressed', String(bulletMode));
-        toggleBulletsBtn.textContent = bulletMode ? 'Show full script' : 'Show bullet point script';
-        const html = bulletMode ? (lastRender.bulletsHtml || '') : (lastRender.html || '');
-        if (html) {
-          outputEl.innerHTML = html;
-          modalScript.innerHTML = html;
-        }
-      });
-    }
+    toggleTipsBtn?.addEventListener('click', () => {
+      const willHide = !(toggleTipsBtn.getAttribute('aria-expanded') === 'true');
+      localStorage.setItem(TIPS_HIDDEN_KEY, willHide ? '1' : '0');
+      applyTipsVisibility();
+    });
 
     saveNotesBtn?.addEventListener('click', saveNotes);
     downloadNotesBtn?.addEventListener('click', () => {
@@ -1087,41 +1066,37 @@
       downloadText(`call-notes_${who}_${new Date().toISOString().slice(0, 10)}.txt`, notesArea.value || '');
     });
 
-    copyBtn?.addEventListener('click', async () => {
+    // New Copy/Download under the script
+    copyScriptBtn?.addEventListener('click', async () => {
       const txt = outputEl?.innerText || ''; if (!txt.trim()) return;
-      await navigator.clipboard.writeText(txt); setStatus('Copied to clipboard.');
+      await navigator.clipboard.writeText(txt); setStatus('Copied script to clipboard.');
+    });
+    downloadScriptBtn?.addEventListener('click', () => {
+      const txt = outputEl?.innerText || ''; if (!txt.trim()) return;
+      const who = (form?.elements?.prospect_name?.value || 'script').trim().replace(/\s+/g, '-');
+      downloadText(`conversation-guide_${who}_${new Date().toISOString().slice(0, 10)}.txt`, txt);
     });
 
-    // ---------- Product registry ----------
+    // Product registry
     async function populateProductsForMode(mode) {
       const sel = document.getElementById('product');
       if (!sel) return;
-
       sel.innerHTML = `<option value="">Loading…</option>`;
       try {
         const idx = await getIndex(mode, basePrefix);
         const items = Array.isArray(idx?.products) ? idx.products : Array.isArray(idx?.items) ? idx.items : Array.isArray(idx) ? idx : [];
-
-        if (!items.length) {
-          sel.innerHTML = `<option value="">No products found</option>`;
-          console.warn('[Product] index.json loaded but empty', idx);
-          return;
-        }
-
+        if (!items.length) { sel.innerHTML = `<option value="">No products found</option>`; console.warn('[Product] index.json loaded but empty', idx); return; }
         const saved = (form?.elements?.product?.value || '').trim().toLowerCase();
         sel.innerHTML = '<option value="" disabled>Select…</option>';
-
         for (const item of items) {
           const idLike = item.id ?? item.slug ?? item.value ?? item.key ?? item.name ?? item.label;
           const label = item.label ?? item.name ?? String(idLike ?? '');
           const val = String(idLike || '').trim().toLowerCase().replace(/\s+/g, '-');
           if (!val) continue;
-          const opt = document.createElement('option');
-          opt.value = val; opt.textContent = label;
+          const opt = document.createElement('option'); opt.value = val; opt.textContent = label;
           if (saved && (saved === val || saved === String(label).toLowerCase())) opt.selected = true;
           sel.appendChild(opt);
         }
-
         if (!sel.value) sel.options[0].selected = true;
         validateField(sel);
         if (buyerBehSel?.value) {
@@ -1129,7 +1104,6 @@
           renderIntel(label, buyerBehSel.value);
         }
         refreshSubmitState();
-        console.info('[Product] index loaded OK, count =', items.length);
       } catch (err) {
         console.error('[Product] Failed to load index.json', err);
         sel.innerHTML = `<option value="">Error loading products</option>`;
@@ -1137,10 +1111,9 @@
       }
     }
 
-    // ---------- Submit: API-first ----------
+    // Submit: API-first
     form && form.addEventListener("submit", async (e) => {
       e.preventDefault();
-
       for (const name of REQUIRED) {
         const el = form.elements[name] || document.getElementById(name);
         if (!el || !String(el.value || "").trim()) { validateField(el); el?.focus(); setStatus("Please complete required fields.", "error"); return; }
@@ -1165,11 +1138,9 @@
       const mode = modeFromCallType(values.call_type);
       const productId = String(values.product).toLowerCase().trim();
       const buyerId = buyerCanon(values.buyer_behaviour);
-
       if (!productId) { validateField("product"); setStatus("Please choose a product.", "error"); return; }
 
-      setBusy(true);
-      setStatus("Generating call script…");
+      setBusy(true); setStatus("Generating call script…");
       if (diag) diag.open = false; if (diagJson) diagJson.textContent = "";
 
       try {
@@ -1183,41 +1154,32 @@
           templateMdText: templateText
         };
 
-        const resp = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
+        const resp = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         if (!resp.ok) { const errTxt = await resp.text(); throw new Error(`API ${resp.status}: ${errTxt}`); }
 
         const data = await resp.json();
         const script = data?.script?.text || "";
         const tips = data?.script?.tips || [];
-
         if (!script || !script.trim()) throw new Error("Empty script returned from API");
 
-        // Render full script + bullets from the same parse
         const rendered = renderSectionsToHtml(script, values);
         const bulletsHtml = renderBulletScriptFromSections(rendered.sections);
+        lastRender = { html: rendered.html, bulletsHtml }; window.lastRender = lastRender;
 
-        lastRender = { html: rendered.html, bulletsHtml };
-        window.lastRender = lastRender;            // keep pop-out in sync
-
-        // honour current toggle state
         const htmlToShow = bulletMode ? bulletsHtml : rendered.html;
         outputEl.innerHTML = htmlToShow;
         modalScript.innerHTML = htmlToShow;
 
-        // meta line
-        outputMeta.textContent =
-          `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
+        outputMeta.textContent = `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
 
-        // tips
-        tipsList.innerHTML = "";
-        (tips || []).forEach((t) => { const li = document.createElement("li"); li.textContent = t; tipsList.appendChild(li); });
-        applyTipsVisibility(); // hide/show tips card appropriately
+        // Tips
+        tipsList.innerHTML = ""; (tips || []).forEach(t => { const li = document.createElement("li"); li.textContent = t; tipsList.appendChild(li); });
+        applyTipsVisibility();
 
-        // delta + activity
+        // Enable copy/download now there is content
+        copyScriptBtn.disabled = false; downloadScriptBtn.disabled = false;
+
+        // Delta + activity
         const old = localStorage.getItem(OUTPUT_KEY) || "";
         const delta = computeDelta(old, script);
         renderDelta(delta);
@@ -1235,7 +1197,7 @@
       }
     });
 
-    // ---------- Follow-up email ----------
+    // Follow-up email
     document.getElementById('make-followup')?.addEventListener('click', async () => {
       try {
         const payload = {
@@ -1252,12 +1214,10 @@
           scriptMdText: localStorage.getItem('first_call_script_v2.last_output') || "",
           callNotes: (notesArea?.value || "")
         };
-
         setStatus('Building follow-up email…');
         const r = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await r.json();
         if (!r.ok) throw new Error(data?.error || 'Could not build follow-up');
-
         modalScript.innerText = data?.followup?.email || 'No email produced.';
         modal.showModal();
         setStatus('Follow-up ready.');
@@ -1267,20 +1227,12 @@
       }
     });
 
-    // ---------- Pop-out (always prints whichever view is showing) ----------
+    // Pop-out (kept but hidden via CSS)
     if (popoutBtn) {
       popoutBtn.onclick = () => {
         const meta = (document.getElementById('output-meta')?.textContent || '').trim();
-        const html =
-          (window.bulletMode && window.lastRender?.bulletsHtml) ||
-          (window.lastRender?.html) ||
-          (outputEl?.innerHTML || "");
-
-        if (!html || !html.trim()) {
-          setStatus("No script to pop out yet.", "error");
-          return;
-        }
-
+        const html = (window.bulletMode && window.lastRender?.bulletsHtml) || (window.lastRender?.html) || (outputEl?.innerHTML || "");
+        if (!html || !html.trim()) { setStatus("No script to pop out yet.", "error"); return; }
         const w = window.open("", "_blank", "noopener,noreferrer");
         if (!w) { setStatus("Pop-out was blocked by the browser.", "error"); return; }
         w.document.open();
@@ -1300,8 +1252,33 @@
       };
     }
 
-    // ---------- Init ----------
-    let intel = null;
+    // Reset button — clear form, local state, and UI
+    resetBtn?.addEventListener('click', () => {
+      try {
+        form.reset();
+        if (callTypeSelXs && callTypeSel) callTypeSelXs.value = callTypeSel.value || '';
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(ACTIVITY_KEY);
+        localStorage.removeItem(OUTPUT_KEY);
+        outputEl.innerHTML = '';
+        tipsList.innerHTML = '';
+        applyTipsVisibility();
+        activityLog.innerHTML = '';
+        deltaLog.innerHTML = '';
+        statusEl.textContent = '';
+        copyScriptBtn.disabled = true;
+        downloadScriptBtn.disabled = true;
+        fillAll(['—']);
+        try { localStorage.removeItem(notesKey()); } catch { }
+        notesArea.value = '';
+        refreshSubmitState();
+        document.getElementById('seller_name')?.focus();
+      } catch (e) {
+        setStatus('Could not reset form.', 'error');
+      }
+    });
+
+    // Init
     (async function init() {
       try {
         const me = await fetch('/.auth/me', { cache: 'no-store' });
@@ -1315,9 +1292,8 @@
       catch { intel = { products: {} }; }
 
       loadForm(); loadCallPref();
-      if (callTypeSelXs && callTypeSel) {
-        callTypeSelXs.value = callTypeSel.value || '';
-      }
+      if (callTypeSelXs && callTypeSel) { callTypeSelXs.value = callTypeSel.value || ''; }
+
       const currentMode = modeFromCallType(callTypeSel?.value || 'direct');
       await populateProductsForMode(currentMode);
       if (productSel?.value && buyerBehSel?.value) {
@@ -1327,10 +1303,9 @@
 
       applyTipsVisibility();
       const hasText = !!(outputEl?.textContent?.trim());
-      if (copyBtn) copyBtn.disabled = !hasText;
-      if (downloadBtn) downloadBtn.disabled = !hasText;
-      if (submitBtn) submitBtn.disabled = !allRequiredFilled(form);
-
+      copyScriptBtn.disabled = !hasText;
+      downloadScriptBtn.disabled = !hasText;
+      submitBtn.disabled = !allRequiredFilled(form);
       loadNotes();
 
       document.addEventListener('input', (e) => {
