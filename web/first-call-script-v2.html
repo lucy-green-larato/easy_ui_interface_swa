@@ -310,6 +310,17 @@
               <p class="error" id="seller_name_error" role="alert" aria-live="polite"></p>
             </div>
 
+            <!-- Mobile-only fallback for Sales model -->
+            <div class="field field-calltype-xs">
+              <label for="call_type_xs">Sales model <span aria-hidden="true" class="req">*</span></label>
+              <select id="call_type_xs" name="call_type_xs" aria-describedby="call_type_error_xs">
+                <option value="">Select…</option>
+                <option>Direct</option>
+                <option>Partner</option>
+              </select>
+              <p class="error" id="call_type_error_xs" role="alert" aria-live="polite"></p>
+            </div>
+
             <div class="field">
               <label for="seller_company">Your company <span aria-hidden="true" class="req">*</span></label>
               <input id="seller_company" name="seller_company" required autocomplete="organization" />
