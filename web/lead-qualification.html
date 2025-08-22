@@ -46,7 +46,7 @@
     <!-- LEFT: INPUTS -->
     <section class="panel left" aria-label="Input form">
       <form id="lq-form" novalidate>
-        <!-- Supplier (your) details -->
+        <!-- Seller details -->
         <fieldset class="card" aria-labelledby="legend-supplier">
           <legend id="legend-supplier">Your details</legend>
           <div class="grid-2">
@@ -69,6 +69,64 @@
           </div>
         </fieldset>
 
+        <!-- Seller proposition (NEW) -->
+        <fieldset class="card" aria-labelledby="legend-prop">
+          <legend id="legend-prop">Your proposition</legend>
+          <div class="grid-2">
+            <div class="field">
+              <label for="proposition_name">Proposition name <span aria-hidden="true" class="req">*</span></label>
+              <input id="proposition_name" name="proposition_name" placeholder="e.g., Sentinel Cloud Security" required />
+              <p class="error" id="proposition_name_error" role="alert" aria-live="polite"></p>
+            </div>
+            <div class="field">
+              <label for="proposition_type">Type <span aria-hidden="true" class="req">*</span></label>
+              <select id="proposition_type" name="proposition_type" required>
+                <option value="">Select…</option>
+                <option>SaaS</option>
+                <option>Security</option>
+                <option>Connectivity</option>
+                <option>Data Services</option>
+                <option>Hardware</option>
+                <option>Services</option>
+                <option>Other</option>
+              </select>
+              <p class="error" id="proposition_type_error" role="alert" aria-live="polite"></p>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="field">
+              <label for="typical_deal_size_gbp">Typical deal size (GBP)</label>
+              <input id="typical_deal_size_gbp" name="typical_deal_size_gbp" type="number" min="0" step="100" placeholder="e.g., 25000" inputmode="numeric" />
+            </div>
+            <div class="field">
+              <label for="territory_or_segment_focus">Territory / segment focus</label>
+              <input id="territory_or_segment_focus" name="territory_or_segment_focus" placeholder="e.g., UK mid-market; 100–1000 employees" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="differentiation_points">Differentiation (one per line, 3–5)</label>
+            <textarea id="differentiation_points" name="differentiation_points" rows="3" placeholder="Faster deployment&#10;UK data residency&#10;SOC2 &amp; ISO27001"></textarea>
+          </div>
+
+          <div class="field">
+            <label for="technical_prereqs">Technical prerequisites / integrations (one per line)</label>
+            <textarea id="technical_prereqs" name="technical_prereqs" rows="3" placeholder="Azure AD&#10;Microsoft 365&#10;SAML 2.0"></textarea>
+          </div>
+
+          <div class="field">
+            <label for="sales_motion">Sales motion <span aria-hidden="true" class="req">*</span></label>
+            <select id="sales_motion" name="sales_motion" required>
+              <option value="">Select…</option>
+              <option value="direct">Direct to end-user</option>
+              <option value="channel">Via the UK Channel</option>
+              <option value="hybrid">Hybrid</option>
+            </select>
+            <p class="error" id="sales_motion_error" role="alert" aria-live="polite"></p>
+          </div>
+        </fieldset>
+
         <!-- Prospect details -->
         <fieldset class="card" aria-labelledby="legend-lead">
           <legend id="legend-lead">Lead details</legend>
@@ -77,10 +135,17 @@
             <input id="company" name="company" required placeholder="Acme Networks Ltd" />
             <p class="error" id="company_error" role="alert" aria-live="polite"></p>
           </div>
-          <div class="field">
-            <label for="industry">Industry <span aria-hidden="true" class="req">*</span></label>
-            <input id="industry" name="industry" required placeholder="Managed Services / Cybersecurity" />
-            <p class="error" id="industry_error" role="alert" aria-live="polite"></p>
+          <div class="grid-2">
+            <div class="field">
+              <label for="industry">Industry <span aria-hidden="true" class="req">*</span></label>
+              <input id="industry" name="industry" required placeholder="Managed Services / Cybersecurity" />
+              <p class="error" id="industry_error" role="alert" aria-live="polite"></p>
+            </div>
+            <div class="field">
+              <label for="company_reg">Company reg. no. (optional)</label>
+              <input id="company_reg" name="company_reg" placeholder="e.g., 01234567" />
+              <p class="help">If provided, the backend can fetch Companies House filings for the last two years.</p>
+            </div>
           </div>
           <div class="field">
             <label for="website">Prospect website <span aria-hidden="true" class="req">*</span></label>
@@ -169,11 +234,12 @@
         <h3 style="margin:0">About Lead Qualification</h3>
         <button id="help-close" class="btn inline" type="button">Close ×</button>
       </div>
-      <p>Provide your supplier details and the prospect’s details. We’ll generate a concise
+      <p>Provide your details, your proposition, and the prospect’s details. We’ll generate a concise
         qualification summary that weighs your value against the prospect’s context and signals.</p>
       <ul>
         <li><strong>Your company URL</strong> is used to qualify value and proof points.</li>
         <li>Add <em>Sources</em> to steer the analysis (annual report, LinkedIn, press).</li>
+        <li>Optionally include a <em>Company reg. no.</em> so the backend can fetch Companies House filings.</li>
       </ul>
     </div>
   </dialog>
@@ -211,7 +277,12 @@
     const downloadBtn = $("download");
     const responseBox = $("responseBox");
 
-    const fields = ["seller_name","seller_company","seller_url","company","industry","website","sources","notes"];
+    const fields = [
+      "seller_name","seller_company","seller_url",
+      "proposition_name","proposition_type","typical_deal_size_gbp","territory_or_segment_focus",
+      "differentiation_points","technical_prereqs","sales_motion",
+      "company","company_reg","industry","website","sources","notes"
+    ];
     const STORAGE_KEY = "lead_qualification_v2.form";
     let lastSummary = localStorage.getItem("lead_qualification_v2.last_summary") || "";
 
@@ -219,12 +290,16 @@
     const setStatus = (msg, kind="info") => { statusEl.textContent = msg || ""; statusEl.dataset.kind = kind; };
     const safeURL = (u) => { try{ const x = new URL(u); return x.protocol==="http:"||x.protocol==="https:"; } catch { return false; } };
     const srcArray = () => ( ($("sources").value || "").split(/\n|,/).map(s=>s.trim()).filter(Boolean) );
+    const lines = (t)=> (t||"").split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
 
     function validateInline(){
       const req = {
         seller_name: !!$("seller_name").value.trim(),
         seller_company: !!$("seller_company").value.trim(),
         seller_url: safeURL($("seller_url").value.trim()),
+        proposition_name: !!$("proposition_name").value.trim(),
+        proposition_type: !!$("proposition_type").value.trim(),
+        sales_motion: !!$("sales_motion").value.trim(),
         company: !!$("company").value.trim(),
         industry: !!$("industry").value.trim(),
         website: safeURL($("website").value.trim()),
@@ -232,6 +307,9 @@
       $("seller_name_error").textContent = req.seller_name ? "" : "This field is required.";
       $("seller_company_error").textContent = req.seller_company ? "" : "This field is required.";
       $("seller_url_error").textContent = req.seller_url ? "" : "Enter a valid URL (https://…).";
+      $("proposition_name_error").textContent = req.proposition_name ? "" : "This field is required.";
+      $("proposition_type_error").textContent = req.proposition_type ? "" : "This field is required.";
+      $("sales_motion_error").textContent = req.sales_motion ? "" : "Select a motion.";
       $("company_error").textContent = req.company ? "" : "This field is required.";
       $("industry_error").textContent = req.industry ? "" : "This field is required.";
       $("website_error").textContent = req.website ? "" : "Enter a valid URL (https://…).";
@@ -253,12 +331,23 @@
       const srcRaw = $("sources").value || "";
       return {
         pack: "uk_b2b_sales_core",
-        template: "opportunity_qualification",
+        template: "opportunity_qualification", // keep using this name in your API template map
         variables: {
+          // seller context
           seller_name: $("seller_name").value.trim(),
           seller_company: $("seller_company").value.trim(),
           seller_url: $("seller_url").value.trim(),
+          proposition_name: $("proposition_name").value.trim(),
+          proposition_type: $("proposition_type").value.trim(),
+          typical_deal_size_gbp: $("typical_deal_size_gbp").value ? Number($("typical_deal_size_gbp").value) : null,
+          territory_or_segment_focus: $("territory_or_segment_focus").value.trim(),
+          differentiation_points: lines($("differentiation_points").value),
+          technical_prerequisites: lines($("technical_prereqs").value),
+          sales_motion: $("sales_motion").value.trim(),
+
+          // prospect inputs
           company: $("company").value.trim(),
+          company_registration_number: $("company_reg").value.trim(),
           industry: $("industry").value.trim(),
           website: $("website").value.trim(),
           sources_raw: srcRaw,
