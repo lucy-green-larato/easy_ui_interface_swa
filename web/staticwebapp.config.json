@@ -1,64 +1,50 @@
 {
   "routes": [
-    {
-      "route": "/",
-      "rewrite": "/index.html"
-    },
-    {
-      "route": "/script",
-      "rewrite": "/first-call-script-v2.html"
-    },
-    {
-      "route": "/first-call-script-v2",
-      "rewrite": "/first-call-script-v2.html"
-    },
-    {
-      "route": "/first-call-script-v2/*",
-      "rewrite": "/first-call-script-v2.html"
-    },
-    {
-      "route": "/api/*",
-      "allowedRoles": [
-        "anonymous"
-      ]
-    },
+    { "route": "/", "rewrite": "/index.html" },
+    { "route": "/script", "rewrite": "/first-call-script-v2.html" },
+    { "route": "/first-call-script-v2", "rewrite": "/first-call-script-v2.html" },
+    { "route": "/first-call-script-v2/*", "rewrite": "/first-call-script-v2.html" },
+
+    { "route": "/api/*", "allowedRoles": ["anonymous"] },
     {
       "route": "/content/call-library/*",
-      "allowedRoles": [
-        "anonymous",
-        "authenticated"
-      ],
-      "headers": {
-        "Cache-Control": "no-store"
-      }
+      "allowedRoles": ["anonymous", "authenticated"],
+      "headers": { "Cache-Control": "no-store" }
     },
+
     {
       "route": "/src/*",
-      "allowedRoles": [
-        "anonymous",
-        "authenticated"
-      ]
+      "allowedRoles": ["anonymous", "authenticated"]
     }
   ],
+
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": [
       "/api/*",
       "/content/*",
-      "/content/call-library/*",
-      "/src/*"
+      "/src/*",
+      "/*.css",
+      "/*.js",
+      "/*.mjs",
+      "/*.json",
+      "/*.png",
+      "/*.jpg",
+      "/*.gif",
+      "/*.svg",
+      "/*.ico"
     ]
   },
-"responseOverrides": {
-  "404": {
-    "rewrite": "/first-call-script-v2.html"
+
+  "responseOverrides": {
+    "404": { "rewrite": "/index.html" }
+  },
+
+  "mimeTypes": {
+    ".md":  "text/markdown; charset=utf-8",
+    ".mdx": "text/markdown; charset=utf-8",
+    ".js":  "application/javascript; charset=utf-8",
+    ".mjs": "application/javascript; charset=utf-8",
+    ".json":"application/json; charset=utf-8"
   }
-},
-"mimeTypes": {
-  ".md": "text/markdown; charset=utf-8",
-  ".mdx": "text/markdown; charset=utf-8",
-  ".js": "application/javascript; charset=utf-8",
-  ".mjs": "application/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8"
-}
 }
