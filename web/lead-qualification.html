@@ -1,222 +1,267 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-app="inside-track-tools">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Lead Qualification • Inside Track Sales Tools</title>
-  <meta name="color-scheme" content="light only">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inside Track Tools · Lead Qualification</title>
+  <!-- Use your shared stylesheet from the Call Script page -->
+  <link rel="stylesheet" href="./styles.css?v=fix4" />
   <style>
-    :root{
-      --radius:16px; --gap:20px; --line:rgba(0,0,0,.08);
-      --bg:#f7f8fa; --card:#fff; --text:#0f172a; --muted:#6b7280; --brand:#1f6feb;
-    }
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{margin:0;font-family:system-ui,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
-
-    /* App bar */
-    .appbar{position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);
-      padding:12px 20px;display:flex;justify-content:space-between;align-items:center;z-index:10}
-    .appbar-left{display:flex;align-items:center;gap:10px}
-    .crumb{display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:#0f172a;font-weight:600}
-    .crumb::before{content:"‹";font-size:16px;opacity:.6}
-    .title{font-weight:700}
-    .appbar-right{display:flex;align-items:center;gap:12px}
-    .user-pill{padding:6px 10px;border:1px solid var(--line);border-radius:999px;font-size:.9rem;color:#111}
-    .toggle{display:inline-flex;align-items:center;gap:6px;font-size:.9rem;color:#111}
-
-    /* Layout */
-    .container{max-width:1200px;margin:24px auto;padding:0 20px}
-    .grid{display:grid;grid-template-columns:320px 1fr 320px;gap:var(--gap)}
-    .stack{display:flex;flex-direction:column;gap:var(--gap)}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:0 1px 2px rgba(0,0,0,.02)}
-    h1{margin:0 0 8px;font-size:1.35rem}
-    h2{margin:0 0 8px;font-size:1.1rem}
-    .muted{color:var(--muted)}
-    .helptext{margin:0 0 12px;font-size:.95rem;color:var(--muted)}
-
-    /* Inputs */
-    label{display:block;margin:10px 0 6px;font-weight:600;font-size:.95rem}
-    input,select,textarea{width:100%;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#fff;font-size:14px}
-    textarea{min-height:110px}
-    input:focus,select:focus,textarea:focus{outline:2px solid #bcd3ff;border-color:#90b4ff}
-    .error{color:#b42318;font-size:.9rem;margin:4px 0 0}
-
-    /* Buttons */
-    .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-    .btn{border:1px solid var(--line);border-radius:999px;padding:8px 14px;background:#fff;cursor:pointer;font-size:14px}
-    .btn:hover{background:#f5f7fb}
-    .btn[disabled]{opacity:.5;pointer-events:none}
-    .btn-primary{background:var(--brand);color:#fff;border-color:var(--brand)}
-    .btn-ghost{border-color:transparent}
-
-    /* Summary + states */
-    .summary{min-height:320px;border:1px dashed var(--line);border-radius:12px;padding:16px;background:#fafbff;white-space:pre-wrap}
-    .summary.empty{color:var(--muted)}
-    .skeleton{position:relative;overflow:hidden}
-    .skeleton::after{
-      content:"";position:absolute;inset:0;
-      background:linear-gradient(90deg,rgba(255,255,255,0) 0%, rgba(0,0,0,.04) 50%, rgba(255,255,255,0) 100%);
-      animation:shimmer 1.2s infinite; background-size:200% 100%;
-    }
-    @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
-
-    /* Lists */
-    .bullets{margin:0;padding-left:18px}
-    .bullets li{margin:6px 0}
-
-    /* Responsive */
-    @media (max-width:1100px){
-      .grid{grid-template-columns:1fr}
-    }
+    /* Minor page-specific trims only (everything else comes from styles.css) */
+    .panel.middle .output-card{ position: sticky; top: calc(var(--header-h) + 12px); z-index: 5; }
+    .output{ white-space:pre-wrap; background:#fff; color:#111827; border:1px solid var(--border);
+             padding:14px; border-radius:12px; min-height:240px; outline:none; resize:vertical; }
+    .status{ margin-top:var(--s-2); min-height:1.2rem; color:var(--text-2) }
+    .status[data-kind="error"]{ color: var(--danger) }
+    .status[data-kind="ok"]{ color: var(--ok) }
+    .sources-list ul{ margin:.5rem 0 0 1.1rem }
   </style>
 </head>
 <body>
-  <!-- App bar -->
-  <header class="appbar">
-    <div class="appbar-left">
-      <a class="crumb" href="/index.html" aria-label="Back to menu">Prepare</a>
-      <span class="title">Lead Qualification</span>
+
+  <!-- HEADER (same pattern as your call-script tool) -->
+  <header class="app-header" role="banner">
+    <div class="header-left">
+      <img class="logo" src="./larato-logo.svg" alt="Larato" />
+      <div class="brand-text">
+        <h1 class="app-title">Inside Track Tools</h1>
+        <p class="kicker">Lead qualification briefing</p>
+      </div>
     </div>
-    <div class="appbar-right">
-      <label class="toggle"><input id="remember" type="checkbox"> Remember</label>
-      <a class="btn btn-ghost" href="/web/help/lead-qualification.html">Help</a>
-      <span id="user" class="user-pill" title="Signed in user">Signed in</span>
-      <button class="btn" id="logout">Sign out</button>
+    <div class="header-right">
+      <label class="model-note" style="gap:.5rem">
+        <input type="checkbox" id="remember"> Remember
+      </label>
+      <button id="help" class="btn inline" type="button" title="About this tool">Help</button>
+      <span id="user-badge" class="badge is-hidden" aria-live="polite" aria-atomic="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="7" r="4"></circle>
+          <path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path>
+        </svg>
+        <span id="user-email">Loading…</span>
+      </span>
+      <a class="btn inline" href="/.auth/logout">Sign out</a>
     </div>
   </header>
 
-  <main class="container">
-    <section class="grid">
-      <!-- Left: Lead details -->
-      <div class="card">
-        <h2>Lead details</h2>
-        <p class="helptext">Add company information and sources. We’ll create a concise qualification summary.</p>
+  <!-- LAYOUT -->
+  <main id="main" class="layout" role="main">
+    <!-- LEFT: INPUTS -->
+    <section class="panel left" aria-label="Input form">
+      <form id="lq-form" novalidate>
+        <!-- Supplier (your) details -->
+        <fieldset class="card" aria-labelledby="legend-supplier">
+          <legend id="legend-supplier">Your details</legend>
+          <div class="grid-2">
+            <div class="field">
+              <label for="seller_name">Your name <span aria-hidden="true" class="req">*</span></label>
+              <input id="seller_name" name="seller_name" required autocomplete="name" />
+              <p class="error" id="seller_name_error" role="alert" aria-live="polite"></p>
+            </div>
+            <div class="field">
+              <label for="seller_company">Your company <span aria-hidden="true" class="req">*</span></label>
+              <input id="seller_company" name="seller_company" required autocomplete="organization" />
+              <p class="error" id="seller_company_error" role="alert" aria-live="polite"></p>
+            </div>
+          </div>
+          <div class="field">
+            <label for="seller_url">Your company URL <span aria-hidden="true" class="req">*</span></label>
+            <input id="seller_url" name="seller_url" type="url" placeholder="https://www.yourcompany.co.uk" required inputmode="url" autocomplete="url" />
+            <p class="error" id="seller_url_error" role="alert" aria-live="polite"></p>
+            <p class="help">Use the primary site or investor page. We’ll reference this when qualifying value.</p>
+          </div>
+        </fieldset>
 
-        <label for="company">Company *</label>
-        <input id="company" placeholder="Acme Networks Ltd" autocomplete="organization">
-        <div id="err-company" class="error" hidden>Company is required</div>
+        <!-- Prospect details -->
+        <fieldset class="card" aria-labelledby="legend-lead">
+          <legend id="legend-lead">Lead details</legend>
+          <div class="field">
+            <label for="company">Prospect company <span aria-hidden="true" class="req">*</span></label>
+            <input id="company" name="company" required placeholder="Acme Networks Ltd" />
+            <p class="error" id="company_error" role="alert" aria-live="polite"></p>
+          </div>
+          <div class="field">
+            <label for="industry">Industry <span aria-hidden="true" class="req">*</span></label>
+            <input id="industry" name="industry" required placeholder="Managed Services / Cybersecurity" />
+            <p class="error" id="industry_error" role="alert" aria-live="polite"></p>
+          </div>
+          <div class="field">
+            <label for="website">Prospect website <span aria-hidden="true" class="req">*</span></label>
+            <input id="website" name="website" type="url" placeholder="https://www.example.co.uk" required inputmode="url" autocomplete="url" />
+            <p class="error" id="website_error" role="alert" aria-live="polite"></p>
+          </div>
+          <div class="field">
+            <label for="sources">Sources (URLs, comma or newline)</label>
+            <textarea id="sources" name="sources" rows="3" placeholder="Annual report, LinkedIn page, Press release…"></textarea>
+            <p class="help">Paste links that should be prioritised in the analysis.</p>
+          </div>
+        </fieldset>
+      </form>
+    </section>
 
-        <label for="industry">Industry *</label>
-        <input id="industry" placeholder="Managed Services / Cybersecurity" autocomplete="off">
-        <div id="err-industry" class="error" hidden>Industry is required</div>
-
-        <label for="website">Website *</label>
-        <input id="website" type="url" placeholder="https://www.example.co.uk" inputmode="url" autocomplete="url">
-        <div id="err-website" class="error" hidden>Website must be a valid URL (https://…)</div>
-
-        <label for="sources">Sources (URLs, comma or newline)</label>
-        <textarea id="sources" placeholder="Annual report, LinkedIn page, Press release…"></textarea>
-      </div>
-
-      <!-- Center: Qualification summary -->
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <h2>Qualification summary</h2>
-          <div class="actions">
-            <button id="generate" class="btn btn-primary" disabled>Generate qualification</button>
-            <button id="copy" class="btn" disabled>Copy summary</button>
-            <button id="download" class="btn" disabled>Download .txt</button>
-            <button id="viewPayload" class="btn">View payload</button>
+    <!-- MIDDLE: OUTPUT -->
+    <section class="panel middle">
+      <div class="output-card card">
+        <div class="output-head">
+          <h2 id="output-title">Qualification summary</h2>
+          <div class="row-between" style="gap:8px">
+            <button id="generate" class="btn primary" type="button" disabled>
+              <span class="btn-label">Generate qualification</span>
+              <span class="spinner" aria-hidden="true"></span>
+            </button>
+            <button id="copy" class="btn inline" type="button" disabled>Copy summary</button>
+            <button id="download" class="btn inline" type="button" disabled>Download .txt</button>
+            <button id="viewPayload" class="btn inline" type="button">View payload</button>
           </div>
         </div>
 
-        <div id="summary" class="summary empty">Add company details to generate a qualification summary.</div>
+        <div id="output" class="output" tabindex="0" aria-label="Generated summary will appear here">
+          Add details on the left, then click <em>Generate qualification</em>.
+        </div>
 
-        <details id="payloadWrap" style="margin-top:12px">
-          <summary class="muted">Payload preview</summary>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+
+        <details id="payloadWrap" style="margin-top:var(--s-3)">
+          <summary class="kicker">Payload preview</summary>
           <pre id="previewBox" style="overflow:auto"></pre>
         </details>
 
-        <details style="margin-top:12px">
-          <summary class="muted">API Response (raw)</summary>
+        <details style="margin-top:var(--s-3)">
+          <summary class="kicker">API response (raw)</summary>
           <pre id="responseBox" style="overflow:auto"></pre>
         </details>
       </div>
+    </section>
 
-      <!-- Right: Reference -->
-      <aside class="stack">
-        <div class="card">
-          <h2>Signals to check</h2>
-          <ul class="bullets">
-            <li>Hiring spikes in engineering/IT</li>
-            <li>M&amp;A / restructuring announcements</li>
-            <li>Contract renewals or vendor changes</li>
-            <li>Security/compliance incidents or audits</li>
-            <li>Cloud migration or major refresh cycle</li>
-          </ul>
+    <!-- RIGHT: REFERENCE RAIL -->
+    <section class="panel right" aria-labelledby="intel-title">
+      <aside class="intel card">
+        <div class="intel-head">
+          <h2 id="intel-title">Reference</h2>
+          <button id="toggle-rail" class="btn small" type="button" aria-expanded="true" aria-controls="rail-body">Hide</button>
         </div>
+        <div id="rail-body">
+          <section class="intel-slot">
+            <h3>Signals to check</h3>
+            <ul>
+              <li>Hiring spikes in engineering/IT</li>
+              <li>M&amp;A / restructuring announcements</li>
+              <li>Contract renewals or vendor changes</li>
+              <li>Certifications / compliance events</li>
+              <li>Cloud migrations or refresh cycles</li>
+            </ul>
+          </section>
 
-        <div class="card">
-          <h2>Your sources</h2>
-          <div id="sourcesList" class="muted">No sources yet.</div>
-        </div>
+          <section class="intel-slot sources-list">
+            <h3>Your sources</h3>
+            <div id="sourcesList" class="muted">No sources yet.</div>
+          </section>
 
-        <div class="card">
-          <h2>What changed</h2>
-          <div id="delta" class="muted">Run twice to see changes.</div>
-        </div>
+          <section class="intel-slot">
+            <h3>What changed</h3>
+            <div id="delta" class="muted">Run twice to see differences.</div>
+          </section>
 
-        <div class="card">
-          <h2>Notes</h2>
-          <textarea id="notes" rows="6" placeholder="Saved locally only."></textarea>
+          <section class="intel-slot">
+            <h3>Notes</h3>
+            <textarea id="notes" rows="6" placeholder="Saved locally only."></textarea>
+          </section>
         </div>
       </aside>
     </section>
   </main>
 
+  <!-- Simple Help Modal -->
+  <dialog id="help-modal" class="modal">
+    <div class="card" style="max-width:700px">
+      <div class="row-between" style="align-items:center">
+        <h3 style="margin:0">About Lead Qualification</h3>
+        <button id="help-close" class="btn inline" type="button">Close ×</button>
+      </div>
+      <p>Provide your supplier details and the prospect’s details. We’ll generate a concise
+        qualification summary that weighs your value against the prospect’s context and signals.</p>
+      <ul>
+        <li><strong>Your company URL</strong> is used to qualify value and proof points.</li>
+        <li>Add <em>Sources</em> to steer the analysis (annual report, LinkedIn, press).</li>
+      </ul>
+    </div>
+  </dialog>
+
   <script>
-    /* ---------- Auth & header ---------- */
+    // ---------- Auth ----------
     (async () => {
-      try {
-        const r = await fetch("/.auth/me", { credentials: "include" });
+      try{
+        const r = await fetch("/.auth/me", { credentials:"include", cache:"no-store" });
         if (r.status === 401) {
           const here = encodeURIComponent(location.pathname + location.search + location.hash || "/");
           location.href = "/.auth/login/aad?post_login_redirect_uri=" + here;
           return;
         }
         const me = await r.json().catch(()=>null);
-        const user = me?.clientPrincipal?.userDetails
+        const email = me?.clientPrincipal?.userDetails
           || (me?.clientPrincipal?.claims||[]).find(c => (c.typ||"").toLowerCase().includes("email"))?.val
-          || "Signed in";
-        document.getElementById("user").textContent = user;
-      } catch {
-        // ignore
-      }
+          || "";
+        if (email) {
+          const badge = document.getElementById("user-badge");
+          const el = document.getElementById("user-email");
+          if (badge && el) { el.textContent = email; badge.classList.remove("is-hidden"); }
+        }
+      }catch{}
     })();
-    document.getElementById("logout").addEventListener("click", () => location.href='/.auth/logout');
 
-    /* ---------- Helpers ---------- */
-    const $ = (id) => document.getElementById(id);
-    const fields = ["company","industry","website","sources","notes"];
-    const rememberBox = $("remember");
+    // ---------- Refs ----------
+    const $ = (id)=>document.getElementById(id);
+    const form = $("lq-form");
+    const remember = $("remember");
+    const output = $("output");
+    const statusEl = $("status");
     const generateBtn = $("generate");
     const copyBtn = $("copy");
     const downloadBtn = $("download");
-    const summaryEl = $("summary");
     const previewBox = $("previewBox");
     const responseBox = $("responseBox");
     const payloadWrap = $("payloadWrap");
-    let lastSummary = sessionStorage.getItem("lq_lastSummary") || "";
 
-    function safeURL(u){
-      try{ const x = new URL(u); return x.protocol === "http:" || x.protocol === "https:"; } catch { return false; }
-    }
+    const fields = ["seller_name","seller_company","seller_url","company","industry","website","sources","notes"];
+    const STORAGE_KEY = "lead_qualification_v2.form";
+    let lastSummary = localStorage.getItem("lead_qualification_v2.last_summary") || "";
+
+    // ---------- Utilities ----------
+    const setStatus = (msg, kind="info") => {
+      statusEl.textContent = msg || "";
+      statusEl.dataset.kind = kind;
+    };
+    const safeURL = (u) => { try{ const x = new URL(u); return x.protocol==="http:"||x.protocol==="https:"; } catch { return false; } };
+    const srcArray = () => ( ($("sources").value || "").split(/\n|,/).map(s=>s.trim()).filter(Boolean) );
+
     function validateInline(){
-      const c = $("company").value.trim();
-      const i = $("industry").value.trim();
-      const w = $("website").value.trim();
-      $("err-company").hidden = !!c;
-      $("err-industry").hidden = !!i;
-      $("err-website").hidden = safeURL(w);
-      const ok = c && i && safeURL(w);
+      const req = {
+        seller_name: !!$("seller_name").value.trim(),
+        seller_company: !!$("seller_company").value.trim(),
+        seller_url: safeURL($("seller_url").value.trim()),
+        company: !!$("company").value.trim(),
+        industry: !!$("industry").value.trim(),
+        website: safeURL($("website").value.trim()),
+      };
+      $("seller_name_error").textContent = req.seller_name ? "" : "This field is required.";
+      $("seller_company_error").textContent = req.seller_company ? "" : "This field is required.";
+      $("seller_url_error").textContent = req.seller_url ? "" : "Enter a valid URL (https://…).";
+      $("company_error").textContent = req.company ? "" : "This field is required.";
+      $("industry_error").textContent = req.industry ? "" : "This field is required.";
+      $("website_error").textContent = req.website ? "" : "Enter a valid URL (https://…).";
+
+      const ok = Object.values(req).every(Boolean);
       generateBtn.disabled = !ok;
       return ok;
     }
-    function getSourcesArray(){
-      const raw = $("sources").value || "";
-      return raw.split(/\n|,/).map(s => s.trim()).filter(Boolean);
+
+    function updateSourcesList(){
+      const arr = srcArray();
+      $("sourcesList").innerHTML = arr.length
+        ? '<ul>'+arr.map(a=>`<li><a href="${a}" target="_blank" rel="noopener">${a}</a></li>`).join("")+'</ul>'
+        : 'No sources yet.';
     }
+
     function buildPayload(){
       if(!validateInline()) return null;
       const srcRaw = $("sources").value || "";
@@ -224,92 +269,90 @@
         pack: "uk_b2b_sales_core",
         template: "opportunity_qualification",
         variables: {
+          seller_name: $("seller_name").value.trim(),
+          seller_company: $("seller_company").value.trim(),
+          seller_url: $("seller_url").value.trim(),
           company: $("company").value.trim(),
           industry: $("industry").value.trim(),
           website: $("website").value.trim(),
           sources_raw: srcRaw,
-          sources: getSourcesArray()
+          sources: srcArray()
         }
       };
     }
-    function updateSourcesList(){
-      const arr = getSourcesArray();
-      $("sourcesList").innerHTML = arr.length
-        ? '<ul class="bullets">'+arr.map(a=>`<li><a href="${a}" target="_blank" rel="noopener">${a}</a></li>`).join("")+'</ul>'
-        : 'No sources yet.';
+
+    function saveForm(){
+      if (!remember.checked) return;
+      const fd = Object.fromEntries(new FormData(form).entries());
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(fd));
     }
-    function persistIfRemember(){
-      if (!rememberBox.checked) return;
-      fields.forEach(id => localStorage.setItem("lq_"+id, ($(id)?.value||"")));
-      localStorage.setItem("lq_remember","1");
-    }
-    function restoreIfRemember(){
-      if (localStorage.getItem("lq_remember")==="1"){
-        rememberBox.checked = true;
-        fields.forEach(id => {
-          const v = localStorage.getItem("lq_"+id);
-          if (v!=null) ($(id)||{}).value = v;
+    function loadForm(){
+      if (localStorage.getItem(STORAGE_KEY)) remember.checked = true;
+      try{
+        const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+        Object.entries(data).forEach(([k,v])=>{
+          const el = form.elements[k] || $(k);
+          if (el) el.value = v;
         });
-        updateSourcesList();
-        validateInline();
-      }
+      }catch{}
     }
+
     function setSummary(text){
-      summaryEl.classList.remove("empty","skeleton");
-      summaryEl.textContent = text || "";
-      const has = !!text;
-      copyBtn.disabled = !has;
-      downloadBtn.disabled = !has;
+      output.textContent = text || "";
+      const has = !!(text && text.trim());
+      copyBtn.disabled = !has; downloadBtn.disabled = !has;
       if (has) {
         $("delta").textContent = diffText(lastSummary, text) || "—";
         lastSummary = text;
-        sessionStorage.setItem("lq_lastSummary", text);
+        localStorage.setItem("lead_qualification_v2.last_summary", text);
       }
-    }
-    function showLoading(){
-      summaryEl.textContent = "";
-      summaryEl.classList.add("skeleton");
-    }
-    function stopLoading(){
-      summaryEl.classList.remove("skeleton");
     }
     function diffText(oldT, newT){
       if(!oldT) return "Run again to see differences.";
       if(oldT === newT) return "No changes.";
-      // simple line-based diff
       const o = new Set(oldT.split(/\r?\n/));
       const n = new Set(newT.split(/\r?\n/));
-      const added = [...n].filter(l=>!o.has(l)).slice(0,6);
-      const removed = [...o].filter(l=>!n.has(l)).slice(0,6);
+      const added = [...n].filter(l=>!o.has(l) && l.trim()).slice(0,6);
+      const removed = [...o].filter(l=>!n.has(l) && l.trim()).slice(0,6);
       let s = "";
       if (added.length) s += "Added:\n• " + added.join("\n• ") + "\n";
       if (removed.length) s += "Removed:\n• " + removed.join("\n• ");
       return s.trim();
     }
 
-    /* ---------- Events ---------- */
-    fields.forEach(id => ($(id)||{}).addEventListener?.("input", () => {
+    // ---------- Events ----------
+    fields.forEach(id => ( $(id)?.addEventListener?.("input", () => {
       validateInline();
-      if (id === "sources") updateSourcesList();
-      persistIfRemember();
-    }));
-    rememberBox.addEventListener("change", () => {
-      if (rememberBox.checked) persistIfRemember();
-      else { localStorage.removeItem("lq_remember"); fields.forEach(id => localStorage.removeItem("lq_"+id)); }
+      if (id==="sources") updateSourcesList();
+      saveForm();
+    })));
+
+    $("toggle-rail")?.addEventListener("click", () => {
+      const btn = $("toggle-rail");
+      const body = $("rail-body");
+      const expanded = btn.getAttribute("aria-expanded") === "true";
+      btn.setAttribute("aria-expanded", String(!expanded));
+      body.hidden = expanded;
+      btn.textContent = expanded ? "Show" : "Hide";
     });
+
+    $("help")?.addEventListener("click", ()=> $("help-modal")?.showModal());
+    $("help-close")?.addEventListener("click", ()=> $("help-modal")?.close());
 
     $("viewPayload").addEventListener("click", () => {
       const p = buildPayload(); if(!p) return;
       previewBox.textContent = JSON.stringify(p, null, 2);
       payloadWrap.open = true;
-      persistIfRemember();
+      setStatus("Payload ready.");
+      saveForm();
     });
 
     generateBtn.addEventListener("click", async () => {
       const payload = buildPayload(); if(!payload) return;
-      responseBox.textContent = "";
-      showLoading();
-      try {
+      setStatus("Generating…");
+      responseBox.textContent = "Sending…";
+      generateBtn.classList.add("busy");
+      try{
         const res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -318,33 +361,46 @@
         const text = await res.text();
         setSummary(text);
         responseBox.textContent = text;
-      } catch (e) {
+        setStatus("Done.", "ok");
+      }catch(e){
         setSummary("");
         responseBox.textContent = "Request failed: " + (e?.message || String(e));
-      } finally {
-        stopLoading();
-        persistIfRemember();
+        setStatus("Could not generate a qualification summary.", "error");
+      }finally{
+        generateBtn.classList.remove("busy");
+        saveForm();
       }
     });
 
     copyBtn.addEventListener("click", async () => {
-      if(!summaryEl.textContent) return;
-      try { await navigator.clipboard.writeText(summaryEl.textContent); copyBtn.textContent="Copied"; setTimeout(()=>copyBtn.textContent="Copy summary",1200);} catch {}
+      const txt = output?.innerText || ""; if (!txt.trim()) return;
+      await navigator.clipboard.writeText(txt);
+      setStatus("Copied summary to clipboard.","ok");
     });
 
     downloadBtn.addEventListener("click", () => {
-      const blob = new Blob([summaryEl.textContent||""], {type:"text/plain"});
+      const txt = output?.innerText || ""; if (!txt.trim()) return;
+      const name = ($("company").value || "qualification").trim().replace(/\s+/g,"-");
+      const blob = new Blob([txt], {type:"text/plain"});
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = ( $("company").value.trim() || "qualification") + ".txt";
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+      a.href = url; a.download = `lead-qualification_${name}_${new Date().toISOString().slice(0,10)}.txt`;
+      document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
     });
 
-    // init
-    restoreIfRemember();
-    updateSourcesList();
-    validateInline();
+    remember.addEventListener("change", () => {
+      if (!remember.checked) localStorage.removeItem(STORAGE_KEY); else saveForm();
+    });
+
+    // ---------- Init ----------
+    (function init(){
+      loadForm();
+      validateInline();
+      updateSourcesList();
+      // restore notes
+      try { $("notes").value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}").notes || ""; } catch {}
+      $("notes").addEventListener("input", saveForm);
+    })();
   </script>
 </body>
 </html>
