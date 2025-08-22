@@ -3,103 +3,304 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Larato | Inside Track Sales Tools</title>
-  <meta name="description" content="Inside Track–powered tools for front-end B2B engagement."/>
+  <title>Larato | Inside Track Business Growth Tools</title>
+  <meta name="description" content="Inside Track Business Growth Tools by Larato — fast, consistent sales workflows that raise your win rate."/>
+  <meta name="color-scheme" content="light only">
   <style>
-    :root { --bg:#f8fafc; --card:#fff; --text:#0f172a; --muted:#64748b; --brand:#1e40af; }
+    /* ====== Design tokens ====== */
+    :root{
+      --bg: #f6f8fb;
+      --surface: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --outline: #e2e8f0;
+      --brand: #1e40af;           /* Larato deep blue */
+      --brand-2: #0ea5e9;         /* accent blue */
+      --focus: #6366f1;
+      --radius: 16px;
+      --shadow: 0 8px 24px rgba(2, 6, 23, .08);
+    }
+
     * { box-sizing: border-box }
-    body { font-family: system-ui,"Segoe UI",Roboto,Arial,sans-serif; background:var(--bg); color:var(--text); margin:0 }
-    header, main, footer { max-width: 960px; margin: 0 auto; padding: 24px }
-    .nav { display:flex; justify-content:space-between; align-items:center; gap:12px }
-    .btn { padding:10px 14px; border-radius:10px; border:1px solid #cbd5e1; background:#fff; cursor:pointer }
-    .btn:hover { background:#f1f5f9 }
-    .btn-primary { background:var(--brand); border-color:var(--brand); color:#fff }
-    .btn-primary:hover { filter:brightness(1.05) }
-    .card { background:var(--card); border:1px solid #e2e8f0; border-radius:16px; padding:20px }
-    .grid { display:grid; gap:12px }
-    .grid-2 { grid-template-columns: repeat(auto-fit,minmax(220px,1fr)) }
-    .muted { color:var(--muted); font-size: 14px }
-    a.tool { display:block; padding:14px; border:1px solid #e2e8f0; border-radius:12px; background:#fff; text-decoration:none; color:inherit }
-    a.tool:hover { background:#f8fafc }
-    .hide { display:none }
+    html,body { height:100% }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji";
+      background: radial-gradient(1200px 600px at 10% -10%, rgba(14,165,233,.15), transparent 60%) ,
+                  radial-gradient(900px 500px at 110% -20%, rgba(30,64,175,.12), transparent 60%),
+                  var(--bg);
+      color:var(--text);
+      line-height:1.5;
+    }
+
+    a{ color:inherit }
+    img{ max-width:100%; height:auto; display:block }
+
+    /* ====== Layout ====== */
+    header, main, footer { max-width: 1040px; margin: 0 auto; padding: 24px }
+    header { padding-top: 28px }
+    .nav{
+      display:flex; align-items:center; justify-content:space-between; gap:16px;
+    }
+    .brand{
+      display:flex; align-items:center; gap:14px; text-decoration:none;
+    }
+    .brand h1{
+      font-size: clamp(18px, 2.6vw, 24px);
+      font-weight: 700; letter-spacing:.2px; margin:0;
+    }
+    .tagline{ color:var(--muted); font-weight:500; font-size: 14px; margin-left:6px }
+
+    .hero{
+      background: linear-gradient(135deg, #ffffff, #fbfdff 35%, rgba(14,165,233,.06) 100%);
+      border: 1px solid var(--outline);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 28px;
+    }
+
+    .welcome{
+      display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap;
+    }
+
+    .muted { color:var(--muted) }
+
+    .grid{
+      display:grid;
+      gap:14px;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      margin-top: 12px;
+    }
+
+    /* ====== Buttons ====== */
+    .btn{
+      appearance:none;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border:1px solid var(--outline);
+      background: #fff;
+      cursor: pointer;
+      transition: transform .04s ease, background .15s ease, filter .15s ease, box-shadow .15s ease;
+      font-weight:600;
+    }
+    .btn:hover{ background:#f8fafc }
+    .btn:active{ transform: translateY(1px) }
+    .btn-primary{
+      background: linear-gradient(180deg, var(--brand), #173991);
+      color:#fff;
+      border-color: transparent;
+      box-shadow: 0 6px 14px rgba(30,64,175,.25);
+    }
+    .btn-primary:hover{ filter:brightness(1.03) }
+    .btn:focus-visible{
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    /* ====== Tool tiles ====== */
+    .tool{
+      display:block;
+      position:relative;
+      text-decoration:none;
+      background:#fff;
+      border:1px solid var(--outline);
+      border-radius:14px;
+      padding:16px 16px 18px;
+      box-shadow: var(--shadow);
+      transition: transform .06s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease;
+      font-weight:700;
+    }
+    .tool small{ display:block; font-weight:500; color:var(--muted); margin-top:6px }
+    .tool:hover{ background:#f9fbff; transform: translateY(-1px) }
+    .tool:focus-visible{ outline: 3px solid var(--focus); outline-offset: 2px }
+
+    .tool .pill{
+      display:inline-block;
+      font-size:12px; line-height:1;
+      padding:6px 8px;
+      border-radius:999px;
+      background: rgba(14,165,233,.1);
+      color:#0369a1;
+      border:1px solid rgba(14,165,233,.25);
+      margin-top:10px;
+    }
+
+    /* Disabled / “coming soon” tiles  */
+    .tool.disabled{
+      cursor: not-allowed;
+      color:#475569;
+      background: linear-gradient(180deg, #fff, #fafafa);
+      opacity: .72;
+      box-shadow: none;
+    }
+    .tool.disabled:hover{ transform:none; background: linear-gradient(180deg, #fff, #f6f6f6) }
+    .tool.disabled:focus{ outline:none }
+
+    /* Tooltip (pure CSS, accessible fallback via title attribute) */
+    .tool[data-tip]{
+      position:relative;
+    }
+    .tool[data-tip]:hover::after{
+      content: attr(data-tip);
+      position:absolute; left:50%; top:100%;
+      transform: translate(-50%, 10px);
+      background:#0b1220; color:#fff;
+      padding:8px 10px; border-radius:8px; font-size:12px; line-height:1.3;
+      width: 280px; max-width: 78vw; text-align:center;
+      box-shadow: 0 8px 18px rgba(2,6,23,.2);
+      z-index: 10;
+      pointer-events:none;
+    }
+
+    /* Footer */
+    footer .card{
+      display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+      background:#fff; border:1px solid var(--outline); border-radius:var(--radius); padding:16px; box-shadow: var(--shadow);
+    }
+
+    /* Helpers */
+    .hide{ display:none }
+    .spacer{ height:8px }
+
+    /* Logo sizing */
+    .logo-wrap{ width:40px; height:40px }
+    .wordmark{ display:flex; align-items:center; gap:8px }
   </style>
 </head>
 <body>
-  <header class="nav">
-    <h1 style="margin:0">SWA Sales Tools <span class="muted">| Larato Best Practice</span></h1>
+  <header class="nav" aria-label="Global">
+    <a href="/" class="brand" aria-current="page">
+      <!-- Simple inline Larato mark (no external asset required) -->
+      <div class="logo-wrap" aria-hidden="true">
+        <svg viewBox="0 0 64 64" role="img" aria-label="Larato" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#1e40af"/>
+              <stop offset=".9" stop-color="#0ea5e9"/>
+            </linearGradient>
+          </defs>
+          <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g)"/>
+          <path d="M20 18v28h24v-6H28V18z" fill="#fff" opacity=".98"/>
+        </svg>
+      </div>
+      <div class="wordmark">
+        <h1>Inside Track Business Growth Tools</h1>
+        <span class="tagline">| Larato best practice</span>
+      </div>
+    </a>
     <div id="authButtons">
       <button class="btn" onclick="login()">Sign in</button>
     </div>
   </header>
 
-  <main class="grid" aria-labelledby="welcome-heading">
+  <main class="hero" aria-labelledby="welcome-heading">
     <!-- Public welcome -->
-    <section id="welcome" class="card">
-      <h2 id="welcome-heading">Welcome</h2>
-      <p class="muted">These tools help you qualify opportunities, make the best first contact, and follow up using Inside Track insights. Please sign in to access the facilities.</p>
-      <div><button class="btn-primary btn" onclick="login()">Sign in with Microsoft</button></div>
-      <p class="muted" style="margin-top:12px">By signing in you agree to Larato’s internal use policy and privacy notice.</p>
+    <section id="welcome" class="welcome" aria-live="polite">
+      <div>
+        <h2 id="welcome-heading" style="margin:0 0 6px 0">Welcome</h2>
+        <p class="muted" style="max-width:68ch">
+          These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects.
+          Please sign in to get started.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn-primary" onclick="login()" aria-label="Sign in with Microsoft">Sign in with Microsoft</button>
+        <p class="muted" style="margin-top:10px">By signing in you agree to Larato’s internal use policy and privacy notice.</p>
+      </div>
     </section>
 
     <!-- Signed-in dashboard -->
-    <section id="dashboard" class="card hide" aria-live="polite">
-      <h2>Good to see you<span id="userName"></span></h2>
-      <p class="muted">Choose a facility to start. You can paste Inside Track details on each page.</p>
+    <section id="dashboard" class="hide" aria-live="polite">
+      <h2 style="margin:0 0 6px 0">Welcome<span id="userName"></span></h2>
+      <p class="muted" style="max-width:72ch">
+        These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects.
+      </p>
 
-      <div class="grid grid-2" style="margin-top:12px">
-        <a class="tool" href="/lead-qualification.html">Lead Qualification</a>
-        <a class="tool" href="/first-call-script-v2.html">First Call Script</a>
-        <a class="tool" href="/email-gen.html">Sales Email Generator</a>
-        <a class="tool" href="/follow-up.html">Follow-up Planner</a>
-        <a class="tool" href="/competition.html">Competitive Positioning</a>
-        <a class="tool" href="/checklist.html">First-Step Engagement Checklist</a>
-        <a class="tool" href="/promptvariableassurer.html">Prompt Variable Assurer</a>
-      </div>
+      <!-- Three-tile layout: accessible first, two “coming soon” to the right -->
+      <div class="grid" style="margin-top:14px">
+        <!-- 1) Accessible now -->
+        <a class="tool" href="/first-call-script-v2.html">
+          Call scripts and emails
+          <small>Craft confident, on-brand outreach in seconds.</small>
+          <span class="pill">Available</span>
+        </a>
 
-      <div style="margin-top:16px">
-        <button class="btn" onclick="logout()">Sign out</button>
+        <!-- 2) Coming soon: Lead Qualification -->
+        <a class="tool disabled"
+           href="#"
+           aria-disabled="true" tabindex="-1"
+           title="Coming soon (Sept 2025). This will help you to qualify and prioritise leads"
+           data-tip="Coming soon (Sept 2025). This will help you to qualify and prioritise leads">
+          Lead qualification
+          <small>Score and prioritise opportunities using Inside Track.</small>
+          <span class="pill" aria-hidden="true">Coming soon</span>
+        </a>
+
+        <!-- 3) Coming soon: Competitive Positioning -->
+        <a class="tool disabled"
+           href="#"
+           aria-disabled="true" tabindex="-1"
+           title="Coming soon (October 2025). This will help you to differentiate against your competition"
+           data-tip="Coming soon (October 2025). This will help you to differentiate against your competition">
+          Beat your competitors
+          <small>Position your value clearly against alternatives.</small>
+          <span class="pill" aria-hidden="true">Coming soon</span>
+        </a>
       </div>
     </section>
   </main>
 
-  <footer class="card" style="margin:24px auto">
-    <div class="muted">© Larato • Internal use only • <a href="privacy.html">Privacy</a></div>
+  <footer>
+    <div class="card">
+      <div class="muted">© Larato • Internal use only • <a href="privacy.html">Privacy</a></div>
+    </div>
   </footer>
 
   <script>
-  function buildReturnTarget() {
-    const target = window.location.pathname + window.location.search + window.location.hash;
-    return encodeURIComponent(target || "/");
-  }
+    // Keep disabled tiles from navigating if clicked
+    document.addEventListener('click', function (e) {
+      const t = e.target.closest('.tool.disabled');
+      if (t) { e.preventDefault(); }
+    });
 
-  async function login(){
-    location.href = "/.auth/login/aad?post_login_redirect_uri=" + buildReturnTarget();
-  }
+    function buildReturnTarget() {
+      const target = window.location.pathname + window.location.search + window.location.hash;
+      return encodeURIComponent(target || "/");
+    }
 
-  async function logout(){ location.href='/.auth/logout'; }
+    async function login(){
+      location.href = "/.auth/login/aad?post_login_redirect_uri=" + buildReturnTarget();
+    }
 
-  (async function init(){
-    try {
-      const res = await fetch('/.auth/me', { credentials: 'include' });
-      if (!res.ok) throw new Error('auth check failed');
-      const data = await res.json();
-      const princ = (data && data.clientPrincipal) || null;
-      const welcome = document.getElementById('welcome');
-      const dash = document.getElementById('dashboard');
-      const name = document.getElementById('userName');
-      const authButtons = document.getElementById('authButtons');
-      if (princ) {
-        welcome.classList.add('hide');
-        dash.classList.remove('hide');
-        name.textContent = princ.userDetails ? `, ${princ.userDetails}` : '';
-        authButtons.innerHTML = '<button class="btn" onclick="logout()">Sign out</button>';
-      } else {
-        welcome.classList.remove('hide');
-        dash.classList.add('hide');
-        authButtons.innerHTML = '<button class="btn" onclick="login()">Sign in</button>';
+    async function logout(){
+      location.href='/.auth/logout';
+    }
+
+    (async function init(){
+      try {
+        const res = await fetch('/.auth/me', { credentials: 'include' });
+        if (!res.ok) throw new Error('auth check failed');
+        const data = await res.json();
+        const princ = (data && data.clientPrincipal) || null;
+
+        const welcome = document.getElementById('welcome');
+        const dash    = document.getElementById('dashboard');
+        const name    = document.getElementById('userName');
+        const authButtons = document.getElementById('authButtons');
+
+        if (princ) {
+          welcome.classList.add('hide');
+          dash.classList.remove('hide');
+          name.textContent = princ.userDetails ? `, ${princ.userDetails}` : '';
+          authButtons.innerHTML = '<button class="btn" onclick="logout()">Sign out</button>'; // Single sign-out location
+        } else {
+          welcome.classList.remove('hide');
+          dash.classList.add('hide');
+          authButtons.innerHTML = '<button class="btn" onclick="login()">Sign in</button>';
+        }
+      } catch {
+        // If auth check fails, default to signed-out view
       }
-    } catch {}
-  })();
-</script>
+    })();
+  </script>
 </body>
 </html>
