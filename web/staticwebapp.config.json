@@ -1,39 +1,64 @@
 {
   "routes": [
-    { "route": "/", "rewrite": "/first-call-script-v2.html" },
-    { "route": "/first-call-script-v2", "rewrite": "/first-call-script-v2.html" },
-
+    {
+      "route": "/",
+      "rewrite": "/index.html"
+    },
+    {
+      "route": "/script",
+      "rewrite": "/first-call-script-v2.html"
+    },
+    {
+      "route": "/first-call-script-v2",
+      "rewrite": "/first-call-script-v2.html"
+    },
+    {
+      "route": "/first-call-script-v2/*",
+      "rewrite": "/first-call-script-v2.html"
+    },
+    {
+      "route": "/api/*",
+      "allowedRoles": [
+        "anonymous"
+      ]
+    },
     {
       "route": "/content/call-library/*",
-      "allowedRoles": ["anonymous", "authenticated"],
-      "headers": { "Cache-Control": "no-store" }
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ],
+      "headers": {
+        "Cache-Control": "no-store"
+      }
     },
     {
       "route": "/src/*",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
     }
   ],
-
   "navigationFallback": {
-    "rewrite": "/first-call-script-v2.html",
+    "rewrite": "/index.html",
     "exclude": [
       "/api/*",
       "/content/*",
-      "/src/*",
-      "/favicon.ico",
-      "/robots.txt"
+      "/content/call-library/*",
+      "/src/*"
     ]
   },
-
-  "responseOverrides": {
-    "404": { "rewrite": "/first-call-script-v2.html" }
-  },
-
-  "mimeTypes": {
-    ".md": "text/markdown; charset=utf-8",
-    ".mdx": "text/markdown; charset=utf-8",
-    ".js": "application/javascript; charset=utf-8",
-    ".mjs": "application/javascript; charset=utf-8",
-    ".json": "application/json; charset=utf-8"
+"responseOverrides": {
+  "404": {
+    "rewrite": "/first-call-script-v2.html"
   }
+},
+"mimeTypes": {
+  ".md": "text/markdown; charset=utf-8",
+  ".mdx": "text/markdown; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".mjs": "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8"
+}
 }
