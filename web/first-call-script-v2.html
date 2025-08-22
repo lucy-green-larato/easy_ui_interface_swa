@@ -810,6 +810,7 @@
     const intelBody = document.getElementById('intel-body');
 
     const callTypeSel = document.getElementById('call_type');
+    const callTypeSelXs = document.getElementById('call_type_xs');
     const rememberCallType = document.getElementById('remember_call_type');
     const mapLabel = document.getElementById('map-label');
     const userBadge = document.getElementById('user-badge');
@@ -1028,11 +1029,23 @@
     };
 
     callTypeSel?.addEventListener('change', async () => {
+      if (callTypeSelXs) callTypeSelXs.value = callTypeSel.value;
       validateField(callTypeSel);
       saveForm(); updateMapIndicator(); refreshSubmitState();
       const mode = modeFromCallType(callTypeSel.value) || 'direct';
       await populateProductsForMode(mode);
       validateField('product');
+    });
+
+    // When the mobile field changes, mirror to the header pill and trigger its logic
+    callTypeSelXs?.addEventListener('change', () => {
+      if (!callTypeSel) return;
+      callTypeSel.value = callTypeSelXs.value;
+      validateField(callTypeSel);
+      saveForm(); updateMapIndicator(); refreshSubmitState();
+      const mode = modeFromCallType(callTypeSel.value) || 'direct';
+      await populateProductsForMode(mode)
+      callTypeSel.dispatchEvent(new Event('change', { bubbles: true }));
     });
     rememberCallType?.addEventListener('change', saveCallPrefIfRequested);
 
@@ -1302,6 +1315,9 @@
       catch { intel = { products: {} }; }
 
       loadForm(); loadCallPref();
+      if (callTypeSelXs && callTypeSel) {
+        callTypeSelXs.value = callTypeSel.value || '';
+      }
       const currentMode = modeFromCallType(callTypeSel?.value || 'direct');
       await populateProductsForMode(currentMode);
       if (productSel?.value && buyerBehSel?.value) {
