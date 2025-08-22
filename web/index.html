@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Larato | Inside Track Business Growth Tools</title>
-  <meta name="description" content="Inside Track Business Growth Tools by Larato — fast, consistent sales workflows that raise your win rate."/>
+  <meta name="description" content="Inside Track Business Growth Tools by Larato — fast, consistent sales and marketing workflows."/>
   <meta name="color-scheme" content="light only">
   <style>
     /* ====== Design tokens ====== */
@@ -14,8 +14,8 @@
       --text: #0f172a;
       --muted: #64748b;
       --outline: #e2e8f0;
-      --brand: #1e40af;           /* Larato deep blue */
-      --brand-2: #0ea5e9;         /* accent blue */
+      --brand: #1e40af;   /* Larato deep blue */
+      --accent: #0ea5e9;  /* accent */
       --focus: #6366f1;
       --radius: 16px;
       --shadow: 0 8px 24px rgba(2, 6, 23, .08);
@@ -25,7 +25,7 @@
     html,body { height:100% }
     body{
       margin:0;
-      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji";
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans";
       background: radial-gradient(1200px 600px at 10% -10%, rgba(14,165,233,.15), transparent 60%) ,
                   radial-gradient(900px 500px at 110% -20%, rgba(30,64,175,.12), transparent 60%),
                   var(--bg);
@@ -33,23 +33,22 @@
       line-height:1.5;
     }
 
-    a{ color:inherit }
+    a{ color:inherit; text-decoration:none }
     img{ max-width:100%; height:auto; display:block }
 
-    /* ====== Layout ====== */
     header, main, footer { max-width: 1040px; margin: 0 auto; padding: 24px }
     header { padding-top: 28px }
-    .nav{
-      display:flex; align-items:center; justify-content:space-between; gap:16px;
-    }
-    .brand{
-      display:flex; align-items:center; gap:14px; text-decoration:none;
-    }
-    .brand h1{
+
+    .nav{ display:flex; align-items:center; justify-content:space-between; gap:16px }
+    .brand{ display:flex; align-items:center; gap:14px }
+    .logo{ width:40px; height:40px }
+    .title-wrap{ display:flex; flex-direction:column }
+    .title-wrap h1{
+      margin:0;
       font-size: clamp(18px, 2.6vw, 24px);
-      font-weight: 700; letter-spacing:.2px; margin:0;
+      font-weight: 700; letter-spacing:.2px;
     }
-    .tagline{ color:var(--muted); font-weight:500; font-size: 14px; margin-left:6px }
+    .subtag{ color:var(--muted); font-weight:500; font-size: 13px; margin-top:2px }
 
     .hero{
       background: linear-gradient(135deg, #ffffff, #fbfdff 35%, rgba(14,165,233,.06) 100%);
@@ -59,11 +58,20 @@
       padding: 28px;
     }
 
-    .welcome{
-      display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap;
+    /* Keep welcome, fix wrapping by using block layout + max-width */
+    .welcome { display:block }
+    .welcome p{
+      margin: 8px 0 0 0;
+      color: var(--muted);
+      max-width: 72ch;
     }
 
-    .muted { color:var(--muted) }
+    .section-heading{
+      margin: 24px 0 8px 0;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing:.2px;
+    }
 
     .grid{
       display:grid;
@@ -72,7 +80,6 @@
       margin-top: 12px;
     }
 
-    /* ====== Buttons ====== */
     .btn{
       appearance:none;
       padding: 10px 14px;
@@ -92,40 +99,30 @@
       box-shadow: 0 6px 14px rgba(30,64,175,.25);
     }
     .btn-primary:hover{ filter:brightness(1.03) }
-    .btn:focus-visible{
-      outline: 3px solid var(--focus);
-      outline-offset: 2px;
-    }
+    .btn:focus-visible{ outline: 3px solid var(--focus); outline-offset: 2px }
 
-    /* ====== Tool tiles ====== */
     .tool{
       display:block;
       position:relative;
-      text-decoration:none;
       background:#fff;
       border:1px solid var(--outline);
       border-radius:14px;
       padding:16px 16px 18px;
       box-shadow: var(--shadow);
-      transition: transform .06s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease;
+      transition: transform .06s ease, box-shadow .15s ease, background .15s ease;
       font-weight:700;
     }
     .tool small{ display:block; font-weight:500; color:var(--muted); margin-top:6px }
     .tool:hover{ background:#f9fbff; transform: translateY(-1px) }
     .tool:focus-visible{ outline: 3px solid var(--focus); outline-offset: 2px }
 
-    .tool .pill{
-      display:inline-block;
-      font-size:12px; line-height:1;
-      padding:6px 8px;
-      border-radius:999px;
-      background: rgba(14,165,233,.1);
-      color:#0369a1;
-      border:1px solid rgba(14,165,233,.25);
+    .pill{
+      display:inline-block; font-size:12px; line-height:1;
+      padding:6px 8px; border-radius:999px;
+      background: rgba(14,165,233,.1); color:#0369a1; border:1px solid rgba(14,165,233,.25);
       margin-top:10px;
     }
 
-    /* Disabled / “coming soon” tiles  */
     .tool.disabled{
       cursor: not-allowed;
       color:#475569;
@@ -136,10 +133,8 @@
     .tool.disabled:hover{ transform:none; background: linear-gradient(180deg, #fff, #f6f6f6) }
     .tool.disabled:focus{ outline:none }
 
-    /* Tooltip (pure CSS, accessible fallback via title attribute) */
-    .tool[data-tip]{
-      position:relative;
-    }
+    /* Tooltip */
+    .tool[data-tip]{ position:relative }
     .tool[data-tip]:hover::after{
       content: attr(data-tip);
       position:absolute; left:50%; top:100%;
@@ -148,44 +143,26 @@
       padding:8px 10px; border-radius:8px; font-size:12px; line-height:1.3;
       width: 280px; max-width: 78vw; text-align:center;
       box-shadow: 0 8px 18px rgba(2,6,23,.2);
-      z-index: 10;
-      pointer-events:none;
+      z-index: 10; pointer-events:none;
     }
 
-    /* Footer */
     footer .card{
-      display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
-      background:#fff; border:1px solid var(--outline); border-radius:var(--radius); padding:16px; box-shadow: var(--shadow);
+      background:#fff; border:1px solid var(--outline); border-radius:var(--radius);
+      padding:16px; box-shadow: var(--shadow);
+      color: var(--muted);
     }
 
-    /* Helpers */
     .hide{ display:none }
-    .spacer{ height:8px }
-
-    /* Logo sizing */
-    .logo-wrap{ width:40px; height:40px }
-    .wordmark{ display:flex; align-items:center; gap:8px }
   </style>
 </head>
 <body>
   <header class="nav" aria-label="Global">
     <a href="/" class="brand" aria-current="page">
-      <!-- Simple inline Larato mark (no external asset required) -->
-      <div class="logo-wrap" aria-hidden="true">
-        <svg viewBox="0 0 64 64" role="img" aria-label="Larato" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#1e40af"/>
-              <stop offset=".9" stop-color="#0ea5e9"/>
-            </linearGradient>
-          </defs>
-          <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#g)"/>
-          <path d="M20 18v28h24v-6H28V18z" fill="#fff" opacity=".98"/>
-        </svg>
-      </div>
-      <div class="wordmark">
+      <!-- Prefer external SVG; falls back to inline mark if missing -->
+      <img class="logo" src="/assets/larato-logo.svg" alt="Larato" onerror="this.outerHTML = `<svg class='logo' viewBox='0 0 64 64' xmlns='http://www.w3.org/2000/svg'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#1e40af'/><stop offset='.9' stop-color='#0ea5e9'/></linearGradient></defs><rect x='2' y='2' width='60' height='60' rx='14' fill='url(#g)'/><path d='M20 18v28h24v-6H28V18z' fill='#fff' opacity='.98'/></svg>`;" />
+      <div class="title-wrap">
         <h1>Inside Track Business Growth Tools</h1>
-        <span class="tagline">| Larato best practice</span>
+        <div class="subtag">Larato best practice</div>
       </div>
     </a>
     <div id="authButtons">
@@ -196,27 +173,23 @@
   <main class="hero" aria-labelledby="welcome-heading">
     <!-- Public welcome -->
     <section id="welcome" class="welcome" aria-live="polite">
-      <div>
-        <h2 id="welcome-heading" style="margin:0 0 6px 0">Welcome</h2>
-        <p class="muted" style="max-width:68ch">
-          These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects.
-          Please sign in to get started.
-        </p>
-        <div class="spacer"></div>
+      <h2 id="welcome-heading" style="margin:0 0 6px 0">Welcome</h2>
+      <p>These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects. Please sign in to get started.</p>
+      <div style="margin-top:10px">
         <button class="btn btn-primary" onclick="login()" aria-label="Sign in with Microsoft">Sign in with Microsoft</button>
-        <p class="muted" style="margin-top:10px">By signing in you agree to Larato’s internal use policy and privacy notice.</p>
       </div>
     </section>
 
     <!-- Signed-in dashboard -->
     <section id="dashboard" class="hide" aria-live="polite">
       <h2 style="margin:0 0 6px 0">Welcome<span id="userName"></span></h2>
-      <p class="muted" style="max-width:72ch">
+      <p class="welcome-text" style="color:var(--muted); max-width:72ch; margin:8px 0 0 0">
         These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects.
       </p>
 
-      <!-- Three-tile layout: accessible first, two “coming soon” to the right -->
-      <div class="grid" style="margin-top:14px">
+      <!-- ===== Sales tools ===== -->
+      <h3 class="section-heading">Tools for sales</h3>
+      <div class="grid">
         <!-- 1) Accessible now -->
         <a class="tool" href="/first-call-script-v2.html">
           Call scripts and emails
@@ -224,18 +197,18 @@
           <span class="pill">Available</span>
         </a>
 
-        <!-- 2) Coming soon: Lead Qualification -->
+        <!-- 2) Lead Qualification (disabled, to the right of script) -->
         <a class="tool disabled"
            href="#"
            aria-disabled="true" tabindex="-1"
            title="Coming soon (Sept 2025). This will help you to qualify and prioritise leads"
            data-tip="Coming soon (Sept 2025). This will help you to qualify and prioritise leads">
           Lead qualification
-          <small>Score and prioritise opportunities using Inside Track.</small>
+          <small>Score and prioritise your leads</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
         </a>
 
-        <!-- 3) Coming soon: Competitive Positioning -->
+        <!-- 3) Competitive Positioning (disabled, to the right) -->
         <a class="tool disabled"
            href="#"
            aria-disabled="true" tabindex="-1"
@@ -246,17 +219,43 @@
           <span class="pill" aria-hidden="true">Coming soon</span>
         </a>
       </div>
+
+      <!-- ===== Marketing tools ===== -->
+      <h3 class="section-heading" style="margin-top:28px">Tools for marketing</h3>
+      <div class="grid">
+        <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
+           title="Coming soon. Specify campaigns that target your best prospects"
+           data-tip="Coming soon. Specify campaigns that target your best prospects">
+          Campaign specification
+          <small>Pinpoint your best prospects</small>
+          <span class="pill" aria-hidden="true">Coming soon</span>
+        </a>
+
+        <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
+           title="Coming soon. Prove why your offer is better"
+           data-tip="Coming soon. Prove why your offer is better">
+          Differentiation
+          <small>Evidence why your offer is better</small>
+          <span class="pill" aria-hidden="true">Coming soon</span>
+        </a>
+
+        <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
+           title="Coming soon. Create data-backed, personalised messaging"
+           data-tip="Coming soon. Create data-backed, personalised messaging">
+          Market beating messaging
+          <small>Data-backed, personalised, messaging</small>
+          <span class="pill" aria-hidden="true">Coming soon</span>
+        </a>
+      </div>
     </section>
   </main>
 
   <footer>
-    <div class="card">
-      <div class="muted">© Larato • Internal use only • <a href="privacy.html">Privacy</a></div>
-    </div>
+    <div class="card">© Larato</div>
   </footer>
 
   <script>
-    // Keep disabled tiles from navigating if clicked
+    // Prevent navigation from disabled tiles
     document.addEventListener('click', function (e) {
       const t = e.target.closest('.tool.disabled');
       if (t) { e.preventDefault(); }
@@ -291,14 +290,15 @@
           welcome.classList.add('hide');
           dash.classList.remove('hide');
           name.textContent = princ.userDetails ? `, ${princ.userDetails}` : '';
-          authButtons.innerHTML = '<button class="btn" onclick="logout()">Sign out</button>'; // Single sign-out location
+          // Single sign-out in header only
+          authButtons.innerHTML = '<button class="btn" onclick="logout()">Sign out</button>';
         } else {
           welcome.classList.remove('hide');
           dash.classList.add('hide');
           authButtons.innerHTML = '<button class="btn" onclick="login()">Sign in</button>';
         }
       } catch {
-        // If auth check fails, default to signed-out view
+        // default to signed-out view if auth check fails
       }
     })();
   </script>
