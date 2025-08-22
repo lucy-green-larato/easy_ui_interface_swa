@@ -1,14 +1,16 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Larato | Inside Track Business Growth Tools</title>
-  <meta name="description" content="Inside Track Business Growth Tools by Larato — fast, consistent sales and marketing workflows."/>
+  <meta name="description"
+    content="Inside Track Business Growth Tools by Larato — fast, consistent sales and marketing workflows." />
   <meta name="color-scheme" content="light only">
   <style>
     /* ====== Design tokens ====== */
-    :root{
+    :root {
       --bg: #f6f8fb;
       --surface: #ffffff;
       --text: #0f172a;
@@ -21,37 +23,87 @@
       --shadow: 0 8px 24px rgba(2, 6, 23, .08);
     }
 
-    * { box-sizing: border-box }
-    html,body { height:100% }
-    body{
-      margin:0;
+    * {
+      box-sizing: border-box
+    }
+
+    html,
+    body {
+      height: 100%
+    }
+
+    body {
+      margin: 0;
       font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans";
-      background: radial-gradient(1200px 600px at 10% -10%, rgba(14,165,233,.15), transparent 60%) ,
-                  radial-gradient(900px 500px at 110% -20%, rgba(30,64,175,.12), transparent 60%),
-                  var(--bg);
-      color:var(--text);
-      line-height:1.5;
+      background: radial-gradient(1200px 600px at 10% -10%, rgba(14, 165, 233, .15), transparent 60%),
+        radial-gradient(900px 500px at 110% -20%, rgba(30, 64, 175, .12), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.5;
     }
 
-    a{ color:inherit; text-decoration:none }
-    img{ max-width:100%; height:auto; display:block }
+    a {
+      color: inherit;
+      text-decoration: none
+    }
 
-    header, main, footer { max-width: 1040px; margin: 0 auto; padding: 24px }
-    header { padding-top: 28px }
+    img {
+      max-width: 100%;
+      height: auto;
+      display: block
+    }
 
-    .nav{ display:flex; align-items:center; justify-content:space-between; gap:16px }
-    .brand{ display:flex; align-items:center; gap:14px }
-    .logo{ width:40px; height:40px }
-    .title-wrap{ display:flex; flex-direction:column }
-    .title-wrap h1{
-      margin:0;
+    header,
+    main,
+    footer {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 24px
+    }
+
+    header {
+      padding-top: 28px
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px
+    }
+
+    .logo {
+      width: 40px;
+      height: 40px
+    }
+
+    .title-wrap {
+      display: flex;
+      flex-direction: column
+    }
+
+    .title-wrap h1 {
+      margin: 0;
       font-size: clamp(18px, 2.6vw, 24px);
-      font-weight: 700; letter-spacing:.2px;
+      font-weight: 700;
+      letter-spacing: .2px;
     }
-    .subtag{ color:var(--muted); font-weight:500; font-size: 13px; margin-top:2px }
 
-    .hero{
-      background: linear-gradient(135deg, #ffffff, #fbfdff 35%, rgba(14,165,233,.06) 100%);
+    .subtag {
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 13px;
+      margin-top: 2px
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #ffffff, #fbfdff 35%, rgba(14, 165, 233, .06) 100%);
       border: 1px solid var(--outline);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
@@ -59,107 +111,168 @@
     }
 
     /* Keep welcome, fix wrapping by using block layout + max-width */
-    .welcome { display:block }
-    .welcome p{
+    .welcome {
+      display: block
+    }
+
+    .welcome p {
       margin: 8px 0 0 0;
       color: var(--muted);
       max-width: 72ch;
     }
 
-    .section-heading{
+    .section-heading {
       margin: 24px 0 8px 0;
       font-size: 18px;
       font-weight: 800;
-      letter-spacing:.2px;
+      letter-spacing: .2px;
     }
 
-    .grid{
-      display:grid;
-      gap:14px;
+    .grid {
+      display: grid;
+      gap: 14px;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
       margin-top: 12px;
     }
 
-    .btn{
-      appearance:none;
+    .btn {
+      appearance: none;
       padding: 10px 14px;
       border-radius: 12px;
-      border:1px solid var(--outline);
+      border: 1px solid var(--outline);
       background: #fff;
       cursor: pointer;
       transition: transform .04s ease, background .15s ease, filter .15s ease, box-shadow .15s ease;
-      font-weight:600;
+      font-weight: 600;
     }
-    .btn:hover{ background:#f8fafc }
-    .btn:active{ transform: translateY(1px) }
-    .btn-primary{
-      background: linear-gradient(180deg, var(--brand), #173991);
-      color:#fff;
-      border-color: transparent;
-      box-shadow: 0 6px 14px rgba(30,64,175,.25);
-    }
-    .btn-primary:hover{ filter:brightness(1.03) }
-    .btn:focus-visible{ outline: 3px solid var(--focus); outline-offset: 2px }
 
-    .tool{
-      display:block;
-      position:relative;
-      background:#fff;
-      border:1px solid var(--outline);
-      border-radius:14px;
-      padding:16px 16px 18px;
+    .btn:hover {
+      background: #f8fafc
+    }
+
+    .btn:active {
+      transform: translateY(1px)
+    }
+
+    .btn-primary {
+      background: linear-gradient(180deg, var(--brand), #173991);
+      color: #fff;
+      border-color: transparent;
+      box-shadow: 0 6px 14px rgba(30, 64, 175, .25);
+    }
+
+    .btn-primary:hover {
+      filter: brightness(1.03)
+    }
+
+    .btn:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px
+    }
+
+    .tool {
+      display: block;
+      position: relative;
+      background: #fff;
+      border: 1px solid var(--outline);
+      border-radius: 14px;
+      padding: 16px 16px 18px;
       box-shadow: var(--shadow);
       transition: transform .06s ease, box-shadow .15s ease, background .15s ease;
-      font-weight:700;
-    }
-    .tool small{ display:block; font-weight:500; color:var(--muted); margin-top:6px }
-    .tool:hover{ background:#f9fbff; transform: translateY(-1px) }
-    .tool:focus-visible{ outline: 3px solid var(--focus); outline-offset: 2px }
-
-    .pill{
-      display:inline-block; font-size:12px; line-height:1;
-      padding:6px 8px; border-radius:999px;
-      background: rgba(14,165,233,.1); color:#0369a1; border:1px solid rgba(14,165,233,.25);
-      margin-top:10px;
+      font-weight: 700;
     }
 
-    .tool.disabled{
+    .tool small {
+      display: block;
+      font-weight: 500;
+      color: var(--muted);
+      margin-top: 6px
+    }
+
+    .tool:hover {
+      background: #f9fbff;
+      transform: translateY(-1px)
+    }
+
+    .tool:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px
+    }
+
+    .pill {
+      display: inline-block;
+      font-size: 12px;
+      line-height: 1;
+      padding: 6px 8px;
+      border-radius: 999px;
+      background: rgba(14, 165, 233, .1);
+      color: #0369a1;
+      border: 1px solid rgba(14, 165, 233, .25);
+      margin-top: 10px;
+    }
+
+    .tool.disabled {
       cursor: not-allowed;
-      color:#475569;
+      color: #475569;
       background: linear-gradient(180deg, #fff, #fafafa);
       opacity: .72;
       box-shadow: none;
     }
-    .tool.disabled:hover{ transform:none; background: linear-gradient(180deg, #fff, #f6f6f6) }
-    .tool.disabled:focus{ outline:none }
 
-    /* Tooltip */
-    .tool[data-tip]{ position:relative }
-    .tool[data-tip]:hover::after{
-      content: attr(data-tip);
-      position:absolute; left:50%; top:100%;
-      transform: translate(-50%, 10px);
-      background:#0b1220; color:#fff;
-      padding:8px 10px; border-radius:8px; font-size:12px; line-height:1.3;
-      width: 280px; max-width: 78vw; text-align:center;
-      box-shadow: 0 8px 18px rgba(2,6,23,.2);
-      z-index: 10; pointer-events:none;
+    .tool.disabled:hover {
+      transform: none;
+      background: linear-gradient(180deg, #fff, #f6f6f6)
     }
 
-    footer .card{
-      background:#fff; border:1px solid var(--outline); border-radius:var(--radius);
-      padding:16px; box-shadow: var(--shadow);
+    .tool.disabled:focus {
+      outline: none
+    }
+
+    /* Tooltip */
+    .tool[data-tip] {
+      position: relative
+    }
+
+    .tool[data-tip]:hover::after {
+      content: attr(data-tip);
+      position: absolute;
+      left: 50%;
+      top: 100%;
+      transform: translate(-50%, 10px);
+      background: #0b1220;
+      color: #fff;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.3;
+      width: 280px;
+      max-width: 78vw;
+      text-align: center;
+      box-shadow: 0 8px 18px rgba(2, 6, 23, .2);
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    footer .card {
+      background: #fff;
+      border: 1px solid var(--outline);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow);
       color: var(--muted);
     }
 
-    .hide{ display:none }
+    .hide {
+      display: none
+    }
   </style>
 </head>
+
 <body>
   <header class="nav" aria-label="Global">
     <a href="/" class="brand" aria-current="page">
       <!-- Prefer external SVG; falls back to inline mark if missing -->
-      <img class="logo" src="./assets/larato-logo.svg" alt="Larato" onerror="this.outerHTML = `<svg class='logo' viewBox='0 0 64 64' xmlns='http://www.w3.org/2000/svg'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#1e40af'/><stop offset='.9' stop-color='#0ea5e9'/></linearGradient></defs><rect x='2' y='2' width='60' height='60' rx='14' fill='url(#g)'/><path d='M20 18v28h24v-6H28V18z' fill='#fff' opacity='.98'/></svg>`;" />
+      <img class="logo" src="./assets/larato-logo.svg" alt="Larato" style="height:84px;width:auto;display:block">
       <div class="title-wrap">
         <h1>Inside Track Business Growth Tools</h1>
         <div class="subtag">Larato best practice</div>
@@ -174,9 +287,11 @@
     <!-- Public welcome -->
     <section id="welcome" class="welcome" aria-live="polite">
       <h2 id="welcome-heading" style="margin:0 0 6px 0">Welcome</h2>
-      <p>These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects. Please sign in to get started.</p>
+      <p>These tools will save you time and assure that you deliver the best sales and marketing experience to your
+        prospects. Please sign in to get started.</p>
       <div style="margin-top:10px">
-        <button class="btn btn-primary" onclick="login()" aria-label="Sign in with Microsoft">Sign in with Microsoft</button>
+        <button class="btn btn-primary" onclick="login()" aria-label="Sign in with Microsoft">Sign in with
+          Microsoft</button>
       </div>
     </section>
 
@@ -184,7 +299,8 @@
     <section id="dashboard" class="hide" aria-live="polite">
       <h2 style="margin:0 0 6px 0">Welcome<span id="userName"></span></h2>
       <p class="welcome-text" style="color:var(--muted); max-width:72ch; margin:8px 0 0 0">
-        These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects.
+        These tools will save you time and assure that you deliver the best sales and marketing experience to your
+        prospects.
       </p>
 
       <!-- ===== Sales tools ===== -->
@@ -198,22 +314,18 @@
         </a>
 
         <!-- 2) Lead Qualification (disabled, to the right of script) -->
-        <a class="tool disabled"
-           href="#"
-           aria-disabled="true" tabindex="-1"
-           title="Coming soon (Sept 2025). This will help you to qualify and prioritise leads"
-           data-tip="Coming soon (Sept 2025). This will help you to qualify and prioritise leads">
+        <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
+          title="Coming soon (Sept 2025). This will help you to qualify and prioritise leads"
+          data-tip="Coming soon (Sept 2025). This will help you to qualify and prioritise leads">
           Lead qualification
           <small>Score and prioritise your leads</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
         </a>
 
         <!-- 3) Competitive Positioning (disabled, to the right) -->
-        <a class="tool disabled"
-           href="#"
-           aria-disabled="true" tabindex="-1"
-           title="Coming soon (October 2025). This will help you to differentiate against your competition"
-           data-tip="Coming soon (October 2025). This will help you to differentiate against your competition">
+        <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
+          title="Coming soon (October 2025). This will help you to differentiate against your competition"
+          data-tip="Coming soon (October 2025). This will help you to differentiate against your competition">
           Beat your competitors
           <small>Position your value clearly against alternatives.</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
@@ -224,24 +336,23 @@
       <h3 class="section-heading" style="margin-top:28px">Tools for marketing</h3>
       <div class="grid">
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-           title="Coming soon. Specify campaigns that target your best prospects"
-           data-tip="Coming soon. Specify campaigns that target your best prospects">
+          title="Coming soon. Specify campaigns that target your best prospects"
+          data-tip="Coming soon. Specify campaigns that target your best prospects">
           Campaign specification
           <small>Pinpoint your best prospects</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
         </a>
 
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-           title="Coming soon. Prove why your offer is better"
-           data-tip="Coming soon. Prove why your offer is better">
+          title="Coming soon. Prove why your offer is better" data-tip="Coming soon. Prove why your offer is better">
           Differentiation
           <small>Evidence why your offer is better</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
         </a>
 
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-           title="Coming soon. Create data-backed, personalised messaging"
-           data-tip="Coming soon. Create data-backed, personalised messaging">
+          title="Coming soon. Create data-backed, personalised messaging"
+          data-tip="Coming soon. Create data-backed, personalised messaging">
           Market beating messaging
           <small>Data-backed, personalised, messaging</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
@@ -266,15 +377,15 @@
       return encodeURIComponent(target || "/");
     }
 
-    async function login(){
+    async function login() {
       location.href = "/.auth/login/aad?post_login_redirect_uri=" + buildReturnTarget();
     }
 
-    async function logout(){
-      location.href='/.auth/logout';
+    async function logout() {
+      location.href = '/.auth/logout';
     }
 
-    (async function init(){
+    (async function init() {
       try {
         const res = await fetch('/.auth/me', { credentials: 'include' });
         if (!res.ok) throw new Error('auth check failed');
@@ -282,8 +393,8 @@
         const princ = (data && data.clientPrincipal) || null;
 
         const welcome = document.getElementById('welcome');
-        const dash    = document.getElementById('dashboard');
-        const name    = document.getElementById('userName');
+        const dash = document.getElementById('dashboard');
+        const name = document.getElementById('userName');
         const authButtons = document.getElementById('authButtons');
 
         if (princ) {
@@ -303,4 +414,5 @@
     })();
   </script>
 </body>
+
 </html>
