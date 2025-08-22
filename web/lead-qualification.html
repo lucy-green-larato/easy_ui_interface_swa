@@ -4,128 +4,347 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Lead Qualification • Inside Track Sales Tools</title>
+  <meta name="color-scheme" content="light only">
   <style>
-    :root { --bg:#f8fafc; --card:#fff; --text:#0f172a; --muted:#64748b; --brand:#1e40af; }
-    body { font-family: system-ui,"Segoe UI",Roboto,Arial,sans-serif; background:var(--bg); color:var(--text); margin:0 }
-    header, main { max-width: 960px; margin: 0 auto; padding: 24px }
-    .nav { display:flex; justify-content:space-between; align-items:center; gap:12px }
-    .btn { padding:10px 14px; border-radius:10px; border:1px solid #cbd5e1; background:#fff; cursor:pointer }
-    .btn:hover { background:#f1f5f9 }
-    .card { background:var(--card); border:1px solid #e2e8f0; border-radius:16px; padding:20px }
-    .muted { color:var(--muted); font-size: 14px }
-    label { display:block; margin:12px 0 6px; font-weight:600; font-size:14px }
-    input, textarea, select { width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:12px; font-size:14px }
-    textarea { height:120px }
+    :root{
+      --radius:16px; --gap:20px; --line:rgba(0,0,0,.08);
+      --bg:#f7f8fa; --card:#fff; --text:#0f172a; --muted:#6b7280; --brand:#1f6feb;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font-family:system-ui,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
+
+    /* App bar */
+    .appbar{position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);
+      padding:12px 20px;display:flex;justify-content:space-between;align-items:center;z-index:10}
+    .appbar-left{display:flex;align-items:center;gap:10px}
+    .crumb{display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:#0f172a;font-weight:600}
+    .crumb::before{content:"‹";font-size:16px;opacity:.6}
+    .title{font-weight:700}
+    .appbar-right{display:flex;align-items:center;gap:12px}
+    .user-pill{padding:6px 10px;border:1px solid var(--line);border-radius:999px;font-size:.9rem;color:#111}
+    .toggle{display:inline-flex;align-items:center;gap:6px;font-size:.9rem;color:#111}
+
+    /* Layout */
+    .container{max-width:1200px;margin:24px auto;padding:0 20px}
+    .grid{display:grid;grid-template-columns:320px 1fr 320px;gap:var(--gap)}
+    .stack{display:flex;flex-direction:column;gap:var(--gap)}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:0 1px 2px rgba(0,0,0,.02)}
+    h1{margin:0 0 8px;font-size:1.35rem}
+    h2{margin:0 0 8px;font-size:1.1rem}
+    .muted{color:var(--muted)}
+    .helptext{margin:0 0 12px;font-size:.95rem;color:var(--muted)}
+
+    /* Inputs */
+    label{display:block;margin:10px 0 6px;font-weight:600;font-size:.95rem}
+    input,select,textarea{width:100%;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#fff;font-size:14px}
+    textarea{min-height:110px}
+    input:focus,select:focus,textarea:focus{outline:2px solid #bcd3ff;border-color:#90b4ff}
+    .error{color:#b42318;font-size:.9rem;margin:4px 0 0}
+
+    /* Buttons */
+    .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .btn{border:1px solid var(--line);border-radius:999px;padding:8px 14px;background:#fff;cursor:pointer;font-size:14px}
+    .btn:hover{background:#f5f7fb}
+    .btn[disabled]{opacity:.5;pointer-events:none}
+    .btn-primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+    .btn-ghost{border-color:transparent}
+
+    /* Summary + states */
+    .summary{min-height:320px;border:1px dashed var(--line);border-radius:12px;padding:16px;background:#fafbff;white-space:pre-wrap}
+    .summary.empty{color:var(--muted)}
+    .skeleton{position:relative;overflow:hidden}
+    .skeleton::after{
+      content:"";position:absolute;inset:0;
+      background:linear-gradient(90deg,rgba(255,255,255,0) 0%, rgba(0,0,0,.04) 50%, rgba(255,255,255,0) 100%);
+      animation:shimmer 1.2s infinite; background-size:200% 100%;
+    }
+    @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+
+    /* Lists */
+    .bullets{margin:0;padding-left:18px}
+    .bullets li{margin:6px 0}
+
+    /* Responsive */
+    @media (max-width:1100px){
+      .grid{grid-template-columns:1fr}
+    }
   </style>
 </head>
 <body>
-  <header class="nav">
-    <div>
-      <a href="/index.html" class="btn" aria-label="Back to menu">← Menu</a>
+  <!-- App bar -->
+  <header class="appbar">
+    <div class="appbar-left">
+      <a class="crumb" href="/index.html" aria-label="Back to menu">Prepare</a>
+      <span class="title">Lead Qualification</span>
     </div>
-    <div>
-      <button class="btn" onclick="logout()">Sign out</button>
+    <div class="appbar-right">
+      <label class="toggle"><input id="remember" type="checkbox"> Remember</label>
+      <a class="btn btn-ghost" href="/web/help/lead-qualification.html">Help</a>
+      <span id="user" class="user-pill" title="Signed in user">Signed in</span>
+      <button class="btn" id="logout">Sign out</button>
     </div>
   </header>
 
-  <main>
-    <h1>Lead Qualification</h1>
-    <p class="muted">Fill in the details and submit to /api/generate using your selected pack/template.</p>
+  <main class="container">
+    <section class="grid">
+      <!-- Left: Lead details -->
+      <div class="card">
+        <h2>Lead details</h2>
+        <p class="helptext">Add company information and sources. We’ll create a concise qualification summary.</p>
 
-    <!-- YOUR TOOL UI GOES HERE -->
-    <!-- Example minimal form that posts to /api/generate -->
-    <div class="card" id="tool">
-      <label>Company *</label>
-      <input id="company" placeholder="Acme Networks Ltd"/>
+        <label for="company">Company *</label>
+        <input id="company" placeholder="Acme Networks Ltd" autocomplete="organization">
+        <div id="err-company" class="error" hidden>Company is required</div>
 
-      <label>Industry *</label>
-      <input id="industry" placeholder="Managed Services / Cybersecurity"/>
+        <label for="industry">Industry *</label>
+        <input id="industry" placeholder="Managed Services / Cybersecurity" autocomplete="off">
+        <div id="err-industry" class="error" hidden>Industry is required</div>
 
-      <label>Website *</label>
-      <input id="website" placeholder="https://www.example.co.uk"/>
+        <label for="website">Website *</label>
+        <input id="website" type="url" placeholder="https://www.example.co.uk" inputmode="url" autocomplete="url">
+        <div id="err-website" class="error" hidden>Website must be a valid URL (https://…)</div>
 
-      <label>Sources (comma or newline separated)</label>
-      <textarea id="sources" placeholder="Annual report URL, LinkedIn page, Press release URL"></textarea>
-
-      <div style="margin-top:12px; display:flex; gap:12px;">
-        <button class="btn" onclick="preview()">Preview Payload</button>
-        <button class="btn" onclick="send()">Send to /api/generate</button>
+        <label for="sources">Sources (URLs, comma or newline)</label>
+        <textarea id="sources" placeholder="Annual report, LinkedIn page, Press release…"></textarea>
       </div>
 
-      <h3 class="muted" style="margin-top:16px">Preview</h3>
-      <pre id="previewBox"></pre>
+      <!-- Center: Qualification summary -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <h2>Qualification summary</h2>
+          <div class="actions">
+            <button id="generate" class="btn btn-primary" disabled>Generate qualification</button>
+            <button id="copy" class="btn" disabled>Copy summary</button>
+            <button id="download" class="btn" disabled>Download .txt</button>
+            <button id="viewPayload" class="btn">View payload</button>
+          </div>
+        </div>
 
-      <h3 class="muted" style="margin-top:16px">API Response</h3>
-      <pre id="responseBox"></pre>
-    </div>
+        <div id="summary" class="summary empty">Add company details to generate a qualification summary.</div>
+
+        <details id="payloadWrap" style="margin-top:12px">
+          <summary class="muted">Payload preview</summary>
+          <pre id="previewBox" style="overflow:auto"></pre>
+        </details>
+
+        <details style="margin-top:12px">
+          <summary class="muted">API Response (raw)</summary>
+          <pre id="responseBox" style="overflow:auto"></pre>
+        </details>
+      </div>
+
+      <!-- Right: Reference -->
+      <aside class="stack">
+        <div class="card">
+          <h2>Signals to check</h2>
+          <ul class="bullets">
+            <li>Hiring spikes in engineering/IT</li>
+            <li>M&amp;A / restructuring announcements</li>
+            <li>Contract renewals or vendor changes</li>
+            <li>Security/compliance incidents or audits</li>
+            <li>Cloud migration or major refresh cycle</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h2>Your sources</h2>
+          <div id="sourcesList" class="muted">No sources yet.</div>
+        </div>
+
+        <div class="card">
+          <h2>What changed</h2>
+          <div id="delta" class="muted">Run twice to see changes.</div>
+        </div>
+
+        <div class="card">
+          <h2>Notes</h2>
+          <textarea id="notes" rows="6" placeholder="Saved locally only."></textarea>
+        </div>
+      </aside>
+    </section>
   </main>
 
   <script>
+    /* ---------- Auth & header ---------- */
     (async () => {
       try {
         const r = await fetch("/.auth/me", { credentials: "include" });
         if (r.status === 401) {
           const here = encodeURIComponent(location.pathname + location.search + location.hash || "/");
           location.href = "/.auth/login/aad?post_login_redirect_uri=" + here;
+          return;
         }
-      } catch {}
+        const me = await r.json().catch(()=>null);
+        const user = me?.clientPrincipal?.userDetails
+          || (me?.clientPrincipal?.claims||[]).find(c => (c.typ||"").toLowerCase().includes("email"))?.val
+          || "Signed in";
+        document.getElementById("user").textContent = user;
+      } catch {
+        // ignore
+      }
     })();
+    document.getElementById("logout").addEventListener("click", () => location.href='/.auth/logout');
 
-    // Keep auth simple: rely on SWA routes; allow manual logout
-    async function logout(){ location.href='/.auth/logout'; }
+    /* ---------- Helpers ---------- */
+    const $ = (id) => document.getElementById(id);
+    const fields = ["company","industry","website","sources","notes"];
+    const rememberBox = $("remember");
+    const generateBtn = $("generate");
+    const copyBtn = $("copy");
+    const downloadBtn = $("download");
+    const summaryEl = $("summary");
+    const previewBox = $("previewBox");
+    const responseBox = $("responseBox");
+    const payloadWrap = $("payloadWrap");
+    let lastSummary = sessionStorage.getItem("lq_lastSummary") || "";
 
-    function validate() {
-      const errs = [];
-      const c = document.getElementById('company').value.trim();
-      const i = document.getElementById('industry').value.trim();
-      const w = document.getElementById('website').value.trim();
-      if (!c) errs.push("Company is required");
-      if (!i) errs.push("Industry is required");
-      try { new URL(w); } catch { errs.push("Website must be a valid URL (https://…)"); }
-      if (errs.length) { alert(errs.join("\\n")); return null; }
-      return { company:c, industry:i, website:w };
+    function safeURL(u){
+      try{ const x = new URL(u); return x.protocol === "http:" || x.protocol === "https:"; } catch { return false; }
     }
-
-    function buildPayload() {
-      const v = validate();
-      if (!v) return null;
-      const srcRaw = document.getElementById('sources').value || "";
-      const src = srcRaw.split(/\n|,/).map(s => s.trim()).filter(Boolean);
+    function validateInline(){
+      const c = $("company").value.trim();
+      const i = $("industry").value.trim();
+      const w = $("website").value.trim();
+      $("err-company").hidden = !!c;
+      $("err-industry").hidden = !!i;
+      $("err-website").hidden = safeURL(w);
+      const ok = c && i && safeURL(w);
+      generateBtn.disabled = !ok;
+      return ok;
+    }
+    function getSourcesArray(){
+      const raw = $("sources").value || "";
+      return raw.split(/\n|,/).map(s => s.trim()).filter(Boolean);
+    }
+    function buildPayload(){
+      if(!validateInline()) return null;
+      const srcRaw = $("sources").value || "";
       return {
         pack: "uk_b2b_sales_core",
         template: "opportunity_qualification",
         variables: {
-          company: v.company,
-          industry: v.industry,
-          website: v.website,
+          company: $("company").value.trim(),
+          industry: $("industry").value.trim(),
+          website: $("website").value.trim(),
           sources_raw: srcRaw,
-          sources: src
+          sources: getSourcesArray()
         }
       };
     }
-
-    function preview() {
-      const payload = buildPayload();
-      if (!payload) return;
-      document.getElementById('previewBox').textContent = JSON.stringify(payload, null, 2);
+    function updateSourcesList(){
+      const arr = getSourcesArray();
+      $("sourcesList").innerHTML = arr.length
+        ? '<ul class="bullets">'+arr.map(a=>`<li><a href="${a}" target="_blank" rel="noopener">${a}</a></li>`).join("")+'</ul>'
+        : 'No sources yet.';
+    }
+    function persistIfRemember(){
+      if (!rememberBox.checked) return;
+      fields.forEach(id => localStorage.setItem("lq_"+id, ($(id)?.value||"")));
+      localStorage.setItem("lq_remember","1");
+    }
+    function restoreIfRemember(){
+      if (localStorage.getItem("lq_remember")==="1"){
+        rememberBox.checked = true;
+        fields.forEach(id => {
+          const v = localStorage.getItem("lq_"+id);
+          if (v!=null) ($(id)||{}).value = v;
+        });
+        updateSourcesList();
+        validateInline();
+      }
+    }
+    function setSummary(text){
+      summaryEl.classList.remove("empty","skeleton");
+      summaryEl.textContent = text || "";
+      const has = !!text;
+      copyBtn.disabled = !has;
+      downloadBtn.disabled = !has;
+      if (has) {
+        $("delta").textContent = diffText(lastSummary, text) || "—";
+        lastSummary = text;
+        sessionStorage.setItem("lq_lastSummary", text);
+      }
+    }
+    function showLoading(){
+      summaryEl.textContent = "";
+      summaryEl.classList.add("skeleton");
+    }
+    function stopLoading(){
+      summaryEl.classList.remove("skeleton");
+    }
+    function diffText(oldT, newT){
+      if(!oldT) return "Run again to see differences.";
+      if(oldT === newT) return "No changes.";
+      // simple line-based diff
+      const o = new Set(oldT.split(/\r?\n/));
+      const n = new Set(newT.split(/\r?\n/));
+      const added = [...n].filter(l=>!o.has(l)).slice(0,6);
+      const removed = [...o].filter(l=>!n.has(l)).slice(0,6);
+      let s = "";
+      if (added.length) s += "Added:\n• " + added.join("\n• ") + "\n";
+      if (removed.length) s += "Removed:\n• " + removed.join("\n• ");
+      return s.trim();
     }
 
-    async function send() {
-      const payload = buildPayload();
-      if (!payload) return;
-      const box = document.getElementById('responseBox');
-      box.textContent = "Sending…";
+    /* ---------- Events ---------- */
+    fields.forEach(id => ($(id)||{}).addEventListener?.("input", () => {
+      validateInline();
+      if (id === "sources") updateSourcesList();
+      persistIfRemember();
+    }));
+    rememberBox.addEventListener("change", () => {
+      if (rememberBox.checked) persistIfRemember();
+      else { localStorage.removeItem("lq_remember"); fields.forEach(id => localStorage.removeItem("lq_"+id)); }
+    });
+
+    $("viewPayload").addEventListener("click", () => {
+      const p = buildPayload(); if(!p) return;
+      previewBox.textContent = JSON.stringify(p, null, 2);
+      payloadWrap.open = true;
+      persistIfRemember();
+    });
+
+    generateBtn.addEventListener("click", async () => {
+      const payload = buildPayload(); if(!payload) return;
+      responseBox.textContent = "";
+      showLoading();
       try {
         const res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-        box.textContent = await res.text();
+        const text = await res.text();
+        setSummary(text);
+        responseBox.textContent = text;
       } catch (e) {
-        box.textContent = "Request failed: " + (e?.message || String(e));
+        setSummary("");
+        responseBox.textContent = "Request failed: " + (e?.message || String(e));
+      } finally {
+        stopLoading();
+        persistIfRemember();
       }
-    }
+    });
+
+    copyBtn.addEventListener("click", async () => {
+      if(!summaryEl.textContent) return;
+      try { await navigator.clipboard.writeText(summaryEl.textContent); copyBtn.textContent="Copied"; setTimeout(()=>copyBtn.textContent="Copy summary",1200);} catch {}
+    });
+
+    downloadBtn.addEventListener("click", () => {
+      const blob = new Blob([summaryEl.textContent||""], {type:"text/plain"});
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = ( $("company").value.trim() || "qualification") + ".txt";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    });
+
+    // init
+    restoreIfRemember();
+    updateSourcesList();
+    validateInline();
   </script>
 </body>
 </html>
