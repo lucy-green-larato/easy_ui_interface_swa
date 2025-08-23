@@ -1223,12 +1223,28 @@ ${callNotes || "(none)"}`
         });
 
         const text = stripPleasantries(extractText(llmRes) || "").trim();
+
+        // NEW: echo back which template/mode/motion actually ran
+        const whichLower = String(which || "").toLowerCase();
+        const modeHeader =
+          whichLower === "opportunity_qualification_light" ? "light" :
+            whichLower === "opportunity_qualification" ? "deep" :
+              ""; // leave blank for other templates (e.g., prioritisation)
+        const motionHeader = String((variables && variables.sales_motion) || "");
+
         context.res = {
           status: 200,
-          headers: { ...cors, "Content-Type": "text/plain; charset=utf-8" },
+          headers: {
+            ...cors,
+            "Content-Type": "text/plain; charset=utf-8",
+            "x-qual-template": whichLower,
+            "x-qual-mode": modeHeader,
+            "x-qual-motion": motionHeader
+          },
           body: text || "(no content)"
         };
         return;
+
       }
 
       // For non-matching packs, keep legacy neutral response to avoid breaking anything else
