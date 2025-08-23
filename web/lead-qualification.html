@@ -295,6 +295,11 @@
           </section>
 
           <section class="intel-slot">
+            <h3>Financials (iXBRL)</h3>
+            <div id="ixbrlBox" class="muted">No financials fetched.</div>
+          </section>
+
+          <section class="intel-slot">
             <h3>What changed</h3>
             <div id="delta" class="muted">Run twice to see differences.</div>
           </section>
@@ -367,6 +372,51 @@
     ];
     const STORAGE_KEY = "lead_qualification_v2.form";
     let lastSummary = localStorage.getItem("lead_qualification_v2.last_summary") || "";
+    // B2: iXBRL state + helpers
+    let ixbrlSummary = null;
+
+    async function fetchIxbrlIfReady() {
+      const reg = $("company_reg").value.trim();
+      // Basic UK reg no. sanity check (6–8 digits)
+      if (!/^[A-Z0-9]{6,8}$/i.test(reg)) {
+        ixbrlSummary = null;
+        const box = $("ixbrlBox");
+        if (box) box.textContent = "No reg no. / not valid.";
+        return;
+      }
+      const box = $("ixbrlBox");
+      if (box) box.textContent = "Fetching…";
+      try {
+        const r = await fetch(`/api/ixbrl/financials?companyNumber=${encodeURIComponent(reg)}`, { cache: "no-store" });
+        if (r.status === 204) {
+          ixbrlSummary = null;
+          if (box) box.textContent = "No iXBRL available for this company.";
+          return;
+        }
+        if (!r.ok) throw new Error(await r.text());
+        const data = await r.json();
+        ixbrlSummary = data?.summary || null;
+        if (!ixbrlSummary) {
+          if (box) box.textContent = "No data returned.";
+          return;
+        }
+        const y1 = ixbrlSummary.years?.[0], y2 = ixbrlSummary.years?.[1];
+        const d = ixbrlSummary.derived || {};
+        if (box) {
+          box.innerHTML =
+            (y1 ? `<div><strong>${y1.endDate || "Latest"}</strong>: turnover ${fmt(y1.turnover)}, op ${fmt(y1.operatingProfit)}, net assets ${fmt(y1.netAssets)}</div>` : "") +
+            (y2 ? `<div><strong>${y2.endDate}</strong>: turnover ${fmt(y2.turnover)}, op ${fmt(y2.operatingProfit)}, net assets ${fmt(y2.netAssets)}</div>` : "") +
+            `<div class="muted">YoY: ${fmtPct(d.revenueYoYPct)} • GM%: ${fmtPct(d.grossMarginPct?.y1)} • OPM%: ${fmtPct(d.operatingMarginPct?.y1)} • Current: ${fmtDec(d.currentRatio)} • Cash: ${fmtDec(d.cashRatio)}</div>`;
+        }
+      } catch (e) {
+        ixbrlSummary = null;
+        if (box) box.textContent = "Fetch failed.";
+      }
+    }
+
+    function fmt(n) { return (n == null) ? "—" : new Intl.NumberFormat("en-GB").format(n); }
+    function fmtPct(n) { return (n == null) ? "—" : new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1 }).format(n) + "%"; }
+    function fmtDec(n) { return (n == null) ? "—" : new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 }).format(n); }
 
     // ---------- Utilities ----------
     const setStatus = (msg, kind = "info") => { statusEl.textContent = msg || ""; statusEl.dataset.kind = kind; };
@@ -426,6 +476,7 @@
           differentiation_points: lines($("differentiation_points").value),
           technical_prerequisites: lines($("technical_prereqs").value),
           sales_motion: $("sales_motion").value.trim(),
+          ixbrl: ixbrlSummary,   // ← include compact iXBRL summary when available
 
           // prospect inputs
           company: $("company").value.trim(),
@@ -511,6 +562,13 @@
       saveForm();
     })));
 
+    // iXBRL triggers
+    $("company_reg").addEventListener("blur", fetchIxbrlIfReady);
+    $("company_reg").addEventListener("input", () => {
+      const box = $("ixbrlBox");
+      if (box) box.textContent = "—";
+    });
+
     $("toggle-rail")?.addEventListener("click", () => {
       const btn = $("toggle-rail");
       const body = $("rail-body");
@@ -551,8 +609,17 @@
       loadForm();
       validateInline();
       updateSourcesList();
-      try { $("notes").value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}").notes || ""; } catch { }
+
+      try {
+        $("notes").value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}").notes || "";
+      } catch { }
+
       $("notes").addEventListener("input", saveForm);
+
+      // If a reg no. is already present, fetch iXBRL now
+      if ($("company_reg").value.trim()) {
+        fetchIxbrlIfReady();
+      }
     })();
   </script>
 </body>
