@@ -1,27 +1,81 @@
 <!doctype html>
 <html lang="en" data-app="inside-track-tools">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Tools · Lead Qualification</title>
   <link rel="stylesheet" href="./styles.css?v=fix4" />
   <style>
-    .panel.middle .output-card{ position: sticky; top: calc(var(--header-h) + 12px); z-index: 5; }
-    .output{ white-space:pre-wrap; background:#fff; color:#111827; border:1px solid var(--border);
-             padding:14px; border-radius:12px; min-height:240px; outline:none; resize:vertical; }
-    .status{ margin-top:var(--s-2); min-height:1.2rem; color:var(--text-2) }
-    .status[data-kind="error"]{ color: var(--danger) }
-    .status[data-kind="ok"]{ color: var(--ok) }
-    .sources-list ul{ margin:.5rem 0 0 1.1rem }
+    .panel.middle .output-card {
+      position: sticky;
+      top: calc(var(--header-h) + 12px);
+      z-index: 5;
+    }
+
+    .output {
+      white-space: pre-wrap;
+      background: #fff;
+      color: #111827;
+      border: 1px solid var(--border);
+      padding: 14px;
+      border-radius: 12px;
+      min-height: 240px;
+      outline: none;
+      resize: vertical;
+    }
+
+    .status {
+      margin-top: var(--s-2);
+      min-height: 1.2rem;
+      color: var(--text-2)
+    }
+
+    .status[data-kind="error"] {
+      color: var(--danger)
+    }
+
+    .status[data-kind="ok"] {
+      color: var(--ok)
+    }
+
+    .sources-list ul {
+      margin: .5rem 0 0 1.1rem
+    }
+
     /* logo sizing consistent with index */
-    .logo{ height:44px; width:auto; display:block }
-    @media (max-width:640px){ .logo{ height:36px } }
+    .logo {
+      height: 44px;
+      width: auto;
+      display: block
+    }
+
+    @media (max-width:640px) {
+      .logo {
+        height: 36px
+      }
+    }
+
     /* action button group */
-    .action-group{ display:flex; gap:8px; flex-wrap:wrap }
-    .btn.secondary{ background:#fff; border:1px solid var(--border) }
-    .btn.primary:disabled, .btn.secondary:disabled{ opacity:.6; cursor:not-allowed }
+    .action-group {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap
+    }
+
+    .btn.secondary {
+      background: #fff;
+      border: 1px solid var(--border)
+    }
+
+    .btn.primary:disabled,
+    .btn.secondary:disabled {
+      opacity: .6;
+      cursor: not-allowed
+    }
   </style>
 </head>
+
 <body>
 
   <!-- HEADER -->
@@ -70,7 +124,8 @@
           </div>
           <div class="field">
             <label for="seller_url">Your company URL <span aria-hidden="true" class="req">*</span></label>
-            <input id="seller_url" name="seller_url" type="url" placeholder="https://www.yourcompany.co.uk" required inputmode="url" autocomplete="url" />
+            <input id="seller_url" name="seller_url" type="url" placeholder="https://www.yourcompany.co.uk" required
+              inputmode="url" autocomplete="url" />
             <p class="error" id="seller_url_error" role="alert" aria-live="polite"></p>
             <p class="help">Use the primary site or investor page. We’ll reference this when qualifying value.</p>
           </div>
@@ -82,7 +137,8 @@
           <div class="grid-2">
             <div class="field">
               <label for="proposition_name">Proposition name <span aria-hidden="true" class="req">*</span></label>
-              <input id="proposition_name" name="proposition_name" placeholder="e.g., Sentinel Cloud Security" required />
+              <input id="proposition_name" name="proposition_name" placeholder="e.g., Sentinel Cloud Security"
+                required />
               <p class="error" id="proposition_name_error" role="alert" aria-live="polite"></p>
             </div>
             <div class="field">
@@ -104,22 +160,26 @@
           <div class="grid-2">
             <div class="field">
               <label for="typical_deal_size_gbp">Typical deal size (GBP)</label>
-              <input id="typical_deal_size_gbp" name="typical_deal_size_gbp" type="number" min="0" step="100" placeholder="e.g., 25000" inputmode="numeric" />
+              <input id="typical_deal_size_gbp" name="typical_deal_size_gbp" type="number" min="0" step="100"
+                placeholder="e.g., 25000" inputmode="numeric" />
             </div>
             <div class="field">
               <label for="territory_or_segment_focus">Territory / segment focus</label>
-              <input id="territory_or_segment_focus" name="territory_or_segment_focus" placeholder="e.g., UK mid-market; 100–1000 employees" />
+              <input id="territory_or_segment_focus" name="territory_or_segment_focus"
+                placeholder="e.g., UK mid-market; 100–1000 employees" />
             </div>
           </div>
 
           <div class="field">
             <label for="differentiation_points">Differentiation (one per line, 3–5)</label>
-            <textarea id="differentiation_points" name="differentiation_points" rows="3" placeholder="Faster deployment&#10;UK data residency&#10;SOC2 &amp; ISO27001"></textarea>
+            <textarea id="differentiation_points" name="differentiation_points" rows="3"
+              placeholder="Faster deployment&#10;UK data residency&#10;SOC2 &amp; ISO27001"></textarea>
           </div>
 
           <div class="field">
             <label for="technical_prereqs">Technical prerequisites / integrations (one per line)</label>
-            <textarea id="technical_prereqs" name="technical_prereqs" rows="3" placeholder="Azure AD&#10;Microsoft 365&#10;SAML 2.0"></textarea>
+            <textarea id="technical_prereqs" name="technical_prereqs" rows="3"
+              placeholder="Azure AD&#10;Microsoft 365&#10;SAML 2.0"></textarea>
           </div>
 
           <div class="field">
@@ -156,13 +216,20 @@
           </div>
           <div class="field">
             <label for="website">Prospect website <span aria-hidden="true" class="req">*</span></label>
-            <input id="website" name="website" type="url" placeholder="https://www.example.co.uk" required inputmode="url" autocomplete="url" />
+            <input id="website" name="website" type="url" placeholder="https://www.example.co.uk" required
+              inputmode="url" autocomplete="url" />
             <p class="error" id="website_error" role="alert" aria-live="polite"></p>
           </div>
           <div class="field">
             <label for="sources">Sources (URLs, comma or newline)</label>
-            <textarea id="sources" name="sources" rows="3" placeholder="Annual report, LinkedIn page, Press release…"></textarea>
+            <textarea id="sources" name="sources" rows="3"
+              placeholder="Annual report, LinkedIn page, Press release…"></textarea>
             <p class="help">Paste links that should be prioritised in the analysis.</p>
+          </div>
+          <div class="field">
+            <label for="partner_linkedin">Partner LinkedIn URL (optional)</label>
+            <input id="partner_linkedin" name="partner_linkedin" type="url"
+              placeholder="https://www.linkedin.com/company/…" inputmode="url" autocomplete="url" />
           </div>
         </fieldset>
       </form>
@@ -174,11 +241,13 @@
         <div class="output-head">
           <h2 id="output-title">Qualification summary</h2>
           <div class="action-group">
-            <button id="gen-deep" class="btn primary" type="button" disabled title="Full analysis with evidence and plans">
+            <button id="gen-deep" class="btn primary" type="button" disabled
+              title="Full analysis with evidence and plans">
               Deep dive
               <span class="spinner" aria-hidden="true"></span>
             </button>
-            <button id="gen-light" class="btn secondary" type="button" disabled title="Fast summary with bullets and a verdict">
+            <button id="gen-light" class="btn secondary" type="button" disabled
+              title="Fast summary with bullets and a verdict">
               Light touch
               <span class="spinner" aria-hidden="true"></span>
             </button>
@@ -205,7 +274,8 @@
       <aside class="intel card">
         <div class="intel-head">
           <h2 id="intel-title">Reference</h2>
-          <button id="toggle-rail" class="btn small" type="button" aria-expanded="true" aria-controls="rail-body">Hide</button>
+          <button id="toggle-rail" class="btn small" type="button" aria-expanded="true"
+            aria-controls="rail-body">Hide</button>
         </div>
         <div id="rail-body">
           <section class="intel-slot">
@@ -245,7 +315,8 @@
         <h3 style="margin:0">About Lead Qualification</h3>
         <button id="help-close" class="btn inline" type="button">Close ×</button>
       </div>
-      <p>Provide your details, your proposition, and the prospect’s details. Choose <em>Deep dive</em> for a full analysis, or <em>Light touch</em> for a fast summary.</p>
+      <p>Provide your details, your proposition, and the prospect’s details. Choose <em>Deep dive</em> for a full
+        analysis, or <em>Light touch</em> for a fast summary.</p>
       <ul>
         <li><strong>Your company URL</strong> is used to qualify value and proof points.</li>
         <li>Add <em>Sources</em> to steer the analysis (annual report, LinkedIn, press).</li>
@@ -257,27 +328,27 @@
   <script>
     // ---------- Auth ----------
     (async () => {
-      try{
-        const r = await fetch("/.auth/me", { credentials:"include", cache:"no-store" });
+      try {
+        const r = await fetch("/.auth/me", { credentials: "include", cache: "no-store" });
         if (r.status === 401) {
           const here = encodeURIComponent(location.pathname + location.search + location.hash || "/");
           location.href = "/.auth/login/aad?post_login_redirect_uri=" + here;
           return;
         }
-        const me = await r.json().catch(()=>null);
+        const me = await r.json().catch(() => null);
         const email = me?.clientPrincipal?.userDetails
-          || (me?.clientPrincipal?.claims||[]).find(c => (c.typ||"").toLowerCase().includes("email"))?.val
+          || (me?.clientPrincipal?.claims || []).find(c => (c.typ || "").toLowerCase().includes("email"))?.val
           || "";
         if (email) {
           const badge = document.getElementById("user-badge");
           const el = document.getElementById("user-email");
           if (badge && el) { el.textContent = email; badge.classList.remove("is-hidden"); }
         }
-      }catch{}
+      } catch { }
     })();
 
     // ---------- Refs ----------
-    const $ = (id)=>document.getElementById(id);
+    const $ = (id) => document.getElementById(id);
     const form = $("lq-form");
     const remember = $("remember");
     const output = $("output");
@@ -289,21 +360,21 @@
     const lightBtn = $("gen-light");
 
     const fields = [
-      "seller_name","seller_company","seller_url",
-      "proposition_name","proposition_type","typical_deal_size_gbp","territory_or_segment_focus",
-      "differentiation_points","technical_prereqs","sales_motion",
-      "company","company_reg","industry","website","sources","notes"
+      "seller_name", "seller_company", "seller_url",
+      "proposition_name", "proposition_type", "typical_deal_size_gbp", "territory_or_segment_focus",
+      "differentiation_points", "technical_prereqs", "sales_motion",
+      "company", "company_reg", "industry", "website", "sources", "notes"
     ];
     const STORAGE_KEY = "lead_qualification_v2.form";
     let lastSummary = localStorage.getItem("lead_qualification_v2.last_summary") || "";
 
     // ---------- Utilities ----------
-    const setStatus = (msg, kind="info") => { statusEl.textContent = msg || ""; statusEl.dataset.kind = kind; };
-    const safeURL = (u) => { try{ const x = new URL(u); return x.protocol==="http:"||x.protocol==="https:"; } catch { return false; } };
-    const srcArray = () => ( ($("sources").value || "").split(/\n|,/).map(s=>s.trim()).filter(Boolean) );
-    const lines = (t)=> (t||"").split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    const setStatus = (msg, kind = "info") => { statusEl.textContent = msg || ""; statusEl.dataset.kind = kind; };
+    const safeURL = (u) => { try { const x = new URL(u); return x.protocol === "http:" || x.protocol === "https:"; } catch { return false; } };
+    const srcArray = () => (($("sources").value || "").split(/\n|,/).map(s => s.trim()).filter(Boolean));
+    const lines = (t) => (t || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 
-    function validateInline(){
+    function validateInline() {
       const req = {
         seller_name: !!$("seller_name").value.trim(),
         seller_company: !!$("seller_company").value.trim(),
@@ -331,15 +402,15 @@
       return ok;
     }
 
-    function updateSourcesList(){
+    function updateSourcesList() {
       const arr = srcArray();
       $("sourcesList").innerHTML = arr.length
-        ? '<ul>'+arr.map(a=>`<li><a href="${a}" target="_blank" rel="noopener">${a}</a></li>`).join("")+'</ul>'
+        ? '<ul>' + arr.map(a => `<li><a href="${a}" target="_blank" rel="noopener">${a}</a></li>`).join("") + '</ul>'
         : 'No sources yet.';
     }
 
-    function basePayload(){
-      if(!validateInline()) return null;
+    function basePayload() {
+      if (!validateInline()) return null;
       const srcRaw = $("sources").value || "";
       return {
         pack: "uk_b2b_sales_core",
@@ -367,35 +438,35 @@
       };
     }
 
-    function saveForm(){
+    function saveForm() {
       if (!remember.checked) return;
       const fd = Object.fromEntries(new FormData(form).entries());
       localStorage.setItem(STORAGE_KEY, JSON.stringify(fd));
     }
-    function loadForm(){
+    function loadForm() {
       if (localStorage.getItem(STORAGE_KEY)) remember.checked = true;
-      try{
+      try {
         const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-        Object.entries(data).forEach(([k,v])=>{
+        Object.entries(data).forEach(([k, v]) => {
           const el = form.elements[k] || $(k);
           if (el) el.value = v;
         });
-      }catch{}
+      } catch { }
     }
 
-    function diffText(oldT, newT){
-      if(!oldT) return "Run again to see differences.";
-      if(oldT === newT) return "No changes.";
+    function diffText(oldT, newT) {
+      if (!oldT) return "Run again to see differences.";
+      if (oldT === newT) return "No changes.";
       const o = new Set(oldT.split(/\r?\n/));
       const n = new Set(newT.split(/\r?\n/));
-      const added = [...n].filter(l=>!o.has(l) && l.trim()).slice(0,6);
-      const removed = [...o].filter(l=>!n.has(l) && l.trim()).slice(0,6);
+      const added = [...n].filter(l => !o.has(l) && l.trim()).slice(0, 6);
+      const removed = [...o].filter(l => !n.has(l) && l.trim()).slice(0, 6);
       let s = "";
       if (added.length) s += "Added:\n• " + added.join("\n• ") + "\n";
       if (removed.length) s += "Removed:\n• " + removed.join("\n• ");
       return s.trim();
     }
-    function setSummary(text){
+    function setSummary(text) {
       output.textContent = text || "";
       const has = !!(text && text.trim());
       copyBtn.disabled = !has; downloadBtn.disabled = !has;
@@ -406,14 +477,14 @@
       }
     }
 
-    async function sendRequest(templateName){
-      const payload = basePayload(); if(!payload) return;
+    async function sendRequest(templateName) {
+      const payload = basePayload(); if (!payload) return;
       payload.template = templateName; // "opportunity_qualification" or "opportunity_qualification_light"
       setStatus("Generating…");
       responseBox.textContent = "Sending…";
-      const disable = (v)=>{ deepBtn.disabled = v; lightBtn.disabled = v; deepBtn.classList.toggle("busy", v); lightBtn.classList.toggle("busy", v); };
+      const disable = (v) => { deepBtn.disabled = v; lightBtn.disabled = v; deepBtn.classList.toggle("busy", v); lightBtn.classList.toggle("busy", v); };
       disable(true);
-      try{
+      try {
         const res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -423,20 +494,20 @@
         setSummary(text);
         responseBox.textContent = text;
         setStatus("Done.", "ok");
-      }catch(e){
+      } catch (e) {
         setSummary("");
         responseBox.textContent = "Request failed: " + (e?.message || String(e));
         setStatus("Could not generate a qualification summary.", "error");
-      }finally{
+      } finally {
         disable(false);
         saveForm();
       }
     }
 
     // ---------- Events ----------
-    fields.forEach(id => ( $(id)?.addEventListener?.("input", () => {
+    fields.forEach(id => ($(id)?.addEventListener?.("input", () => {
       validateInline();
-      if (id==="sources") updateSourcesList();
+      if (id === "sources") updateSourcesList();
       saveForm();
     })));
 
@@ -449,8 +520,8 @@
       btn.textContent = expanded ? "Show" : "Hide";
     });
 
-    $("help")?.addEventListener("click", ()=> $("help-modal")?.showModal());
-    $("help-close")?.addEventListener("click", ()=> $("help-modal")?.close());
+    $("help")?.addEventListener("click", () => $("help-modal")?.showModal());
+    $("help-close")?.addEventListener("click", () => $("help-modal")?.close());
 
     deepBtn.addEventListener("click", () => sendRequest("opportunity_qualification"));
     lightBtn.addEventListener("click", () => sendRequest("opportunity_qualification_light"));
@@ -458,16 +529,16 @@
     copyBtn.addEventListener("click", async () => {
       const txt = output?.innerText || ""; if (!txt.trim()) return;
       await navigator.clipboard.writeText(txt);
-      setStatus("Copied summary to clipboard.","ok");
+      setStatus("Copied summary to clipboard.", "ok");
     });
 
     downloadBtn.addEventListener("click", () => {
       const txt = output?.innerText || ""; if (!txt.trim()) return;
-      const name = ($("company").value || "qualification").trim().replace(/\s+/g,"-");
-      const blob = new Blob([txt], {type:"text/plain"});
+      const name = ($("company").value || "qualification").trim().replace(/\s+/g, "-");
+      const blob = new Blob([txt], { type: "text/plain" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `lead-qualification_${name}_${new Date().toISOString().slice(0,10)}.txt`;
+      a.href = url; a.download = `lead-qualification_${name}_${new Date().toISOString().slice(0, 10)}.txt`;
       document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
     });
 
@@ -476,13 +547,14 @@
     });
 
     // ---------- Init ----------
-    (function init(){
+    (function init() {
       loadForm();
       validateInline();
       updateSourcesList();
-      try { $("notes").value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}").notes || ""; } catch {}
+      try { $("notes").value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}").notes || ""; } catch { }
       $("notes").addEventListener("input", saveForm);
     })();
   </script>
 </body>
+
 </html>
