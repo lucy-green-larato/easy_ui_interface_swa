@@ -370,3 +370,9 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   .field-calltype-xs { display: block; }
 }
 
+/* Lead Qualification: action buttons */
+.action-group{ display:flex; gap:8px; flex-wrap:wrap; }
+
+/* secondary button look, used by "Light touch" */
+.btn.secondary{ background:#fff; border:1px solid var(--border); }
+
