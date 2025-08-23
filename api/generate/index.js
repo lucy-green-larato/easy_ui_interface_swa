@@ -1199,20 +1199,14 @@ ${callNotes || "(none)"}`
         let prompt = "";
         const which = String(template || "").toLowerCase();
 
-        if (which === "opportunity_qualification") {
-          prompt = buildQualificationPrompt(variables || {});                 // Deep dive (existing)
-        } else if (which === "opportunity_qualification_light") {            // NEW: Light touch routes by motion
-          const mv = variables || {};
-          const motion = String(mv.sales_motion || "").toLowerCase();
-          if (motion === "channel" || motion === "indirect") {
-            prompt = buildQualificationPromptLightIndirect(mv);               // Light, indirect
-          } else {
-            prompt = buildQualificationPromptLight(mv);                       // Light, direct (your generic light)
-          }
+        if (which === "opportunity_qualification_light") {
+          prompt = buildQualificationPromptLightIndirect(variables || {});
+        } else if (which === "opportunity_qualification") {
+          prompt = buildQualificationPrompt(variables || {});
         } else if (which === "opportunity_prioritisation") {
           prompt = buildPrioritisationPrompt(variables || {});
         } else {
-          context.res = { status: 200, headers: cors, body: { output: "", preview: "", version: VERSION } };
+          context.res = { status: 400, headers: cors, body: { error: "Unknown template", which, version: VERSION } };
           return;
         }
 
@@ -1224,12 +1218,10 @@ ${callNotes || "(none)"}`
 
         const text = stripPleasantries(extractText(llmRes) || "").trim();
 
-        // NEW: echo back which template/mode/motion actually ran
-        const whichLower = String(which || "").toLowerCase();
+        // NEW: headers so frontend can show the pill
         const modeHeader =
-          whichLower === "opportunity_qualification_light" ? "light" :
-            whichLower === "opportunity_qualification" ? "deep" :
-              ""; // leave blank for other templates (e.g., prioritisation)
+          which === "opportunity_qualification_light" ? "light" :
+            which === "opportunity_qualification" ? "deep" : "";
         const motionHeader = String((variables && variables.sales_motion) || "");
 
         context.res = {
@@ -1237,15 +1229,15 @@ ${callNotes || "(none)"}`
           headers: {
             ...cors,
             "Content-Type": "text/plain; charset=utf-8",
-            "x-qual-template": whichLower,
+            "x-qual-template": which,
             "x-qual-mode": modeHeader,
             "x-qual-motion": motionHeader
           },
           body: text || "(no content)"
         };
         return;
-
       }
+
 
       // For non-matching packs, keep legacy neutral response to avoid breaking anything else
       context.res = { status: 200, headers: cors, body: { output: "", preview: "", version: VERSION } };
