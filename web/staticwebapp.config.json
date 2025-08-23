@@ -9,13 +9,15 @@
     {
       "route": "/content/call-library/*",
       "allowedRoles": ["anonymous", "authenticated"],
-      "headers": { "Cache-Control": "no-store" }
+      "headers": { "cache-control": "no-store" }
     },
+    { "route": "/src/*", "allowedRoles": ["anonymous", "authenticated"] },
 
-    {
-      "route": "/src/*",
-      "allowedRoles": ["anonymous", "authenticated"]
-    }
+    { "route": "/*.html", "headers": { "cache-control": "no-cache" } },
+    { "route": "/*.css",  "headers": { "cache-control": "public, max-age=31536000, immutable" } },
+    { "route": "/*.js",   "headers": { "cache-control": "public, max-age=31536000, immutable" } },
+    { "route": "/*.mjs",  "headers": { "cache-control": "public, max-age=31536000, immutable" } },
+    { "route": "/assets/*", "headers": { "cache-control": "public, max-age=31536000, immutable" } }
   ],
 
   "navigationFallback": {
@@ -45,6 +47,6 @@
     ".mdx": "text/markdown; charset=utf-8",
     ".js":  "application/javascript; charset=utf-8",
     ".mjs": "application/javascript; charset=utf-8",
-    ".json":"application/json; charset=utf-8"
+    ".json": "application/json; charset=utf-8"
   }
 }
