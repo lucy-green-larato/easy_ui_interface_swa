@@ -463,12 +463,12 @@ ${templateMdText}
 
 /* ---------------------- NEW small helpers for packs --------------------- */
 
-function linesToList(x){ return (Array.isArray(x)?x:String(x||"").split(/\r?\n/)).map(s=>String(s).trim()).filter(Boolean); }
-function numOrNull(x){ const n = Number(x); return Number.isFinite(n) ? n : null; }
+function linesToList(x) { return (Array.isArray(x) ? x : String(x || "").split(/\r?\n/)).map(s => String(s).trim()).filter(Boolean); }
+function numOrNull(x) { const n = Number(x); return Number.isFinite(n) ? n : null; }
 
 /* -------------------- Prompt builders: qualification/prioritisation -------------------- */
 
-function buildQualificationPrompt(v){
+function buildQualificationPrompt(v) {
   const diffs = linesToList(v.differentiation_points || v.differentiation || v.usps);
   const prereqs = linesToList(v.technical_prerequisites || v.technical_prereqs);
   const sources = linesToList(v.sources || v.sources_raw);
@@ -592,7 +592,90 @@ Provide a JSON block with:
 `.trim();
 }
 
-function buildPrioritisationPrompt(v){
+function buildQualificationPromptLightIndirect(v) {
+  const services = [v.proposition_name, v.proposition_type].filter(Boolean).join(" (") + (v.proposition_type ? ")" : "");
+  const sourcesRaw = String(v.sources_raw || "").trim() || "(none)";
+  const safe = s => (String(s || "").trim() || "Not provided");
+  return `
+System / Role
+You are a top-performing UK B2B salesperson working the Technology Channel (indirect sales).
+You’re also an experienced UK channel GTM strategist and CMO for trade shows across technology / cybersecurity / telecoms.
+Use British English. Be concise, commercial and specific.
+
+Operating context (important)
+- The UK channel has seen frequent M&A. With higher interest rates, many partners must drive organic growth and efficiency.
+- Many partners struggle with lead generation and consistent execution.
+
+Constraints (no exceptions)
+- Evidence first. If a fact is unknown, write "Not found" and add one line on how to source it (e.g., IXBRL, LinkedIn, press, investor pages).
+- No assumptions, no vague generalisations. Tie each judgement to a concrete detail or mark it as "Not found".
+
+Inputs
+- Seller company: ${safe(v.seller_company)}
+- Services sold: ${safe(services)}
+- Partner website: ${safe(v.website)}
+- Partner LinkedIn (optional): ${safe(v.partner_linkedin)}
+- Company registration no. (optional): ${safe(v.company_registration_number)}
+- IXBRL interface: available via backend when a reg no. is provided; otherwise use public sources.
+- Sources (optional): ${sourcesRaw}
+
+Task
+Assess whether this channel partner is a good fit to resell ${safe(v.seller_company)}’s ${safe(v.proposition_name)}. Use the inputs and any IXBRL data available (two years if possible). Where data is not available, state "Not found" and how to find it.
+
+Output (plain text, exactly this order; keep it tight)
+
+## Executive summary (≤90 words)
+A crisp, evidenced view of fit and whether to invest time now.
+
+## Company profile (bullets, 6–8)
+- Size (employees; revenue if available from IXBRL): …
+- Segment & focus where ${safe(v.proposition_name)} adds clear value: …
+- GTM model & growth strategy (what they say they’re doing next): …
+- Recent performance (revenue, profit, debt, risk/opportunity) with year(s): …
+- Seniority of current contacts (decision-makers vs influencers): …
+- Trade shows attended this calendar year (if any): …
+- Estimated per-show budget and likely opps created (if known; else "Not found" + how to estimate): …
+
+## Pain points (5 bullets)
+Specific, evidenced challenges (e.g., organic growth, onboarding new products, marketing/sales execution), aligned to ${safe(v.proposition_name)}. Include items from accounts/press if available.
+
+## Relationship value (3 bullets)
+- Why a partnership could be valuable (market access, attach plays, services revenue).
+- Where ${safe(v.seller_company)} differentiates vs their current capabilities.
+- Leading indicator you would watch in 30–60 days.
+
+## Decision process & risk (bullets)
+- Who chooses vendors/wholesalers; access status; engagement level.
+- Known vendors/wholesalers/distributors already used.
+- Risk of sign-up with no sell-through; 1–2 mitigations.
+
+## Competition & differentiation (3 bullets)
+Clear, evidence-anchored differentiation opportunities. If unknown, "Not found" + where to check.
+
+## BANT (short lines)
+B: Pass | Borderline | Fail — one line evidence
+A: Pass | Borderline | Fail — one line evidence
+N: Pass | Borderline | Fail — one line evidence
+T: Pass | Borderline | Fail — one line evidence
+
+## Next step (one sentence)
+A low-friction next action suited to channel (e.g., validation call with commercial + enablement, or micro-pilot).
+
+## JSON
+{
+  "fit_score_0_5": <int>,
+  "need_0_5": <int>,
+  "authority_0_5": <int>,
+  "timeline_0_5": <int>,
+  "budget_0_5": <int>,
+  "pursue": true | false,
+  "key_risk": "None|DataGap|NoAccess|WeakFinancials|CompetingVendors|NoLeadGen",
+  "notes": "<one short sentence>"
+}
+`.trim();
+}
+
+function buildPrioritisationPrompt(v) {
   // v.opportunities_json should be a JSON array of the qualification JSONs
   const list = String(v.opportunities_json || "[]");
   return `
@@ -1117,11 +1200,18 @@ ${callNotes || "(none)"}`
         const which = String(template || "").toLowerCase();
 
         if (which === "opportunity_qualification") {
-          prompt = buildQualificationPrompt(variables || {});
+          prompt = buildQualificationPrompt(variables || {});                 // Deep dive (existing)
+        } else if (which === "opportunity_qualification_light") {            // NEW: Light touch routes by motion
+          const mv = variables || {};
+          const motion = String(mv.sales_motion || "").toLowerCase();
+          if (motion === "channel" || motion === "indirect") {
+            prompt = buildQualificationPromptLightIndirect(mv);               // Light, indirect
+          } else {
+            prompt = buildQualificationPromptLight(mv);                       // Light, direct (your generic light)
+          }
         } else if (which === "opportunity_prioritisation") {
           prompt = buildPrioritisationPrompt(variables || {});
         } else {
-          // Preserve old behaviour for unknown templates within this pack
           context.res = { status: 200, headers: cors, body: { output: "", preview: "", version: VERSION } };
           return;
         }
