@@ -13,6 +13,13 @@
     .status[data-kind="error"]{ color: var(--danger) }
     .status[data-kind="ok"]{ color: var(--ok) }
     .sources-list ul{ margin:.5rem 0 0 1.1rem }
+    /* logo sizing consistent with index */
+    .logo{ height:44px; width:auto; display:block }
+    @media (max-width:640px){ .logo{ height:36px } }
+    /* action button group */
+    .action-group{ display:flex; gap:8px; flex-wrap:wrap }
+    .btn.secondary{ background:#fff; border:1px solid var(--border) }
+    .btn.primary:disabled, .btn.secondary:disabled{ opacity:.6; cursor:not-allowed }
   </style>
 </head>
 <body>
@@ -20,7 +27,7 @@
   <!-- HEADER -->
   <header class="app-header" role="banner">
     <div class="header-left">
-      <img class="logo" src="./larato-logo.svg" alt="Larato" />
+      <img class="logo" src="./assets/larato-logo.svg" alt="Larato" />
       <div class="brand-text">
         <h1 class="app-title">Inside Track Tools</h1>
         <p class="kicker">Lead qualification briefing</p>
@@ -69,7 +76,7 @@
           </div>
         </fieldset>
 
-        <!-- Seller proposition (NEW) -->
+        <!-- Seller proposition -->
         <fieldset class="card" aria-labelledby="legend-prop">
           <legend id="legend-prop">Your proposition</legend>
           <div class="grid-2">
@@ -166,9 +173,13 @@
       <div class="output-card card">
         <div class="output-head">
           <h2 id="output-title">Qualification summary</h2>
-          <div class="row-between" style="gap:8px">
-            <button id="generate" class="btn primary" type="button" disabled>
-              <span class="btn-label">Generate qualification</span>
+          <div class="action-group">
+            <button id="gen-deep" class="btn primary" type="button" disabled title="Full analysis with evidence and plans">
+              Deep dive
+              <span class="spinner" aria-hidden="true"></span>
+            </button>
+            <button id="gen-light" class="btn secondary" type="button" disabled title="Fast summary with bullets and a verdict">
+              Light touch
               <span class="spinner" aria-hidden="true"></span>
             </button>
             <button id="copy" class="btn inline" type="button" disabled>Copy summary</button>
@@ -177,7 +188,7 @@
         </div>
 
         <div id="output" class="output" tabindex="0" aria-label="Generated summary will appear here">
-          Add details on the left, then click <em>Generate qualification</em>.
+          Add details on the left, then click <em>Deep dive</em> or <em>Light touch</em>.
         </div>
 
         <div id="status" class="status" role="status" aria-live="polite"></div>
@@ -234,8 +245,7 @@
         <h3 style="margin:0">About Lead Qualification</h3>
         <button id="help-close" class="btn inline" type="button">Close ×</button>
       </div>
-      <p>Provide your details, your proposition, and the prospect’s details. We’ll generate a concise
-        qualification summary that weighs your value against the prospect’s context and signals.</p>
+      <p>Provide your details, your proposition, and the prospect’s details. Choose <em>Deep dive</em> for a full analysis, or <em>Light touch</em> for a fast summary.</p>
       <ul>
         <li><strong>Your company URL</strong> is used to qualify value and proof points.</li>
         <li>Add <em>Sources</em> to steer the analysis (annual report, LinkedIn, press).</li>
@@ -245,7 +255,7 @@
   </dialog>
 
   <script>
-    // ---------- Auth (no sign-out button) ----------
+    // ---------- Auth ----------
     (async () => {
       try{
         const r = await fetch("/.auth/me", { credentials:"include", cache:"no-store" });
@@ -272,10 +282,11 @@
     const remember = $("remember");
     const output = $("output");
     const statusEl = $("status");
-    const generateBtn = $("generate");
+    const responseBox = $("responseBox");
     const copyBtn = $("copy");
     const downloadBtn = $("download");
-    const responseBox = $("responseBox");
+    const deepBtn = $("gen-deep");
+    const lightBtn = $("gen-light");
 
     const fields = [
       "seller_name","seller_company","seller_url",
@@ -315,7 +326,8 @@
       $("website_error").textContent = req.website ? "" : "Enter a valid URL (https://…).";
 
       const ok = Object.values(req).every(Boolean);
-      generateBtn.disabled = !ok;
+      deepBtn.disabled = !ok;
+      lightBtn.disabled = !ok;
       return ok;
     }
 
@@ -326,12 +338,11 @@
         : 'No sources yet.';
     }
 
-    function buildPayload(){
+    function basePayload(){
       if(!validateInline()) return null;
       const srcRaw = $("sources").value || "";
       return {
         pack: "uk_b2b_sales_core",
-        template: "opportunity_qualification", // keep using this name in your API template map
         variables: {
           // seller context
           seller_name: $("seller_name").value.trim(),
@@ -395,6 +406,33 @@
       }
     }
 
+    async function sendRequest(templateName){
+      const payload = basePayload(); if(!payload) return;
+      payload.template = templateName; // "opportunity_qualification" or "opportunity_qualification_light"
+      setStatus("Generating…");
+      responseBox.textContent = "Sending…";
+      const disable = (v)=>{ deepBtn.disabled = v; lightBtn.disabled = v; deepBtn.classList.toggle("busy", v); lightBtn.classList.toggle("busy", v); };
+      disable(true);
+      try{
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const text = await res.text();
+        setSummary(text);
+        responseBox.textContent = text;
+        setStatus("Done.", "ok");
+      }catch(e){
+        setSummary("");
+        responseBox.textContent = "Request failed: " + (e?.message || String(e));
+        setStatus("Could not generate a qualification summary.", "error");
+      }finally{
+        disable(false);
+        saveForm();
+      }
+    }
+
     // ---------- Events ----------
     fields.forEach(id => ( $(id)?.addEventListener?.("input", () => {
       validateInline();
@@ -414,30 +452,8 @@
     $("help")?.addEventListener("click", ()=> $("help-modal")?.showModal());
     $("help-close")?.addEventListener("click", ()=> $("help-modal")?.close());
 
-    generateBtn.addEventListener("click", async () => {
-      const payload = buildPayload(); if(!payload) return;
-      setStatus("Generating…");
-      responseBox.textContent = "Sending…";
-      generateBtn.classList.add("busy");
-      try{
-        const res = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        const text = await res.text();
-        setSummary(text);
-        responseBox.textContent = text;
-        setStatus("Done.", "ok");
-      }catch(e){
-        setSummary("");
-        responseBox.textContent = "Request failed: " + (e?.message || String(e));
-        setStatus("Could not generate a qualification summary.", "error");
-      }finally{
-        generateBtn.classList.remove("busy");
-        saveForm();
-      }
-    });
+    deepBtn.addEventListener("click", () => sendRequest("opportunity_qualification"));
+    lightBtn.addEventListener("click", () => sendRequest("opportunity_qualification_light"));
 
     copyBtn.addEventListener("click", async () => {
       const txt = output?.innerText || ""; if (!txt.trim()) return;
