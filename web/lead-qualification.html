@@ -731,23 +731,176 @@
       }
     });
 
+    // ---------- OCR parser (multi-file) ----------
+    (function () {
+      // Don’t redefine if already present
+      if (window.parseAccountsFiles) return;
+
+      // Fallback formatters (use your existing ones if present)
+      const fmt = window.fmt || (v => v == null ? "n/a" : new Intl.NumberFormat("en-GB").format(v));
+      const fmtPct = window.fmtPct || (v => v == null ? "n/a" : (typeof v === "number" ? v.toFixed(1) + "%" : v));
+      const fmtDec = window.fmtDec || (v => v == null ? "n/a" : (Number.isFinite(+v) ? Number(v).toFixed(2) : "n/a"));
+
+      async function readPdfText(file) {
+        if (!window.pdfjsLib) throw new Error("pdf.js not loaded");
+        const url = URL.createObjectURL(file);
+        try {
+          const pdf = await pdfjsLib.getDocument(url).promise;
+          const maxPages = Math.min(pdf.numPages, 8);
+          let text = "";
+          for (let p = 1; p <= maxPages; p++) {
+            const page = await pdf.getPage(p);
+            const content = await page.getTextContent();
+            text += "\n" + content.items.map(it => it.str).join(" ");
+          }
+          return text;
+        } finally { URL.revokeObjectURL(url); }
+      }
+
+      function lastNumberIn(s) {
+        const matches = String(s || "").match(/[-(]?\s*£?\d[\d,]*\)?/g);
+        if (!matches) return null;
+        let raw = matches[matches.length - 1].replace(/[£,\s]/g, "");
+        const neg = raw.startsWith("(") && raw.endsWith(")");
+        raw = raw.replace(/[()]/g, "");
+        const n = Number(raw);
+        return Number.isFinite(n) ? (neg ? -n : n) : null;
+      }
+
+      function findVal(lines, labels) {
+        const rx = new RegExp("\\b(" + labels.join("|").replace(/\s+/g, "\\s+") + ")\\b", "i");
+        for (const line of lines) {
+          if (rx.test(line)) {
+            const v = lastNumberIn(line);
+            if (v != null) return v;
+          }
+        }
+        return null;
+      }
+
+      function parseEndDateToISO(s) {
+        if (!s) return null;
+        const dmy = s.match(/^([0-3]?\d)[\/\-]([01]?\d)[\/\-](\d{4})$/);
+        if (dmy) {
+          const [_, d, m, y] = dmy;
+          return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        }
+        const dt = new Date(s);
+        return isNaN(dt.getTime()) ? null :
+          `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+      }
+
+      function findEndDate(text) {
+        const m = String(text || "").match(/\b(year\s+ended|for\s+the\s+year\s+ended)\s+([0-3]?\d[\/\-\s][A-Za-z]{3,9}[\/\-\s]\d{4}|[0-3]?\d[\/\-][01]?\d[\/\-]\d{4})/i);
+        return m ? parseEndDateToISO(m[2].replace(/\s+/g, " ").trim()) : null;
+      }
+
+      function extractYearFromText(text) {
+        if (!text || text.length < 200) return null;
+        const lines = String(text).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+
+        const turnover = findVal(lines, ["Turnover", "Revenue"]);
+        const grossProfit = findVal(lines, ["Gross profit"]);
+        const operatingProfit = findVal(lines, ["Operating profit", "Operating (loss)", "Operating loss"]);
+        const pbt = findVal(lines, ["Profit before tax", "(Loss) before tax", "(loss) before taxation"]);
+        const pat = findVal(lines, ["Profit for the financial year", "(Loss) for the financial year", "Profit for the year", "(Loss) for the year"]);
+        const netAssets = findVal(lines, ["Net assets", "Net (liabilities)", "Net liabilities"]);
+        const cash = findVal(lines, ["Cash at bank", "Cash and cash equivalents"]);
+        const currentAssets = findVal(lines, ["Current assets"]);
+        const currentLiabs = findVal(lines, ["Current liabilities"]);
+        const totalAssets = findVal(lines, ["Total assets", "Total assets less current liabilities"]);
+        const totalLiabs = findVal(lines, ["Total liabilities", "Total creditors"]);
+        const endDate = findEndDate(text);
+
+        if (turnover == null && operatingProfit == null && netAssets == null && currentAssets == null) return null;
+
+        return {
+          endDate, turnover, grossProfit, operatingProfit,
+          profitBeforeTax: pbt, profitAfterTax: pat,
+          cash, currentAssets, currentLiabilities: currentLiabs,
+          totalAssets, totalLiabilities, totalDebt: null,
+          netAssets
+        };
+      }
+
+      function mergeYearsToSummary(years) {
+        const byKey = new Map();
+        for (const y of years) {
+          if (!y || !y.endDate) continue;
+          const k = y.endDate;
+          if (!byKey.has(k)) { byKey.set(k, { ...y }); }
+          else {
+            const cur = byKey.get(k);
+            for (const f of Object.keys(y)) if (cur[f] == null && y[f] != null) cur[f] = y[f];
+          }
+        }
+        const merged = [...byKey.values()]
+          .sort((a, b) => String(b.endDate).localeCompare(String(a.endDate)))
+          .slice(0, 2);
+
+        const y1 = merged[0], y2 = merged[1];
+        const derived = {
+          revenueYoYPct: (y1?.turnover != null && y2?.turnover != null && y2.turnover !== 0)
+            ? ((y1.turnover - y2.turnover) / Math.abs(y2.turnover)) * 100 : null,
+          grossMarginPct: {
+            y1: (y1?.turnover && y1?.grossProfit != null) ? (y1.grossProfit / y1.turnover) * 100 : null,
+            y2: (y2?.turnover && y2?.grossProfit != null) ? (y2.grossProfit / y2.turnover) * 100 : null
+          },
+          operatingMarginPct: {
+            y1: (y1?.turnover && y1?.operatingProfit != null) ? (y1.operatingProfit / y1.turnover) * 100 : null,
+            y2: (y2?.turnover && y2?.operatingProfit != null) ? (y2.operatingProfit / y2.turnover) * 100 : null
+          },
+          currentRatio: (y1?.currentAssets && y1?.currentLiabilities) ? (y1.currentAssets / y1.currentLiabilities) : null,
+          cashRatio: (y1?.cash && y1?.currentLiabilities) ? (y1.cash / y1.currentLiabilities) : null,
+          netDebtToEquity: (y1?.totalDebt != null && y1?.netAssets) ? (y1.totalDebt / y1.netAssets) : null
+        };
+
+        return { companyNumber: "manual-upload", years: merged, derived };
+      }
+
+      // Only define renderer if you don’t already have one
+      if (!window.renderIxbrlBox) {
+        window.renderIxbrlBox = function (sum) {
+          const y1 = sum?.years?.[0];
+          const y2 = sum?.years?.[1];
+          const d = sum?.derived || {};
+          return [
+            y1 ? `<div><strong>${y1.endDate || "Latest"}</strong>: turnover ${fmt(y1.turnover)}, op ${fmt(y1.operatingProfit)}, net assets ${fmt(y1.netAssets)}</div>` : "",
+            y2 ? `<div><strong>${y2.endDate}</strong>: turnover ${fmt(y2.turnover)}, op ${fmt(y2.operatingProfit)}, net assets ${fmt(y2.netAssets)}</div>` : "",
+            `<div class="muted">GM%: ${fmtPct(d.grossMarginPct?.y1)} • OPM%: ${fmtPct(d.operatingMarginPct?.y1)} • Current: ${fmtDec(d.currentRatio)} • Cash: ${fmtDec(d.cashRatio)}</div>`
+          ].filter(Boolean).join("");
+        };
+      }
+
+      async function parseOneFileToYear(file) {
+        const isPdf = (file.type || "").includes("pdf") || file.name.toLowerCase().endsWith(".pdf");
+        const text = isPdf ? await readPdfText(file) : await file.text();
+        return extractYearFromText(text);
+      }
+
+      async function parseAccountsFiles(files) {
+        const status = document.getElementById("accounts_status");
+        const box = document.getElementById("ixbrlBox");
+        if (!files || !files.
+
+
     // ---------- Init ----------
     (function init() {
-      loadForm();
-      validateInline();
-      updateSourcesList();
+          loadForm();
+          validateInline();
+          updateSourcesList();
 
-      try {
-        $("notes").value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}").notes || "";
-      } catch { }
+          try {
+            $("notes").value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}").notes || "";
+          } catch { }
 
-      $("notes").addEventListener("input", saveForm);
+          $("notes").addEventListener("input", saveForm);
 
-      // If a reg no. is already present, fetch iXBRL now
-      if ($("company_reg").value.trim()) {
-        fetchIxbrlIfReady();
-      }
-    })();
+          // If a reg no. is already present, fetch iXBRL now
+          if ($("company_reg").value.trim()) {
+            fetchIxbrlIfReady();
+          }
+        })();
   </script>
 </body>
 
