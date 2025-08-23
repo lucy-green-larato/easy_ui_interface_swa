@@ -227,7 +227,7 @@
             <p class="help">Paste links that should be prioritised in the analysis.</p>
           </div>
           <div class="field">
-            <label for="partner_linkedin">Partner LinkedIn URL (optional)</label>
+            <label for="partner_linkedin">Prospect LinkedIn URL (optional)</label>
             <input id="partner_linkedin" name="partner_linkedin" type="url"
               placeholder="https://www.linkedin.com/company/…" inputmode="url" autocomplete="url" />
           </div>
@@ -281,10 +281,7 @@
           <section class="intel-slot">
             <h3>Signals to check</h3>
             <section class="intel-slot">
-              <h3>Financials (iXBRL)</h3>
-              <div id="ixbrlBox" class="muted">No financials fetched.</div>
-            </section>
-            <section class="intel-slot">
+              <ul id="accounts_list" class="muted" style="margin:.5rem 0 0 1rem"></ul>
               <h3>Upload accounts (OCR)</h3>
               <input type="file" id="accounts_file" accept=".pdf,.txt" multiple />
               <div id="accounts_status" class="muted">No file uploaded.</div>
@@ -392,46 +389,6 @@
     let lastSummary = localStorage.getItem("lead_qualification_v2.last_summary") || "";
     // B2: iXBRL state + helpers
     let ixbrlSummary = null;
-
-    async function fetchIxbrlIfReady() {
-      const reg = $("company_reg").value.trim();
-      // Basic UK reg no. sanity check (6–8 digits)
-      if (!/^[A-Z0-9]{6,8}$/i.test(reg)) {
-        ixbrlSummary = null;
-        const box = $("ixbrlBox");
-        if (box) box.textContent = "No reg no. / not valid.";
-        return;
-      }
-      const box = $("ixbrlBox");
-      if (box) box.textContent = "Fetching…";
-      try {
-        const r = await fetch(`/api/ixbrl/financials?companyNumber=${encodeURIComponent(reg)}`, { cache: "no-store" });
-        if (r.status === 204) {
-          ixbrlSummary = null;
-          if (box) box.textContent = "No iXBRL available for this company.";
-          return;
-        }
-        if (!r.ok) throw new Error(await r.text());
-        const data = await r.json();
-        ixbrlSummary = data?.summary || null;
-        if (!ixbrlSummary) {
-          if (box) box.textContent = "No data returned.";
-          return;
-        }
-        const y1 = ixbrlSummary.years?.[0], y2 = ixbrlSummary.years?.[1];
-        const d = ixbrlSummary.derived || {};
-        if (box) {
-          box.innerHTML =
-            (y1 ? `<div><strong>${y1.endDate || "Latest"}</strong>: turnover ${fmt(y1.turnover)}, op ${fmt(y1.operatingProfit)}, net assets ${fmt(y1.netAssets)}</div>` : "") +
-            (y2 ? `<div><strong>${y2.endDate}</strong>: turnover ${fmt(y2.turnover)}, op ${fmt(y2.operatingProfit)}, net assets ${fmt(y2.netAssets)}</div>` : "") +
-            `<div class="muted">YoY: ${fmtPct(d.revenueYoYPct)} • GM%: ${fmtPct(d.grossMarginPct?.y1)} • OPM%: ${fmtPct(d.operatingMarginPct?.y1)} • Current: ${fmtDec(d.currentRatio)} • Cash: ${fmtDec(d.cashRatio)}</div>`;
-        }
-      } catch (e) {
-        ixbrlSummary = null;
-        if (box) box.textContent = "Fetch failed.";
-      }
-    }
-
     function fmt(n) { return (n == null) ? "—" : new Intl.NumberFormat("en-GB").format(n); }
     function fmtPct(n) { return (n == null) ? "—" : new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1 }).format(n) + "%"; }
     function fmtDec(n) { return (n == null) ? "—" : new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 }).format(n); }
@@ -504,7 +461,6 @@
           differentiation_points: lines($("differentiation_points").value),
           technical_prerequisites: lines($("technical_prereqs").value),
           sales_motion: $("sales_motion").value.trim(),
-          ixbrl: ixbrlSummary,   // ← include compact iXBRL summary when available
 
           // prospect inputs
           company: $("company").value.trim(),
@@ -521,6 +477,8 @@
     function saveForm() {
       if (!remember.checked) return;
       const fd = Object.fromEntries(new FormData(form).entries());
+      const notesEl = $("notes");
+      if (notesEl) fd.notes = notesEl.value;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(fd));
     }
     function loadForm() {
@@ -596,7 +554,14 @@
         setSummary(text);
         responseBox.textContent = text;
 
-        setStatus(`Done. Ran: ${srvMode === "light" ? "Light touch" : "Deep dive"}${srvMotion ? ` (${srvMotion})` : ""}.`, "ok");
+        setStatus(
+          "Done. Ran: " +
+          (srvMode === "light" ? "Light touch" : "Deep dive") +
+          (srvMotion ? " (" + srvMotion + ")" : "") +
+          ".",
+          "ok"
+        );
+
       } catch (e) {
         setSummary("");
         responseBox.textContent = "Request failed: " + (e?.message || String(e));
@@ -615,7 +580,7 @@
     })));
 
     // iXBRL triggers
-    $("company_reg").addEventListener("blur", fetchIxbrlIfReady);
+    $("company_reg").addEventListener("blur", () => { try { window.fetchIxbrlIfReady?.(); } catch { } });
     $("company_reg").addEventListener("input", () => {
       const box = $("ixbrlBox");
       if (box) box.textContent = "—";
@@ -715,20 +680,6 @@
     // Connect the reg-no field to the fetcher (on blur)
     document.getElementById("company_reg")?.addEventListener("blur", () => {
       try { window.fetchIxbrlIfReady(); } catch { }
-    });
-
-    // Multi-file OCR upload handler (only wires the input; assumes you already added the parser).
-    document.getElementById("accounts_file")?.addEventListener("change", (e) => {
-      const files = Array.from(e.target?.files || []);
-      if (!files.length) return;
-      // If you already pasted the multi-file OCR parser: parseAccountsFiles(files)
-      // If not yet, leave this as a placeholder; we can wire it when you’re ready.
-      if (typeof parseAccountsFiles === "function") {
-        parseAccountsFiles(files);
-      } else {
-        document.getElementById("accounts_status").textContent =
-          "Parser not wired yet. (We’ll add it next.)";
-      }
     });
 
     // ---------- OCR parser (multi-file) ----------
@@ -878,29 +829,119 @@
         return extractYearFromText(text);
       }
 
-      async function parseAccountsFiles(files) {
+      // Combine multiple files → summary in window.ixbrlSummary + render box
+      window.parseAccountsFiles = async function (files) {
         const status = document.getElementById("accounts_status");
         const box = document.getElementById("ixbrlBox");
-        if (!files || !files.
+        try {
+          const yearsRaw = [];
+          for (const f of files) {
+            const y = await parseOneFileToYear(f);
+            if (y) yearsRaw.push(y);
+          }
+          if (yearsRaw.length === 0) {
+            window.ixbrlSummary = null;
+            if (box) box.textContent = "No financials found in uploaded files.";
+            if (status) status.textContent = "No usable data in uploaded files.";
+            return;
+          }
+          window.ixbrlSummary = mergeYearsToSummary(yearsRaw);
+          if (box) box.innerHTML = window.renderIxbrlBox(window.ixbrlSummary);
+          if (status) status.textContent = `Loaded ${window.ixbrlSummary.years?.length || 0} period(s).`;
+        } catch (e) {
+          console.error(e);
+          if (status) status.textContent = e?.message || "Parse failed.";
+          window.ixbrlSummary = null;
+        }
+      };
 
+      // ---------- OCR upload wiring (robust) ----------
+      (function () {
+        const input = document.getElementById("accounts_file");
+        const status = document.getElementById("accounts_status");
+        const list = document.getElementById("accounts_list");
+        const panel = input ? (input.closest(".intel-slot") || input.parentElement) : null;
 
-    // ---------- Init ----------
-    (function init() {
-          loadForm();
-          validateInline();
-          updateSourcesList();
+        if (!input || !status) return; // panel not present on this page
+
+        // Helpers
+        const esc = (s) => String(s || "").replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+        function showList(files) {
+          if (!list) return;
+          if (!files?.length) { list.innerHTML = ""; return; }
+          list.innerHTML = files.map(f => `<li>${esc(f.name)} — ${Math.round(f.size / 1024)} KB</li>`).join("");
+        }
+        function setBusy(on) { status.classList.toggle("busy", !!on); }
+
+        async function handleFiles(files) {
+          if (!files || !files.length) return;
+          showList(files);
+          status.textContent = `Reading ${files.length} file(s)…`;
+          setBusy(true);
 
           try {
-            $("notes").value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}").notes || "";
-          } catch { }
-
-          $("notes").addEventListener("input", saveForm);
-
-          // If a reg no. is already present, fetch iXBRL now
-          if ($("company_reg").value.trim()) {
-            fetchIxbrlIfReady();
+            if (typeof window.parseAccountsFiles !== "function") {
+              status.textContent = "Parser not wired yet (internal error).";
+              console.warn("parseAccountsFiles missing");
+              return;
+            }
+            await window.parseAccountsFiles(files); // this will set window.ixbrlSummary and update #ixbrlBox
+            // also ensure payload picks it up:
+            // (Your buildPayload/basePayload should already include: ixbrl: window.ixbrlSummary || null)
+            if (window.ixbrlSummary) {
+              status.textContent = `Loaded ${window.ixbrlSummary.years?.length || 0} period(s).`;
+            } else {
+              status.textContent = "Couldn’t extract headline numbers from the files.";
+            }
+          } catch (e) {
+            console.error(e);
+            status.textContent = e?.message || "Failed to read files.";
+          } finally {
+            setBusy(false);
+            // Let user re-select the same file again if needed
+            input.value = "";
           }
-        })();
+        }
+
+        // Change handler (click-to-choose)
+        input.addEventListener("change", (e) => {
+          const files = Array.from(e.target?.files || []);
+          if (files.length) handleFiles(files);
+        });
+
+        // Drag & drop (nice UX)
+        if (panel) {
+          ["dragenter", "dragover"].forEach(ev =>
+            panel.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); panel.classList.add("is-drag"); })
+          );
+          ["dragleave", "drop"].forEach(ev =>
+            panel.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); panel.classList.remove("is-drag"); })
+          );
+          panel.addEventListener("drop", (e) => {
+            const files = Array.from(e.dataTransfer?.files || []);
+            if (files.length) handleFiles(files);
+          });
+        }
+      })();
+
+      // ---------- Init ----------
+      (function init() {
+        loadForm();
+        validateInline();
+        updateSourcesList();
+
+        try {
+          $("notes").value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}").notes || "";
+        } catch { }
+
+        $("notes").addEventListener("input", saveForm);
+
+        // If a reg no. is already present, fetch iXBRL now
+        if ($("company_reg").value.trim()) {
+          try { window.fetchIxbrlIfReady?.(); } catch { }
+        }
+      })();
+    })();
   </script>
 </body>
 
