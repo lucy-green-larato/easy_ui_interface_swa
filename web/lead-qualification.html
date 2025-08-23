@@ -239,7 +239,7 @@
     <section class="panel middle">
       <div class="output-card card">
         <div class="output-head">
-          <h2 id="output-title">Qualification summary</h2>
+          <h2 id="output-title">Qualification summary<span id="run-mode" class="pill" hidden></span></h2>
           <div class="action-group">
             <button id="gen-deep" class="btn primary" type="button" disabled
               title="Full analysis with evidence and plans">
@@ -452,6 +452,16 @@
       return ok;
     }
 
+    function updateRunModePill(mode, motion) {
+      const el = $("run-mode");
+      if (!el) return;
+      const niceMode = mode === "light" ? "Light touch" : "Deep dive";
+      const niceMotion = (motion || "").trim();
+      el.textContent = niceMotion ? `${niceMode} (${niceMotion})` : niceMode;
+      el.dataset.kind = (mode === "light" ? "light" : "deep");
+      el.hidden = false;
+    }
+
     function updateSourcesList() {
       const arr = srcArray();
       $("sourcesList").innerHTML = arr.length
@@ -529,29 +539,62 @@
     }
 
     async function sendRequest(templateName) {
-      const payload = basePayload(); if (!payload) return;
-      payload.template = templateName; // "opportunity_qualification" or "opportunity_qualification_light"
+      // Build payload
+      const payload = (typeof basePayload === "function" ? basePayload() : buildPayload());
+      if (!payload) return;
+      payload.template = templateName; // "opportunity_qualification" | "opportunity_qualification_light"
+
+      // UI: starting state
       setStatus("Generating…");
       responseBox.textContent = "Sending…";
-      const disable = (v) => { deepBtn.disabled = v; lightBtn.disabled = v; deepBtn.classList.toggle("busy", v); lightBtn.classList.toggle("busy", v); };
+
+      const motion = ($("sales_motion").value || "").trim().toLowerCase();
+      const optimisticMode = templateName === "opportunity_qualification_light" ? "light" : "deep";
+      updateRunModePill(optimisticMode, motion);
+
+      const disable = (v) => {
+        [deepBtn, lightBtn].forEach(btn => {
+          if (!btn) return;
+          btn.disabled = v;
+          btn.classList.toggle("busy", v);
+        });
+      };
       disable(true);
+
       try {
         const res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
+
+        // Surface non-200s usefully
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "");
+          throw new Error(errText || res.statusText || "Request failed");
+        }
+
+        // Confirm mode/motion from backend headers (if you added them)
+        const srvMode = res.headers.get("x-qual-mode") || optimisticMode;
+        const srvMotion = res.headers.get("x-qual-motion") || motion;
+        updateRunModePill(srvMode, srvMotion);
+
+        // Read body ONCE
         const text = await res.text();
         setSummary(text);
         responseBox.textContent = text;
-        setStatus("Done.", "ok");
+
+        setStatus(
+          `Done. Ran: ${srvMode === "light" ? "Light touch" : "Deep dive"}${srvMotion ? ` (${srvMotion})` : ""}.`,
+          "ok"
+        );
       } catch (e) {
         setSummary("");
         responseBox.textContent = "Request failed: " + (e?.message || String(e));
         setStatus("Could not generate a qualification summary.", "error");
       } finally {
         disable(false);
-        saveForm();
+        if (typeof saveForm === "function") saveForm();
       }
     }
 
