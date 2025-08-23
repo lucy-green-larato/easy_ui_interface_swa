@@ -376,3 +376,11 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
 /* secondary button look, used by "Light touch" */
 .btn.secondary{ background:#fff; border:1px solid var(--border); }
 
+/* Mode pill */
+.pill{
+  display:inline-block; margin-left:.5rem; padding:.15rem .5rem;
+  border-radius:999px; font-size:.85rem; line-height:1.1;
+  background:#e5e7eb; color:#111827; vertical-align:middle;
+}
+.pill[data-kind="light"]{ background:#dbeafe; color:#1e3a8a; } /* light blue */
+.pill[data-kind="deep"] { background:#dcfce7; color:#166534; } /* green */
