@@ -56,6 +56,12 @@ function replaceSection(text, name, md) {
   return `${text.trim()}\n\n## ${name}\n\n${md.trim()}\n`;
 }
 
+function hasTwoYears(ix) {
+  try { return !!(ix && Array.isArray(ix.years) && ix.years.length >= 2); }
+  catch { return false; }
+}
+
+
 // Insert an intro + bullets immediately after the section heading (preserves existing content).
 function injectBullets(text, name, intro, items) {
   const list = splitList(items);
@@ -472,6 +478,10 @@ function buildQualificationPrompt(v) {
   const diffs = linesToList(v.differentiation_points || v.differentiation || v.usps);
   const prereqs = linesToList(v.technical_prerequisites || v.technical_prereqs);
   const sources = linesToList(v.sources || v.sources_raw);
+  const ixbrlText = v.ixbrl ? ixbrlSnippet(v.ixbrl) : "No structured financials provided.";
+  const twoYears = hasTwoYears(v.ixbrl);
+
+  function numOrNull(x) { const n = Number(x); return Number.isFinite(n) ? n : null; }
 
   return `
 System / Role
@@ -491,12 +501,20 @@ Seller context
 - territory_or_segment_focus: ${v.territory_or_segment_focus || "Not provided"}
 - sales_motion: ${v.sales_motion || "direct|channel|hybrid (Not provided)"}
 
+Operating context (important)
+- The UK channel has seen frequent M&A. With higher interest rates, many partners must drive organic growth and efficiency.
+- Many partners struggle with lead generation and consistent execution.
+- Partners want help from their suppliers to decide what they need to add to their portfolio.
+- Partners need their suppliers to help train their sales, marketing, and technical people.
+- Partners want their suppliers to make the partner's business more valuable (important).
+
 Prospect inputs
 - company_name: ${v.company || "Not provided"}
 - company_registration_number: ${v.company_registration_number || "Not provided"}
 - company_website_url: ${v.website || "Not provided"}
 - industry_or_segment: ${v.industry || "Not provided"}
 - sources: ${sources.join(", ") || "(none)"}
+- Financials (from iXBRL if available): ${ixbrlText}
 
 What to analyse
 1) Company profile
@@ -536,14 +554,14 @@ Required calculations (use two-year accounts if present)
 - Cash ratio, current ratio, net debt / equity.
 - Health flag: Strong | Watch | Weak with one-line justification.
 
-Frameworks
-- BANT: Budget, Authority, Need, Timeline → Pass | Borderline | Fail each.
-- CGP TCI BA: add succinct notes.
-
 Output format (plain text, in this exact order)
 ## Executive summary (≤120 words)
 ## Evidence (bullets with source & metric)
-## BANT verdict (with one-line rationale each)
+${twoYears ? `## Year-on-year changes
+- Revenue: show Y1 and Y2, absolute change and YoY % (e.g., £12.3m → £14.1m, +14.6%).
+- Gross margin % and operating margin %: Y1 vs Y2 with direction arrow (↑/↓/→) and one-line driver.
+- Net assets and cash: absolute change, and % if meaningful; note liquidity risks or improvements.
+` : ""}## BANT verdict (with one-line rationale each)
 ## CGP TCI BA notes (bullets under each letter)
 ## Motion plan
 - If direct: PoC/pilot plan, stakeholders to secure, timeline to contract.
@@ -593,34 +611,42 @@ Provide a JSON block with:
 }
 
 function buildQualificationPromptLightIndirect(v) {
-  const services = [v.proposition_name, v.proposition_type].filter(Boolean).join(" (") + (v.proposition_type ? ")" : "");
-  const sourcesRaw = String(v.sources_raw || "").trim() || "(none)";
-  const safe = s => (String(s || "").trim() || "Not provided");
+  const ixText = (v && v.ixbrl) ? ixbrlSnippet(v.ixbrl) : "No structured financials provided.";
+  const twoYears = hasTwoYears(v && v.ixbrl);
+  const safe = (s) => (String(s || "").trim() || "Not provided");
+  const services =
+    [safe(v && v.proposition_name)].filter(Boolean).join("") +
+    (v && v.proposition_type ? ` (${safe(v.proposition_type)})` : "");
+  const sourcesRaw = String((v && v.sources_raw) || "").trim() || "(none)";
+
   return `
 System / Role
 You are a top-performing UK B2B salesperson working the Technology Channel (indirect sales).
-You’re also an experienced UK channel GTM strategist and CMO for trade shows across technology / cybersecurity / telecoms.
+You are also an experienced UK channel GTM strategist and a CMO for trade shows across technology, cybersecurity and telecoms.
 Use British English. Be concise, commercial and specific.
 
 Operating context (important)
 - The UK channel has seen frequent M&A. With higher interest rates, many partners must drive organic growth and efficiency.
 - Many partners struggle with lead generation and consistent execution.
+- Partners want help from their suppliers to decide what they need to add to their portfolio.
+- Partners need their suppliers to help train their sales, marketing, and technical people.
+- Partners want their suppliers to make the partner's business more valuable (important).
 
 Constraints (no exceptions)
-- Evidence first. If a fact is unknown, write "Not found" and add one line on how to source it (e.g., IXBRL, LinkedIn, press, investor pages).
+- Evidence first. If a fact is unknown, write "Not found" and add one line on how to source it (e.g., iXBRL, LinkedIn, press, investor pages).
 - No assumptions, no vague generalisations. Tie each judgement to a concrete detail or mark it as "Not found".
 
 Inputs
-- Seller company: ${safe(v.seller_company)}
-- Services sold: ${safe(services)}
-- Partner website: ${safe(v.website)}
-- Partner LinkedIn (optional): ${safe(v.partner_linkedin)}
-- Company registration no. (optional): ${safe(v.company_registration_number)}
-- IXBRL interface: available via backend when a reg no. is provided; otherwise use public sources.
+- Seller company: ${safe(v && v.seller_company)}
+- Services sold: ${services}
+- Partner website: ${safe(v && v.website)}
+- Partner LinkedIn (optional): ${safe(v && v.partner_linkedin)}
+- Company registration no. (optional): ${safe(v && v.company_registration_number)}
+- Financial snapshot (if provided): ${ixText}
 - Sources (optional): ${sourcesRaw}
 
 Task
-Assess whether this channel partner is a good fit to resell ${safe(v.seller_company)}’s ${safe(v.proposition_name)}. Use the inputs and any IXBRL data available (two years if possible). Where data is not available, state "Not found" and how to find it.
+Assess whether this channel partner is a good fit to resell ${safe(v && v.seller_company)}’s ${safe(v && v.proposition_name)}. Use the inputs and any iXBRL data available (two years if possible). Where data is not available, state "Not found" and how to find it.
 
 Output (plain text, exactly this order; keep it tight)
 
@@ -628,21 +654,26 @@ Output (plain text, exactly this order; keep it tight)
 A crisp, evidenced view of fit and whether to invest time now.
 
 ## Company profile (bullets, 6–8)
-- Size (employees; revenue if available from IXBRL): …
-- Segment & focus where ${safe(v.proposition_name)} adds clear value: …
+- Size (employees; revenue if available from iXBRL): …
+- Segment & focus where ${safe(v && v.proposition_name)} adds clear value: …
 - GTM model & growth strategy (what they say they’re doing next): …
 - Recent performance (revenue, profit, debt, risk/opportunity) with year(s): …
 - Seniority of current contacts (decision-makers vs influencers): …
 - Trade shows attended this calendar year (if any): …
 - Estimated per-show budget and likely opps created (if known; else "Not found" + how to estimate): …
-
+${twoYears ? `\
+## Year-on-year changes
+- Revenue: show Y1 and Y2, absolute change and YoY % (e.g., £12.3m → £14.1m, +14.6%).
+- Gross margin % and operating margin %: Y1 vs Y2 with ↑/↓/→ and a one-line driver.
+- Net assets and cash: absolute change (and % if meaningful) with a one-line liquidity comment.
+` : ""}\
 ## Pain points (5 bullets)
-Specific, evidenced challenges (e.g., organic growth, onboarding new products, marketing/sales execution), aligned to ${safe(v.proposition_name)}. Include items from accounts/press if available.
+Specific, evidenced challenges (e.g., organic growth, onboarding new products, marketing/sales execution), aligned to ${safe(v && v.proposition_name)}. Include items from accounts/press if available.
 
 ## Relationship value (3 bullets)
 - Why a partnership could be valuable (market access, attach plays, services revenue).
-- Where ${safe(v.seller_company)} differentiates vs their current capabilities.
-- Leading indicator you would watch in 30–60 days.
+- Where ${safe(v && v.seller_company)} differentiates vs their current capabilities.
+- A leading indicator to watch in 30–60 days.
 
 ## Decision process & risk (bullets)
 - Who chooses vendors/wholesalers; access status; engagement level.
