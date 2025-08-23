@@ -280,12 +280,20 @@
         <div id="rail-body">
           <section class="intel-slot">
             <h3>Signals to check</h3>
+            <section class="intel-slot">
+              <h3>Financials (iXBRL)</h3>
+              <div id="ixbrlBox" class="muted">No financials fetched.</div>
+            </section>
+            <section class="intel-slot">
+              <h3>Upload accounts (OCR)</h3>
+              <input type="file" id="accounts_file" accept=".pdf,.txt" multiple />
+              <div id="accounts_status" class="muted">No file uploaded.</div>
+            </section>
             <ul>
-              <li>Hiring spikes in engineering/IT</li>
+              <li>Confidence in sales and marketing</li>
               <li>M&amp;A / restructuring announcements</li>
               <li>Contract renewals or vendor changes</li>
-              <li>Certifications / compliance events</li>
-              <li>Cloud migrations or refresh cycles</li>
+              <li>Portfolio completeness</li>
             </ul>
           </section>
 
@@ -329,6 +337,16 @@
       </ul>
     </div>
   </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.js"></script>
+
+  <script>
+    // Tell pdf.js where to find its worker (same version as above)
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.js";
+    }
+  </script>
 
   <script>
     // ---------- Auth ----------
@@ -494,7 +512,8 @@
           industry: $("industry").value.trim(),
           website: $("website").value.trim(),
           sources_raw: srcRaw,
-          sources: srcArray()
+          sources: srcArray(),
+          ixbrl: window.ixbrlSummary || null
         }
       };
     }
@@ -539,12 +558,10 @@
     }
 
     async function sendRequest(templateName) {
-      // Build payload
       const payload = (typeof basePayload === "function" ? basePayload() : buildPayload());
       if (!payload) return;
-      payload.template = templateName; // "opportunity_qualification" | "opportunity_qualification_light"
+      payload.template = templateName;
 
-      // UI: starting state
       setStatus("Generating…");
       responseBox.textContent = "Sending…";
 
@@ -552,12 +569,11 @@
       const optimisticMode = templateName === "opportunity_qualification_light" ? "light" : "deep";
       updateRunModePill(optimisticMode, motion);
 
+      // Only show the spinner on the clicked button (but disable both)
+      const activeBtn = (templateName === "opportunity_qualification_light") ? lightBtn : deepBtn;
       const disable = (v) => {
-        [deepBtn, lightBtn].forEach(btn => {
-          if (!btn) return;
-          btn.disabled = v;
-          btn.classList.toggle("busy", v);
-        });
+        [deepBtn, lightBtn].forEach(b => { if (b) b.disabled = v; });
+        if (activeBtn) activeBtn.classList.toggle("busy", v);
       };
       disable(true);
 
@@ -567,27 +583,20 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-
-        // Surface non-200s usefully
         if (!res.ok) {
           const errText = await res.text().catch(() => "");
-          throw new Error(errText || res.statusText || "Request failed");
+          throw new Error(errText || res.statusText);
         }
 
-        // Confirm mode/motion from backend headers (if you added them)
         const srvMode = res.headers.get("x-qual-mode") || optimisticMode;
         const srvMotion = res.headers.get("x-qual-motion") || motion;
         updateRunModePill(srvMode, srvMotion);
 
-        // Read body ONCE
-        const text = await res.text();
+        const text = await res.text();     // read once
         setSummary(text);
         responseBox.textContent = text;
 
-        setStatus(
-          `Done. Ran: ${srvMode === "light" ? "Light touch" : "Deep dive"}${srvMotion ? ` (${srvMotion})` : ""}.`,
-          "ok"
-        );
+        setStatus(`Done. Ran: ${srvMode === "light" ? "Light touch" : "Deep dive"}${srvMotion ? ` (${srvMotion})` : ""}.`, "ok");
       } catch (e) {
         setSummary("");
         responseBox.textContent = "Request failed: " + (e?.message || String(e));
@@ -645,6 +654,81 @@
 
     remember.addEventListener("change", () => {
       if (!remember.checked) localStorage.removeItem(STORAGE_KEY); else saveForm();
+    });
+
+    // ——— Right-rail financials state ———
+    window.ixbrlSummary = window.ixbrlSummary || null;
+
+    // Render the little financials box. Guarded so no duplicate-declare.
+    window.renderIxbrlBox = window.renderIxbrlBox || function (sum) {
+      const fmt = (v) => v == null ? "n/a" : new Intl.NumberFormat("en-GB").format(v);
+      const fmtPct = (v) => v == null ? "n/a" : (typeof v === "number" ? v.toFixed(1) + "%" : v);
+      const fmtDec = (v) => v == null ? "n/a" : (Number.isFinite(+v) ? Number(v).toFixed(2) : "n/a");
+
+      const y1 = sum?.years?.[0];
+      const y2 = sum?.years?.[1];
+      const d = sum?.derived || {};
+      return [
+        y1 ? `<div><strong>${y1.endDate || "Latest"}</strong>: turnover ${fmt(y1.turnover)}, op ${fmt(y1.operatingProfit)}, net assets ${fmt(y1.netAssets)}</div>` : "",
+        y2 ? `<div><strong>${y2.endDate}</strong>: turnover ${fmt(y2.turnover)}, op ${fmt(y2.operatingProfit)}, net assets ${fmt(y2.netAssets)}</div>` : "",
+        `<div class="muted">GM%: ${fmtPct(d.grossMarginPct?.y1)} • OPM%: ${fmtPct(d.operatingMarginPct?.y1)} • Current: ${fmtDec(d.currentRatio)} • Cash: ${fmtDec(d.cashRatio)}</div>`
+      ].filter(Boolean).join("");
+    };
+
+    // Fetch iXBRL from your backend when a valid reg no. is present. Guarded.
+    window.fetchIxbrlIfReady = window.fetchIxbrlIfReady || (async function fetchIxbrlIfReady() {
+      const box = document.getElementById("ixbrlBox");
+      const reg = (document.getElementById("company_reg")?.value || "").trim();
+      if (!box) return;
+
+      // Allow 6–8 alphanumeric CRNs (e.g., SC123456); tighten if you prefer digits only.
+      if (!/^[A-Z0-9]{6,8}$/i.test(reg)) {
+        box.textContent = "No reg no. / not valid.";
+        return;
+      }
+
+      box.textContent = "Fetching…";
+      try {
+        const r = await fetch(`/api/ixbrl/financials?companyNumber=${encodeURIComponent(reg)}`, { cache: "no-store" });
+        if (r.status === 204) {
+          box.textContent = "No iXBRL available for this company.";
+          window.ixbrlSummary = null;
+          return;
+        }
+        if (!r.ok) {
+          const t = await r.text().catch(() => "");
+          box.textContent = "Upstream error.";
+          console.warn("ixbrl error:", r.status, t);
+          window.ixbrlSummary = null;
+          return;
+        }
+        const data = await r.json();
+        window.ixbrlSummary = data?.summary || null;
+        box.innerHTML = window.ixbrlSummary ? window.renderIxbrlBox(window.ixbrlSummary) : "No financials found.";
+      } catch (e) {
+        box.textContent = "Fetch failed.";
+        console.error(e);
+        window.ixbrlSummary = null;
+      }
+    });
+
+    // Connect the reg-no field to the fetcher (on blur)
+    document.getElementById("company_reg")?.addEventListener("blur", () => {
+      try { window.fetchIxbrlIfReady(); } catch { }
+    });
+
+    // Multi-file OCR upload handler (only wires the input; assumes you already added the parser).
+    document.getElementById("accounts_file")?.addEventListener("change", (e) => {
+      const files = Array.from(e.target?.files || []);
+      if (!files.length) return;
+      // If you already pasted the multi-file OCR parser: parseAccountsFiles(files)
+      // If not yet, leave this as a placeholder; we can wire it when you’re ready.
+      if (typeof parseAccountsFiles === "function") {
+        parseAccountsFiles(files);
+      } else {
+        document.getElementById("accounts_status").textContent =
+          "Parser not wired yet. (We’ll add it next.)";
+      }
     });
 
     // ---------- Init ----------
