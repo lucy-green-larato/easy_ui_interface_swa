@@ -4,104 +4,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Inside Track Tools · First Call Script (v2)</title>
-  <link rel="stylesheet" href="./styles.css?v=fix4" />
-  <style>
-    :root {
-      --right-min: 280px;
-      /* tighter local spacing tokens for this page */
-      --space-3: 8px;
-      --space-4: 12px;
-      --space-5: 16px;
-      --space-6: 16px;
-      --surface-2: #f2f4f8;
-      --surface-3: #e5e7eb;
-      --text-2: #5b6270;
-      --accent: #2458e6;
-      --bg: #f7f7f9;
-    }
-
-    body { background: var(--bg) }
-
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(0, 2.65fr) minmax(var(--right-min), clamp(260px, 14vw, 300px));
-      gap: var(--space-6);
-      padding: var(--space-5);
-      align-items: start;
-      width: 100%;
-    }
-
-    @media (max-width:1200px) { .layout { grid-template-columns: 1fr } }
-
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3) }
-    @media (max-width:800px) { .grid-2 { grid-template-columns: 1fr } }
-
-    .output {
-      white-space: normal; background: #fff; color: #111827; border: 1px solid #e5e7eb;
-      padding: var(--space-4); border-radius: 10px; min-height: 220px; outline: none;
-      font: 16.5px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-      letter-spacing: .005em
-    }
-    .output h1, .output h2, .output h3 { margin: .35rem 0 .2rem }
-    .output p { margin: .35rem 0 }
-    .output ul, .output ol { margin: .35rem 0 .35rem 1.1rem }
-
-    .panel .card h3 { margin: 0 0 .45rem 0 }
-
-    .intel-grid { display: grid; grid-template-columns: 1fr !important; gap: var(--space-3) }
-
-    input, select, textarea {
-      width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--surface-3);
-      background: #fff; outline: none; transition: box-shadow .15s ease, border-color .15s ease
-    }
-    input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 2px rgba(36, 88, 230, .35); border-color: var(--accent) }
-
-    .app-header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 8px 14px; background: #fff; border-bottom: 1px solid #e5e7eb
-    }
-    .app-header .header-left { display: flex; align-items: center; gap: 10px }
-    .app-header .logo { height: 28px; width: auto }
-    .app-header .brand-text { line-height: 1.1 }
-    .app-header .app-title { font-size: 1rem; font-weight: 600; margin: 0 }
-    .app-header .kicker { margin: 0; color: #6b7280; font-size: .85rem }
-    .app-header .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
-
-    .calltype-mini {
-      display: flex; align-items: center; gap: 8px; padding: 4px 8px;
-      border: 1px solid #e5e7eb; border-radius: 999px; background: #fff
-    }
-    .calltype-mini .mini-label { color: #6b7280; font-size: .85rem }
-    .calltype-mini select {
-      appearance: none; border: none; background: #f9fafb; padding: 2px 8px; border-radius: 999px; font-size: .85rem
-    }
-    .calltype-mini .remember { display: flex; align-items: center; gap: 6px; font-size: .85rem; color: #374151 }
-    .calltype-mini, .calltype-mini .mini-label { white-space: nowrap }
-
-    .model-note { color: #374151; font-size: .85rem; padding: 4px 10px; border: 1px solid #e5e7eb; border-radius: 999px; background: #f9fafb }
-    .model-note .label { color: #6b7280; margin-right: 6px }
-
-    .badge { display: flex; align-items: center; gap: 6px; color: #374151; font-size: .85rem }
-    .badge svg { width: 16px; height: 16px; stroke: #6b7280; fill: none; stroke-width: 1.5 }
-    .is-hidden { display: none !important }
-
-    .error-inline { color: #b91c1c; font-size: .85rem; margin-left: 8px }
-
-    /* Mobile sales-model fallback */
-    .field-calltype-xs { display: none }
-    @media (max-width:640px) { .calltype-mini { display: none } .field-calltype-xs { display: block } }
-
-    /* TEMP: hide bullet-view + pop-out controls (functionality intact) */
-    #toggle-bullets, .bullets-card, #outline-card, #popout { display: none !important }
-
-    /* Output action row */
-    .output-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 8px }
-  </style>
+  <title>Inside Track Tools · Call scripts and emails(v2)</title>
+  <link rel="stylesheet" href="./styles.css?v=lg-72369d-2" />
 </head>
 
 <body>
-
   <!-- HEADER -->
   <header class="app-header" role="banner">
     <div class="header-left">
