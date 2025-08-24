@@ -6,14 +6,14 @@
   --border:#e2e5ea;
   --text-1:#1d2129;
   --text-2:#4a5160;
-  --accent:#2458e6;
-  --accent-pressed:#1f49be;
+  --accent:#72369d;
+  --accent-pressed:#72369d;
   --danger:#b00020;
   --ok:#0a7f2e;
 
   /* Stage & header */
   --stage-max: 100vw;             /* FULL WIDTH (remove container cap) */
-  --header-h: 64px;
+  --header-h: 56px;               /* compact header */
 
   /* 3-col proportions */
   --left-min: 480px;
@@ -23,7 +23,7 @@
   /* Elevation / radii / rings */
   --radius:12px;
   --ring-shadow: 0 0 0 2px rgba(36,88,230,.35);
-  --ring-outline: 3px solid rgba(36,88,230,.8);
+  --ring-outline: 3px solid rgba(114,157);
   --shadow:0 1px 2px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.06);
 
   /* Fluid type scale */
@@ -63,24 +63,24 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 *::-webkit-scrollbar-thumb{background:#cfd5e0;border-radius:999px}
 *::-webkit-scrollbar-thumb:hover{background:#b8c1d0}
 
-/* === Header (sticky with light elevation) ========================= */
+/* === Header (sticky with light elevation, compact) ================= */
 .app-header{
   position: sticky; top: 0; z-index: 100;
   display:flex; align-items:center; justify-content:space-between;
-  gap:.75rem; padding:12px 24px; background:var(--card-bg);
+  gap:.75rem; padding:10px 16px; background:var(--card-bg);
   border-bottom:1px solid var(--border);
   box-shadow: 0 1px 2px rgba(16,24,40,.08), 0 1px 1px rgba(16,24,40,.06);
   min-height: var(--header-h);
 }
 .header-left{display:flex; align-items:center; gap:.75rem; min-width:0; flex:1 1 auto}
-.logo{max-width:56px; max-height:56px; height:auto; width:auto; object-fit:contain}
+.logo{max-width:40px; max-height:40px; height:auto; width:auto; object-fit:contain}
 .brand-text{display:flex; flex-direction:column; min-width:0}
 .app-title{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .kicker{font-size:.9em; color:var(--text-2); margin-top:.125rem}
 .header-right{display:flex; align-items:center; gap:.5rem}
 
 /* Pills / sales model */
-.calltype-mini{display:inline-flex; align-items:center; gap:.6rem; padding:8px 12px; border-radius:999px; background:#eef0f4; border:1px solid var(--border); font-size:.95rem}
+.calltype-mini{display:inline-flex; align-items:center; gap:.6rem; padding:6px 10px; border-radius:999px; background:#eef0f4; border:1px solid var(--border); font-size:.95rem}
 .calltype-mini .mini-label{font-weight:600}
 .calltype-mini select{padding:6px 10px; border-radius:8px; border:1px solid #cfd7eb; background:#fff}
 .model-note,.badge{display:inline-flex; align-items:center; gap:.35rem; padding:6px 10px; border-radius:999px; background:#eef0f4; border:1px solid var(--border); font-size:.9rem}
@@ -169,13 +169,13 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
 .output-card .output-head{ display:flex; align-items:baseline; justify-content:space-between; gap:var(--s-2) }
 .output-card .meta{ color: var(--text-2); font-size:.9rem }
 .output{
-  white-space:pre-wrap; background:#fff; color:#1f2937; border:1px solid #e5e7eb;
+  white-space:normal; background:#fff; color:#1f2937; border:1px solid #e5e7eb;
   padding:14px; border-radius:12px; min-height:240px; outline:none; resize:vertical;
   font-variant-ligatures: contextual;
 }
 .panel.middle .output-card{ position: sticky; top: calc(var(--header-h) + 12px); z-index: 5; }
 
-/* === Right (Buyer needs) — single slim column ===================== */
+/* === Right (Buyer needs + Tips) — single slim column ============== */
 .intel .intel-head{
   display:flex; align-items:center; justify-content:space-between; gap:var(--s-2);
   position:sticky; top: calc(var(--header-h) + 8px); background:var(--card-bg); z-index:4; padding-top:6px;
@@ -284,6 +284,7 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   padding:0 !important; margin:-1px !important; overflow:hidden !important;
   clip:rect(0,0,0,0) !important; white-space:nowrap !important; border:0 !important;
 }
+.row-between{display:flex; align-items:center; justify-content:space-between; gap:8px}
 
 /* === Pop out box ======*/
 .modal {
@@ -317,27 +318,6 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   margin-bottom: 0.5em;
   font-size: 1.1rem;
   color: #111827; /* matches body text */
-}
-
-.script-body p {
-  margin: 0.6em 0;
-  line-height: 1.6;
-}
-
-.script-body strong {
-  font-weight: 600;
-}
-
-.script-body {
-  font-size: 1rem;
-  color: #111827;
-}
-/* === Script output formatting === */
-.script-body h3 {
-  margin-top: 1.2em;
-  margin-bottom: 0.5em;
-  font-size: 1.1rem;
-  color: #111827;
 }
 .script-body p {
   margin: 0.6em 0;
