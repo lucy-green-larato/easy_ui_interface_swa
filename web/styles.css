@@ -189,7 +189,7 @@ h3 {
 }
 
 .calltype-mini .mini-label {
-  font-weight: 500;
+  font-weight: 550;
   white-space: nowrap
 }
 
@@ -398,13 +398,13 @@ fieldset {
   /* label above input */
   gap: 3px;
   /* space between label and control */
-  margin-bottom: 10px;
+  margin-bottom: 3px;
 }
 
 label {
   display: block;
   margin: 0;
-  font-weight: 500;
+  font-weight: 550;
   font-size: .95rem
 }
 
@@ -500,7 +500,7 @@ textarea[disabled] {
   border: 1px solid #e5e8ee;
   background: #fff;
   cursor: pointer;
-  font-weight: 500
+  font-weight: 550
 }
 
 .btn.small {
@@ -705,7 +705,7 @@ textarea[disabled] {
 /* Heading size in right rail equals “Opening” heading in script */
 .intel-grid h3 {
   font-size: .95rem;
-  font-weight: 500;
+  font-weight: 550;
   margin: 0 0 6px;
 }
 
@@ -714,7 +714,7 @@ textarea[disabled] {
 .tips-card h3 {
   font-size: .95rem;
   /* same as left form labels */
-  font-weight: 500;
+  font-weight: 550;
   margin: 0 0 6px;
 }
 
@@ -987,7 +987,7 @@ textarea[disabled] {
 }
 
 .script-body strong {
-  font-weight: 500;
+  font-weight: 550;
 }
 
 .script-body {
@@ -1017,7 +1017,7 @@ textarea[disabled] {
 }
 
 .script-body strong {
-  font-weight: 500;
+  font-weight: 550;
 }
 
 .script-body {
