@@ -189,7 +189,7 @@ h3 {
 }
 
 .calltype-mini .mini-label {
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap
 }
 
@@ -257,7 +257,7 @@ h3 {
 }
 
 .calltype-mini .mini-label {
-  font-weight: 600
+  font-weight: 500
 }
 
 .calltype-mini select {
@@ -388,7 +388,7 @@ fieldset {
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: 16px;
-  row-gap: 8px;
+  row-gap: 3px;
   /* tighter vertical gap between rows */
 }
 
@@ -396,7 +396,7 @@ fieldset {
   display: flex;
   flex-direction: column;
   /* label above input */
-  gap: 4px;
+  gap: 3px;
   /* space between label and control */
   margin-bottom: 10px;
 }
@@ -404,7 +404,7 @@ fieldset {
 label {
   display: block;
   margin: 2px 0 6px;
-  font-weight: 600;
+  font-weight: 500;
   font-size: .95rem
 }
 
@@ -500,7 +500,7 @@ textarea[disabled] {
   border: 1px solid #e5e8ee;
   background: #fff;
   cursor: pointer;
-  font-weight: 600
+  font-weight: 500
 }
 
 .btn.small {
@@ -658,7 +658,7 @@ textarea[disabled] {
 
 .intel-grid ul {
   margin: 4px 0 0;
-  gap: 4px;
+  gap: 3px;
 }
 
 /* If chips are used, make them a touch slimmer */
@@ -705,7 +705,7 @@ textarea[disabled] {
 /* Heading size in right rail equals “Opening” heading in script */
 .intel-grid h3 {
   font-size: .95rem;
-  font-weight: 600;
+  font-weight: 500;
   margin: 0 0 6px;
 }
 
@@ -714,7 +714,7 @@ textarea[disabled] {
 .tips-card h3 {
   font-size: .95rem;
   /* same as left form labels */
-  font-weight: 600;
+  font-weight: 500;
   margin: 0 0 6px;
 }
 
@@ -987,7 +987,7 @@ textarea[disabled] {
 }
 
 .script-body strong {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .script-body {
@@ -1017,7 +1017,7 @@ textarea[disabled] {
 }
 
 .script-body strong {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .script-body {
