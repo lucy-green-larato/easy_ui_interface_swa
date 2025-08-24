@@ -108,83 +108,98 @@ h3 {
   background: #b8c1d0
 }
 
-/* === Header (sticky with light elevation) ========================= */
-.app-header {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: .75rem;
-  padding: 12px 24px;
-  background: var(--card-bg);
-  border-bottom: 1px solid var(--border);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, .08), 0 1px 1px rgba(16, 24, 40, .06);
-  min-height: var(--header-h);
-}
+/* === Header fixes ================================================== */
 
+/* 1) Left side: align brand text with the logo block */
 .header-left {
-  display: flex;
   align-items: center;
-  gap: .75rem;
-  min-width: 0;
-  flex: 1 1 auto
+  gap: 12px;
 }
 
 .logo {
-  max-width: 56px;
-  max-height: 56px;
-  height: auto;
+  height: 28px;
   width: auto;
-  object-fit: contain
+  max-height: 28px;
 }
 
+/* slightly smaller mark */
 .brand-text {
   display: flex;
   flex-direction: column;
-  min-width: 0
+  margin-top: 1px;
 }
 
 .app-title {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis
+  line-height: 1.15;
 }
 
 .kicker {
-  font-size: .9em;
-  color: var(--text-2);
-  margin-top: .125rem
+  margin-top: 2px;
 }
 
+/* 2) Right side: keep everything on one line and tighten spacing */
 .header-right {
   display: flex;
   align-items: center;
-  gap: .5rem
-}
-
-/* Keep the header controls on one line and prevent shrinking/wrapping */
-.header-right {
+  gap: 12px;
+  /* clearer spacing between pills */
   flex-wrap: nowrap;
+  /* never wrap to a second line */
 }
 
-/* make it explicit */
 .header-right>* {
   flex-shrink: 0;
 }
 
-/* don't let items compress */
+/* prevent items compressing/overlapping */
+
+/* Sales-model pill */
 .calltype-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  /* label ↔ select ↔ remember */
+  padding: 8px 12px;
   white-space: nowrap;
+  /* keep inside one line */
+  overflow: visible;
+  /* never clip the “Remember” text */
 }
 
-/* keep label/select/remember on one line */
-.model-note,
-.calltype-mini .mini-label,
-.calltype-mini .remember {
-  white-space: nowrap;
+.calltype-mini .mini-label {
+  font-weight: 600;
 }
+
+.calltype-mini select {
+  padding: 6px 10px;
+  height: 32px;
+  /* matches checkbox height visually */
+  border-radius: 8px;
+  border: 1px solid #cfd7eb;
+  background: #fff;
+}
+
+.calltype-mini .remember {
+  display: inline-flex;
+  /* keeps checkbox tight to its text */
+  align-items: center;
+  gap: 6px;
+  margin-left: 2px;
+}
+
+.calltype-mini .remember input {
+  margin: 0;
+  /* remove default checkbox offset */
+}
+
+/* Pills beside it (no overlap) */
+.model-note,
+.badge,
+#help.btn {
+  position: relative;
+}
+
+/* ensures stacking without covering neighbors */
 
 /* Pills / sales model */
 .calltype-mini {
