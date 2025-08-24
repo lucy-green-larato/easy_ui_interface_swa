@@ -1,26 +1,19 @@
-/* === Inside Track Tools — UX polish v1.4 ================================== */
-/* What changed (high level)
-   • Header: unified “chip” controls → Sales model pill now same size/shape.
-   • Left column: clear step-by-step sections, numbered legends, sticky legends,
-     taller form controls, consistent 2-col grid, subtle scroll affordance.
-   • Middle: hides Bullet-point + Pop-out triggers (robust selectors).
-   • Right rail: header tightened; Hide button perfectly right-aligned.
-   • Responsive: left panel gets its own scroll within the viewport; right rail
-     stays slim; spacing/typography consistent across breakpoints.               */
+/* === Inside Track Tools — UX polish v1.5 ================================ */
+/* Brand-safe, responsive, accessible. 3-col layout with strong form UX.  */
 
-/* === Global / Design Tokens ============================================== */
+/* === Global / Design Tokens ============================================ */
 :root{
   /* Color (light) */
   --bg:#f6f7fb; --card-bg:#fff; --border:#e2e5ea;
   --text-1:#1d2129; --text-2:#4a5160;
   --accent:#72369d; --accent-pressed:#5f2d81;
 
-  /* Status (used by .error/.ok etc.) */
-  --danger:#c43d4b;        /* NEW: was referenced but undefined */
-  --ok:#1b8f5a;            /* NEW: was referenced but undefined */
+  /* Status (ensure these exist) */
+  --danger:#c43d4b;
+  --ok:#1b8f5a;
 
   /* Stage & header */
-  --stage-max:100vw;
+  --stage-max:100vw;      /* full width */
   --header-h:64px;
 
   /* 3-col proportions */
@@ -42,9 +35,9 @@
   --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:24px; --s-6:32px;
   --gap:var(--s-6);
 
-  /* Field control size (slightly larger for touch) */
+  /* Field control size */
   --fs-field:clamp(14px,0.26vw + 12px,16px);
-  --field-h:42px;          /* NEW: consistent field height */
+  --field-h:42px;
 }
 
 *{box-sizing:border-box}
@@ -58,7 +51,7 @@ body{
 h1,h2,h3{margin:0 0 var(--s-2); line-height:1.2; font-weight:600}
 h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 
-/* Focus visibility */
+/* Focus ring for keyboard users */
 :where(a,button,[role="button"],[tabindex]:not(input):not(select):not(textarea)):focus-visible{
   outline:var(--ring-outline); outline-offset:2px; border-radius:10px;
 }
@@ -68,7 +61,7 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 *::-webkit-scrollbar-thumb{background:#cfd5e0;border-radius:999px}
 *::-webkit-scrollbar-thumb:hover{background:#b8c1d0}
 
-/* === Header (sticky) ===================================================== */
+/* === Header (sticky) ==================================================== */
 .app-header{
   position:sticky; top:0; z-index:100;
   display:flex; align-items:center; justify-content:space-between; gap:.75rem;
@@ -76,15 +69,19 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
   box-shadow:0 1px 2px rgba(16,24,40,.08),0 1px 1px rgba(16,24,40,.06);
   min-height:var(--header-h);
 }
+
+/* Left: logo & brand text */
 .header-left{display:flex; align-items:center; gap:12px; min-width:0; flex:1 1 auto}
 .logo{height:32px; width:auto; object-fit:contain; display:block}
 .brand-text{display:flex; flex-direction:column; justify-content:center; min-width:0}
 .app-title{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.15}
 .kicker{font-size:.9em; color:var(--text-2); margin-top:2px}
+
+/* Right cluster */
 .header-right{display:flex; align-items:center; gap:12px; flex-wrap:nowrap}
 .header-right>*{flex-shrink:0}
 
-/* Unified “chip” pattern for all small header controls */
+/* Unified “chip” pattern — makes Sales model match other badges */
 .badge,.model-note,.calltype-mini{
   --chip-h:34px;
   display:inline-flex; align-items:center; gap:.5rem;
@@ -95,7 +92,7 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 .badge svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
 .badge.is-hidden{display:none}
 
-/* Sales Model: match chip style perfectly */
+/* Sales Model internals */
 .calltype-mini .mini-label{font-weight:600}
 .calltype-mini select{
   height:28px; padding:0 10px; line-height:28px;
@@ -104,7 +101,7 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 .calltype-mini .remember{display:inline-flex; align-items:center; gap:6px; margin-left:4px}
 .calltype-mini .remember input[type="checkbox"]{width:16px;height:16px;margin:0}
 
-/* === Layout — full-width 3-column grid ============================== */
+/* === Layout — 3-column grid ============================================ */
 .stage{width:100%; max-width:var(--stage-max); margin-inline:auto}
 .layout{
   display:grid; gap:var(--gap); padding:var(--gap); align-items:start; width:100%;
@@ -114,7 +111,7 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
     minmax(var(--right-min), clamp(260px,14vw,300px)); /* RIGHT */
 }
 
-/* === Panels ======================================================== */
+/* === Panels ============================================================= */
 .panel{
   position:relative; background:var(--card-bg); border:1px solid var(--border);
   border-radius:var(--radius); padding:18px; box-shadow:var(--shadow); min-width:0;
@@ -126,9 +123,8 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 /* Avoid nested double borders */
 .panel .card{background:transparent; border:0; box-shadow:none; padding:0; margin:0}
 
-/* === Left panel — step-by-step form =================================== */
-/* Make the left panel its own scroll area within the viewport so users
-   always see that there’s more to complete. Adds subtle scroll shadows. */
+/* === Left panel — step-by-step, easy to scan ============================ */
+/* Its own scroll area on wide screens → clear “there’s more” affordance */
 .panel.left{
   max-height:calc(100vh - var(--header-h) - var(--gap)*1.5);
   overflow:auto;
@@ -136,11 +132,11 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
     linear-gradient(var(--card-bg),var(--card-bg)) padding-box,
     linear-gradient(to bottom, rgba(0,0,0,.08), rgba(0,0,0,0)) top/100% 12px no-repeat,
     linear-gradient(to top,   rgba(0,0,0,.08), rgba(0,0,0,0)) bottom/100% 12px no-repeat;
-  background-attachment:local, scroll, scroll;   /* scroll affordance */
-  counter-reset:section;                          /* section numbering */
+  background-attachment:local, scroll, scroll;
+  counter-reset:section;
 }
 
-/* Section titles + numbering + sticky legends */
+/* Section titles: numbered & sticky */
 fieldset{border:0; margin:0; padding:0}
 .card>legend,.card>h2{display:block; margin:0 0 var(--s-2); font-size:1.05rem; font-weight:700}
 .panel.left .card>legend{
@@ -153,7 +149,7 @@ fieldset{border:0; margin:0; padding:0}
   color:var(--accent); font-weight:700; margin-right:2px;
 }
 
-/* Stronger section separation so it’s obvious there is more below */
+/* Clear separation between sections */
 .panel.left .card{padding-top:12px; margin-top:14px; border-top:1px dashed var(--border)}
 .panel.left .card:first-of-type{margin-top:0; padding-top:0; border-top:0}
 
@@ -205,7 +201,7 @@ input[disabled],select[disabled],textarea[disabled]{background:#f3f4f6; color:#6
 .status[data-kind="error"]{color:var(--danger)}
 .status[data-kind="ok"]{color:var(--ok)}
 
-/* === Middle (Script) ====================================================== */
+/* === Middle (Script) ==================================================== */
 .panel.middle{display:grid; grid-template-columns:1fr; gap:var(--s-4)}
 .output-card .output-head{display:flex; align-items:center; justify-content:space-between; gap:var(--s-2)}
 .output-card .meta{color:var(--text-2); font-size:.9rem}
@@ -217,9 +213,15 @@ input[disabled],select[disabled],textarea[disabled]{background:#f3f4f6; color:#6
 .panel.middle .output-card{position:sticky; top:calc(var(--header-h) + 12px); z-index:5}
 .output-actions{display:flex; gap:8px; align-items:center; justify-content:flex-end; margin-top:8px}
 
-/* Hide bullet-point + pop-out triggers (matches IDs, classes or data attrs) */
-.output-head [id*="bullet"], .output-head [class*="bullet"], .output-head [data-action*="bullet"],
-.output-head [id*="pop"],    .output-head [class*="pop"],    .output-head [data-action*="pop"]{
+/* Hide “Bullet point” and “Pop-out” actions (robust selectors) */
+.output-head [data-action*="bullet" i],
+.output-head [data-action*="pop" i],
+.output-head [title*="bullet" i],
+.output-head [title*="pop" i],
+.output-head [aria-label*="bullet" i],
+.output-head [aria-label*="pop" i],
+.output-head button#bullet, .output-head .bullet,
+.output-head #popout, .output-head .popout{
   display:none !important;
 }
 
@@ -229,21 +231,22 @@ input[disabled],select[disabled],textarea[disabled]{background:#f3f4f6; color:#6
   position:sticky; top:calc(var(--header-h) + 8px); background:var(--card-bg); z-index:4; padding-top:6px;
   border-bottom:1px solid var(--border); padding-bottom:6px;
 }
-/* Ensure the last child (Hide button) hugs the right edge and matches chip size */
+/* Make the Hide button flush-right and chip-sized */
 .intel .intel-head > :last-child{margin-left:auto}
-.intel .intel-head button,
-.intel .intel-head .btn{
-  height:34px; padding:0 12px; border-radius:999px; border:1px solid var(--border); background:#eef0f4;
-  font-size:.9rem; line-height:1; display:inline-flex; align-items:center;
+.intel .intel-head :where(button, .btn){
+  height:34px; padding:0 12px; border-radius:999px; border:1px solid var(--border);
+  background:#eef0f4; font-size:.9rem; line-height:1; display:inline-flex; align-items:center;
 }
+
 .intel-grid{display:grid; grid-template-columns:1fr !important; gap:10px}
 .intel-grid section{background:transparent; padding:0}
 .intel-slot{
   background:transparent; padding:8px 0 0; color:var(--text-2);
   border-top:1px solid var(--border); border-radius:0;
 }
-/* Ensure first section also shows a divider */
+/* First section also shows a divider */
 .intel-grid section:first-child .intel-slot{border-top:1px solid var(--border)!important}
+
 .intel-grid h3{font-size:.95rem; font-weight:600; margin:0 0 6px}
 .intel-slot p{font-size:.92rem; line-height:1.35; margin:4px 0}
 .intel-grid ul{list-style:none; padding-left:0; margin:6px 0 0; display:flex; flex-wrap:wrap; gap:6px}
@@ -255,7 +258,7 @@ input[disabled],select[disabled],textarea[disabled]{background:#f3f4f6; color:#6
 .tips-card ul{margin:6px 0 0; padding-left:1.15rem}
 .tips-card li{font-size:.92rem; line-height:1.35; margin:4px 0}
 
-/* === Dark Mode ============================================================ */
+/* === Dark Mode ========================================================== */
 @media (prefers-color-scheme: dark){
   :root{
     --bg:#0f1318; --card-bg:#141a1f; --border:#2a3342;
@@ -271,20 +274,20 @@ input[disabled],select[disabled],textarea[disabled]{background:#f3f4f6; color:#6
   *::-webkit-scrollbar-thumb:hover{background:#4b5870}
 }
 
-/* === Single-select caret ================================================== */
-.layout select:not([multiple]){
+/* === Single-select caret ================================================ */
+select:not([multiple]){
   -webkit-appearance:none; -moz-appearance:none; appearance:none;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
   background-repeat:no-repeat; background-position:right 12px center; background-size:14px 14px;
   padding-right:36px;
 }
 @media (prefers-color-scheme: dark){
-  .layout select:not([multiple]){
+  select:not([multiple]){
     background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a9b2c3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
   }
 }
 
-/* === Ultra-wide tuning ==================================================== */
+/* === Ultra-wide tuning ================================================== */
 @media (min-width:1800px){
   .layout{
     grid-template-columns:
@@ -294,16 +297,15 @@ input[disabled],select[disabled],textarea[disabled]{background:#f3f4f6; color:#6
   }
 }
 
-/* === Laptop: stack right rail under script =============================== */
+/* === Laptop: stack right rail under script ============================= */
 @media (max-width:1200px){
   .layout{grid-template-columns:1fr 1fr}
-  .panel.left{grid-column:1}
+  .panel.left{grid-column:1; max-height:none}  /* allow full page scroll */
   .panel.middle{grid-column:2}
   .panel.right{grid-column:1 / -1; max-width:none}
-  .panel.left{max-height:none} /* allow page scroll on narrower screens */
 }
 
-/* === Tablet / Phone ====================================================== */
+/* === Tablet / Phone ==================================================== */
 @media (max-width:860px){
   .layout{grid-template-columns:1fr}
   .panel.left,.panel.middle,.panel.right{grid-column:1}
@@ -311,7 +313,7 @@ input[disabled],select[disabled],textarea[disabled]{background:#f3f4f6; color:#6
   .grid-2{grid-template-columns:1fr}
 }
 
-/* === Accessibility: motion & contrast =================================== */
+/* === Accessibility: motion & contrast ================================= */
 @media (prefers-reduced-motion: reduce){
   *{animation-duration:.001s !important; animation-iteration-count:1 !important; transition:none !important}
 }
@@ -321,7 +323,7 @@ input[disabled],select[disabled],textarea[disabled]{background:#f3f4f6; color:#6
   :where(a,button,[role="button"],[tabindex]:not(input):not(select):not(textarea)):focus-visible{outline-width:4px}
 }
 
-/* === Print: one-page script export ====================================== */
+/* === Print: one-page script export ==================================== */
 @media print{
   @page{margin:16mm}
   body{background:#fff; color:#000}
@@ -333,7 +335,7 @@ input[disabled],select[disabled],textarea[disabled]{background:#f3f4f6; color:#6
   .change-log,.activity{display:none}
 }
 
-/* === Utilities =========================================================== */
+/* === Utilities ========================================================= */
 .sr-only{
   position:absolute !important; width:1px !important; height:1px !important;
   padding:0 !important; margin:-1px !important; overflow:hidden !important;
@@ -341,7 +343,7 @@ input[disabled],select[disabled],textarea[disabled]{background:#f3f4f6; color:#6
 }
 .row-between{display:flex; align-items:center; justify-content:space-between; gap:8px}
 
-/* === Modal (kept for future use; triggers hidden above) ================== */
+/* === Modal (kept for future, triggers hidden above) ==================== */
 .modal{
   width:80%; height:80%; max-width:900px; border:none; padding:1rem;
   background:#fff; border-radius:1rem; box-shadow:0 0 20px rgba(0,0,0,0.3);
@@ -350,7 +352,7 @@ input[disabled],select[disabled],textarea[disabled]{background:#f3f4f6; color:#6
 .modal::backdrop{background:rgba(0,0,0,0.6)}
 #close-modal{float:right; margin-bottom:.5rem}
 
-/* === Script output formatting =========================================== */
+/* === Script output formatting ========================================= */
 .script-body h3{margin-top:1.2em; margin-bottom:.5em; font-size:1.1rem; color:#111827}
 .script-body p{margin:.6em 0; line-height:1.6}
 .script-body ul{margin:.5em 0 .75em 1.25rem}
