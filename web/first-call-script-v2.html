@@ -20,9 +20,7 @@
       --bg: #f7f7f9;
     }
 
-    body {
-      background: var(--bg)
-    }
+    body { background: var(--bg) }
 
     .layout {
       display: grid;
@@ -34,9 +32,7 @@
     }
 
     @media (max-width:1200px) {
-      .layout {
-        grid-template-columns: 1fr
-      }
+      .layout { grid-template-columns: 1fr }
     }
 
     .grid-2 {
@@ -46,9 +42,7 @@
     }
 
     @media (max-width:800px) {
-      .grid-2 {
-        grid-template-columns: 1fr
-      }
+      .grid-2 { grid-template-columns: 1fr }
     }
 
     .output {
@@ -64,33 +58,11 @@
       letter-spacing: .005em
     }
 
-    .output h1,
-    .output h2,
-    .output h3 {
-      margin: .4rem 0 .2rem
-    }
+    .output h1, .output h2, .output h3 { margin: .4rem 0 .2rem }
+    .output p { margin: .4rem 0 }
+    .output ul, .output ol { margin: .4rem 0 .4rem 1.25rem }
 
-    .output p {
-      margin: .4rem 0
-    }
-
-    .output ul,
-    .output ol {
-      margin: .4rem 0 .4rem 1.25rem
-    }
-
-    .tips-card ul {
-      margin: .5rem 0 0;
-      padding-left: 1.25rem
-    }
-
-    .tips-card ul li {
-      margin: .25rem 0
-    }
-
-    .panel .card h3 {
-      margin: 0 0 .5rem 0
-    }
+    .panel .card h3 { margin: 0 0 .5rem 0 }
 
     .intel-grid {
       display: grid;
@@ -98,9 +70,7 @@
       gap: var(--space-3)
     }
 
-    input,
-    select,
-    textarea {
+    input, select, textarea {
       width: 100%;
       padding: 10px 12px;
       border-radius: 8px;
@@ -109,10 +79,7 @@
       outline: none;
       transition: box-shadow .15s ease, border-color .15s ease
     }
-
-    input:focus,
-    select:focus,
-    textarea:focus {
+    input:focus, select:focus, textarea:focus {
       box-shadow: 0 0 0 2px rgba(36, 88, 230, .35);
       border-color: var(--accent)
     }
@@ -125,148 +92,46 @@
       background: #fff;
       border-bottom: 1px solid #e5e7eb
     }
-
-    .app-header .header-left {
-      display: flex;
-      align-items: center;
-      gap: 10px
-    }
-
-    .app-header .logo {
-      height: 24px;
-      width: auto
-    }
-
-    .app-header .brand-text {
-      line-height: 1.15
-    }
-
-    .app-header .app-title {
-      font-size: 1rem;
-      font-weight: 600;
-      margin: 0
-    }
-
-    .app-header .kicker {
-      margin: 0;
-      color: #6b7280;
-      font-size: .85rem
-    }
-
-    .app-header .header-right {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap
-    }
+    .app-header .header-left { display: flex; align-items: center; gap: 10px }
+    .app-header .logo { height: 32px; width: auto }
+    .app-header .brand-text { line-height: 1.15 }
+    .app-header .app-title { font-size: 1rem; font-weight: 600; margin: 0 }
+    .app-header .kicker { margin: 0; color: #6b7280; font-size: .85rem }
+    .app-header .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap }
 
     .calltype-mini {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 4px 8px;
-      border: 1px solid #e5e7eb;
-      border-radius: 999px;
-      background: #fff
+      display: flex; align-items: center; gap: 8px; padding: 4px 8px;
+      border: 1px solid #e5e7eb; border-radius: 999px; background: #fff
     }
-
-    .calltype-mini .mini-label {
-      color: #6b7280;
-      font-size: .85rem
-    }
-
+    .calltype-mini .mini-label { color: #6b7280; font-size: .85rem }
     .calltype-mini select {
-      appearance: none;
-      border: none;
-      background: #f9fafb;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-size: .85rem
+      appearance: none; border: none; background: #f9fafb; padding: 2px 8px; border-radius: 999px; font-size: .85rem
     }
+    .calltype-mini .remember { display: flex; align-items: center; gap: 6px; font-size: .85rem; color: #374151 }
+    .calltype-mini, .calltype-mini .mini-label { white-space: nowrap }
 
-    .calltype-mini .remember {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: .85rem;
-      color: #374151
-    }
+    .model-note { color: #374151; font-size: .85rem; padding: 4px 10px; border: 1px solid #e5e7eb; border-radius: 999px; background: #f9fafb }
+    .model-note .label { color: #6b7280; margin-right: 6px }
 
-    .calltype-mini,
-    .calltype-mini .mini-label {
-      white-space: nowrap
-    }
+    .badge { display: flex; align-items: center; gap: 6px; color: #374151; font-size: .85rem }
+    .badge svg { width: 16px; height: 16px; stroke: #6b7280; fill: none; stroke-width: 1.5 }
+    .is-hidden { display: none !important }
 
-    .model-note {
-      color: #374151;
-      font-size: .85rem;
-      padding: 4px 10px;
-      border: 1px solid #e5e7eb;
-      border-radius: 999px;
-      background: #f9fafb
-    }
-
-    .model-note .label {
-      color: #6b7280;
-      margin-right: 6px
-    }
-
-    .badge {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      color: #374151;
-      font-size: .85rem
-    }
-
-    .badge svg {
-      width: 16px;
-      height: 16px;
-      stroke: #6b7280;
-      fill: none;
-      stroke-width: 1.5
-    }
-
-    .is-hidden {
-      display: none !important
-    }
-
-    .error-inline {
-      color: #b91c1c;
-      font-size: .85rem;
-      margin-left: 8px
-    }
+    .error-inline { color: #b91c1c; font-size: .85rem; margin-left: 8px }
 
     /* Mobile sales-model fallback */
-    .field-calltype-xs {
-      display: none
-    }
-
+    .field-calltype-xs { display: none }
     @media (max-width:640px) {
-      .calltype-mini {
-        display: none
-      }
-
-      .field-calltype-xs {
-        display: block
-      }
+      .calltype-mini { display: none }
+      .field-calltype-xs { display: block }
     }
 
     /* TEMP: hide bullet-view + pop-out controls (functionality intact) */
-    #toggle-bullets,
-    .bullets-card,
-    #outline-card,
-    #popout {
-      display: none !important
-    }
+    #toggle-bullets, .bullets-card, #outline-card, #popout { display: none !important }
 
     /* Output action row */
     .output-actions {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      justify-content: flex-end;
-      margin-top: 8px
+      display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 8px
     }
   </style>
 </head>
@@ -470,15 +335,7 @@
         <button id="download-script" class="btn inline" type="button" disabled>Download script</button>
       </div>
 
-      <div class="tips-card card" style="margin-top:var(--space-4)">
-        <div class="row-between">
-          <h3>Helpful tips</h3>
-          <button id="toggle-tips" class="btn inline" type="button" aria-expanded="true" aria-controls="tips-list">Hide
-            tips</button>
-        </div>
-        <ul id="tips-list"></ul>
-      </div>
-
+      <!-- Notes under the output (unchanged) -->
       <div class="notes-card card" style="margin-top:var(--space-4)">
         <div class="row-between">
           <h3>Call notes</h3>
@@ -620,6 +477,15 @@
             </section>
           </div>
         </div>
+      </aside>
+
+      <!-- Moved Helpful tips to the right rail with show/hide -->
+      <aside class="tips-card card" style="margin-top:var(--space-4)">
+        <div class="row-between">
+          <h3>Helpful tips</h3>
+          <button id="toggle-tips" class="btn small" type="button" aria-expanded="true" aria-controls="tips-list">Hide</button>
+        </div>
+        <ul id="tips-list"></ul>
       </aside>
     </section>
   </main>
@@ -1015,7 +881,7 @@
       const card = document.querySelector(".tips-card");
       const hidden = localStorage.getItem(TIPS_HIDDEN_KEY) === '1';
       tipsList.hidden = hidden;
-      toggleTipsBtn.textContent = hidden ? 'Show tips' : 'Hide tips';
+      toggleTipsBtn.textContent = hidden ? 'Show tips' : 'Hide';
       toggleTipsBtn.setAttribute('aria-expanded', String(!hidden));
       const has = tipsList.children.length > 0;
       if (card) card.classList.toggle('is-hidden', !has);
