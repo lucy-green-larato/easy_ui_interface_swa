@@ -583,6 +583,32 @@ textarea[disabled] {
   /* divider on every section */
 }
 
+/* Right rail item text — smaller font & tighter leading */
+.intel-slot p,
+.intel-grid li {
+  font-size: .92rem;
+  /* smaller than body */
+  line-height: 1.35;
+  /* tighter line spacing */
+  margin: 2px 0;
+}
+
+/* Slightly tighter spacing around lists */
+.intel-slot {
+  padding: 4px 0 0;
+}
+
+.intel-grid ul {
+  margin: 4px 0 0;
+  gap: 4px;
+}
+
+/* If chips are used, make them a touch slimmer */
+.intel-grid li,
+.intel-chip {
+  padding: 2px 6px;
+}
+
 /* Ensure first section ALSO shows a divider */
 .intel-grid section:first-child .intel-slot {
   border-top: 1px solid var(--border) !important;
@@ -620,7 +646,9 @@ textarea[disabled] {
 
 /* Heading size in right rail equals “Opening” heading in script */
 .intel-grid h3 {
-  font-size: 1.1rem;
+  font-size: .95rem;
+  font-weight: 600;
+  margin: 0 0 6px;
 }
 
 /* Tips card (right rail) */
