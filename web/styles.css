@@ -6,22 +6,17 @@
   --border:#e2e5ea;
   --text-1:#1d2129;
   --text-2:#4a5160;
-
-  /* Brand accent (updated to #72369d) */
-  --accent:#72369d;
-  --accent-pressed:#5f2d81;
-
-  --danger:#b00020;
-  --ok:#0a7f2e;
+  --accent:#72369d;                 /* updated brand accent */
+  --accent-pressed:#5f2d81;         /* hover/pressed */
 
   /* Stage & header */
-  --stage-max: 100vw;             /* FULL WIDTH (remove container cap) */
-  --header-h: 64px;               /* header height back to original */
+  --stage-max: 100vw;               /* FULL WIDTH (remove container cap) */
+  --header-h: 64px;
 
   /* 3-col proportions */
   --left-min: 480px;
   --middle-min: 780px;
-  --right-min: 220px;             /* base min for Buyer needs */
+  --right-min: 220px;               /* base min for Buyer needs */
 
   /* Elevation / radii / rings */
   --radius:12px;
@@ -36,8 +31,8 @@
   --fs-h3:   clamp(16px, 0.7vw + 12px, 18px);
 
   /* Spacing scale */
-  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
-  --gap:var(--s-4); /* tighter page padding & column gap */
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:24px; --s-6:32px;
+  --gap:var(--s-6);
 }
 
 *{box-sizing:border-box}
@@ -98,82 +93,78 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
   max-width: var(--stage-max);
   margin-inline: auto;
 
+  /* LEFT / MIDDLE expand, RIGHT stays slim */
   grid-template-columns:
     minmax(0, 1.35fr)                                  /* LEFT */
     minmax(0, 2.65fr)                                  /* MIDDLE */
     minmax(var(--right-min), clamp(260px,14vw,300px));/* RIGHT cap ≤300px */
 }
 
-/* === Panels ======================================================= */
+/* === Three white “windows” ======================================== */
 .panel{
   position: relative;
   background:var(--card-bg);
   border:1px solid var(--border);
   border-radius:var(--radius);
-  padding:12px; /* compact */
+  padding:18px;
   box-shadow:var(--shadow);
   min-width:0;
 }
 .panel.left{grid-column:1}
 .panel.middle{grid-column:2}
-.panel.right{grid-column:3; max-width:300px}
+.panel.right{grid-column:3; max-width:300px}          /* keep the rail slim */
 
 /* Avoid nested double borders */
 .panel .card{background:transparent; border:0; box-shadow:none; padding:0; margin:0}
 
 /* Section titles within panels — unify sizes to match “Call details” */
 fieldset{border:0; margin:0; padding:0}
-.card>legend,.card>h2{display:block; margin:0 0 6px; font-size:1.02rem; font-weight:700}
-.panel h2{font-size:1.02rem; font-weight:700; margin:0 0 6px}
-.card>.kicker{ margin:-2px 0 8px; color:var(--text-2); font-size:.9rem; }
+.card>legend,.card>h2{display:block; margin:0 0 var(--s-2); font-size:1.05rem; font-weight:700}
+.panel h2{font-size:1.05rem; font-weight:700; margin:0 0 var(--s-2)}
+.card>.kicker{ margin:-2px 0 10px; color:var(--text-2); font-size:.9rem; }
 
 /* === Form ========================================================= */
 .grid-2{
   display:grid;
   grid-template-columns:1fr 1fr;
-  column-gap:12px;
-  row-gap:6px;             /* tighter: reduces gap between row 1 and row 2 */
+  column-gap:16px;
+  row-gap:8px;                 /* tighter vertical gap between rows */
 }
 .field{
   display:flex;
-  flex-direction:column;
-  gap:3px;                 /* tighter label → control gap */
-  margin-bottom:6px;       /* tighter between fields in the same column */
+  flex-direction:column;       /* label above input */
+  gap:4px;                     /* space between label and control */
+  margin-bottom:10px;
 }
-label{display:block; margin:2px 0 3px; font-weight:600; font-size:.94rem}
+label{display:block; margin:2px 0 6px; font-weight:600; font-size:.95rem}
 .req{color:var(--danger)}
 input,select,textarea{
-  width:100%;
-  padding:8px 10px;
-  border-radius:10px;
-  border:1px solid #dee3ea;
-  background:#fff;
-  font: 16.5px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; /* match output */
+  width:100%; padding:10px 12px; border-radius:12px; border:1px solid #dee3ea; background:#fff;
+  font: 16.5px/1.7 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; /* match output */
   letter-spacing:.005em;
-  outline:none;
-  transition: box-shadow .15s ease, border-color .15s ease;
+  line-height:1.7;
+  outline:none; transition: box-shadow .15s ease, border-color .15s ease;
 }
-textarea::placeholder,
-input::placeholder{
-  font: 16.5px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+textarea::placeholder, input::placeholder{
+  font: 16.5px/1.7 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
   letter-spacing:.005em;
   color:#6b7280;
 }
 select{ -webkit-appearance:none; appearance:none; background-image:none; }
 input:focus,select:focus,textarea:focus{ border-color: var(--accent); box-shadow: var(--ring-shadow); }
 input.invalid,select.invalid,textarea.invalid{ border-color: var(--danger); }
-.help{ margin:.3rem 0 0; color:var(--text-2); font-size:.85rem; }
-.error{ min-height:1rem; color: var(--danger); font-size:.9rem; margin:.2rem 0 0; }
+.help{ margin:.35rem 0 0; color:var(--text-2); font-size:.85rem; }
+.error{ min-height:1.1rem; color: var(--danger); font-size:.9rem; margin:.25rem 0 0; }
 .error-inline{ color: var(--danger); font-size:.85rem; margin-left:.25rem; }
 input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#6b7280; border-color:#e5e7eb; cursor:not-allowed; }
 
 /* Buttons / actions */
-.actions{ display:flex; gap: 10px; align-items:center; margin-top:10px; flex-wrap:wrap; }
+.actions{ display:flex; gap: var(--s-3); align-items:center; margin-top: var(--s-3); flex-wrap:wrap; }
 .btn{
-  display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px;
+  display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:999px;
   border:1px solid #e5e8ee; background:#fff; cursor:pointer; font-weight:600
 }
-.btn.small{ padding:5px 8px; font-size:.9rem }
+.btn.small{ padding:6px 10px; font-size:.9rem }
 .btn[disabled]{ opacity:.55; cursor:not-allowed }
 .btn.primary{ background: var(--accent); color:#fff; border-color: transparent }
 .btn.primary:hover{ background: var(--accent-pressed) }
@@ -181,42 +172,44 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
 .spinner{ width:16px; height:16px; border-radius:50%; border:2px solid rgba(255,255,255,.5); border-top-color:#fff; display:none }
 .btn.primary.busy .spinner{ display:inline-block; animation:spin .9s linear infinite }
 @keyframes spin{ to{ transform: rotate(360deg) } }
-.status{ margin-top:6px; min-height:1.1rem; color:var(--text-2) }
+.status{ margin-top:var(--s-2); min-height:1.2rem; color:var(--text-2) }
 .status[data-kind="error"]{ color: var(--danger) }
 .status[data-kind="ok"]{ color: var(--ok) }
 
 /* === Middle (Script) ============================================== */
-.panel.middle{ display:grid; grid-template-columns:1fr; gap:12px }
-.output-card .output-head{ display:flex; align-items:baseline; justify-content:space-between; gap:8px }
+.panel.middle{ display:grid; grid-template-columns:1fr; gap:var(--s-4) }
+.output-card .output-head{ display:flex; align-items:baseline; justify-content:space-between; gap:var(--s-2) }
 .output-card .meta{ color: var(--text-2); font-size:.9rem }
 .output{
-  white-space:normal; background:#fff; color:#1f2937; border:1px solid #e5e7eb;
-  padding:12px; border-radius:10px; min-height:220px; outline:none; resize:vertical;
+  white-space:pre-wrap; background:#fff; color:#1f2937; border:1px solid #e5e7eb;
+  padding:14px; border-radius:12px; min-height:240px; outline:none; resize:vertical;
   font-variant-ligatures: contextual;
 }
-.panel.middle .output-card{ position: sticky; top: calc(var(--header-h) + 8px); z-index: 5; }
+.panel.middle .output-card{ position: sticky; top: calc(var(--header-h) + 12px); z-index: 5; }
+.output-actions{ display:flex; gap:8px; align-items:center; justify-content:flex-end; margin-top:8px }
 
-/* === Right (Buyer needs + Tips) =================================== */
+/* === Right (Buyer needs) — single slim column ===================== */
 .intel .intel-head{
-  display:flex; align-items:center; justify-content:space-between; gap:8px;
-  position:sticky; top: calc(var(--header-h) + 6px); background:var(--card-bg); z-index:4; padding-top:4px;
+  display:flex; align-items:center; justify-content:space-between; gap:var(--s-2);
+  position:sticky; top: calc(var(--header-h) + 8px); background:var(--card-bg); z-index:4; padding-top:6px;
 }
-.intel-grid{ display:grid; grid-template-columns:1fr !important; gap:8px }
+.intel-grid{ display:grid; grid-template-columns:1fr !important; gap:10px }
 .intel-grid section{ background:transparent; padding:0 }
-.intel-grid h3{ font-size:1.05rem; } /* match “Opening” size */
 .intel-slot{
-  background:transparent; padding:6px 0 0; color:var(--text-2);
-  border-top:1px solid var(--border); border-radius:0; /* divider on first section too */
+  background:transparent; padding:8px 0 0; color:var(--text-2);
+  border-top:1px solid var(--border); border-radius:0;  /* divider on every section */
 }
-.intel-slot p{ margin:4px 0 }
-.intel-grid ul{ list-style:none; padding-left:0; margin:6px 0 0; display:flex; flex-wrap:wrap; gap:4px }
-.intel-grid li{ display:inline-block; padding:3px 6px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.95rem; color:var(--text-2) }
-.intel-chip{ display:inline-block; padding:3px 6px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.85rem; color:var(--text-2); margin:0 4px 4px 0 }
+/* Ensure first section ALSO shows a divider */
+.intel-grid section:first-child .intel-slot{ border-top:1px solid var(--border) !important; }
+.intel-grid ul{ list-style:none; padding-left:0; margin:6px 0 0; display:flex; flex-wrap:wrap; gap:6px }
+.intel-grid li{ display:inline-block; padding:4px 8px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.85rem; color:var(--text-2) }
+.intel-chip{ display:inline-block; padding:4px 8px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.85rem; color:var(--text-2); margin:0 6px 6px 0 }
+/* Heading size in right rail equals “Opening” heading in script */
+.intel-grid h3{ font-size:1.1rem; }
 
-/* Tips card in right rail */
-.panel.right .tips-card{ margin-top:12px }
-.tips-card ul{ margin:.5rem 0 0; padding-left:1.25rem }
-.tips-card ul li{ margin:.25rem 0 }
+/* Tips card (right rail) */
+.tips-card ul { margin:.5rem 0 0; padding-left:1.25rem }
+.tips-card ul li { margin:.25rem 0 }
 
 /* === Dark Mode (auto) ============================================= */
 @media (prefers-color-scheme: dark){
@@ -242,9 +235,9 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
 <svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>\
 <polyline points='6 9 12 15 18 9'/></svg>");
   background-repeat: no-repeat;
-  background-position: right 10px center;
+  background-position: right 12px center;
   background-size: 14px 14px;
-  padding-right: 30px;
+  padding-right: 36px; /* room for the chevron */
 }
 @media (prefers-color-scheme: dark){
   .layout select:not([multiple]) {
@@ -341,13 +334,39 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
 
 /* === Script output formatting === */
 .script-body h3 {
-  margin-top: 1em;
-  margin-bottom: 0.35em;
-  font-size: 1.05rem;
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+  font-size: 1.1rem;
+  color: #111827; /* matches body text */
+}
+
+.script-body p {
+  margin: 0.6em 0;
+  line-height: 1.6;
+}
+
+.script-body strong {
+  font-weight: 600;
+}
+
+.script-body {
+  font-size: 1rem;
   color: #111827;
 }
-.script-body p { margin: 0.5em 0; line-height: 1.55; }
-.script-body ul { margin: 0.4em 0 0.6em 1.1rem; }
-.script-body li { margin: 0.2em 0; }
+/* === Script output formatting === */
+.script-body h3 {
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+  font-size: 1.1rem;
+  color: #111827;
+}
+.script-body p {
+  margin: 0.6em 0;
+  line-height: 1.6;
+}
+.script-body ul {
+  margin: 0.5em 0 0.75em 1.25rem;
+}
+.script-body li { margin: 0.25em 0; }
 .script-body strong { font-weight: 600; }
 .script-body { font-size: 1rem; color: #111827; }
