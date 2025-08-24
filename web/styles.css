@@ -6,14 +6,17 @@
   --border:#e2e5ea;
   --text-1:#1d2129;
   --text-2:#4a5160;
-  --accent:#2458e6;
-  --accent-pressed:#1f49be;
+
+  /* Brand accent (updated to #72369d) */
+  --accent:#72369d;
+  --accent-pressed:#5f2d81;
+
   --danger:#b00020;
   --ok:#0a7f2e;
 
   /* Stage & header */
   --stage-max: 100vw;             /* FULL WIDTH (remove container cap) */
-  --header-h: 56px;               /* compact header */
+  --header-h: 64px;               /* header height back to original */
 
   /* 3-col proportions */
   --left-min: 480px;
@@ -22,8 +25,8 @@
 
   /* Elevation / radii / rings */
   --radius:12px;
-  --ring-shadow: 0 0 0 2px rgba(36,88,230,.35);
-  --ring-outline: 3px solid rgba(36,88,230,.8);
+  --ring-shadow: 0 0 0 2px rgba(114,54,157,.35);
+  --ring-outline: 3px solid rgba(114,54,157,.8);
   --shadow:0 1px 2px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.06);
 
   /* Fluid type scale */
@@ -63,27 +66,27 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
 *::-webkit-scrollbar-thumb{background:#cfd5e0;border-radius:999px}
 *::-webkit-scrollbar-thumb:hover{background:#b8c1d0}
 
-/* === Header (sticky with light elevation, compact) ================= */
+/* === Header (sticky with light elevation) ========================= */
 .app-header{
   position: sticky; top: 0; z-index: 100;
   display:flex; align-items:center; justify-content:space-between;
-  gap:.75rem; padding:8px 14px; background:var(--card-bg);
+  gap:.75rem; padding:12px 24px; background:var(--card-bg);
   border-bottom:1px solid var(--border);
   box-shadow: 0 1px 2px rgba(16,24,40,.08), 0 1px 1px rgba(16,24,40,.06);
   min-height: var(--header-h);
 }
-.header-left{display:flex; align-items:center; gap:.6rem; min-width:0; flex:1 1 auto}
-.logo{max-width:36px; max-height:36px; height:auto; width:auto; object-fit:contain}
+.header-left{display:flex; align-items:center; gap:.75rem; min-width:0; flex:1 1 auto}
+.logo{max-width:56px; max-height:56px; height:auto; width:auto; object-fit:contain}
 .brand-text{display:flex; flex-direction:column; min-width:0}
 .app-title{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .kicker{font-size:.9em; color:var(--text-2); margin-top:.125rem}
-.header-right{display:flex; align-items:center; gap:.4rem}
+.header-right{display:flex; align-items:center; gap:.5rem}
 
 /* Pills / sales model */
-.calltype-mini{display:inline-flex; align-items:center; gap:.5rem; padding:5px 8px; border-radius:999px; background:#eef0f4; border:1px solid var(--border); font-size:.92rem}
+.calltype-mini{display:inline-flex; align-items:center; gap:.6rem; padding:8px 12px; border-radius:999px; background:#eef0f4; border:1px solid var(--border); font-size:.95rem}
 .calltype-mini .mini-label{font-weight:600}
-.calltype-mini select{padding:5px 8px; border-radius:8px; border:1px solid #cfd7eb; background:#fff}
-.model-note,.badge{display:inline-flex; align-items:center; gap:.35rem; padding:5px 8px; border-radius:999px; background:#eef0f4; border:1px solid var(--border); font-size:.88rem}
+.calltype-mini select{padding:6px 10px; border-radius:8px; border:1px solid #cfd7eb; background:#fff}
+.model-note,.badge{display:inline-flex; align-items:center; gap:.35rem; padding:6px 10px; border-radius:999px; background:#eef0f4; border:1px solid var(--border); font-size:.9rem}
 .badge svg{width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2}
 .badge.is-hidden{display:none}
 
@@ -95,48 +98,66 @@ h1{font-size:var(--fs-h1)} h2{font-size:var(--fs-h2)} h3{font-size:var(--fs-h3)}
   max-width: var(--stage-max);
   margin-inline: auto;
 
-  /* LEFT / MIDDLE expand, RIGHT stays slim */
   grid-template-columns:
     minmax(0, 1.35fr)                                  /* LEFT */
     minmax(0, 2.65fr)                                  /* MIDDLE */
     minmax(var(--right-min), clamp(260px,14vw,300px));/* RIGHT cap ≤300px */
 }
 
-/* === Three white “windows” ======================================== */
+/* === Panels ======================================================= */
 .panel{
   position: relative;
   background:var(--card-bg);
   border:1px solid var(--border);
   border-radius:var(--radius);
-  padding:12px; /* tighter */
+  padding:12px; /* compact */
   box-shadow:var(--shadow);
   min-width:0;
 }
 .panel.left{grid-column:1}
 .panel.middle{grid-column:2}
-.panel.right{grid-column:3; max-width:300px}          /* keep the rail slim */
+.panel.right{grid-column:3; max-width:300px}
 
 /* Avoid nested double borders */
 .panel .card{background:transparent; border:0; box-shadow:none; padding:0; margin:0}
 
-/* Section titles within panels */
+/* Section titles within panels — unify sizes to match “Call details” */
 fieldset{border:0; margin:0; padding:0}
 .card>legend,.card>h2{display:block; margin:0 0 6px; font-size:1.02rem; font-weight:700}
+.panel h2{font-size:1.02rem; font-weight:700; margin:0 0 6px}
 .card>.kicker{ margin:-2px 0 8px; color:var(--text-2); font-size:.9rem; }
 
 /* === Form ========================================================= */
-.grid-2{display:grid; grid-template-columns:1fr 1fr; gap:10px 12px}
+.grid-2{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  column-gap:12px;
+  row-gap:6px;             /* tighter: reduces gap between row 1 and row 2 */
+}
 .field{
   display:flex;
-  flex-direction:column;   /* label above input */
-  gap:3px;                 /* space between label and control */
-  margin-bottom:8px;       /* tighter vertical rhythm */
+  flex-direction:column;
+  gap:3px;                 /* tighter label → control gap */
+  margin-bottom:6px;       /* tighter between fields in the same column */
 }
-label{display:block; margin:2px 0 4px; font-weight:600; font-size:.94rem}
+label{display:block; margin:2px 0 3px; font-weight:600; font-size:.94rem}
 .req{color:var(--danger)}
 input,select,textarea{
-  width:100%; padding:8px 10px; border-radius:10px; border:1px solid #dee3ea; background:#fff;
-  font:inherit; line-height:1.4; outline:none; transition: box-shadow .15s ease, border-color .15s ease;
+  width:100%;
+  padding:8px 10px;
+  border-radius:10px;
+  border:1px solid #dee3ea;
+  background:#fff;
+  font: 16.5px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; /* match output */
+  letter-spacing:.005em;
+  outline:none;
+  transition: box-shadow .15s ease, border-color .15s ease;
+}
+textarea::placeholder,
+input::placeholder{
+  font: 16.5px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  letter-spacing:.005em;
+  color:#6b7280;
 }
 select{ -webkit-appearance:none; appearance:none; background-image:none; }
 input:focus,select:focus,textarea:focus{ border-color: var(--accent); box-shadow: var(--ring-shadow); }
@@ -175,29 +196,34 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
 }
 .panel.middle .output-card{ position: sticky; top: calc(var(--header-h) + 8px); z-index: 5; }
 
-/* === Right (Buyer needs + Tips) — tighter ========================= */
+/* === Right (Buyer needs + Tips) =================================== */
 .intel .intel-head{
   display:flex; align-items:center; justify-content:space-between; gap:8px;
   position:sticky; top: calc(var(--header-h) + 6px); background:var(--card-bg); z-index:4; padding-top:4px;
 }
 .intel-grid{ display:grid; grid-template-columns:1fr !important; gap:8px }
 .intel-grid section{ background:transparent; padding:0 }
+.intel-grid h3{ font-size:1.05rem; } /* match “Opening” size */
 .intel-slot{
   background:transparent; padding:6px 0 0; color:var(--text-2);
-  border-top:1px solid var(--border); border-radius:0;
+  border-top:1px solid var(--border); border-radius:0; /* divider on first section too */
 }
-.intel-slot p{ margin:4px 0 } /* tighten list item spacing */
-.intel-grid section:first-child .intel-slot{ border-top:0 }
+.intel-slot p{ margin:4px 0 }
 .intel-grid ul{ list-style:none; padding-left:0; margin:6px 0 0; display:flex; flex-wrap:wrap; gap:4px }
-.intel-grid li{ display:inline-block; padding:3px 6px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.85rem; color:var(--text-2) }
+.intel-grid li{ display:inline-block; padding:3px 6px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.95rem; color:var(--text-2) }
 .intel-chip{ display:inline-block; padding:3px 6px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); font-size:.85rem; color:var(--text-2); margin:0 4px 4px 0 }
+
+/* Tips card in right rail */
+.panel.right .tips-card{ margin-top:12px }
+.tips-card ul{ margin:.5rem 0 0; padding-left:1.25rem }
+.tips-card ul li{ margin:.25rem 0 }
 
 /* === Dark Mode (auto) ============================================= */
 @media (prefers-color-scheme: dark){
   :root{
     --bg:#0f1318; --card-bg:#141a1f; --border:#2a3342;
     --text-1:#e6eaf2; --text-2:#a9b2c3;
-    --accent:#6da7ff; --accent-pressed:#5a8ee0;
+    --accent:#9b7abd; --accent-pressed:#8461a7;
     --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 30px rgba(0,0,0,.35);
   }
   .output{ background:var(--card-bg); border-color:var(--border); color:var(--text-1) }
@@ -218,7 +244,7 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   background-repeat: no-repeat;
   background-position: right 10px center;
   background-size: 14px 14px;
-  padding-right: 30px; /* room for the chevron */
+  padding-right: 30px;
 }
 @media (prefers-color-scheme: dark){
   .layout select:not([multiple]) {
@@ -318,49 +344,10 @@ input[disabled],select[disabled],textarea[disabled]{ background:#f3f4f6; color:#
   margin-top: 1em;
   margin-bottom: 0.35em;
   font-size: 1.05rem;
-  color: #111827; /* matches body text */
+  color: #111827;
 }
 .script-body p { margin: 0.5em 0; line-height: 1.55; }
 .script-body ul { margin: 0.4em 0 0.6em 1.1rem; }
 .script-body li { margin: 0.2em 0; }
 .script-body strong { font-weight: 600; }
 .script-body { font-size: 1rem; color: #111827; }
-
-/* --- Mobile header & sales-model fixes --- */
-.field-calltype-xs { display: none; }
-
-/* Let the header wrap on small screens and hide non-essential bits */
-@media (max-width: 680px) {
-  .app-header { flex-wrap: wrap; align-items: flex-start; padding: 8px 12px; }
-  .app-header .header-left { flex: 1 1 100%; min-width: 0; }
-  .app-header .header-right { flex: 1 1 100%; order: 2; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-start; margin-top: 8px; }
-  .app-header .brand-text .app-title { font-size: .95rem; }
-  .app-header .brand-text .kicker { font-size: .8rem; }
-
-  /* Save space in the pill on phones */
-  .calltype-mini .mini-label { display: none; }
-  .model-note, .badge { display: none; }
-
-  /* Prefer the in-form control on phones */
-  .calltype-mini { display: none; }
-  .field-calltype-xs { display: block; }
-}
-
-/* Lead Qualification: action buttons */
-.action-group{ display:flex; gap:8px; flex-wrap:wrap; }
-
-/* secondary button look, used by "Light touch" */
-.btn.secondary{ background:#fff; border:1px solid var(--border); }
-
-/* Mode pill */
-.pill{
-  display:inline-block; margin-left:.5rem; padding:.15rem .5rem;
-  border-radius:999px; font-size:.85rem; line-height:1.1;
-  background:#e5e7eb; color:#111827; vertical-align:middle;
-}
-.pill[data-kind="light"]{ background:#dbeafe; color:#1e3a8a; } /* light blue */
-.pill[data-kind="deep"] { background:#dcfce7; color:#166534; } /* green */
-
-#accounts_status.busy::after { content:" • working…"; opacity:.7 }
-.intel-slot.is-drag { outline:2px dashed #94a3b8; border-radius:8px; background:#f8fafc }
-
