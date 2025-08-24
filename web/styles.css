@@ -403,7 +403,7 @@ fieldset {
 
 label {
   display: block;
-  margin: 2px 0 6px;
+  margin: 0;
   font-weight: 500;
   font-size: .95rem
 }
@@ -416,7 +416,7 @@ input,
 select,
 textarea {
   width: 100%;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-radius: 12px;
   border: 1px solid #dee3ea;
   background: #fff;
