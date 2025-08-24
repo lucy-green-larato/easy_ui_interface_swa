@@ -652,13 +652,27 @@ textarea[disabled] {
 }
 
 /* Tips card (right rail) */
-.tips-card ul {
-  margin: .5rem 0 0;
-  padding-left: 1.25rem
+/* Helpful tips — match right-rail heading + compact text */
+.tips-card h3 {
+  font-size: .95rem;
+  /* same as left form labels */
+  font-weight: 600;
+  margin: 0 0 6px;
 }
 
-.tips-card ul li {
-  margin: .25rem 0
+.tips-card ul {
+  margin: 4px 0 0;
+  /* tighter than before */
+  padding-left: 1.15rem;
+  /* subtle indent */
+}
+
+.tips-card li {
+  font-size: .92rem;
+  /* match right-rail list size */
+  line-height: 1.35;
+  /* tighter leading */
+  margin: 2px 0;
 }
 
 /* === Dark Mode (auto) ============================================= */
