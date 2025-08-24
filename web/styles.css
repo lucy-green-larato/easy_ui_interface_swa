@@ -110,96 +110,139 @@ h3 {
 
 /* === Header fixes ================================================== */
 
-/* 1) Left side: align brand text with the logo block */
+/* === Header (sticky with light elevation) ========================= */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: 12px 24px;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .08), 0 1px 1px rgba(16, 24, 40, .06);
+  min-height: var(--header-h);
+}
+
+/* Left cluster: logo + brand text */
 .header-left {
+  display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .logo {
   height: 28px;
-  width: auto;
   max-height: 28px;
+  width: auto;
+  object-fit: contain;
+  display: block;
 }
 
-/* slightly smaller mark */
 .brand-text {
   display: flex;
   flex-direction: column;
-  margin-top: 1px;
+  justify-content: center;
+  min-width: 0
 }
 
 .app-title {
-  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.15
 }
 
 .kicker {
-  margin-top: 2px;
+  font-size: .9em;
+  color: var(--text-2);
+  margin-top: 2px
 }
 
-/* 2) Right side: keep everything on one line and tighten spacing */
+/* Right cluster: keep on one line, no wrapping */
 .header-right {
   display: flex;
   align-items: center;
   gap: 12px;
-  /* clearer spacing between pills */
   flex-wrap: nowrap;
-  /* never wrap to a second line */
 }
 
 .header-right>* {
-  flex-shrink: 0;
+  flex-shrink: 0
 }
-
-/* prevent items compressing/overlapping */
 
 /* Sales-model pill */
 .calltype-mini {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  /* label ↔ select ↔ remember */
   padding: 8px 12px;
+  border-radius: 999px;
+  background: #eef0f4;
+  border: 1px solid var(--border);
+  font-size: .95rem;
   white-space: nowrap;
-  /* keep inside one line */
-  overflow: visible;
-  /* never clip the “Remember” text */
 }
 
 .calltype-mini .mini-label {
   font-weight: 600;
+  white-space: nowrap
 }
 
 .calltype-mini select {
   padding: 6px 10px;
   height: 32px;
-  /* matches checkbox height visually */
+  line-height: 1;
   border-radius: 8px;
   border: 1px solid #cfd7eb;
   background: #fff;
+  vertical-align: middle;
 }
 
 .calltype-mini .remember {
   display: inline-flex;
-  /* keeps checkbox tight to its text */
   align-items: center;
   gap: 6px;
   margin-left: 2px;
+  white-space: nowrap;
 }
 
-.calltype-mini .remember input {
+.calltype-mini .remember input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
   margin: 0;
-  /* remove default checkbox offset */
+  vertical-align: middle;
 }
 
-/* Pills beside it (no overlap) */
+/* Other header chips */
 .model-note,
-.badge,
-#help.btn {
-  position: relative;
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #eef0f4;
+  border: 1px solid var(--border);
+  font-size: .9rem;
 }
 
-/* ensures stacking without covering neighbors */
+.badge svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2
+}
+
+.badge.is-hidden {
+  display: none
+}
+
 
 /* Pills / sales model */
 .calltype-mini {
