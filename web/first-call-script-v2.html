@@ -178,7 +178,7 @@
 
         <div id="status" class="status" role="status" aria-live="polite"></div>
 
-        <details id="diagnostics" class="diag card" style="margin-top:var(--space-5)">
+        <details id="diagnostics" class="diag card" style="margin-top:var(--s-5)">
           <summary>Diagnostics</summary>
           <pre id="diag-json" tabindex="0" aria-label="Diagnostics JSON"></pre>
           <p class="muted">If you see a 401 unauthorised error, please <a href="/.auth/login/aad">sign in again</a>.</p>
@@ -207,7 +207,7 @@
       </div>
 
       <!-- Notes under the output -->
-      <div class="notes-card card" style="margin-top:var(--space-4)">
+      <div class="notes-card card" style="margin-top:var(--s-4)">
         <div class="row-between">
           <h3>Call notes</h3>
           <div class="row-between" style="gap:8px">
@@ -221,11 +221,11 @@
         <p class="muted" style="margin-top:.5rem">Notes are stored locally (this browser only).</p>
       </div>
 
-      <div class="change-log" style="margin-top:var(--space-4)">
+      <div class="change-log" style="margin-top:var(--s-4)">
         <h3>What changed</h3>
         <ul id="delta-log" class="delta" aria-live="polite"></ul>
       </div>
-      <div class="activity" style="margin-top:var(--space-4)">
+      <div class="activity" style="margin-top:var(--s-4)">
         <h3>Recent activity</h3>
         <ol id="activity-log" class="activity-log" aria-live="polite" style="margin:0;padding-left:1.25rem"></ol>
       </div>
@@ -244,9 +244,11 @@
           <h3 style="margin:0">About this tool</h3>
           <button id="help-close" class="btn inline" type="button">Close ×</button>
         </div>
-        <p>This Sales call scripting and emailing tool is designed to save you time. In just a minute, you can prepare a sharp,
+        <p>This Sales call scripting and emailing tool is designed to save you time. In just a minute, you can prepare a
+          sharp,
           buyer-centred conversation guide for sales calls, and then turn your call notes into a concise follow-up
-          email. Scripts and emails blend your inputs (prospect, product, USPs, context and desired next step) with our call-library
+          email. Scripts and emails blend your inputs (prospect, product, USPs, context and desired next step) with our
+          call-library
           templates and current buyer intelligence to produce high quality sales content fast.</p>
 
         <h3>How to use it</h3>
@@ -274,16 +276,21 @@
         <h3>What the tool assures</h3>
         <ul>
           <li>These tools save you time and assure that every call you make is the best it could be.</li>
-          <li>All scripts follow proven best practice sales methods focused on delivering value to the prospect in ways that build trust and lead to well qualified opportunities.</li>
+          <li>All scripts follow proven best practice sales methods focused on delivering value to the prospect in ways
+            that build trust and lead to well qualified opportunities.</li>
           <li>You can choose from a professoinal, more corporate tone of language, or a warmer one if you prefer.</li>
-          <li>Uses your Next step if provided. If not, it uses the follow up from the researched sales pitches that are centred on what prospects have said they would value.</li>
-          <li>The scripts produced are an elegant blend of your requirements for the call and the researched sales pitches.</li>
+          <li>Uses your Next step if provided. If not, it uses the follow up from the researched sales pitches that are
+            centred on what prospects have said they would value.</li>
+          <li>The scripts produced are an elegant blend of your requirements for the call and the researched sales
+            pitches.</li>
         </ul>
 
         <h3>Where the insights come from</h3>
-        <p>Buyer information and behaviours are refreshed monthly. The underlying sales pitches are researched every six months across
+        <p>Buyer information and behaviours are refreshed monthly. The underlying sales pitches are researched every six
+          months across
           technology buyers and indirect channel players. Together, this gives you a gold-standard view
-          of current commercial status, pains, priorities, triggers, proof points, objections and CTAs for each buyer behaviour.</p>
+          of current commercial status, pains, priorities, triggers, proof points, objections and CTAs for each buyer
+          behaviour.</p>
 
         <h3>Tips for best results</h3>
         <ul>
@@ -307,15 +314,15 @@
         </ul>
 
         <h3>Feedback</h3>
-        <p>We want these tools to be the best for you. If you have ideas for improvements or suggestions that would make this even more valuable to you, please contact us through our website.</p>
+        <p>We want these tools to be the best for you. If you have ideas for improvements or suggestions that would make
+          this even more valuable to you, please contact us through our website.</p>
       </div>
     </dialog>
 
     <!-- RIGHT -->
     <section class="panel right" aria-labelledby="intel-title">
       <aside class="intel card">
-        <div class="intel-head"
-          style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
+        <div class="intel-head">
           <h2 id="intel-title">Buyer needs</h2>
           <button id="toggle-intel" class="btn small" type="button" aria-expanded="true"
             aria-controls="intel-body">Hide</button>
@@ -351,10 +358,11 @@
       </aside>
 
       <!-- Helpful tips in the right rail with show/hide -->
-      <aside class="tips-card card" style="margin-top:var(--space-4)">
+      <aside <aside class="tips-card card" style="margin-top:var(--s-4)">
         <div class="row-between">
           <h3>Helpful tips</h3>
-          <button id="toggle-tips" class="btn small" type="button" aria-expanded="true" aria-controls="tips-list">Hide</button>
+          <button id="toggle-tips" class="btn small" type="button" aria-expanded="true"
+            aria-controls="tips-list">Hide</button>
         </div>
         <ul id="tips-list"></ul>
       </aside>
@@ -750,12 +758,31 @@
     // Tips toggle + auto-hide
     function applyTipsVisibility() {
       const card = document.querySelector(".tips-card");
+      if (!card || !tipsList || !toggleTipsBtn) return;
+
+      // Respect the user's show/hide choice
       const hidden = localStorage.getItem(TIPS_HIDDEN_KEY) === '1';
       tipsList.hidden = hidden;
       toggleTipsBtn.textContent = hidden ? 'Show tips' : 'Hide';
       toggleTipsBtn.setAttribute('aria-expanded', String(!hidden));
-      const has = tipsList.children.length > 0;
-      if (card) card.classList.toggle('is-hidden', !has);
+
+      // Ensure the card is ALWAYS visible (even when there are no tips yet)
+      // and show a friendly placeholder until the API provides tips.
+      const hasTips = tipsList.children.length > 0;
+      let empty = card.querySelector('#tips-empty');
+
+      if (!hasTips) {
+        if (!empty) {
+          empty = document.createElement('p');
+          empty.id = 'tips-empty';
+          empty.className = 'muted';
+          empty.textContent = 'Tips will appear after you generate a script.';
+          // Insert the placeholder right after the tips list
+          tipsList.insertAdjacentElement('afterend', empty);
+        }
+      } else if (empty) {
+        empty.remove();
+      }
     }
 
     // Events
