@@ -1,7 +1,7 @@
 // index.js – Azure Function handler for /api/generate
 // Version: v3-markdown-first-2025-08-20-patch8-fixed (normalized vars; strict buyer; safe base; logs; sanitizer; length trim)
 
-const VERSION = "DEV-verify-2025-08-23-frontend-only-no-qualification"; // <-- bumped
+const VERSION = "DEV-verify-2025-08-21-2"; // <-- bump this every edit
 try {
   console.log(`[${VERSION}] module loaded at ${new Date().toISOString()} cwd=${process.cwd()} dir=${__dirname}`);
 } catch { }
@@ -55,12 +55,6 @@ function replaceSection(text, name, md) {
   // If not found, append section.
   return `${text.trim()}\n\n## ${name}\n\n${md.trim()}\n`;
 }
-
-function hasTwoYears(ix) {
-  try { return !!(ix && Array.isArray(ix.years) && ix.years.length >= 2); }
-  catch { return false; }
-}
-
 
 // Insert an intro + bullets immediately after the section heading (preserves existing content).
 function injectBullets(text, name, intro, items) {
@@ -154,7 +148,7 @@ const ScriptJsonSchema = z.object({
     next_step_source: z.enum(["salesperson", "template", "assistant"]).optional()
   }).optional(),
   tips: z.array(z.string()).min(3).max(3),
-  summary_bullets: z.array(z.string()).min(6).max(12)  // concise outline (front-end ignores today)
+  summary_bullets: z.array(z.string()).min(6).max(12)  // NEW: concise outline
 });
 
 function extractText(res) {
@@ -381,7 +375,7 @@ function buildPromptFromMarkdown(args) {
     "Use the Markdown template below as the skeleton for the call. Preserve the section headings and overall order. Fill the content so it reads as a natural, spoken conversation.\n\n" +
     "MANDATES:\n" +
     "- Use professional British business English; no Americanisms; no assumptive closes.\n" +
-    "- Never include pleasantries or check-ins such as \"I hope you are well\", \"Are you well?\", \"How are you?\", \"Hope you're doing well\", \"How are you today?\", \"Trust you are well\". Start directly.\n" +
+    "- Never include pleasantries or check-ins such as \"I hope you are well\", \"Are you well?\", \"Hope you're doing well\", \"How are you?\", \"Trust you are well\". Start directly.\n" +
     "- Open with: Hello " + prospect.name + ", it’s " + seller.name + " from " + seller.company + ".\n" +
     "- Elegantly weave the USPs and Other points where they make sense in context; do not ignore them if provided.\n" +
     "- Include one specific, relevant customer example with measurable results.\n" +
@@ -466,6 +460,14 @@ ${templateMdText}
 `
   );
 }
+
+/* ----------------------------- Legacy schema ---------------------------- */
+
+const BodySchema = z.object({
+  pack: z.string().min(1),
+  template: z.string().min(1),
+  variables: z.record(z.any()).default({}),
+});
 
 /* =============================== Function =============================== */
 
@@ -559,7 +561,7 @@ ${callNotes || "(none)"}`
       return;
     }
 
-    // ---------- Markdown/JSON call-script route ----------
+    // ---------- Markdown-first route ----------
     if (kind === "call-script") {
       // normalize variables: merge top-level with variables (variables win)
       var vars = {};
@@ -756,6 +758,7 @@ ${callNotes || "(none)"}`
         if (valueProposition && String(valueProposition).trim()) {
           const uspItems = splitList(valueProposition);
           if (uspItems.length) {
+            // e.g. “In terms of differentiators, we can emphasise Starlink for remote connectivity.”
             const uspSentence = `In terms of differentiators, we can emphasise ${toOxford(uspItems)}`;
             md = appendSentenceToSection(md, "Buyer Desire", uspSentence);
           }
@@ -763,6 +766,7 @@ ${callNotes || "(none)"}`
         if (otherContext && String(otherContext).trim()) {
           const ctxItems = splitList(otherContext);
           if (ctxItems.length) {
+            // e.g. “We'll also cover contract portability and self-serve provisioning.”
             const ctxSentence = `We'll also cover ${toOxford(ctxItems)}`;
             md = appendSentenceToSection(md, "Opening", ctxSentence);
           }
@@ -786,7 +790,7 @@ ${callNotes || "(none)"}`
         return;
       }
 
-      // ---------- FALLBACK: MARKDOWN-FIRST ----------
+      // ---------- FALLBACK: MARKDOWN-FIRST (your existing path) ----------
       const prompt = buildPromptFromMarkdown({
         templateMdText: templateMdText,
         seller: { name: vars.seller_name || "", company: vars.seller_company || "" },
@@ -827,7 +831,7 @@ ${callNotes || "(none)"}`
       var scriptText = stripPleasantries(scriptTextRaw);
 
       // 1) Ensure canonical section anchors exist (so injections have a place to land)
-      scriptText = ensureHeadings(scriptText);
+      scriptText = ensureHeadings(scriptText); // keep your existing implementation
 
       // 2) Handle {{next_step}} placeholder deterministically, or hard-set the section
       const hasNextToken = /{{\s*next_step\s*}}/i.test(scriptText);
@@ -843,7 +847,37 @@ ${callNotes || "(none)"}`
         scriptText = replaceSection(scriptText, "Next Step", String(nextStep).trim());
       }
 
-      // Weave salesperson inputs as natural sentences (no bullets)
+      // Utility: turn "a; b; c" into "a, b and c"
+      function toSentenceList(raw) {
+        const items = String(raw || "")
+          .split(/\r?\n|;|,|·|•|—|- /)
+          .map(s => s.trim())
+          .filter(Boolean);
+        if (items.length === 0) return "";
+        if (items.length === 1) return items[0];
+        if (items.length === 2) return items[0] + " and " + items[1];
+        return items.slice(0, -1).join(", ") + " and " + items.slice(-1);
+      }
+
+      // Insert one sentence after the first paragraph of a named section
+      function weaveSentenceIntoSection(text, sectionName, sentence) {
+        if (!sentence) return text;
+        const h = sectionName.replace(/\s+/g, "\\s+");
+        const rx = new RegExp(`(^|\\n)##\\s*${h}\\b[\\t ]*\\n([\\s\\S]*?)(?=\\n##\\s*[A-Za-z]|$)`, "i");
+        const m = text.match(rx);
+        if (!m) return text;
+
+        const full = m[0];
+        const body = m[2] || "";
+        const parts = body.split(/\n{2,}/); // paragraphs
+        if (parts.length === 0) return text;
+
+        parts[0] = parts[0].trim() + (parts[0].trim().endsWith(".") ? " " : ". ") + sentence.trim();
+        const newBody = parts.join("\n\n");
+        return text.replace(full, m[1] + "## " + sectionName + "\n" + newBody);
+      }
+
+      // 3) Weave salesperson inputs as natural sentences (no bullets)
       if (valueProposition && String(valueProposition).trim()) {
         const uspItems = splitList(valueProposition);
         if (uspItems.length) {
@@ -896,10 +930,13 @@ ${callNotes || "(none)"}`
       return;
     }
 
-    // ---------- Unknown kind ----------
-    context.res = { status: 400, headers: cors, body: { error: "Unknown request kind", version: VERSION } };
-    return;
-
+    // ---------- Legacy packs route ----------
+    const parsed = BodySchema.safeParse(body);
+    if (!parsed.success) {
+      context.res = { status: 400, headers: cors, body: { error: "Invalid request body", version: VERSION } };
+      return;
+    }
+    context.res = { status: 200, headers: cors, body: { output: "", preview: "", version: VERSION } };
   } catch (err) {
     context.log.error("[" + VERSION + "] Unhandled error: " + (err && err.stack ? err.stack : err));
     context.res = { status: 500, headers: cors, body: { error: "Server error", detail: String(err && err.message ? err.message : err), version: VERSION } };
