@@ -9,10 +9,11 @@
   <style>
     :root {
       --right-min: 280px;
-      --space-3: 12px;
-      --space-4: 16px;
-      --space-5: 24px;
-      --space-6: 32px;
+      /* tighter local spacing tokens for this page */
+      --space-3: 8px;
+      --space-4: 12px;
+      --space-5: 16px;
+      --space-6: 16px;
       --surface-2: #f2f4f8;
       --surface-3: #e5e7eb;
       --text-2: #5b6270;
@@ -31,73 +32,41 @@
       width: 100%;
     }
 
-    @media (max-width:1200px) {
-      .layout { grid-template-columns: 1fr }
-    }
+    @media (max-width:1200px) { .layout { grid-template-columns: 1fr } }
 
-    .grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: var(--space-3)
-    }
-
-    @media (max-width:800px) {
-      .grid-2 { grid-template-columns: 1fr }
-    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3) }
+    @media (max-width:800px) { .grid-2 { grid-template-columns: 1fr } }
 
     .output {
-      white-space: normal;
-      background: #fff;
-      color: #111827;
-      border: 1px solid #e5e7eb;
-      padding: var(--space-5);
-      border-radius: 12px;
-      min-height: 260px;
-      outline: none;
-      font: 16.5px/1.7 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      white-space: normal; background: #fff; color: #111827; border: 1px solid #e5e7eb;
+      padding: var(--space-4); border-radius: 10px; min-height: 220px; outline: none;
+      font: 16.5px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
       letter-spacing: .005em
     }
+    .output h1, .output h2, .output h3 { margin: .35rem 0 .2rem }
+    .output p { margin: .35rem 0 }
+    .output ul, .output ol { margin: .35rem 0 .35rem 1.1rem }
 
-    .output h1, .output h2, .output h3 { margin: .4rem 0 .2rem }
-    .output p { margin: .4rem 0 }
-    .output ul, .output ol { margin: .4rem 0 .4rem 1.25rem }
+    .panel .card h3 { margin: 0 0 .45rem 0 }
 
-    .panel .card h3 { margin: 0 0 .5rem 0 }
-
-    .intel-grid {
-      display: grid;
-      grid-template-columns: 1fr !important;
-      gap: var(--space-3)
-    }
+    .intel-grid { display: grid; grid-template-columns: 1fr !important; gap: var(--space-3) }
 
     input, select, textarea {
-      width: 100%;
-      padding: 10px 12px;
-      border-radius: 8px;
-      border: 1px solid var(--surface-3);
-      background: #fff;
-      outline: none;
-      transition: box-shadow .15s ease, border-color .15s ease
+      width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--surface-3);
+      background: #fff; outline: none; transition: box-shadow .15s ease, border-color .15s ease
     }
-    input:focus, select:focus, textarea:focus {
-      box-shadow: 0 0 0 2px rgba(36, 88, 230, .35);
-      border-color: var(--accent)
-    }
+    input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 2px rgba(36, 88, 230, .35); border-color: var(--accent) }
 
     .app-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 16px;
-      background: #fff;
-      border-bottom: 1px solid #e5e7eb
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 14px; background: #fff; border-bottom: 1px solid #e5e7eb
     }
     .app-header .header-left { display: flex; align-items: center; gap: 10px }
-    .app-header .logo { height: 32px; width: auto }
-    .app-header .brand-text { line-height: 1.15 }
+    .app-header .logo { height: 28px; width: auto }
+    .app-header .brand-text { line-height: 1.1 }
     .app-header .app-title { font-size: 1rem; font-weight: 600; margin: 0 }
     .app-header .kicker { margin: 0; color: #6b7280; font-size: .85rem }
-    .app-header .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap }
+    .app-header .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
 
     .calltype-mini {
       display: flex; align-items: center; gap: 8px; padding: 4px 8px;
@@ -121,18 +90,13 @@
 
     /* Mobile sales-model fallback */
     .field-calltype-xs { display: none }
-    @media (max-width:640px) {
-      .calltype-mini { display: none }
-      .field-calltype-xs { display: block }
-    }
+    @media (max-width:640px) { .calltype-mini { display: none } .field-calltype-xs { display: block } }
 
     /* TEMP: hide bullet-view + pop-out controls (functionality intact) */
     #toggle-bullets, .bullets-card, #outline-card, #popout { display: none !important }
 
     /* Output action row */
-    .output-actions {
-      display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 8px
-    }
+    .output-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 8px }
   </style>
 </head>
 
@@ -335,7 +299,7 @@
         <button id="download-script" class="btn inline" type="button" disabled>Download script</button>
       </div>
 
-      <!-- Notes under the output (unchanged) -->
+      <!-- Notes under the output -->
       <div class="notes-card card" style="margin-top:var(--space-4)">
         <div class="row-between">
           <h3>Call notes</h3>
@@ -479,7 +443,7 @@
         </div>
       </aside>
 
-      <!-- Moved Helpful tips to the right rail with show/hide -->
+      <!-- Helpful tips in the right rail with show/hide -->
       <aside class="tips-card card" style="margin-top:var(--space-4)">
         <div class="row-between">
           <h3>Helpful tips</h3>
@@ -1105,10 +1069,10 @@
         w.document.write(`<!doctype html>
 <meta charset="utf-8"><title>Conversation Guide</title>
 <style>
-  body{font:16.5px/1.7 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica Neue,Arial;padding:24px;background:#fff;color:#111}
-  .meta{color:#6b7280;font-size:.9rem;margin-bottom:12px}
+  body{font:16.5px/1.65 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica Neue,Arial;padding:20px;background:#fff;color:#111}
+  .meta{color:#6b7280;font-size:.9rem;margin-bottom:10px}
   .bar{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-bottom:8px}
-  button{padding:.4rem .6rem;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;cursor:pointer}
+  button{padding:.35rem .55rem;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;cursor:pointer}
 </style>
 <div class="bar"><button onclick="window.print()">Print</button>
 <button onclick="navigator.clipboard.writeText(document.body.innerText)">Copy</button></div>
