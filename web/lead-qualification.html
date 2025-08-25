@@ -340,14 +340,41 @@
         <h3 style="margin:0">About Companies House numbers & iXBRL</h3>
         <button id="ch-close" class="btn inline" type="button">Close ×</button>
       </div>
-      <p>iXBRL is a machine-readable format for annual accounts. If the company files iXBRL, we can fetch headline
-        figures directly.</p>
+      <p><strong>What this does</strong><br>
+        Use this panel to assemble an evidence-based view of a lead’s commercial performance.</p>
+
       <ul>
-        <li><strong>Optional:</strong> Add the Companies House number and click <em>Fetch iXBRL</em>.</li>
-        <li><strong>No iXBRL?</strong> Upload OCR’d PDF accounts instead (last two years recommended) and we’ll use
-          those.</li>
-        <li>You can also enter key metrics manually in <em>Enter key metrics manually</em>.</li>
+        <li>You can analyse <strong>one or two financial years</strong>.</li>
+        <li>Two evidence routes:
+          <ol>
+            <li><strong>Fetch iXBRL</strong> (recommended) — enter the Companies House number and click <em>Fetch
+                iXBRL</em>.</li>
+            <li><strong>Upload accounts</strong> — add up to two <strong>OCR’d</strong> PDF filings (most recent years).
+            </li>
+          </ol>
+        </li>
+        <li>Or enter <strong>key commercial metrics manually</strong> if filings aren’t available.</li>
       </ul>
+
+      <h4>What is iXBRL?</h4>
+      <p>iXBRL (“Inline XBRL”) is a <strong>digital accounts format</strong> that Companies House is rolling out and
+        increasingly mandating. It replaces image-only PDFs and lets the tool read headline figures directly.</p>
+
+      <h4>Making PDFs searchable (OCR)</h4>
+      <p>If your accounts are scans or image-only PDFs, run OCR before uploading so the tool can read them:</p>
+      <ol>
+        <li>Open the PDF in your editor (e.g., Adobe Acrobat).</li>
+        <li>Use <em>Recognise Text</em> / <em>OCR</em> for the entire document.</li>
+        <li>Save as a new “searchable” PDF and upload here (max two files, most recent years).</li>
+      </ol>
+      <p class="muted">Tip: ensure text is selectable and the file isn’t password-protected.</p>
+
+      <h4>How your inputs are used</h4>
+      <ul>
+        <li><strong>Company number</strong> is used to fetch iXBRL and link to filings.</li>
+        <li><strong>Buyer type</strong> shapes the qualification analysis and the tips you see on the right.</li>
+      </ul>
+
     </div>
   </dialog>
 
