@@ -946,8 +946,8 @@ select:not([multiple]) {
 /* === Output sizing: make generated script text smaller =================== */
 :root{
   /* tweak these two numbers to taste */
-  --fs-output: clamp(12px, 0.24vw + 10.5px, 14px);
-  --fs-output-h3: clamp(14px, 0.24vw + 12px, 16px);
+  --fs-output: clamp(13px, 0.2vw + 11px, 15px);
+  --fs-output-h3: clamp(15px, 0.24vw + 13px, 17px);
 }
 
 .output{
