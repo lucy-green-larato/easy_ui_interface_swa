@@ -899,3 +899,43 @@ select:not([multiple]) {
 .panel.left :is(.field, input, select, textarea) {
   scroll-margin-top: 48px;
 }
+
+/* Tips header layout – put the button on the right */
+.tips-card .row-between{
+  display:flex;
+  align-items:center;
+  gap:.5rem;
+}
+
+/* push the toggle all the way right */
+.tips-card .row-between > :last-child{
+  margin-left:auto;
+}
+
+/* title underline like Buyer Needs */
+.tips-card h3{
+  font-size:.95rem;
+  font-weight:600;
+  margin:0 0 8px;
+  padding-bottom:6px;
+  border-bottom:1px solid var(--border);
+}
+
+/* optional: make tips list chips match intel styles */
+#tips-list{
+  list-style:none;
+  margin:6px 0 0;
+  padding-left:0;
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+#tips-list li{
+  display:inline-block;
+  padding:4px 8px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--card-bg);
+  font-size:.85rem;
+  color:var(--text-2);
+}
