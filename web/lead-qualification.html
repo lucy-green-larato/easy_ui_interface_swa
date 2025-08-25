@@ -56,9 +56,9 @@
       <form id="qual-form" novalidate>
         <!-- Sales model indicator -->
         <div class="card" style="margin-bottom:var(--s-4)">
-          <p><strong>Sales model in use:</strong> <span id="model-indicator">Direct</span> <span class="fineprint">·
+          <p><strong>Sales model in use</strong> <span id="model-indicator">Direct</span> <em class="fineprint">·
               <br>Model
-              can be changed above.</span></p>
+              can be changed above.</em></p>
         </div>
 
         <fieldset class="card" aria-labelledby="legend-person">
@@ -125,9 +125,18 @@
               </label>
 
               <input id="company_number" name="company_number" placeholder="Optional (e.g., 01234567)" />
-              <p class="fineprint" id="company_number_info">
-                Important information for financial analysis. Click the <strong>i</strong> button to read.
+              <label class="label-with-help" for="company_number">
+                Companies House number
+                <button id="ch-help" class="btn info" type="button" title="Important information for financial analysis"
+                  aria-controls="ch-modal" aria-expanded="false">i</button>
+              </label>
+
+              <input id="company_number" name="company_number" placeholder="Optional (e.g., 01234567)" />
+
+              <p id="company_number_hint" class="fineprint">
+                Important information for financial analysis. Click the button to read.
               </p>
+
             </div>
           </div>
 
