@@ -1,11 +1,13 @@
 <!doctype html>
 <html lang="en" data-app="inside-track-tools">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Tools · Lead qualification</title>
   <link rel="stylesheet" href="./styles.css?v=2025-08-24-1">
 </head>
+
 <body>
   <!-- HEADER (reused shell) -->
   <header class="app-header" role="banner">
@@ -54,12 +56,13 @@
       <form id="qual-form" novalidate>
         <!-- Sales model indicator -->
         <div class="card" style="margin-bottom:var(--s-4)">
-          <p><strong>Sales model in use:</strong> <span id="model-indicator">Direct</span> <span class="muted">· Model
+          <p><strong>Sales model in use:</strong> <span id="model-indicator">Direct</span> <span class="fineprint">·
+              <br>Model
               can be changed above.</span></p>
         </div>
 
         <fieldset class="card" aria-labelledby="legend-person">
-          <legend id="legend-person">People</legend>
+          <legend id="legend-person">You and your prospect</legend>
           <div class="grid-2">
             <div class="field">
               <label for="seller_name">Your name <span aria-hidden="true" class="req">*</span></label>
@@ -105,7 +108,7 @@
         </fieldset>
 
         <fieldset class="card" aria-labelledby="legend-company">
-          <legend id="legend-company">Company & sources</legend>
+          <legend id="legend-company">Prospect company information</legend>
           <div class="grid-2">
             <div class="field">
               <label for="prospect_website">Prospect website (URL) <span aria-hidden="true" class="req">*</span></label>
@@ -114,13 +117,22 @@
               <p class="error" id="prospect_website_error" role="alert" aria-live="polite"></p>
             </div>
             <div class="field">
-              <label for="company_number">Companies House number
-                <button id="ch-help" class="btn inline" type="button" title="What is this?">?</button>
+              <label for="company_number" class="label-with-help">
+                Companies House number
+                <button id="ch-help" class="btn info" type="button"
+                  title="Important information about financial analysis" aria-describedby="company_number_info"
+                  aria-label="Read important information about financial analysis">i</button>
               </label>
+
               <input id="company_number" name="company_number" placeholder="Optional (e.g., 01234567)" />
-              <p class="muted" id="company_number_hint">Financial analysis needs accounts filed. Add company number for
-                auto-pull of iXBRL filings or add OCR processed PDF filings.</p>
-              <p class="error" id="company_number_error" role="alert" aria-live="polite"></p>
+
+              <p class="muted" id="company_number_hint">
+                Financial analysis needs accounts filed. Add company number for auto-pull of iXBRL filings or add OCR
+                processed PDF filings.
+              </p>
+              <p class="fineprint" id="company_number_info">
+                Important information for financial analysis. Click the <strong>i</strong> button to read.
+              </p>
             </div>
           </div>
 
@@ -133,35 +145,35 @@
 
           <div class="grid-2">
             <div class="field">
-              <label for="competitors">Competitor(s) in use (optional)</label>
+              <label for="competitors">Competition</label>
               <input id="competitors" name="competitors" placeholder="e.g., BT Wholesale, CityFibre, Gamma" />
             </div>
             <div class="field">
-              <label for="existing_provider">Existing network/provider (optional)</label>
-              <input id="existing_provider" name="existing_provider" placeholder="e.g., Openreach, Vodafone" />
+              <label for="existing_provider">Existing provider(s)</label>
+              <input id="existing_provider" name="existing_provider"
+                placeholder="e.g., Openreach, Microsoft, Vodafone" />
             </div>
           </div>
 
-          <div class="field">
-            <label for="context">Other context (optional)</label>
+          <div class="field" <label for="context">Other context to analyse</label>
             <textarea id="context" name="context" rows="2"
               placeholder="Constraints, timelines, budget signals, known suppliers, etc."></textarea>
           </div>
 
           <div class="grid-2">
             <div class="field">
-              <label for="company_linkedin">Company LinkedIn (optional)</label>
+              <label for="company_linkedin">Company LinkedIn</label>
               <input id="company_linkedin" name="company_linkedin" placeholder="https://www.linkedin.com/company/..."
                 inputmode="url" />
             </div>
             <div class="field">
-              <label for="contact_linkedins">Key contact LinkedIn URLs (optional)</label>
+              <label for="contact_linkedins">Key contact LinkedIn URLs</label>
               <input id="contact_linkedins" name="contact_linkedins" placeholder="Comma or newline separated" />
             </div>
           </div>
 
           <div class="field">
-            <label for="events">Trade show(s) this year (optional)</label>
+            <label for="events">Trade show(s) this year</label>
             <input id="events" name="events" placeholder="e.g., Channel Live; Connected North" />
           </div>
         </fieldset>
@@ -773,7 +785,7 @@
       const url = URL_.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `lead-qualification_${who}_${new Date().toISOString().slice(0,10)}.txt`;
+      a.download = `lead-qualification_${who}_${new Date().toISOString().slice(0, 10)}.txt`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL_.revokeObjectURL(url);
     });
@@ -960,7 +972,7 @@
       const URL_ = window.URL || window.webkitURL;
       const url = URL_.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `qualification-notes_${who}_${new Date().toISOString().slice(0,10)}.txt`;
+      a.href = url; a.download = `qualification-notes_${who}_${new Date().toISOString().slice(0, 10)}.txt`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL_.revokeObjectURL(url);
     });
@@ -1139,4 +1151,5 @@
   </script>
   <!-- Removed stray <script src="./lead-qualification.js"> to avoid 404 -->
 </body>
+
 </html>
