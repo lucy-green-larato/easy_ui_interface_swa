@@ -818,9 +818,10 @@
       toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
     });
 
+    
     toggleTipsBtn?.addEventListener('click', () => {
-      const willHide = !(toggleTipsBtn.getAttribute('aria-expanded') === 'true');
-      localStorage.setItem(TIPS_HIDDEN_KEY, willHide ? '1' : '0');
+      const hidden = localStorage.getItem(TIPS_HIDDEN_KEY) === '1';
+      localStorage.setItem(TIPS_HIDDEN_KEY, hidden ? '0' : '1');
       applyTipsVisibility();
     });
 
