@@ -510,6 +510,39 @@ textarea.invalid {
   color: var(--ok);
 }
 
+/* --- utilities --- */
+.fineprint{
+  font-style: italic;
+  font-size: clamp(0.80rem, 1.2vw, 0.92rem);
+  color: var(--text-3, #667085);
+}
+
+/* keep label + help button on one row but allow wrap on narrow screens */
+.label-with-help{
+  display:inline-flex;
+  align-items:center;
+  gap:.5rem;
+  flex-wrap:wrap;
+}
+
+/* attention “info” button (fits the left column nicely) */
+.btn.info{
+  background: var(--brand, #0b5fff);
+  color:#fff;
+  border:0;
+  width: clamp(1.6rem, 3vw, 1.9rem);
+  height: clamp(1.6rem, 3vw, 1.9rem);
+  line-height: 1;           /* center the “i” */
+  border-radius: 9999px;    /* pill */
+  font-weight: 700;
+  padding:0;
+}
+.btn.info:hover{ filter: brightness(1.05); }
+.btn.info:focus-visible{
+  outline: 3px solid color-mix(in oklab, var(--brand, #0b5fff) 55%, white);
+  outline-offset: 2px;
+}
+
 /* === Middle column ======================================================= */
 .panel.middle {
   display: grid;
