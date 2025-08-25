@@ -1016,7 +1016,15 @@
           }
 
           renderSources(citations);
-          renderTips(tips);
+          // Qualification endpoint returns tips at data.tips (NOT data.script.tips)
+          const llmTips = Array.isArray(data?.tips) ? data.tips : [];
+          const buyerType = (form.elements.buyer_type?.value || "").trim();   // e.g. "Early majority"
+          const mode = (form.elements.call_type?.value || "").trim();         // "Direct" or "Partner"
+
+          // Fall back to your local bank only if the LLM didn’t return tips
+          const fallback = pickBankTips(qualTipsBank || {}, buyerType, mode);
+          renderTips(llmTips.length ? llmTips : fallback);
+          ;
 
           // Enable actions now content exists
           if (copyBtn) copyBtn.disabled = false;
@@ -1214,6 +1222,49 @@
       });
     });
 
+    // ==== Tips bank (loads qualification-tips.json next to this HTML) ====
+    const TIPS_URL = "./qualification-tips.json";
+
+    // Safe fetch with fallback to a built-in default bank if the JSON is missing
+    async function loadTipsBank() {
+      try {
+        const res = await fetch(TIPS_URL, { cache: "no-store" });
+        if (res.ok) return await res.json();
+      } catch { }
+      // Built-in fallback so the UI still shows something if the file is absent
+      return {
+        default: [
+          "Lead with evidence — quote the source inline.",
+          "Map each pain to one measurable outcome.",
+          "Offer a single, low-friction next step."
+        ],
+        byBuyerType: {},
+        byMode: {}
+      };
+    }
+
+    function pickBankTips(bank, buyerType, mode) {
+      const byType = (bank.byBuyerType && bank.byBuyerType[String(buyerType || "").toLowerCase()]) || [];
+      const byMode = (bank.byMode && bank.byMode[String(mode || "").toLowerCase()]) || [];
+      const def = bank.default || [];
+      // Prioritise buyerType, then mode, then default; cap to 3 items
+      return [...byType, ...byMode, ...def].filter(Boolean).slice(0, 3);
+    }
+
+    // Keep using your existing renderTips(tipsArray) function.
+    // If you don't have it yet, use this:
+    function renderTips(arr) {
+      const ul = document.getElementById("tips-list");
+      if (!ul) return;
+      ul.innerHTML = "";
+      (arr || []).forEach(t => {
+        const li = document.createElement("li");
+        li.textContent = t;
+        ul.appendChild(li);
+      });
+    }
+
+
     // Init
     (async function init() {
       try {
@@ -1228,8 +1279,8 @@
       loadForm(); loadCallPref();
       if (callTypeSelXs && callTypeSel) callTypeSelXs.value = callTypeSel.value || "";
       updateMapIndicator();
-      await loadTipsBank();
-      renderTips();
+      const TIPS_URL = "./assets/qualification-tips.json";
+      let qualTipsBank = await loadTipsBank(TIPS_URL);
 
       // Preload “financial analysis needed” nudge if CH missing
       const ch = (form.elements.company_number?.value || "").trim();
@@ -1239,6 +1290,7 @@
       renderActivity();
     })();
   </script>
+  <script src="./lead-qualification.js" defer></script>
 </body>
 
 </html>
