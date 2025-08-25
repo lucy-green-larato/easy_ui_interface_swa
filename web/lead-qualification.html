@@ -1,13 +1,11 @@
 <!doctype html>
 <html lang="en" data-app="inside-track-tools">
-
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Tools · Lead qualification</title>
   <link rel="stylesheet" href="./styles.css?v=2025-08-24-1">
 </head>
-
 <body>
   <!-- HEADER (reused shell) -->
   <header class="app-header" role="banner">
@@ -216,15 +214,15 @@
           </details>
 
           <!-- OCR PDF upload -->
-          <div class="field" style="margin-top:var(--s-3)">
-            <label for="reports">Upload annual report(s) (OCR PDF)</label>
-            <p class="muted" style="margin:.25rem 0 .5rem 0">Multi-year financial analysis is available. Add the last
-              two years’ filings if you require this facility.</p>
-            <input id="reports" name="reports" type="file" accept="application/pdf" multiple
-              aria-describedby="reports_help" />
-            <p id="reports_help" class="muted">Up to 2 PDFs recommended.</p>
-            <ul id="report-list" class="muted" style="margin-top:.25rem"></ul>
+          <div class="field">
+            <label for="report_files">Upload annual report(s) (PDF)</label>
+            <input id="report_files" name="report_files" type="file" accept="application/pdf" multiple />
+            <p id="file_hint" class="muted">
+              Multi-year financial analysis is available. Add the last two years’ filings (max 2).
+            </p>
+            <ul id="file_list" class="muted" style="margin:.5rem 0 0 0;padding-left:1.1rem"></ul>
           </div>
+
         </fieldset>
 
         <fieldset class="card" aria-labelledby="legend-buyer">
@@ -387,10 +385,9 @@
       const path = location.pathname || "/";
       const segs = path.split("/").filter(Boolean);
       const last = segs[segs.length - 1] || "";
-      if (/\.[a-z0-9]+$/i.test(last)) return "";   // looks like /foo/bar.html → no prefix
+      if (/\.[a-z0-9]+$/i.test(last)) return "";
       return segs.length ? "/" + segs[0] : "";
     })();
-
 
     const STORAGE_PREFIX = "lead_qualification_v1";
     const FORM_ID = "qual-form";
@@ -480,8 +477,9 @@
     const helpModal = document.getElementById("help-modal");
     const helpClose = document.getElementById("help-close");
 
-    const reportInput = document.getElementById("reports");
-    const reportList = document.getElementById("report-list");
+    // **File input: correct IDs**
+    const reportInput = document.getElementById("report_files");
+    const reportList = document.getElementById("file_list");
 
     const requiredIds = ["call_type", "seller_name", "seller_company", "prospect_name", "prospect_role", "prospect_company", "prospect_website", "product_service"];
 
@@ -512,10 +510,12 @@
 
     // Persist
     function saveForm() {
+      if (!form) return;
       const fd = Object.fromEntries(new FormData(form).entries());
       try { localStorage.setItem(FORM_KEY, JSON.stringify(fd)); } catch { }
     }
     function loadForm() {
+      if (!form) return;
       try {
         const raw = localStorage.getItem(FORM_KEY); if (!raw) return;
         const data = JSON.parse(raw);
@@ -527,10 +527,10 @@
       } catch { }
     }
     const notesKey = () => {
-      const pn = (form.elements.prospect_name?.value || "").trim().toLowerCase();
-      const pc = (form.elements.prospect_company?.value || "").trim().toLowerCase();
+      const pn = (form?.elements?.prospect_name?.value || "").trim().toLowerCase();
+      const pc = (form?.elements?.prospect_company?.value || "").trim().toLowerCase();
       return NOTES_KEY_PREFIX + "::" + pc + "::" + pn;
-    }
+    };
     function loadNotes() { try { notesArea.value = localStorage.getItem(notesKey()) || ""; } catch { } }
     function saveNotes() { try { localStorage.setItem(notesKey(), notesArea.value || ""); setStatus("Notes saved."); } catch { setStatus("Could not save notes.", "error"); } }
     function updateMapIndicator() {
@@ -554,63 +554,66 @@
       updateMapIndicator();
     }
 
-    // File list
+    // File list (optional; never blocks submit)
     reportInput?.addEventListener("change", () => {
-      reportList.innerHTML = "";
-      const files = Array.from(reportInput.files || []);
-      files.slice(0, 2).forEach(f => {
+      reportList && (reportList.innerHTML = "");
+      const files = Array.from(reportInput.files || []).slice(0, 2);
+      files.forEach(f => {
         const li = document.createElement("li");
-        li.textContent = f.name + " (" + Math.ceil(f.size / 1024) + "KB)";
-        reportList.appendChild(li);
+        li.textContent = f.name + " (" + Math.ceil((f.size || 0) / 1024) + " KB)";
+        reportList?.appendChild(li);
       });
+      enableSubmitIfValid();
     });
 
     // iXBRL fetch
     async function fetchIxbrl(companyNumber) {
       if (!companyNumber) return { ok: false, status: 400, data: null };
       ixbrlStatus.textContent = "Fetching…";
-      try {
-        a.download = "lead-qualification_" + who + "_" + new Date().toISOString().slice(0, 10) + ".txt";
-        const r = await fetch(url, { headers: { "Accept": "application/json" }, cache: "no-store" });
-        if (r.status === 204) { ixbrlStatus.textContent = "No iXBRL available."; return { ok: false, status: 204, data: null }; }
-        const data = await r.json();
-        if (!r.ok) throw new Error(data?.error || ("HTTP " + r.status));
-        ixbrlStatus.textContent = "Loaded.";
-        return { ok: true, status: 200, data };
-      } catch (e) {
-        ixbrlStatus.textContent = "Could not fetch iXBRL.";
-        return { ok: false, status: 500, data: null, error: String(e?.message || e) };
+      const endpoints = [
+        "/api/ixbrl-financials?company=" + encodeURIComponent(companyNumber),
+        "/api/ixbrl-financials/" + encodeURIComponent(companyNumber),
+        "/api/ixbrl-financials?company_number=" + encodeURIComponent(companyNumber)
+      ];
+      for (let i = 0; i < endpoints.length; i++) {
+        const url = endpoints[i];
+        try {
+          const r = await fetch(url, { headers: { "Accept": "application/json" }, cache: "no-store" });
+          if (r.status === 204) { ixbrlStatus.textContent = "No iXBRL available."; return { ok: false, status: 204, data: null }; }
+          let data = {};
+          try { data = await r.json(); } catch { data = {}; }
+          if (!r.ok) throw new Error((data && data.error) || ("HTTP " + r.status));
+          ixbrlStatus.textContent = "Loaded.";
+          return { ok: true, status: 200, data };
+        } catch (e) {
+          // try the next endpoint
+        }
       }
+      ixbrlStatus.textContent = "Could not fetch iXBRL.";
+      return { ok: false, status: 500, data: null };
     }
 
     function pct(n) { return (n == null || isNaN(n)) ? "—" : (Math.round(n * 10) / 10) + "%"; }
     function ratio(n) { return (n == null || isNaN(n)) ? "—" : String(Math.round(n * 100) / 100); }
 
-    function renderIxbrlChips(summary) {
+    function renderIxbrlChips(summaryLike) {
       ixbrlChips.innerHTML = "";
-      if (!summary?.summary?.derived && !summary?.summary?.years?.length) return;
+      if (!summaryLike) return;
 
-      const d = summary.summary.derived || {};
-      const y = summary.summary.years || [];
+      const summary = summaryLike.summary || summaryLike; // tolerate either shape
+      if (!summary?.derived && !(summary?.years && summary.years.length)) return;
+
+      const d = summary.derived || {};
       const chips = [];
 
-      if (d.revenueYoYPct != null) {
-        chips.push('<span class="chip">Revenue YoY: ' + pct(d.revenueYoYPct) + '</span>');
-      }
-      if (d && d.grossMarginPct && d.grossMarginPct.y1 != null)
-        chips.push('<span class="chip">Gross margin (Y1): ' + pct(d.grossMarginPct.y1) + '</span>');
-
-      if (d && d.grossMarginPct && d.grossMarginPct.y2 != null)
-        chips.push('<span class="chip">Gross margin (Y2): ' + pct(d.grossMarginPct.y2) + '</span>');
-
-      if (d && d.currentRatio != null)
-        chips.push('<span class="chip">Current ratio: ' + ratio(d.currentRatio) + '</span>');
-
-      if (d && d.cashRatio != null)
-        chips.push('<span class="chip">Cash ratio: ' + ratio(d.cashRatio) + '</span>');
+      if (d.revenueYoYPct != null) chips.push('<span class="chip">Revenue YoY: ' + pct(d.revenueYoYPct) + '</span>');
+      if (d.grossMarginPct && d.grossMarginPct.y1 != null) chips.push('<span class="chip">Gross margin (Y1): ' + pct(d.grossMarginPct.y1) + '</span>');
+      if (d.grossMarginPct && d.grossMarginPct.y2 != null) chips.push('<span class="chip">Gross margin (Y2): ' + pct(d.grossMarginPct.y2) + '</span>');
+      if (d.currentRatio != null) chips.push('<span class="chip">Current ratio: ' + ratio(d.currentRatio) + '</span>');
+      if (d.cashRatio != null) chips.push('<span class="chip">Cash ratio: ' + ratio(d.cashRatio) + '</span>');
       ixbrlChips.innerHTML = chips.join(" ");
 
-      // Auto-flags for tips
+      // Auto-flags → auto tips
       const flags = [];
       if (d.revenueYoYPct != null && d.revenueYoYPct < 0) flags.push("Revenue contracted YoY.");
       if (d.currentRatio != null && d.currentRatio < 1) flags.push("Current ratio below 1.0 (liquidity pressure).");
@@ -619,87 +622,92 @@
 
       flagsList.innerHTML = "";
       flags.forEach(f => { const li = document.createElement("li"); li.textContent = f; flagsList.appendChild(li); });
-      applyAutoTips(flags);
+      applyAutoTips(flags); // will merge with model/bank tips
     }
 
-    // Tips
-    let tipsBank = null;
+    // -------- Tips system (unified) --------
+    const TIPS_JSON_URL = "./assets/qualification-tips.json";
+    let QUAL_TIPS = { default: [], byBuyerType: {}, byMode: {} };
+    let BASE_TIPS = []; // from LLM or bank
+    let AUTO_TIPS = []; // from flags
+
     async function loadTipsBank() {
       try {
-        const res = await fetch("./qualification-tips.json", { cache: "no-store" });
-        tipsBank = await res.json();
-      } catch {
-        tipsBank = { general: ["Keep claims evidenced. If you cannot cite it, do not say it."] };
-      }
+        const res = await fetch(TIPS_JSON_URL, { cache: "no-store" });
+        if (res.ok) {
+          const bank = await res.json();
+          if (bank && typeof bank === "object") QUAL_TIPS = bank;
+        }
+      } catch { /* fallback keeps defaults */ }
     }
-    function pickStaticTips(mode, buyer) {
-      const byMode = tipsBank?.[mode?.toLowerCase()] || tipsBank?.general || [];
-      const byBuyer = (tipsBank?.buyers && tipsBank.buyers[buyer]) || [];
-      return [...byMode, ...byBuyer].slice(0, 6);
+
+    function pickBankTips(buyerType, mode) {
+      const byType = (QUAL_TIPS.byBuyerType && QUAL_TIPS.byBuyerType[String(buyerType || "").toLowerCase()]) || [];
+      const byMode = (QUAL_TIPS.byMode && QUAL_TIPS.byMode[String(mode || "").toLowerCase()]) || [];
+      const def = QUAL_TIPS.default || [];
+      return [...byType, ...byMode, ...def].filter(Boolean).slice(0, 3);
     }
+
     function applyAutoTips(flags) {
-      // Convert flags to 1-2 actionable nudges
       const auto = [];
       flags.forEach(f => {
-        if (/Revenue contracted/i.test(f)) auto.push("Frame growth levers explicitly (coverage, conversion, ARPU) with conservative targets.");
+        if (/Revenue contracted/i.test(f)) auto.push("Frame growth levers (coverage, conversion, ARPU) with conservative targets.");
         if (/Current ratio below 1/i.test(f)) auto.push("Propose low-friction onboarding and activity-gated MDF to de-risk cash usage.");
         if (/Cash ratio very low/i.test(f)) auto.push("Position light-touch pilots and postcode-led campaigns before scale.");
         if (/High leverage/i.test(f)) auto.push("Avoid heavy upfront commitments; tie discounts to first wins.");
       });
-      // Render tip list
-      renderTips(auto);
+      AUTO_TIPS = Array.from(new Set(auto)).slice(0, 5);
+      renderTips(); // merge with BASE_TIPS
     }
-    function renderTips(extras = []) {
-      const mode = (callTypeSel?.value || "Direct").toLowerCase();
-      const buyer = buyerSlug(document.getElementById("buyer_type")?.value || "Early majority");
-      const staticTips = pickStaticTips(mode, buyer);
-      const all = [...new Set([...extras, ...staticTips])].slice(0, 8);
-      tipsList.innerHTML = "";
-      all.forEach(t => { const li = document.createElement("li"); li.textContent = t; tipsList.appendChild(li); });
-      tipsEmpty.style.display = all.length ? "none" : "";
+
+    function renderTips() {
+      const list = document.getElementById("tips-list");
+      if (!list) return;
+      list.innerHTML = "";
+      const merged = Array.from(new Set([...AUTO_TIPS, ...BASE_TIPS])).slice(0, 8);
+      merged.forEach(t => { const li = document.createElement("li"); li.textContent = t; list.appendChild(li); });
+      tipsEmpty.style.display = merged.length ? "none" : "";
     }
 
     // Source rendering
     function renderSources(citations) {
       sourceList.innerHTML = "";
-      var items = Array.isArray(citations) ? citations : [];
+      const items = Array.isArray(citations) ? citations : [];
       if (!items.length) { sourcesCard.style.display = "none"; return; }
-
-      for (var i = 0; i < items.length; i++) {
-        var c = items[i] || {};
-        var li = document.createElement("li");
-        var label = (c.label || c.title || c.url || "Source");
-        var url = (c.url || "");
-
+      for (let i = 0; i < items.length; i++) {
+        const c = items[i] || {};
+        const li = document.createElement("li");
+        const label = (c.label || c.title || c.url || "Source");
+        const url = (c.url || "");
         if (url) {
-          var a = document.createElement("a");
-          a.href = url;                    // assign directly (no escaping)
+          const a = document.createElement("a");
+          a.href = url;
           a.target = "_blank";
           a.rel = "noopener noreferrer";
-          a.textContent = label;           // safe text
+          a.textContent = label;
           li.appendChild(a);
         } else {
-          li.textContent = label;          // no link available
+          li.textContent = label;
         }
-
-        sourceList.appendChild(li);        // <-- you were missing this
+        sourceList.appendChild(li);
       }
-
       sourcesCard.style.display = "";
     }
 
     // Buttons state
     function setBusy(isBusy) {
       const submitBtn = document.getElementById("submit");
-      if (submitBtn) submitBtn.disabled = isBusy || !allRequiredFilled();
+      if (submitBtn) {
+        submitBtn.disabled = isBusy || !allRequiredFilled();
+        submitBtn.classList.toggle('busy', isBusy);
+      }
       document.getElementById("resetBtn")?.setAttribute("aria-disabled", isBusy ? "true" : "false");
 
       const hasText = !!(outputEl?.textContent?.trim());
-      copyBtn.disabled = isBusy || !hasText;
-      dlBtn.disabled = isBusy || !hasText;
-      emailBtn.disabled = isBusy || !hasText;
-      docxBtn.disabled = isBusy || !hasText;
-      if (submitBtn) submitBtn.classList.toggle('busy', isBusy);
+      copyBtn && (copyBtn.disabled = isBusy || !hasText);
+      dlBtn && (dlBtn.disabled = isBusy || !hasText);
+      emailBtn && (emailBtn.disabled = isBusy || !hasText);
+      docxBtn && (docxBtn.disabled = isBusy || !hasText);
     }
 
     // Change log
@@ -711,16 +719,12 @@
       oldLines.forEach(l => { if (!newSet.has(l) && l.trim()) removed++; });
       return { added, removed };
     }
-
     function renderDelta(delta) {
       deltaLog.innerHTML = "";
-
-      var a = document.createElement("li");
+      const a = document.createElement("li");
       a.textContent = "+" + delta.added + " new line" + (delta.added === 1 ? "" : "s");
-
-      var r = document.createElement("li"); // use "−" (U+2212) or "-" if you prefer ASCII
+      const r = document.createElement("li");
       r.textContent = "−" + delta.removed + " removed line" + (delta.removed === 1 ? "" : "s");
-
       deltaLog.appendChild(a);
       deltaLog.appendChild(r);
     }
@@ -732,203 +736,129 @@
       renderActivity();
     }
     function renderActivity() {
-      var list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || "[]");
+      const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || "[]");
       activityLog.innerHTML = "";
-
-      for (var i = 0; i < list.length; i++) {
-        var item = list[i] || {};
-
-        var li = document.createElement("li");
-
-        var timeSpan = document.createElement("span");
+      list.forEach(item => {
+        const li = document.createElement("li");
+        const timeSpan = document.createElement("span");
         timeSpan.className = "time";
         timeSpan.textContent = item.time || "";
         li.appendChild(timeSpan);
-
         li.appendChild(document.createTextNode(" "));
-
-        var pill1 = document.createElement("span");
+        const pill1 = document.createElement("span");
         pill1.className = "pill";
         pill1.textContent = item.product || "";
         li.appendChild(pill1);
-
         li.appendChild(document.createTextNode(" "));
-
-        var pill2 = document.createElement("span");
+        const pill2 = document.createElement("span");
         pill2.className = "pill";
         pill2.textContent = item.buyer || "";
         li.appendChild(pill2);
-
         activityLog.appendChild(li);
-      }
+      });
     }
 
     // Copy / Download / .docx / Email
     copyBtn?.addEventListener("click", async () => {
       const txt = outputEl?.innerText || "";
       if (!txt.trim()) return;
-      await navigator.clipboard.writeText(txt);
-      setStatus("Copied.");
+      try { await navigator.clipboard.writeText(txt); setStatus("Copied."); }
+      catch { setStatus("Could not copy.", "error"); }
     });
-    if (dlBtn) {
-      dlBtn.addEventListener("click", function () {
-        var txt = (outputEl && (outputEl.textContent || outputEl.innerText)) || "";
-        var companyEl = (form && form.elements) ? form.elements.prospect_company : null;
-        var who = ((companyEl && companyEl.value) ? companyEl.value : "report").trim().replace(/\s+/g, "-");
-
-        var blob = new Blob([txt], { type: "text/plain" });
-        var URL_ = window.URL || window.webkitURL; // Safari fallback
-        var url = URL_.createObjectURL(blob);
-
-        var a = document.createElement("a");
-        a.href = url;
-        a.download = "lead-qualification_" + who + "_" + new Date().toISOString().slice(0, 10) + ".txt";
-
-        // append+click+remove for broader browser support
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-
-        URL_.revokeObjectURL(url);
-      });
-    }
-    if (docxBtn) {
-      docxBtn.addEventListener("click", function () {
-        try {
-          setStatus("Preparing .docx…");
-
-          var htmlOut = (outputEl && outputEl.innerHTML) || "";
-          var citationsAttr = outputEl ? outputEl.getAttribute("data-citations") : null;
-          var citations;
-          try { citations = JSON.parse(citationsAttr || "[]"); } catch (_e) { citations = []; }
-
-          var payload = {
-            kind: "qualification-docx",
-            basePrefix: basePrefix,
-            variables: collectVariables(),
-            html: htmlOut,
-            citations: citations
-          };
-
-          fetch("/api/generate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-          })
-            .then(function (r) {
-              if (!r.ok) {
-                return r.json().then(function (d) {
-                  throw new Error((d && d.error) || ("HTTP " + r.status));
-                });
-              }
-              return r.blob();
-            })
-            .then(function (blob) {
-              var URL_ = window.URL || window.webkitURL;
-
-              if (blob && blob.size) {
-                var url = URL_.createObjectURL(blob);
-
-                var companyEl = (form && form.elements) ? form.elements.prospect_company : null;
-                var who = ((companyEl && companyEl.value) ? companyEl.value : "report")
-                  .replace(/\s+/g, "-");
-
-                var a = document.createElement("a");
-                a.href = url;
-                a.download = "lead-qualification_" + who + ".docx";
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL_.revokeObjectURL(url);
-
-                setStatus("Exported .docx");
-              } else {
-                throw new Error("empty-blob");
-              }
-            })
-            .catch(function () {
-              // Fallback: export current HTML instead
-              var URL_ = window.URL || window.webkitURL;
-              var htmlBlob = new Blob([(outputEl && outputEl.innerHTML) || ""], { type: "text/html" });
-              var url = URL_.createObjectURL(htmlBlob);
-              var a = document.createElement("a");
-              a.href = url;
-              a.download = "lead-qualification.html";
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
+    dlBtn?.addEventListener("click", () => {
+      const txt = outputEl?.textContent || "";
+      const who = (form?.elements?.prospect_company?.value || "report").trim().replace(/\s+/g, "-");
+      const blob = new Blob([txt], { type: "text/plain" });
+      const URL_ = window.URL || window.webkitURL;
+      const url = URL_.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `lead-qualification_${who}_${new Date().toISOString().slice(0,10)}.txt`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL_.revokeObjectURL(url);
+    });
+    docxBtn?.addEventListener("click", () => {
+      try {
+        setStatus("Preparing .docx…");
+        const payload = {
+          kind: "qualification-docx",
+          basePrefix,
+          variables: collectVariables(),
+          html: outputEl?.innerHTML || "",
+          citations: safeJson(outputEl?.getAttribute("data-citations")) || []
+        };
+        fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        })
+          .then(r => r.ok ? r.blob() : r.json().then(d => { throw new Error(d?.error || ("HTTP " + r.status)); }))
+          .then(blob => {
+            const URL_ = window.URL || window.webkitURL;
+            if (blob && blob.size) {
+              const url = URL_.createObjectURL(blob);
+              const who = (form?.elements?.prospect_company?.value || "report").replace(/\s+/g, "-");
+              const a = document.createElement("a");
+              a.href = url; a.download = `lead-qualification_${who}.docx`;
+              document.body.appendChild(a); a.click(); document.body.removeChild(a);
               URL_.revokeObjectURL(url);
-              setStatus("Exported HTML (server .docx not available).", "info");
-            });
-
-        } catch (e) {
-          setStatus("Could not export .docx", "error");
-        }
-      });
-    }
-    if (emailBtn) {
-      emailBtn.addEventListener("click", function () {
-        try {
-          var payload = {
-            kind: "qualification-email",
-            basePrefix: basePrefix,
-            variables: {
-              seller_name: ((form && form.elements && form.elements.seller_name && form.elements.seller_name.value) || "").trim(),
-              seller_company: ((form && form.elements && form.elements.seller_company && form.elements.seller_company.value) || "").trim(),
-              prospect_name: ((form && form.elements && form.elements.prospect_name && form.elements.prospect_name.value) || "").trim(),
-              prospect_role: ((form && form.elements && form.elements.prospect_role && form.elements.prospect_role.value) || "").trim(),
-              prospect_company: ((form && form.elements && form.elements.prospect_company && form.elements.prospect_company.value) || "").trim(),
-              buyer_type: ((form && form.elements && form.elements.buyer_type && form.elements.buyer_type.value) || "").trim()
-            },
-            reportMdText: localStorage.getItem(OUTPUT_KEY) || "",
-            notes: (notesArea && (notesArea.value || "")) || ""
-          };
-
-          setStatus("Building email…");
-
-          fetch("/api/generate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
+              setStatus("Exported .docx");
+            } else {
+              throw new Error("empty-blob");
+            }
           })
-            .then(function (r) {
-              return r.json().then(function (data) {
-                if (!r.ok) {
-                  throw new Error((data && data.error) || "Could not build email.");
-                }
-                return data;
-              });
-            })
-            .then(function (data) {
-              var email =
-                (data && data.email && data.email.text) ||
-                (data && data.followup && data.followup.email) ||
-                "";
+          .catch(() => {
+            // Fallback: export current HTML
+            const URL_ = window.URL || window.webkitURL;
+            const htmlBlob = new Blob([outputEl?.innerHTML || ""], { type: "text/html" });
+            const url = URL_.createObjectURL(htmlBlob);
+            const a = document.createElement("a");
+            a.href = url; a.download = "lead-qualification.html";
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL_.revokeObjectURL(url);
+            setStatus("Exported HTML (server .docx not available).", "info");
+          });
+      } catch { setStatus("Could not export .docx", "error"); }
+    });
+    emailBtn?.addEventListener("click", () => {
+      try {
+        const payload = {
+          kind: "qualification-email",
+          basePrefix,
+          variables: {
+            seller_name: (form.elements.seller_name?.value || "").trim(),
+            seller_company: (form.elements.seller_company?.value || "").trim(),
+            prospect_name: (form.elements.prospect_name?.value || "").trim(),
+            prospect_role: (form.elements.prospect_role?.value || "").trim(),
+            prospect_company: (form.elements.prospect_company?.value || "").trim(),
+            buyer_type: (form.elements.buyer_type?.value || "").trim()
+          },
+          reportMdText: localStorage.getItem(OUTPUT_KEY) || "",
+          notes: (notesArea?.value || "")
+        };
+        setStatus("Building email…");
+        fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        })
+          .then(r => r.json().then(data => { if (!r.ok) throw new Error(data?.error || "Could not build email."); return data; }))
+          .then(data => {
+            const email = data?.email?.text || data?.followup?.email || "";
+            if (email) {
+              const to = "";
+              const subj = `Summary: ${(form.elements.prospect_company?.value || "Lead")}`;
+              const href = "mailto:" + encodeURIComponent(to) + "?subject=" + encodeURIComponent(subj) + "&body=" + encodeURIComponent(email);
+              location.href = href;
+              setStatus("Email composed.");
+            } else {
+              setStatus("No email content produced.", "error");
+            }
+          })
+          .catch(e => { setStatus("Could not compose email", "error"); diag.open = true; diagJson.textContent = String(e?.message || e); });
+      } catch (e) { setStatus("Could not compose email", "error"); diag.open = true; diagJson.textContent = String(e?.message || e); }
+    });
 
-              if (email) {
-                var to = "";
-                var companyEl = (form && form.elements) ? form.elements.prospect_company : null;
-                var subj = "Summary: " + (((companyEl && companyEl.value) ? companyEl.value : "Lead"));
-                var href = "mailto:" + encodeURIComponent(to) +
-                  "?subject=" + encodeURIComponent(subj) +
-                  "&body=" + encodeURIComponent(email);
-                window.location.href = href;
-                setStatus("Email composed.");
-              } else {
-                setStatus("No email content produced.", "error");
-              }
-            })
-            .catch(function (e) {
-              setStatus("Could not compose email", "error");
-              if (diag && diagJson) { diag.open = true; diagJson.textContent = String((e && e.message) || e); }
-            });
-
-        } catch (e) {
-          setStatus("Could not compose email", "error");
-          if (diag && diagJson) { diag.open = true; diagJson.textContent = String((e && e.message) || e); }
-        }
-      });
-    }
     // CH modal
     chHelp?.addEventListener("click", () => chModal?.showModal());
     chClose?.addEventListener("click", () => chModal?.close());
@@ -955,153 +885,18 @@
       const res = await fetchIxbrl(num);
       setBusy(false);
       if (res.ok) {
-        renderIxbrlChips(res.data);
-        // attach to a hidden field for API
-        form.dataset.ixbrl = JSON.stringify(res.data?.summary || {});
+        const summary = res.data?.summary || res.data || {};
+        renderIxbrlChips({ summary });
+        form.dataset.ixbrl = JSON.stringify(summary);
       } else if (res.status === 204) {
         renderIxbrlChips(null);
-        form.dataset.ixbrl = JSON.stringify({}); // none
+        form.dataset.ixbrl = JSON.stringify({});
         setStatus("iXBRL not available; you can upload PDFs or enter metrics manually.", "info");
       }
     });
 
-    // Submit: build payload and call /api/generate
-    if (form) {
-      form.addEventListener("submit", function (e) {
-        e.preventDefault();
-        if (!allRequiredFilled()) return;
-
-        var values = collectVariables();
-        var ixbrlSummary = safeJson((form && form.dataset) ? form.dataset.ixbrl : null);
-
-        // Take up to 2 files safely
-        var filesList = (reportInput && reportInput.files) ? reportInput.files : [];
-        var files = [];
-        for (var i = 0; i < filesList.length && i < 2; i++) files.push(filesList[i]);
-
-        // Evidence guardrail note to the backend
-        var policy = { evidenceOnly: true, dropUnsupportedClaims: true };
-
-        setBusy(true);
-        setStatus("Generating qualification…");
-        if (diag) { diag.open = false; }
-        if (diagJson) { diagJson.textContent = ""; }
-
-        // helper to render success path
-        function two(n) { return (n < 10 ? "0" : "") + n; }
-        function handleData(data) {
-          var md =
-            (data && data.report && (data.report.md || data.report.text)) ||
-            data.text || data.markdown || "";
-
-          var citations =
-            (data && data.report && data.report.citations) ||
-            data.citations || data.sources || [];
-
-          var tips = data.tips || [];
-
-          if (!String(md).trim()) { throw new Error("Empty report returned from API."); }
-
-          var html = mdToHtml(md);
-          if (outputEl) outputEl.innerHTML = html;
-
-          // store citations in a data-* attr (avoid optional chaining)
-          if (outputEl) outputEl.setAttribute("data-citations", JSON.stringify(citations || []));
-
-          if (outputMeta) {
-            outputMeta.textContent =
-              (values.prospect_company || "—") + " · " +
-              (values.product_service || "—") + " · " +
-              (values.call_type || "—");
-          }
-
-          renderSources(citations);
-          // Qualification endpoint returns tips at data.tips (NOT data.script.tips)
-          const llmTips = Array.isArray(data?.tips) ? data.tips : [];
-          const buyerType = (form.elements.buyer_type?.value || "").trim();   // e.g. "Early majority"
-          const mode = (form.elements.call_type?.value || "").trim();         // "Direct" or "Partner"
-
-          // Fall back to your local bank only if the LLM didn’t return tips
-          const fallback = pickBankTips(qualTipsBank || {}, buyerType, mode);
-          renderTips(llmTips.length ? llmTips : fallback);
-          ;
-
-          // Enable actions now content exists
-          if (copyBtn) copyBtn.disabled = false;
-          if (dlBtn) dlBtn.disabled = false;
-          if (emailBtn) emailBtn.disabled = false;
-          if (docxBtn) docxBtn.disabled = false;
-
-          // Delta & activity
-          var old = localStorage.getItem(OUTPUT_KEY) || "";
-          var delta = computeDelta(old, md);
-          renderDelta(delta);
-          localStorage.setItem(OUTPUT_KEY, md);
-
-          var now = new Date();
-          var time = two(now.getHours()) + ":" + two(now.getMinutes());
-          addActivity({ time: time, product: values.product_service || "—", buyer: values.buyer_type || "—" });
-
-          setStatus("Done. (Generated from API)");
-          var ot = document.getElementById("output-title");
-          if (ot && ot.focus) { try { ot.focus(); } catch (_e) { } }
-        }
-
-        // common error path
-        function handleError(err) {
-          setStatus("Could not generate the report. See Diagnostics for details.", "error");
-          if (diag && diagJson) { diag.open = true; diagJson.textContent = String((err && err.message) || err); }
-        }
-
-        // send request (multipart when files present; JSON otherwise)
-        if (files.length) {
-          var fd = new FormData();
-          fd.append("kind", "lead-qualification");
-          fd.append("basePrefix", basePrefix);
-          fd.append("variables", JSON.stringify(values));
-          fd.append("ixbrlSummary", JSON.stringify(ixbrlSummary || {}));
-          fd.append("policy", JSON.stringify(policy));
-          for (var j = 0; j < files.length; j++) {
-            var f = files[j];
-            fd.append("files", f, f && f.name ? f.name : ("report-" + (j + 1) + ".pdf"));
-          }
-
-          fetch("/api/generate", { method: "POST", body: fd })
-            .then(function (resp) {
-              return resp.json().catch(function () { return {}; }).then(function (data) {
-                if (!resp.ok) { throw new Error((data && data.error) || ("API " + resp.status)); }
-                return data;
-              });
-            })
-            .then(handleData)
-            .catch(handleError)
-            .then(function () { setBusy(false); });
-        } else {
-          var body = {
-            kind: "lead-qualification",
-            basePrefix: basePrefix,
-            variables: values,
-            ixbrlSummary: ixbrlSummary || {},
-            policy: policy
-          };
-
-          fetch("/api/generate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body)
-          })
-            .then(function (resp) {
-              return resp.json().catch(function () { return {}; }).then(function (data) {
-                if (!resp.ok) { throw new Error((data && data.error) || ("API " + resp.status)); }
-                return data;
-              });
-            })
-            .then(handleData)
-            .catch(handleError)
-            .then(function () { setBusy(false); });
-        }
-      });
-    }
+    function safeJson(raw) { if (!raw) return null; try { return JSON.parse(raw); } catch { return null; } }
+    function num(x) { const n = Number(String(x || "").replace(/[,£\s]/g, "")); return Number.isFinite(n) ? n : null; }
 
     function collectVariables() {
       return {
@@ -1121,7 +916,6 @@
         contact_linkedins: (form.elements.contact_linkedins?.value || "").trim(),
         events: (form.elements.events?.value || "").trim(),
         buyer_type: (form.elements.buyer_type?.value || "").trim(),
-        // Manual metrics panel (optional)
         manual: {
           y1: {
             endDate: (document.getElementById("m_end_y1")?.value || "").trim(),
@@ -1142,8 +936,6 @@
         }
       };
     }
-    function safeJson(raw) { if (!raw) return null; try { return JSON.parse(raw); } catch { return null; } }
-    function num(x) { const n = Number(String(x || "").replace(/[,£\s]/g, "")); return Number.isFinite(n) ? n : null; }
 
     // Sales model mirror + remember
     callTypeSel?.addEventListener("change", () => {
@@ -1161,28 +953,17 @@
 
     // Notes
     saveNotesBtn?.addEventListener("click", saveNotes);
-    if (downloadNotesBtn) {
-      downloadNotesBtn.addEventListener("click", function () {
-        var companyEl = (form && form.elements) ? form.elements.prospect_company : null;
-        var who = (((companyEl && companyEl.value) ? companyEl.value : "notes")
-          .trim().replace(/\s+/g, "-"));
-
-        var txt = (notesArea && (notesArea.value || "")) || "";
-        var blob = new Blob([txt], { type: "text/plain" });
-
-        var URL_ = window.URL || window.webkitURL; // Safari fallback
-        var url = URL_.createObjectURL(blob);
-
-        var a = document.createElement("a");
-        a.href = url;
-        a.download = "qualification-notes_" + who + "_" + new Date().toISOString().slice(0, 10) + ".txt";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-
-        URL_.revokeObjectURL(url);
-      });
-    }
+    downloadNotesBtn?.addEventListener("click", () => {
+      const who = (form?.elements?.prospect_company?.value || "notes").trim().replace(/\s+/g, "-");
+      const txt = notesArea?.value || "";
+      const blob = new Blob([txt], { type: "text/plain" });
+      const URL_ = window.URL || window.webkitURL;
+      const url = URL_.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `qualification-notes_${who}_${new Date().toISOString().slice(0,10)}.txt`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL_.revokeObjectURL(url);
+    });
 
     // Enable submit
     function enableSubmitIfValid() {
@@ -1190,12 +971,114 @@
       if (submitBtn) submitBtn.disabled = !allRequiredFilled();
     }
 
-    // Form events
+    // Form input persistence & validation
     document.addEventListener("input", (e) => {
-      if (e.target.closest("#" + FORM_ID)) {
+      if (e.target.closest && e.target.closest("#" + FORM_ID)) {
         validateField(e.target.id);
         saveForm();
         enableSubmitIfValid();
+      }
+    });
+
+    // Submit: build payload and call /api/generate
+    form?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (!allRequiredFilled()) return;
+
+      const values = collectVariables();
+      const ixbrlSummary = safeJson(form.dataset.ixbrl);
+      const files = Array.from(reportInput?.files || []).slice(0, 2); // optional
+
+      const policy = { evidenceOnly: true, dropUnsupportedClaims: true };
+
+      setBusy(true);
+      setStatus("Generating qualification…");
+      if (diag) diag.open = false;
+      if (diagJson) diagJson.textContent = "";
+
+      function two(n) { return (n < 10 ? "0" : "") + n; }
+      function handleData(data) {
+        const md =
+          (data?.report && (data.report.md || data.report.text)) ||
+          data?.text || data?.markdown || "";
+        const citations =
+          (data?.report && data.report.citations) ||
+          data?.citations || data?.sources || [];
+        const tipsFromModel = Array.isArray(data?.tips) ? data.tips : [];
+
+        if (!String(md).trim()) throw new Error("Empty report returned from API.");
+
+        const html = mdToHtml(md);
+        outputEl && (outputEl.innerHTML = html);
+        outputEl && outputEl.setAttribute("data-citations", JSON.stringify(citations || []));
+
+        outputMeta && (outputMeta.textContent =
+          `${values.prospect_company || "—"} · ${values.product_service || "—"} · ${values.call_type || "—"}`);
+
+        renderSources(citations);
+
+        // Tips: prefer model → else bank; then merge with AUTO_TIPS
+        const buyerType = (form.elements.buyer_type?.value || "").trim();
+        const mode = (form.elements.call_type?.value || "").trim();
+        BASE_TIPS = tipsFromModel.length ? tipsFromModel : pickBankTips(buyerType, mode);
+        renderTips();
+
+        // Enable actions
+        copyBtn && (copyBtn.disabled = false);
+        dlBtn && (dlBtn.disabled = false);
+        emailBtn && (emailBtn.disabled = false);
+        docxBtn && (docxBtn.disabled = false);
+
+        // Delta & activity
+        const old = localStorage.getItem(OUTPUT_KEY) || "";
+        const delta = computeDelta(old, md);
+        renderDelta(delta);
+        localStorage.setItem(OUTPUT_KEY, md);
+
+        const now = new Date();
+        const time = two(now.getHours()) + ":" + two(now.getMinutes());
+        addActivity({ time, product: values.product_service || "—", buyer: values.buyer_type || "—" });
+
+        setStatus("Done. (Generated from API)");
+        document.getElementById("output-title")?.focus();
+      }
+
+      function handleError(err) {
+        setStatus("Could not generate the report. See Diagnostics for details.", "error");
+        if (diag && diagJson) { diag.open = true; diagJson.textContent = String(err?.message || err); }
+      }
+
+      if (files.length) {
+        const fd = new FormData();
+        fd.append("kind", "lead-qualification");
+        fd.append("basePrefix", basePrefix);
+        fd.append("variables", JSON.stringify(values));
+        fd.append("ixbrlSummary", JSON.stringify(ixbrlSummary || {}));
+        fd.append("policy", JSON.stringify(policy));
+        files.forEach((f, i) => fd.append("files", f, f?.name || `report-${i + 1}.pdf`));
+
+        fetch("/api/generate", { method: "POST", body: fd })
+          .then(resp => resp.json().catch(() => ({})).then(data => { if (!resp.ok) throw new Error(data?.error || ("API " + resp.status)); return data; }))
+          .then(handleData)
+          .catch(handleError)
+          .finally(() => setBusy(false));
+      } else {
+        const body = {
+          kind: "lead-qualification",
+          basePrefix,
+          variables: values,
+          ixbrlSummary: ixbrlSummary || {},
+          policy
+        };
+        fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        })
+          .then(resp => resp.json().catch(() => ({})).then(data => { if (!resp.ok) throw new Error(data?.error || ("API " + resp.status)); return data; }))
+          .then(handleData)
+          .catch(handleError)
+          .finally(() => setBusy(false));
       }
     });
 
@@ -1208,64 +1091,25 @@
           localStorage.removeItem(OUTPUT_KEY);
           localStorage.removeItem(notesKey());
         } catch { }
-        outputEl.innerHTML = "";
-        sourceList.innerHTML = "";
-        sourcesCard.style.display = "none";
-        flagsList.innerHTML = "";
-        tipsList.innerHTML = "";
-        tipsEmpty.style.display = "";
-        ixbrlChips.innerHTML = "";
-        statusEl.textContent = "";
-        copyBtn.disabled = true; dlBtn.disabled = true; emailBtn.disabled = true; docxBtn.disabled = true;
-        document.querySelector(".panel.left")?.scrollTo({ top: 0, behavior: "instant" });
+        outputEl && (outputEl.innerHTML = "");
+        sourceList && (sourceList.innerHTML = "");
+        sourcesCard && (sourcesCard.style.display = "none");
+        flagsList && (flagsList.innerHTML = "");
+        tipsList && (tipsList.innerHTML = "");
+        tipsEmpty && (tipsEmpty.style.display = "");
+        ixbrlChips && (ixbrlChips.innerHTML = "");
+        statusEl && (statusEl.textContent = "");
+        copyBtn && (copyBtn.disabled = true);
+        dlBtn && (dlBtn.disabled = true);
+        emailBtn && (emailBtn.disabled = true);
+        docxBtn && (docxBtn.disabled = true);
+        document.querySelector(".panel.left")?.scrollTo({ top: 0, behavior: "auto" });
         document.getElementById("seller_name")?.focus();
+        BASE_TIPS = []; AUTO_TIPS = []; renderTips();
       });
     });
 
-    // ==== Tips bank (loads qualification-tips.json next to this HTML) ====
-    const TIPS_URL = "./qualification-tips.json";
-
-    // Safe fetch with fallback to a built-in default bank if the JSON is missing
-    async function loadTipsBank() {
-      try {
-        const res = await fetch(TIPS_URL, { cache: "no-store" });
-        if (res.ok) return await res.json();
-      } catch { }
-      // Built-in fallback so the UI still shows something if the file is absent
-      return {
-        default: [
-          "Lead with evidence — quote the source inline.",
-          "Map each pain to one measurable outcome.",
-          "Offer a single, low-friction next step."
-        ],
-        byBuyerType: {},
-        byMode: {}
-      };
-    }
-
-    function pickBankTips(bank, buyerType, mode) {
-      const byType = (bank.byBuyerType && bank.byBuyerType[String(buyerType || "").toLowerCase()]) || [];
-      const byMode = (bank.byMode && bank.byMode[String(mode || "").toLowerCase()]) || [];
-      const def = bank.default || [];
-      // Prioritise buyerType, then mode, then default; cap to 3 items
-      return [...byType, ...byMode, ...def].filter(Boolean).slice(0, 3);
-    }
-
-    // Keep using your existing renderTips(tipsArray) function.
-    // If you don't have it yet, use this:
-    function renderTips(arr) {
-      const ul = document.getElementById("tips-list");
-      if (!ul) return;
-      ul.innerHTML = "";
-      (arr || []).forEach(t => {
-        const li = document.createElement("li");
-        li.textContent = t;
-        ul.appendChild(li);
-      });
-    }
-
-
-    // Init
+    // ==== Init ====
     (async function init() {
       try {
         const me = await fetch("/.auth/me", { cache: "no-store" });
@@ -1279,18 +1123,20 @@
       loadForm(); loadCallPref();
       if (callTypeSelXs && callTypeSel) callTypeSelXs.value = callTypeSel.value || "";
       updateMapIndicator();
-      const TIPS_URL = "./assets/qualification-tips.json";
-      let qualTipsBank = await loadTipsBank(TIPS_URL);
+
+      await loadTipsBank(); // populate QUAL_TIPS
 
       // Preload “financial analysis needed” nudge if CH missing
-      const ch = (form.elements.company_number?.value || "").trim();
+      const ch = (form?.elements?.company_number?.value || "").trim();
       if (!ch) document.getElementById("company_number_hint").style.display = "";
 
       enableSubmitIfValid();
       renderActivity();
+
+      // Render initial (empty) tips state
+      renderTips();
     })();
   </script>
-  <script src="./lead-qualification.js" defer></script>
+  <!-- Removed stray <script src="./lead-qualification.js"> to avoid 404 -->
 </body>
-
 </html>
