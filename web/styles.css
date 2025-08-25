@@ -74,7 +74,7 @@ h2,
 h3 {
   margin: 0 0 var(--s-2);
   line-height: 1.2;
-  font-weight: 600;
+  font-weight: 550;
 }
 
 h1 {
@@ -141,7 +141,7 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: clamp(18px, 0.6vw + 16px, 22px);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .kicker {
@@ -192,7 +192,7 @@ h3 {
 }
 
 .calltype-mini .mini-label {
-  font-weight: 600;
+  font-weight: 550;
 }
 
 .calltype-mini select {
@@ -318,7 +318,7 @@ fieldset {
 .card>legend {
   display: block;
   font-size: 1.05rem;
-  font-weight: 700;
+  font-weight: 600;
   margin: 0 0 var(--s-2);
 }
 
@@ -335,7 +335,7 @@ fieldset {
   counter-increment: section;
   content: counter(section) ". ";
   color: var(--accent);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 /* Form grid & fields */
@@ -355,7 +355,7 @@ fieldset {
 
 label {
   font-size: .95rem;
-  font-weight: 600;
+  font-weight: 550;
 }
 
 input,
@@ -447,7 +447,7 @@ textarea.invalid {
   border-radius: 999px;
   border: 1px solid #e5e8ee;
   background: #fff;
-  font-weight: 600;
+  font-weight: 550;
   cursor: pointer;
 }
 
@@ -618,7 +618,7 @@ textarea.invalid {
 
 .intel-grid h3 {
   font-size: .95rem;
-  font-weight: 600;
+  font-weight: 550;
   margin: 0 0 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--border);
@@ -667,7 +667,7 @@ textarea.invalid {
 
 .tips-card h3 {
   font-size: .95rem;
-  font-weight: 600;
+  font-weight: 550;
   margin: 0 0 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--border);
@@ -915,7 +915,7 @@ select:not([multiple]) {
 /* title underline like Buyer Needs */
 .tips-card h3{
   font-size:.95rem;
-  font-weight:600;
+  font-weight:550;
   margin:0 0 8px;
   padding-bottom:6px;
   border-bottom:1px solid var(--border);
@@ -939,3 +939,29 @@ select:not([multiple]) {
   font-size:.85rem;
   color:var(--text-2);
 }
+
+/* Make the [hidden] attribute win over our custom display rules */
+[hidden] { display: none !important; }
+
+/* === Output sizing: make generated script text smaller =================== */
+:root{
+  /* tweak these two numbers to taste */
+  --fs-output: clamp(12px, 0.2vw + 10x, 14px);
+  --fs-output-h3: clamp(13px, 0.24vw + 12px, 14px);
+}
+
+.output{
+  font-size: var(--fs-output);
+  line-height: 1.4; /* a touch tighter than the site default */
+}
+
+/* headings inside the generated script */
+.output .script-sec > h3{
+  font-size: var(--fs-output-h3);
+  margin: 0 0 6px;
+}
+
+/* optional: tighten paragraph + list spacing slightly */
+.output p{ margin: 6px 0; }
+.output ul{ margin: 6px 0 0 1.1rem; }
+.output li{ margin: 3px 0; }
