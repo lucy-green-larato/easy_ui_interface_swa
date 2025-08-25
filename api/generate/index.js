@@ -716,67 +716,47 @@ module.exports = async function (context, req) {
     context.log("[" + VERSION + "] handler start");
 
     // ---- Robust body parsing
-    var incoming = req.body;
-    if (typeof incoming === "string") {
-      try { incoming = JSON.parse(incoming); } catch (e) { incoming = {}; }
-    }
-    const body = incoming || {};
-    const kind = String((body && body.kind) || "").toLowerCase();
+    // ---- Robust body parsing (multipart-aware)
+    const ct = String((req.headers && (req.headers["content-type"] || req.headers["Content-Type"])) || "");
+    const isMultipart = /multipart\/form-data/i.test(ct);
 
-    function buildFollowupPrompt({ seller, prospect, tone, scriptMdText, callNotes }) {
-      return (
-        `You are a UK B2B salesperson. Draft a concise follow-up email after a discovery call.
+    // We’ll reuse these later if multipart:
+    let multipartCached = null;
+    let body = {};
+    let kind = "";
 
-Tone: ${tone}.
-Output: Plain text email with:
-- Subject line
-- Greeting ("Hello ${prospect.name},")
-- 2–3 short paragraphs that stitch together (1) the prepared call talking points and (2) the salesperson's call notes (prioritise the notes)
-- A single clear next step
-- Signature as "${seller.name}, ${seller.company}"
-
-Prepared talking points (from the script the rep used on the call):
-${scriptMdText || "(none)"}
-
-Salesperson's notes (verbatim):
-${callNotes || "(none)"}`
-      );
-    }
-
-    if (kind === 'call-followup') {
-      const vars = { ...(body || {}), ...(body.variables || {}) };
-      const prompt = buildFollowupPrompt({
-        seller: { name: vars.seller_name || "", company: vars.seller_company || "" },
-        prospect: { name: vars.prospect_name || "", role: vars.prospect_role || "", company: vars.prospect_company || "" },
-        tone: vars.tone || "",
-        scriptMdText: String(body.scriptMdText || ""),
-        callNotes: String(body.callNotes || "")
-      });
-
-      const llmRes = await callModel({
-        system: "You write crisp UK business emails. No pleasantries. Keep it short and specific.",
-        prompt,
-        temperature: 0.5,
-      });
-
-      const email = extractText(llmRes) || "";
-      context.res = { status: 200, headers: cors, body: { followup: { email }, version: VERSION } };
-      return;
+    if (isMultipart) {
+      // Parse fields first so we can read `kind`
+      multipartCached = await parseMultipart(req);
+      body = multipartCached.fields || {};
+      kind = String(body.kind || "").toLowerCase();
+    } else {
+      let incoming = req.body;
+      if (typeof incoming === "string") {
+        try { incoming = JSON.parse(incoming); } catch { incoming = {}; }
+      }
+      body = incoming || {};
+      kind = String(body.kind || "").toLowerCase();
     }
 
     // ======================= NEW: lead-qualification =======================
     if (kind === "lead-qualification") {
       // Accept JSON or multipart (PDF uploads)
-      const isMultipart = /multipart\/form-data/i.test(req.headers["content-type"] || "");
+      const isMultipartNow = /multipart\/form-data/i.test(
+        String((req.headers && (req.headers["content-type"] || req.headers["Content-Type"])) || "")
+      );
+
       let fields = {}, files = [];
-      if (isMultipart) {
-        const m = await parseMultipart(req);
+      if (isMultipartNow) {
+        const m = multipartCached || await parseMultipart(req); // reuse if available
         fields = m.fields || {};
         // accept up to 2 PDFs as per UI
-        files = (m.files || []).filter(f => /^application\/pdf\b/i.test(f.contentType || "")).slice(0, 2);
+        files = (m.files || [])
+          .filter(f => /^application\/pdf\b/i.test(f.contentType || ""))
+          .slice(0, 2);
       } else {
-        fields = req.body || {};
-        files = []; // JSON-only path (no PDFs)
+        fields = body || {};   // body already parsed above
+        files = [];            // JSON-only path (no PDFs)
       }
 
       // Variables from client
