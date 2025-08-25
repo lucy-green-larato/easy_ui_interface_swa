@@ -151,6 +151,18 @@ const ScriptJsonSchema = z.object({
   summary_bullets: z.array(z.string()).min(6).max(12)  // NEW: concise outline
 });
 
+// Model output schema for lead-qualification
+const QualSchema = z.object({
+  report: z.object({
+    md: z.string().min(100),
+    citations: z.array(z.object({
+      label: z.string().min(1),
+      url: z.string().min(1).optional()
+    })).optional()
+  }),
+  tips: z.array(z.string()).min(3).max(3)
+});
+
 function extractText(res) {
   if (!res) return "";
   if (typeof res === "string") return res;
@@ -461,6 +473,197 @@ ${templateMdText}
   );
 }
 
+// ==== NEW HELPERS for lead-qualification ====
+const Busboy = require("busboy");
+const pdfParse = require("pdf-parse");
+const htmlDocx = require("html-docx-js");
+
+function jparse(x, fallback) { try { return x && typeof x === "string" ? JSON.parse(x) : (x || fallback); } catch { return fallback; } }
+
+function parseMultipart(req, opts) {
+  opts = opts || {};
+  var MAX_FILES = typeof opts.maxFiles === "number" ? opts.maxFiles : 2;
+  var MAX_BYTES = typeof opts.maxFileBytes === "number" ? opts.maxFileBytes : (15 * 1024 * 1024); // 15 MB cap
+
+  return new Promise(function (resolve, reject) {
+    try {
+      // Content-Type must be multipart/form-data
+      var ct = (req.headers && (req.headers["content-type"] || req.headers["Content-Type"])) || "";
+      if (!/multipart\/form-data/i.test(ct)) {
+        return reject(new Error("Not multipart/form-data"));
+      }
+
+      var Busboy_ = Busboy || require("busboy");
+      var bb = Busboy_({ headers: req.headers || {} });
+
+      var fields = {};
+      var files = [];
+      var totalBytes = 0;
+
+      bb.on("file", function (fieldname, file, info) {
+        var chunks = [];
+        var filename = (info && (info.filename || info.fileName)) || "file";
+        var contentType = (info && (info.mimeType || info.mimetype)) || "application/octet-stream";
+
+        file.on("data", function (d) {
+          totalBytes += d.length;
+          if (totalBytes > MAX_BYTES) {
+            // Prevent memory blow-ups on huge uploads
+            file.resume();
+            bb.emit("error", new Error("File too large"));
+            return;
+          }
+          chunks.push(d);
+        });
+
+        file.on("end", function () {
+          if (files.length < MAX_FILES) {
+            files.push({
+              fieldname: fieldname,
+              filename: filename,
+              contentType: contentType,
+              buffer: Buffer.concat(chunks)
+            });
+          }
+        });
+      });
+
+      bb.on("field", function (name, val) {
+        fields[name] = val;
+      });
+
+      bb.on("error", function (err) { reject(err); });
+      bb.on("finish", function () { resolve({ fields: fields, files: files }); });
+
+      // Azure Functions may give you body (Buffer) or rawBody (string).
+      var raw =
+        Buffer.isBuffer(req.body) ? req.body :
+          Buffer.isBuffer(req.rawBody) ? req.rawBody :
+            (typeof req.body === "string" ? Buffer.from(req.body) :
+              typeof req.rawBody === "string" ? Buffer.from(req.rawBody) :
+                Buffer.alloc(0));
+
+      bb.end(raw);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+async function extractPdfTexts(fileObjs) {
+  const out = [];
+  for (let i = 0; i < fileObjs.length; i++) {
+    const f = fileObjs[i];
+    try {
+      const parsed = await pdfParse(f.buffer);
+      const text = (parsed && parsed.text) ? String(parsed.text).replace(/\r/g, "").trim() : "";
+      out.push({ filename: f.filename || ("report-" + (i + 1) + ".pdf"), text });
+    } catch (e) {
+      out.push({ filename: f.filename || ("report-" + (i + 1) + ".pdf"), text: "" });
+    }
+  }
+  return out;
+}
+
+async function fetchUrlText(url, context) {
+  try {
+    const r = await fetch(url, {
+      headers: { "User-Agent": "inside-track-tools/" + VERSION }
+    });
+    if (!r.ok) return "";
+    const html = await r.text();
+    // very light HTML→text (avoid heavy deps)
+    return String(html || "")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 150000); // cap to keep prompts sane
+  } catch (e) {
+    try { context && context.log && context.log("[fetchUrlText] " + e.message); } catch { }
+    return "";
+  }
+}
+
+// Evidence-only, JSON-returning prompt for qualification
+function buildQualificationJsonPrompt(args) {
+  const v = args.values || {};
+  const callType = String(v.call_type || "").toLowerCase().startsWith("p") ? "Partner" : "Direct";
+  const ix = args.ixbrl || {};
+  const pdfs = args.pdfs || []; // [{filename,text}]
+  const websiteText = args.websiteText || ""; // distilled text
+  const websiteUrl = v.prospect_website || "";
+  const linkedinUrl = v.company_linkedin || v.linkedin_company || v.linkedin_url || "";
+  const contactLinks = (v.linkedin_contacts || v.key_contacts_linkedin || "");
+  const events = (v.events || v.event_names || "");
+
+  // Compact iXBRL for the model (years[0] is most recent if your ixbrl API sorted it)
+  const ixBrief = JSON.stringify(ix && ix.years ? ix.years : (ix.summary && ix.summary.years) || ix);
+
+  const pdfBundle = pdfs
+    .map(p => ("--- PDF: " + (p.filename || "report.pdf") + " ---\n" + (p.text || "")))
+    .join("\n\n");
+
+  const websiteBlock = websiteText ? ("--- WEBSITE TEXT (" + websiteUrl + ") ---\n" + websiteText) : "";
+
+  const directives = [
+    "You are a top-performing UK B2B/channel salesperson and GTM strategist.",
+    "Output **valid JSON only** (no markdown outside JSON).",
+    "Only make claims you can evidence from the provided sources (PDFs, iXBRL summary, and any website text we included).",
+    "If you cannot evidence an item (e.g., 2025 trade-show attendance), write a clear 'No public evidence found' line for that bullet.",
+    "Do not generalise. No assumptions. UK business English."
+  ].join("\n");
+
+  return (
+    `${directives}
+
+JSON schema:
+{
+  "report": {
+    "md": string,              // markdown with these headings ONLY and in this exact order:
+                               // "Here’s a partner-readiness, evidence-only view of {Company}..."
+                               // ## Company profile (what we can evidence)
+                               // ## Pain points
+                               // ## Relationship value
+                               // ## Decision-making process
+                               // ## Competition & differentiation
+                               // ## Bottom line
+                               // ## What we could not evidence (and why)
+                               // If call_type = Partner, append:
+                               // ## Partner-readiness risks & mitigations
+    "citations": [ { "label": string, "url": string } ] // include any sources you actually used that have URLs (website/LinkedIn). PDFs are cited as filenames only.
+  },
+  "tips": [string, string, string]  // 3 concise tips for reps using this analysis
+}
+
+Constraints for the markdown:
+- Be specific. Use exact figures from iXBRL where present: turnover, gross profit, employees, cash/current assets/liabilities, etc. Include year labels.
+- If no income statement is filed (small-companies regime), say so explicitly and use balance-sheet items you *do* have.
+- Trade-shows: only estimate budgets/opportunity counts **if** you found actual attendance this calendar year in the provided sources; otherwise state estimates not applicable.
+- Decision-makers: list those **only** if they’re named in PDFs/website text included; otherwise say “No public evidence in provided sources.”
+- Keep each section tight and skimmable; bullets are fine where useful.
+
+Context you may use *as evidence*:
+- CALL_TYPE: ${callType}
+- Prospect company: ${v.prospect_company || ""}
+- Prospect website: ${websiteUrl || "(not provided)"}
+- Company LinkedIn: ${linkedinUrl || "(not provided / gated)"}
+- Contact LinkedIn(s): ${contactLinks || "(none provided)"}
+- Event names given by seller (don’t assume attendance; treat as hints only): ${events || "(none provided)"}
+
+iXBRL summary (most recent first, include year labels if you quote numbers):
+${ixBrief}
+
+${websiteBlock}
+
+${pdfBundle}
+`
+  );
+}
+
+
+
 /* ----------------------------- Legacy schema ---------------------------- */
 
 const BodySchema = z.object({
@@ -559,6 +762,153 @@ ${callNotes || "(none)"}`
       const email = extractText(llmRes) || "";
       context.res = { status: 200, headers: cors, body: { followup: { email }, version: VERSION } };
       return;
+    }
+
+    // ======================= NEW: lead-qualification =======================
+    if (kind === "lead-qualification") {
+      // Accept JSON or multipart (PDF uploads)
+      const isMultipart = /multipart\/form-data/i.test(req.headers["content-type"] || "");
+      let fields = {}, files = [];
+      if (isMultipart) {
+        const m = await parseMultipart(req);
+        fields = m.fields || {};
+        // accept up to 2 PDFs as per UI
+        files = (m.files || []).filter(f => /^application\/pdf\b/i.test(f.contentType || "")).slice(0, 2);
+      } else {
+        fields = req.body || {};
+        files = []; // JSON-only path (no PDFs)
+      }
+
+      // Variables from client
+      const vars = jparse(fields.variables, fields.variables || {});
+      const ixbrl = jparse(fields.ixbrlSummary, fields.ixbrlSummary || {});
+      const policy = jparse(fields.policy, fields.policy || {});
+      const basePrefix = String(fields.basePrefix || "").trim();
+
+      // Prospect links (optional)
+      const websiteUrl = String(vars.prospect_website || "").trim();
+      const linkedinUrl = String(vars.company_linkedin || vars.linkedin_company || "").trim();
+
+      // Extract PDF texts (OCR PDFs expected)
+      const pdfTexts = files.length ? await extractPdfTexts(files) : [];
+
+      // Fetch website text (LinkedIn is gated; we keep URL only for citations)
+      const websiteText = websiteUrl ? await fetchUrlText(websiteUrl, context) : "";
+
+      // Build JSON-only prompt
+      const prompt = buildQualificationJsonPrompt({
+        values: vars,
+        ixbrl,
+        pdfs: pdfTexts,
+        websiteText
+      });
+
+      // Call LLM (json_object format)
+      const llmRes = await callModel({
+        system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.",
+        prompt: prompt,
+        temperature: 0.4,
+        response_format: { type: "json_object" }
+      });
+      const raw = extractText(llmRes) || "";
+      let parsed = {};
+      try { parsed = JSON.parse(raw); } catch (e) { }
+
+      const valid = QualSchema.safeParse(parsed);
+      if (!valid.success) {
+        context.res = {
+          status: 502,
+          headers: cors,
+          body: { error: "Model returned invalid JSON for qualification", issues: String(valid.error), version: VERSION }
+        };
+        return;
+      }
+
+      // Merge server-known citations (PDFs, iXBRL link, website) so the UI can render them
+      const citations = [];
+      if (websiteUrl) citations.push({ label: "Company website", url: websiteUrl });
+      if (linkedinUrl) citations.push({ label: "Company LinkedIn", url: linkedinUrl });
+
+      // Try to derive a Companies House link if we have a company number
+      const chNum = String(vars.ch_number || vars.company_number || vars.companies_house_number || "").trim();
+      if (chNum) {
+        citations.push({
+          label: "Companies House (iXBRL/filings)",
+          url: "https://find-and-update.company-information.service.gov.uk/company/" + encodeURIComponent(chNum)
+        });
+      }
+
+      // Add PDF “citations” as filenames (no URL)
+      for (let i = 0; i < pdfTexts.length; i++) {
+        citations.push({ label: "Annual report: " + (pdfTexts[i].filename || ("report-" + (i + 1) + ".pdf")) });
+      }
+
+      const modelCitations = Array.isArray(valid.data.report.citations) ? valid.data.report.citations : [];
+      const mergedCites = [].concat(modelCitations, citations);
+
+      context.res = {
+        status: 200,
+        headers: cors,
+        body: {
+          report: { md: valid.data.report.md, citations: mergedCites },
+          tips: valid.data.tips || [],
+          version: VERSION,
+          usedModel: true,
+          mode: "qualification"
+        }
+      };
+      return;
+    }
+
+    // ======================= NEW: qualification-email =======================
+    if (kind === "qualification-email") {
+      const v = body.variables || {};
+      const co = (v.prospect_company || "Lead");
+      const notes = (body.notes || "").trim();
+      const report = (body.reportMdText || "").trim();
+
+      const prompt =
+        "You are a UK B2B salesperson. Draft a concise follow-up email based on the attached qualification report and the rep’s notes.\n" +
+        "Constraints:\n" +
+        "- UK business English; no pleasantries (no 'Hope you’re well').\n" +
+        "- Plain text output.\n" +
+        "- Include: Subject line; Greeting ('Hello " + (v.prospect_name || "").split(" ")[0] + ",');\n" +
+        "  2 short paragraphs stitching evidence from the report; one clear next step; signature '" + (v.seller_name || "") + ", " + (v.seller_company || "") + "'.\n\n" +
+        "--- REPORT (markdown) ---\n" + report + "\n\n" +
+        "--- NOTES (verbatim) ---\n" + (notes || "(none)") + "\n";
+
+      const llmRes = await callModel({
+        system: "Write crisp UK business emails. No small talk. Specific and short.",
+        prompt: prompt,
+        temperature: 0.5
+      });
+      const email = extractText(llmRes) || "";
+
+      context.res = { status: 200, headers: cors, body: { email: { text: email }, version: VERSION } };
+      return;
+    }
+
+    // ======================= NEW: qualification-docx =======================
+    if (kind === "qualification-docx") {
+      // Expecting HTML (your front-end sends the rendered HTML of the report)
+      const html = String(body.html || "<p>No content</p>");
+      try {
+        const buffer = htmlDocx.asBlob(html); // returns Buffer
+        context.res = {
+          status: 200,
+          headers: {
+            ...cors,
+            "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "Content-Disposition": "attachment; filename=lead-qualification.docx"
+          },
+          body: buffer
+        };
+        return;
+      } catch (e) {
+        // Fallback to HTML if conversion failed
+        context.res = { status: 200, headers: { ...cors, "Content-Type": "text/html; charset=utf-8" }, body: html };
+        return;
+      }
     }
 
     // ---------- Markdown-first route ----------
