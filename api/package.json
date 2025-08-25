@@ -1,12 +1,17 @@
 {
   "name": "swa-api",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
+  "description": "Azure Functions API for Inside Track Tools (lead qualification, call scripts, exports).",
+  "license": "MIT",
   "type": "commonjs",
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
+    "busboy": "^1.6.0",
+    "html-docx-js": "^0.3.1",
+    "pdf-parse": "^1.1.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -14,10 +19,15 @@
     "ajv-cli": "^5.0.0"
   },
   "scripts": {
+    "start": "func start",
     "validate:calllib": "ajv validate -s ./schemas/call-library.schema.json -d './web/content/call-library/v1/**/*.json'"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": ""
+  "keywords": [
+    "azure-functions",
+    "swa",
+    "lead-qualification",
+    "ixbrl",
+    "docx"
+  ],
+  "author": ""
 }
