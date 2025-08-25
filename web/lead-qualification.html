@@ -4,94 +4,41 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Inside Track Tools · Lead Qualification</title>
-  <link rel="stylesheet" href="./styles.css?v=fix4" />
-  <style>
-    .panel.middle .output-card {
-      position: sticky;
-      top: calc(var(--header-h) + 12px);
-      z-index: 5;
-    }
-
-    .output {
-      white-space: pre-wrap;
-      background: #fff;
-      color: #111827;
-      border: 1px solid var(--border);
-      padding: 14px;
-      border-radius: 12px;
-      min-height: 240px;
-      outline: none;
-      resize: vertical;
-    }
-
-    .status {
-      margin-top: var(--s-2);
-      min-height: 1.2rem;
-      color: var(--text-2)
-    }
-
-    .status[data-kind="error"] {
-      color: var(--danger)
-    }
-
-    .status[data-kind="ok"] {
-      color: var(--ok)
-    }
-
-    .sources-list ul {
-      margin: .5rem 0 0 1.1rem
-    }
-
-    /* logo sizing consistent with index */
-    .logo {
-      height: 44px;
-      width: auto;
-      display: block
-    }
-
-    @media (max-width:640px) {
-      .logo {
-        height: 36px
-      }
-    }
-
-    /* action button group */
-    .action-group {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap
-    }
-
-    .btn.secondary {
-      background: #fff;
-      border: 1px solid var(--border)
-    }
-
-    .btn.primary:disabled,
-    .btn.secondary:disabled {
-      opacity: .6;
-      cursor: not-allowed
-    }
-  </style>
+  <title>Inside Track Tools · Lead qualification</title>
+  <link rel="stylesheet" href="./styles.css?v=2025-08-24-1">
 </head>
 
 <body>
-
-  <!-- HEADER -->
+  <!-- HEADER (reused shell) -->
   <header class="app-header" role="banner">
     <div class="header-left">
-      <img class="logo" src="./assets/larato-logo.svg" alt="Larato" />
+      <img class="logo" src="./assets/larato-logo-bullet.svg" alt="Larato Inside Track Sales Tools" />
       <div class="brand-text">
         <h1 class="app-title">Inside Track Tools</h1>
-        <p class="kicker">Lead qualification briefing</p>
+        <p class="kicker">Lead qualification</p>
       </div>
     </div>
     <div class="header-right">
-      <label class="model-note" style="gap:.5rem">
-        <input type="checkbox" id="remember"> Remember
-      </label>
+      <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
+        <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
+        <select id="call_type" name="call_type" form="qual-form" required aria-describedby="call_type_error">
+          <option value="">Select…</option>
+          <option>Direct</option>
+          <option>Partner</option>
+        </select>
+        <label class="remember">
+          <input type="checkbox" id="remember_call_type" form="qual-form" /> Remember
+        </label>
+        <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
+      </div>
+
+      <span class="model-note">
+        <span class="label">Sales model in use:</span>
+        <strong id="map-label">Direct</strong>
+      </span>
+
       <button id="help" class="btn inline" type="button" title="About this tool">Help</button>
+
       <span id="user-badge" class="badge is-hidden" aria-live="polite" aria-atomic="true">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="12" cy="7" r="4"></circle>
@@ -104,843 +51,1192 @@
 
   <!-- LAYOUT -->
   <main id="main" class="layout" role="main">
-    <!-- LEFT: INPUTS -->
-    <section class="panel left" aria-label="Input form">
-      <form id="lq-form" novalidate>
-        <!-- Seller details -->
-        <fieldset class="card" aria-labelledby="legend-supplier">
-          <legend id="legend-supplier">Your details</legend>
+    <!-- LEFT -->
+    <section class="panel left" aria-label="Form">
+      <form id="qual-form" novalidate>
+        <!-- Sales model indicator -->
+        <div class="card" style="margin-bottom:var(--s-4)">
+          <p><strong>Sales model in use:</strong> <span id="model-indicator">Direct</span> <span class="muted">· Model
+              can be changed above.</span></p>
+        </div>
+
+        <fieldset class="card" aria-labelledby="legend-person">
+          <legend id="legend-person">People</legend>
           <div class="grid-2">
             <div class="field">
               <label for="seller_name">Your name <span aria-hidden="true" class="req">*</span></label>
               <input id="seller_name" name="seller_name" required autocomplete="name" />
               <p class="error" id="seller_name_error" role="alert" aria-live="polite"></p>
             </div>
+
+            <!-- Mobile-only mirror -->
+            <div class="field field-calltype-xs">
+              <label for="call_type_xs">Sales model <span aria-hidden="true" class="req">*</span></label>
+              <select id="call_type_xs" name="call_type_xs" aria-describedby="call_type_error_xs">
+                <option value="">Select…</option>
+                <option>Direct</option>
+                <option>Partner</option>
+              </select>
+              <p class="error" id="call_type_error_xs" role="alert" aria-live="polite"></p>
+            </div>
+
             <div class="field">
               <label for="seller_company">Your company <span aria-hidden="true" class="req">*</span></label>
               <input id="seller_company" name="seller_company" required autocomplete="organization" />
               <p class="error" id="seller_company_error" role="alert" aria-live="polite"></p>
             </div>
-          </div>
-          <div class="field">
-            <label for="seller_url">Your company URL <span aria-hidden="true" class="req">*</span></label>
-            <input id="seller_url" name="seller_url" type="url" placeholder="https://www.yourcompany.co.uk" required
-              inputmode="url" autocomplete="url" />
-            <p class="error" id="seller_url_error" role="alert" aria-live="polite"></p>
-            <p class="help">Use the primary site or investor page. We’ll reference this when qualifying value.</p>
+
+            <div class="field">
+              <label for="prospect_name">Prospect name <span aria-hidden="true" class="req">*</span></label>
+              <input id="prospect_name" name="prospect_name" required />
+              <p class="error" id="prospect_name_error" role="alert" aria-live="polite"></p>
+            </div>
+
+            <div class="field">
+              <label for="prospect_role">Prospect role <span aria-hidden="true" class="req">*</span></label>
+              <input id="prospect_role" name="prospect_role" required placeholder="e.g., Finance Director" />
+              <p class="error" id="prospect_role_error" role="alert" aria-live="polite"></p>
+            </div>
+
+            <div class="field">
+              <label for="prospect_company">Prospect company <span aria-hidden="true" class="req">*</span></label>
+              <input id="prospect_company" name="prospect_company" required />
+              <p class="error" id="prospect_company_error" role="alert" aria-live="polite"></p>
+            </div>
           </div>
         </fieldset>
 
-        <!-- Seller proposition -->
-        <fieldset class="card" aria-labelledby="legend-prop">
-          <legend id="legend-prop">Your proposition</legend>
+        <fieldset class="card" aria-labelledby="legend-company">
+          <legend id="legend-company">Company & sources</legend>
           <div class="grid-2">
             <div class="field">
-              <label for="proposition_name">Proposition name <span aria-hidden="true" class="req">*</span></label>
-              <input id="proposition_name" name="proposition_name" placeholder="e.g., Sentinel Cloud Security"
-                required />
-              <p class="error" id="proposition_name_error" role="alert" aria-live="polite"></p>
+              <label for="prospect_website">Prospect website (URL) <span aria-hidden="true" class="req">*</span></label>
+              <input id="prospect_website" name="prospect_website" required placeholder="https://example.com"
+                inputmode="url" />
+              <p class="error" id="prospect_website_error" role="alert" aria-live="polite"></p>
             </div>
             <div class="field">
-              <label for="proposition_type">Type <span aria-hidden="true" class="req">*</span></label>
-              <select id="proposition_type" name="proposition_type" required>
-                <option value="">Select…</option>
-                <option>SaaS</option>
-                <option>Security</option>
-                <option>Connectivity</option>
-                <option>Data Services</option>
-                <option>Hardware</option>
-                <option>Services</option>
-                <option>Other</option>
-              </select>
-              <p class="error" id="proposition_type_error" role="alert" aria-live="polite"></p>
+              <label for="company_number">Companies House number
+                <button id="ch-help" class="btn inline" type="button" title="What is this?">?</button>
+              </label>
+              <input id="company_number" name="company_number" placeholder="Optional (e.g., 01234567)" />
+              <p class="muted" id="company_number_hint">Financial analysis needs accounts filed. Add company number for
+                auto-pull of iXBRL filings or add OCR processed PDF filings.</p>
+              <p class="error" id="company_number_error" role="alert" aria-live="polite"></p>
             </div>
+          </div>
+
+          <div class="field">
+            <label for="product_service">Product / service offered <span aria-hidden="true" class="req">*</span></label>
+            <input id="product_service" name="product_service" required
+              placeholder="Free-form (e.g., FTTP, SIP, IoT, UCaaS, managed LAN)" />
+            <p class="error" id="product_service_error" role="alert" aria-live="polite"></p>
           </div>
 
           <div class="grid-2">
             <div class="field">
-              <label for="typical_deal_size_gbp">Typical deal size (GBP)</label>
-              <input id="typical_deal_size_gbp" name="typical_deal_size_gbp" type="number" min="0" step="100"
-                placeholder="e.g., 25000" inputmode="numeric" />
+              <label for="competitors">Competitor(s) in use (optional)</label>
+              <input id="competitors" name="competitors" placeholder="e.g., BT Wholesale, CityFibre, Gamma" />
             </div>
             <div class="field">
-              <label for="territory_or_segment_focus">Territory / segment focus</label>
-              <input id="territory_or_segment_focus" name="territory_or_segment_focus"
-                placeholder="e.g., UK mid-market; 100–1000 employees" />
+              <label for="existing_provider">Existing network/provider (optional)</label>
+              <input id="existing_provider" name="existing_provider" placeholder="e.g., Openreach, Vodafone" />
             </div>
           </div>
 
           <div class="field">
-            <label for="differentiation_points">Differentiation (one per line, 3–5)</label>
-            <textarea id="differentiation_points" name="differentiation_points" rows="3"
-              placeholder="Faster deployment&#10;UK data residency&#10;SOC2 &amp; ISO27001"></textarea>
+            <label for="context">Other context (optional)</label>
+            <textarea id="context" name="context" rows="2"
+              placeholder="Constraints, timelines, budget signals, known suppliers, etc."></textarea>
+          </div>
+
+          <div class="grid-2">
+            <div class="field">
+              <label for="company_linkedin">Company LinkedIn (optional)</label>
+              <input id="company_linkedin" name="company_linkedin" placeholder="https://www.linkedin.com/company/..."
+                inputmode="url" />
+            </div>
+            <div class="field">
+              <label for="contact_linkedins">Key contact LinkedIn URLs (optional)</label>
+              <input id="contact_linkedins" name="contact_linkedins" placeholder="Comma or newline separated" />
+            </div>
           </div>
 
           <div class="field">
-            <label for="technical_prereqs">Technical prerequisites / integrations (one per line)</label>
-            <textarea id="technical_prereqs" name="technical_prereqs" rows="3"
-              placeholder="Azure AD&#10;Microsoft 365&#10;SAML 2.0"></textarea>
+            <label for="events">Trade show(s) this year (optional)</label>
+            <input id="events" name="events" placeholder="e.g., Channel Live; Connected North" />
+          </div>
+        </fieldset>
+
+        <fieldset class="card" aria-labelledby="legend-evidence">
+          <legend id="legend-evidence">Evidence</legend>
+
+          <!-- iXBRL fetch -->
+          <div class="row-between" style="align-items:flex-end; gap:12px;">
+            <div>
+              <p class="muted" style="margin:.25rem 0 .5rem 0">Fetch latest iXBRL by company number (multi-year
+                supported).</p>
+              <button id="fetch-ixbrl" class="btn inline" type="button">Fetch iXBRL</button>
+              <span id="ixbrl-status" class="muted" aria-live="polite" style="margin-left:.5rem"></span>
+            </div>
+            <div id="ixbrl-chips" class="chips"></div>
           </div>
 
+          <!-- Manual metrics (fallback if 204 or user preference) -->
+          <details id="manual-metrics" class="card" style="margin-top:var(--s-3)">
+            <summary>Enter key metrics manually (use if iXBRL isn’t available)</summary>
+            <div class="grid-3" style="margin-top:var(--s-3)">
+              <div class="field"><label for="m_end_y1">Year 1 end date</label><input id="m_end_y1"
+                  placeholder="YYYY-MM-DD"></div>
+              <div class="field"><label for="m_turnover_y1">Y1 turnover (£)</label><input id="m_turnover_y1"
+                  inputmode="numeric"></div>
+              <div class="field"><label for="m_gp_y1">Y1 gross profit (£)</label><input id="m_gp_y1"
+                  inputmode="numeric"></div>
+              <div class="field"><label for="m_op_y1">Y1 operating profit (£)</label><input id="m_op_y1"
+                  inputmode="numeric"></div>
+              <div class="field"><label for="m_ca_y1">Y1 current assets (£)</label><input id="m_ca_y1"
+                  inputmode="numeric"></div>
+              <div class="field"><label for="m_cl_y1">Y1 current liabilities (£)</label><input id="m_cl_y1"
+                  inputmode="numeric"></div>
+            </div>
+            <div class="grid-3">
+              <div class="field"><label for="m_end_y2">Year 2 end date</label><input id="m_end_y2"
+                  placeholder="YYYY-MM-DD"></div>
+              <div class="field"><label for="m_turnover_y2">Y2 turnover (£)</label><input id="m_turnover_y2"
+                  inputmode="numeric"></div>
+              <div class="field"><label for="m_gp_y2">Y2 gross profit (£)</label><input id="m_gp_y2"
+                  inputmode="numeric"></div>
+              <div class="field"><label for="m_op_y2">Y2 operating profit (£)</label><input id="m_op_y2"
+                  inputmode="numeric"></div>
+              <div class="field"><label for="m_ca_y2">Y2 current assets (£)</label><input id="m_ca_y2"
+                  inputmode="numeric"></div>
+              <div class="field"><label for="m_cl_y2">Y2 current liabilities (£)</label><input id="m_cl_y2"
+                  inputmode="numeric"></div>
+            </div>
+          </details>
+
+          <!-- OCR PDF upload -->
+          <div class="field" style="margin-top:var(--s-3)">
+            <label for="reports">Upload annual report(s) (OCR PDF)</label>
+            <p class="muted" style="margin:.25rem 0 .5rem 0">Multi-year financial analysis is available. Add the last
+              two years’ filings if you require this facility.</p>
+            <input id="reports" name="reports" type="file" accept="application/pdf" multiple
+              aria-describedby="reports_help" />
+            <p id="reports_help" class="muted">Up to 2 PDFs recommended.</p>
+            <ul id="report-list" class="muted" style="margin-top:.25rem"></ul>
+          </div>
+        </fieldset>
+
+        <fieldset class="card" aria-labelledby="legend-buyer">
+          <legend id="legend-buyer">Buyer type</legend>
           <div class="field">
-            <label for="sales_motion">Sales motion <span aria-hidden="true" class="req">*</span></label>
-            <select id="sales_motion" name="sales_motion" required>
-              <option value="">Select…</option>
-              <option value="direct">Direct to end-user</option>
-              <option value="channel">Via the UK Channel</option>
-              <option value="hybrid">Hybrid</option>
+            <label for="buyer_type">Buyer behaviour</label>
+            <select id="buyer_type" name="buyer_type">
+              <option>Innovator</option>
+              <option>Early adopter</option>
+              <option selected>Early majority</option>
+              <option>Late majority</option>
+              <option>Sceptic</option>
             </select>
-            <p class="error" id="sales_motion_error" role="alert" aria-live="polite"></p>
           </div>
         </fieldset>
 
-        <!-- Prospect details -->
-        <fieldset class="card" aria-labelledby="legend-lead">
-          <legend id="legend-lead">Lead details</legend>
-          <div class="field">
-            <label for="company">Prospect company <span aria-hidden="true" class="req">*</span></label>
-            <input id="company" name="company" required placeholder="Acme Networks Ltd" />
-            <p class="error" id="company_error" role="alert" aria-live="polite"></p>
-          </div>
-          <div class="grid-2">
-            <div class="field">
-              <label for="industry">Industry <span aria-hidden="true" class="req">*</span></label>
-              <input id="industry" name="industry" required placeholder="Managed Services / Cybersecurity" />
-              <p class="error" id="industry_error" role="alert" aria-live="polite"></p>
-            </div>
-            <div class="field">
-              <label for="company_reg">Company reg. no. (optional)</label>
-              <input id="company_reg" name="company_reg" placeholder="e.g., 01234567" />
-              <p class="help">If provided, the backend can fetch Companies House filings for the last two years.</p>
-            </div>
-          </div>
-          <div class="field">
-            <label for="website">Prospect website <span aria-hidden="true" class="req">*</span></label>
-            <input id="website" name="website" type="url" placeholder="https://www.example.co.uk" required
-              inputmode="url" autocomplete="url" />
-            <p class="error" id="website_error" role="alert" aria-live="polite"></p>
-          </div>
-          <div class="field">
-            <label for="sources">Sources (URLs, comma or newline)</label>
-            <textarea id="sources" name="sources" rows="3"
-              placeholder="Annual report, LinkedIn page, Press release…"></textarea>
-            <p class="help">Paste links that should be prioritised in the analysis.</p>
-          </div>
-          <div class="field">
-            <label for="partner_linkedin">Prospect LinkedIn URL (optional)</label>
-            <input id="partner_linkedin" name="partner_linkedin" type="url"
-              placeholder="https://www.linkedin.com/company/…" inputmode="url" autocomplete="url" />
-          </div>
-        </fieldset>
-      </form>
-    </section>
-
-    <!-- MIDDLE: OUTPUT -->
-    <section class="panel middle">
-      <div class="output-card card">
-        <div class="output-head">
-          <h2 id="output-title">Qualification summary<span id="run-mode" class="pill" hidden></span></h2>
-          <div class="action-group">
-            <button id="gen-deep" class="btn primary" type="button" disabled
-              title="Full analysis with evidence and plans">
-              Deep dive
-              <span class="spinner" aria-hidden="true"></span>
-            </button>
-            <button id="gen-light" class="btn secondary" type="button" disabled
-              title="Fast summary with bullets and a verdict">
-              Light touch
-              <span class="spinner" aria-hidden="true"></span>
-            </button>
-            <button id="copy" class="btn inline" type="button" disabled>Copy summary</button>
-            <button id="download" class="btn inline" type="button" disabled>Download .txt</button>
-          </div>
-        </div>
-
-        <div id="output" class="output" tabindex="0" aria-label="Generated summary will appear here">
-          Add details on the left, then click <em>Deep dive</em> or <em>Light touch</em>.
+        <div class="actions">
+          <button id="submit" class="btn primary" type="submit" disabled>
+            <span class="btn-label">Generate qualification</span>
+            <span class="spinner" aria-hidden="true"></span>
+          </button>
+          <button id="resetBtn" type="reset" class="btn small">Reset</button>
         </div>
 
         <div id="status" class="status" role="status" aria-live="polite"></div>
 
-        <details style="margin-top:var(--s-3)">
-          <summary class="kicker">API response (raw)</summary>
-          <pre id="responseBox" style="overflow:auto"></pre>
+        <details id="diagnostics" class="diag card" style="margin-top:var(--s-5)">
+          <summary>Diagnostics</summary>
+          <pre id="diag-json" tabindex="0" aria-label="Diagnostics JSON"></pre>
+          <p class="muted">If you see a 401 unauthorised error, please <a href="/.auth/login/aad">sign in again</a>.</p>
         </details>
+      </form>
+    </section>
+
+    <!-- MIDDLE -->
+    <section class="panel middle">
+      <div class="row-between output-head">
+        <h2 id="output-title">Partner-readiness report</h2>
+        <div class="row-between" style="gap:8px">
+          <div class="meta" id="output-meta" aria-live="polite" style="color:var(--text-2);font-size:.9rem"></div>
+        </div>
+      </div>
+
+      <div id="output" class="output" tabindex="0" aria-label="Generated report will appear here"></div>
+
+      <div id="sources" class="card" style="margin-top:var(--s-3); display:none">
+        <h3>Sources</h3>
+        <ol id="source-list" style="margin:0; padding-left:1.25rem"></ol>
+      </div>
+
+      <!-- Output actions -->
+      <div class="output-actions">
+        <button id="copy-report" class="btn inline" type="button" disabled>Copy</button>
+        <button id="download-report" class="btn inline" type="button" disabled>Download .txt</button>
+        <button id="export-docx" class="btn inline" type="button" disabled>Export .docx</button>
+        <button id="email-report" class="btn inline" type="button" disabled>Email</button>
+      </div>
+
+      <!-- Notes -->
+      <div class="notes-card card" style="margin-top:var(--s-4)">
+        <div class="row-between">
+          <h3>Qualification notes</h3>
+          <div class="row-between" style="gap:8px">
+            <button id="save-notes" class="btn inline" type="button">Save notes</button>
+            <button id="download-notes" class="btn inline" type="button">Download .txt</button>
+          </div>
+        </div>
+        <textarea id="notes" rows="6"
+          placeholder="Type notes during desk research or calls. Saved locally on this device."></textarea>
+        <p class="muted" style="margin-top:.5rem">Notes are stored locally (this browser only).</p>
+      </div>
+
+      <div class="change-log" style="margin-top:var(--s-4)">
+        <h3>What changed</h3>
+        <ul id="delta-log" class="delta" aria-live="polite"></ul>
+      </div>
+      <div class="activity" style="margin-top:var(--s-4)">
+        <h3>Recent activity</h3>
+        <ol id="activity-log" class="activity-log" aria-live="polite" style="margin:0;padding-left:1.25rem"></ol>
       </div>
     </section>
 
-    <!-- RIGHT: REFERENCE RAIL -->
+    <!-- RIGHT -->
     <section class="panel right" aria-labelledby="intel-title">
       <aside class="intel card">
         <div class="intel-head">
-          <h2 id="intel-title">Reference</h2>
-          <button id="toggle-rail" class="btn small" type="button" aria-expanded="true"
-            aria-controls="rail-body">Hide</button>
+          <h2 id="intel-title">Helpful tips</h2>
+          <button id="toggle-intel" class="btn small" type="button" aria-expanded="true"
+            aria-controls="intel-body">Hide</button>
         </div>
-        <div id="rail-body">
-          <section class="intel-slot">
-            <h3>Signals to check</h3>
-            <section class="intel-slot">
-              <ul id="accounts_list" class="muted" style="margin:.5rem 0 0 1rem"></ul>
-              <h3>Upload accounts (OCR)</h3>
-              <input type="file" id="accounts_file" accept=".pdf,.txt" multiple />
-              <div id="accounts_status" class="muted">No file uploaded.</div>
-            </section>
-            <ul>
-              <li>Confidence in sales and marketing</li>
-              <li>M&amp;A / restructuring announcements</li>
-              <li>Contract renewals or vendor changes</li>
-              <li>Portfolio completeness</li>
-            </ul>
-          </section>
-
-          <section class="intel-slot sources-list">
-            <h3>Your sources</h3>
-            <div id="sourcesList" class="muted">No sources yet.</div>
-          </section>
-
-          <section class="intel-slot">
-            <h3>Financials (iXBRL)</h3>
-            <div id="ixbrlBox" class="muted">No financials fetched.</div>
-          </section>
-
-          <section class="intel-slot">
-            <h3>What changed</h3>
-            <div id="delta" class="muted">Run twice to see differences.</div>
-          </section>
-
-          <section class="intel-slot">
-            <h3>Notes</h3>
-            <textarea id="notes" rows="6" placeholder="Saved locally only."></textarea>
-          </section>
+        <div id="intel-body">
+          <ul id="tips-list"></ul>
+          <p id="tips-empty" class="muted">Tips will appear after you generate a report.</p>
         </div>
+      </aside>
+
+      <aside class="card" style="margin-top:var(--s-4)">
+        <h3>Financial flags</h3>
+        <ul id="flags-list" class="muted"></ul>
       </aside>
     </section>
   </main>
 
-  <!-- Help Modal -->
-  <dialog id="help-modal" class="modal">
+  <!-- CH / iXBRL HELP MODAL -->
+  <dialog id="ch-modal" class="modal">
     <div class="card" style="max-width:700px">
       <div class="row-between" style="align-items:center">
-        <h3 style="margin:0">About Lead Qualification</h3>
-        <button id="help-close" class="btn inline" type="button">Close ×</button>
+        <h3 style="margin:0">About Companies House numbers & iXBRL</h3>
+        <button id="ch-close" class="btn inline" type="button">Close ×</button>
       </div>
-      <p>Provide your details, your proposition, and the prospect’s details. Choose <em>Deep dive</em> for a full
-        analysis, or <em>Light touch</em> for a fast summary.</p>
+      <p>iXBRL is a machine-readable format for annual accounts. If the company files iXBRL, we can fetch headline
+        figures directly.</p>
       <ul>
-        <li><strong>Your company URL</strong> is used to qualify value and proof points.</li>
-        <li>Add <em>Sources</em> to steer the analysis (annual report, LinkedIn, press).</li>
-        <li>Optionally include a <em>Company reg. no.</em> so the backend can fetch Companies House filings.</li>
+        <li><strong>Optional:</strong> Add the Companies House number and click <em>Fetch iXBRL</em>.</li>
+        <li><strong>No iXBRL?</strong> Upload OCR’d PDF accounts instead (last two years recommended) and we’ll use
+          those.</li>
+        <li>You can also enter key metrics manually in <em>Enter key metrics manually</em>.</li>
       </ul>
     </div>
   </dialog>
 
-  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.js"></script>
+  <!-- HELP MODAL -->
+  <dialog id="help-modal" class="modal">
+    <div class="card" style="max-width:700px">
+      <div class="row-between" style="align-items:center">
+        <h3 style="margin:0">About this tool</h3>
+        <button id="help-close" class="btn inline" type="button">Close ×</button>
+      </div>
+      <p>This Lead qualification tool assembles an evidence-only partner-readiness report using your inputs, public
+        links, iXBRL, and uploaded filings.</p>
+      <h3>How to use it</h3>
+      <ol>
+        <li>Set the sales model (Direct or Partner) at the top.</li>
+        <li>Complete People and Company & sources. CH number is optional.</li>
+        <li>Fetch iXBRL and/or upload OCR PDFs (last two years for multi-year analysis).</li>
+        <li>Click <em>Generate qualification</em>. The report appears in the middle with citations and a
+          <em>Sources</em> list.
+        </li>
+        <li>Copy, download, export .docx, or email the summary. Use <em>Qualification notes</em> to capture findings.
+        </li>
+      </ol>
+      <h3>What the tool assures</h3>
+      <ul>
+        <li>Evidence-only output. Unsupported claims are removed.</li>
+        <li>Multi-year chips show YoY and liquidity ratios (if available).</li>
+        <li>Partner mode adds risks & mitigations automatically.</li>
+      </ul>
+      <h3>Privacy & storage</h3>
+      <ul>
+        <li>Notes are stored locally in your browser.</li>
+        <li>Generation runs server-side. If you see 401, sign in again via the Diagnostics link.</li>
+      </ul>
+    </div>
+  </dialog>
 
-  <script>
-    // Tell pdf.js where to find its worker (same version as above)
-    if (window.pdfjsLib) {
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.js";
-    }
-  </script>
-
-  <script>
-    // ---------- Auth ----------
-    (async () => {
-      try {
-        const r = await fetch("/.auth/me", { credentials: "include", cache: "no-store" });
-        if (r.status === 401) {
-          const here = encodeURIComponent(location.pathname + location.search + location.hash || "/");
-          location.href = "/.auth/login/aad?post_login_redirect_uri=" + here;
-          return;
-        }
-        const me = await r.json().catch(() => null);
-        const email = me?.clientPrincipal?.userDetails
-          || (me?.clientPrincipal?.claims || []).find(c => (c.typ || "").toLowerCase().includes("email"))?.val
-          || "";
-        if (email) {
-          const badge = document.getElementById("user-badge");
-          const el = document.getElementById("user-email");
-          if (badge && el) { el.textContent = email; badge.classList.remove("is-hidden"); }
-        }
-      } catch { }
+  <!-- === SCRIPT === -->
+  <script type="module">
+    /* ---------- Shared helpers ---------- */
+    const basePrefix = (() => {
+      const path = location.pathname || "/";
+      const segs = path.split("/").filter(Boolean);
+      const last = segs[segs.length - 1] || "";
+      if (/\.[a-z0-9]+$/i.test(last)) return "";   // looks like /foo/bar.html → no prefix
+      return segs.length ? "/" + segs[0] : "";
     })();
 
-    // ---------- Refs ----------
-    const $ = (id) => document.getElementById(id);
-    const form = $("lq-form");
-    const remember = $("remember");
-    const output = $("output");
-    const statusEl = $("status");
-    const responseBox = $("responseBox");
-    const copyBtn = $("copy");
-    const downloadBtn = $("download");
-    const deepBtn = $("gen-deep");
-    const lightBtn = $("gen-light");
 
-    const fields = [
-      "seller_name", "seller_company", "seller_url",
-      "proposition_name", "proposition_type", "typical_deal_size_gbp", "territory_or_segment_focus",
-      "differentiation_points", "technical_prereqs", "sales_motion",
-      "company", "company_reg", "industry", "website", "sources", "notes"
-    ];
-    const STORAGE_KEY = "lead_qualification_v2.form";
-    let lastSummary = localStorage.getItem("lead_qualification_v2.last_summary") || "";
-    // B2: iXBRL state + helpers
-    let ixbrlSummary = null;
-    function fmt(n) { return (n == null) ? "—" : new Intl.NumberFormat("en-GB").format(n); }
-    function fmtPct(n) { return (n == null) ? "—" : new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1 }).format(n) + "%"; }
-    function fmtDec(n) { return (n == null) ? "—" : new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 }).format(n); }
+    const STORAGE_PREFIX = "lead_qualification_v1";
+    const FORM_ID = "qual-form";
+    const OUTPUT_KEY = STORAGE_PREFIX + ".last_output";
+    const ACTIVITY_KEY = STORAGE_PREFIX + ".activity";
+    const FORM_KEY = STORAGE_PREFIX + ".form";
+    const NOTES_KEY_PREFIX = STORAGE_PREFIX + ".notes";
+    const CALL_PREF_KEY = STORAGE_PREFIX + ".call_pref";
 
-    // ---------- Utilities ----------
-    const setStatus = (msg, kind = "info") => { statusEl.textContent = msg || ""; statusEl.dataset.kind = kind; };
-    const safeURL = (u) => { try { const x = new URL(u); return x.protocol === "http:" || x.protocol === "https:"; } catch { return false; } };
-    const srcArray = () => (($("sources").value || "").split(/\n|,/).map(s => s.trim()).filter(Boolean));
-    const lines = (t) => (t || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const esc = s => String(s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const strongify = s => String(s || "").replace(/\*\*([^\*\n][\s\S]*?)\*\*/g, "<strong>$1</strong>");
 
-    function validateInline() {
-      const req = {
-        seller_name: !!$("seller_name").value.trim(),
-        seller_company: !!$("seller_company").value.trim(),
-        seller_url: safeURL($("seller_url").value.trim()),
-        proposition_name: !!$("proposition_name").value.trim(),
-        proposition_type: !!$("proposition_type").value.trim(),
-        sales_motion: !!$("sales_motion").value.trim(),
-        company: !!$("company").value.trim(),
-        industry: !!$("industry").value.trim(),
-        website: safeURL($("website").value.trim()),
-      };
-      $("seller_name_error").textContent = req.seller_name ? "" : "This field is required.";
-      $("seller_company_error").textContent = req.seller_company ? "" : "This field is required.";
-      $("seller_url_error").textContent = req.seller_url ? "" : "Enter a valid URL (https://…).";
-      $("proposition_name_error").textContent = req.proposition_name ? "" : "This field is required.";
-      $("proposition_type_error").textContent = req.proposition_type ? "" : "This field is required.";
-      $("sales_motion_error").textContent = req.sales_motion ? "" : "Select a motion.";
-      $("company_error").textContent = req.company ? "" : "This field is required.";
-      $("industry_error").textContent = req.industry ? "" : "This field is required.";
-      $("website_error").textContent = req.website ? "" : "Enter a valid URL (https://…).";
+    // Minimal markdown → HTML (H2/H3, lists, paragraphs)
+    function mdToHtml(md) {
+      var s = String(md || "").replace(/\r/g, "");
+      var lines = s.split("\n");
+      var out = [];
+      var inList = false;
+      function flushList() { if (inList) { out.push("</ul>"); inList = false; } }
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (!line) { flushList(); continue; }
+        if (/^#{2,}\s+/.test(line)) {
+          flushList();
+          out.push("<h3>" + esc(line.replace(/^#{2,}\s+/, "")) + "</h3>");
+          continue;
+        }
+        if (/^- /.test(line)) {
+          if (!inList) { out.push("<ul>"); inList = true; }
+          out.push("<li>" + strongify(esc(line.slice(2))) + "</li>");
+          continue;
+        }
+        flushList();
+        out.push("<p>" + strongify(esc(line)) + "</p>");
+      }
+      flushList();
+      return out.join("");
+    }
 
-      const ok = Object.values(req).every(Boolean);
-      deepBtn.disabled = !ok;
-      lightBtn.disabled = !ok;
+    // Buyer behaviour → slug
+    function buyerSlug(label) {
+      const l = String(label || "").toLowerCase();
+      if (l.includes("innovator")) return "innovator";
+      if (l.includes("early adopter")) return "early-adopter";
+      if (l.includes("early majority")) return "early-majority";
+      if (l.includes("late majority")) return "late-majority";
+      if (l.includes("sceptic") || l.includes("skeptic")) return "sceptic";
+      return "early-majority";
+    }
+
+    // DOM refs
+    const form = document.getElementById(FORM_ID);
+    const statusEl = document.getElementById("status");
+    const diag = document.getElementById("diagnostics");
+    const diagJson = document.getElementById("diag-json");
+    const outputEl = document.getElementById("output");
+    const outputMeta = document.getElementById("output-meta");
+    const copyBtn = document.getElementById("copy-report");
+    const dlBtn = document.getElementById("download-report");
+    const docxBtn = document.getElementById("export-docx");
+    const emailBtn = document.getElementById("email-report");
+    const notesArea = document.getElementById("notes");
+    const saveNotesBtn = document.getElementById("save-notes");
+    const downloadNotesBtn = document.getElementById("download-notes");
+    const deltaLog = document.getElementById("delta-log");
+    const activityLog = document.getElementById("activity-log");
+    const ixbrlBtn = document.getElementById("fetch-ixbrl");
+    const ixbrlStatus = document.getElementById("ixbrl-status");
+    const ixbrlChips = document.getElementById("ixbrl-chips");
+    const flagsList = document.getElementById("flags-list");
+    const tipsList = document.getElementById("tips-list");
+    const tipsEmpty = document.getElementById("tips-empty");
+    const sourcesCard = document.getElementById("sources");
+    const sourceList = document.getElementById("source-list");
+
+    const callTypeSel = document.getElementById("call_type");
+    const callTypeSelXs = document.getElementById("call_type_xs");
+    const rememberCallType = document.getElementById("remember_call_type");
+    const modelIndicator = document.getElementById("model-indicator");
+    const mapLabel = document.getElementById("map-label");
+
+    const chModal = document.getElementById("ch-modal");
+    const chHelp = document.getElementById("ch-help");
+    const chClose = document.getElementById("ch-close");
+
+    const helpBtn = document.getElementById("help");
+    const helpModal = document.getElementById("help-modal");
+    const helpClose = document.getElementById("help-close");
+
+    const reportInput = document.getElementById("reports");
+    const reportList = document.getElementById("report-list");
+
+    const requiredIds = ["call_type", "seller_name", "seller_company", "prospect_name", "prospect_role", "prospect_company", "prospect_website", "product_service"];
+
+    // Accessibility helpers
+    function setStatus(msg, kind = "info") {
+      if (!statusEl) return;
+      statusEl.textContent = msg;
+      statusEl.dataset.kind = kind;
+    }
+    function validateField(id) {
+      const el = document.getElementById(id);
+      if (!el) return true;
+      const val = (el.value || "").trim();
+      const ok = requiredIds.includes(id) ? !!val : true;
+      const errEl = document.getElementById(id + "_error");
+      if (errEl) {
+        if (ok) { errEl.textContent = ""; el.classList.remove("invalid"); el.removeAttribute("aria-invalid"); }
+        else { errEl.textContent = "This field is required."; el.classList.add("invalid"); el.setAttribute("aria-invalid", "true"); }
+      }
       return ok;
     }
-
-    function updateRunModePill(mode, motion) {
-      const el = $("run-mode");
-      if (!el) return;
-      const niceMode = mode === "light" ? "Light touch" : "Deep dive";
-      const niceMotion = (motion || "").trim();
-      el.textContent = niceMotion ? `${niceMode} (${niceMotion})` : niceMode;
-      el.dataset.kind = (mode === "light" ? "light" : "deep");
-      el.hidden = false;
+    function allRequiredFilled() {
+      const missing = requiredIds.filter(id => !String(document.getElementById(id)?.value || "").trim());
+      if (missing.length) setStatus("Please complete: " + missing.map(id => id.replace("_", " ")).join(", ") + ".", "error");
+      else setStatus("");
+      return missing.length === 0;
     }
 
-    function updateSourcesList() {
-      const arr = srcArray();
-      $("sourcesList").innerHTML = arr.length
-        ? '<ul>' + arr.map(a => `<li><a href="${a}" target="_blank" rel="noopener">${a}</a></li>`).join("") + '</ul>'
-        : 'No sources yet.';
-    }
-
-    function basePayload() {
-      if (!validateInline()) return null;
-      const srcRaw = $("sources").value || "";
-      return {
-        pack: "uk_b2b_sales_core",
-        variables: {
-          // seller context
-          seller_name: $("seller_name").value.trim(),
-          seller_company: $("seller_company").value.trim(),
-          seller_url: $("seller_url").value.trim(),
-          proposition_name: $("proposition_name").value.trim(),
-          proposition_type: $("proposition_type").value.trim(),
-          typical_deal_size_gbp: $("typical_deal_size_gbp").value ? Number($("typical_deal_size_gbp").value) : null,
-          territory_or_segment_focus: $("territory_or_segment_focus").value.trim(),
-          differentiation_points: lines($("differentiation_points").value),
-          technical_prerequisites: lines($("technical_prereqs").value),
-          sales_motion: $("sales_motion").value.trim(),
-
-          // prospect inputs
-          company: $("company").value.trim(),
-          company_registration_number: $("company_reg").value.trim(),
-          industry: $("industry").value.trim(),
-          website: $("website").value.trim(),
-          sources_raw: srcRaw,
-          sources: srcArray(),
-          ixbrl: window.ixbrlSummary || null
-        }
-      };
-    }
-
+    // Persist
     function saveForm() {
-      if (!remember.checked) return;
       const fd = Object.fromEntries(new FormData(form).entries());
-      const notesEl = $("notes");
-      if (notesEl) fd.notes = notesEl.value;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(fd));
+      try { localStorage.setItem(FORM_KEY, JSON.stringify(fd)); } catch { }
     }
     function loadForm() {
-      if (localStorage.getItem(STORAGE_KEY)) remember.checked = true;
       try {
-        const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+        const raw = localStorage.getItem(FORM_KEY); if (!raw) return;
+        const data = JSON.parse(raw);
         Object.entries(data).forEach(([k, v]) => {
-          const el = form.elements[k] || $(k);
-          if (el) el.value = v;
+          const el = form.elements[k] || document.getElementById(k);
+          if (!el) return;
+          el.value = v;
         });
       } catch { }
     }
-
-    function diffText(oldT, newT) {
-      if (!oldT) return "Run again to see differences.";
-      if (oldT === newT) return "No changes.";
-      const o = new Set(oldT.split(/\r?\n/));
-      const n = new Set(newT.split(/\r?\n/));
-      const added = [...n].filter(l => !o.has(l) && l.trim()).slice(0, 6);
-      const removed = [...o].filter(l => !n.has(l) && l.trim()).slice(0, 6);
-      let s = "";
-      if (added.length) s += "Added:\n• " + added.join("\n• ") + "\n";
-      if (removed.length) s += "Removed:\n• " + removed.join("\n• ");
-      return s.trim();
+    const notesKey = () => {
+      const pn = (form.elements.prospect_name?.value || "").trim().toLowerCase();
+      const pc = (form.elements.prospect_company?.value || "").trim().toLowerCase();
+      return NOTES_KEY_PREFIX + "::" + pc + "::" + pn;
     }
-    function setSummary(text) {
-      output.textContent = text || "";
-      const has = !!(text && text.trim());
-      copyBtn.disabled = !has; downloadBtn.disabled = !has;
-      if (has) {
-        $("delta").textContent = diffText(lastSummary, text) || "—";
-        lastSummary = text;
-        localStorage.setItem("lead_qualification_v2.last_summary", text);
-      }
+    function loadNotes() { try { notesArea.value = localStorage.getItem(notesKey()) || ""; } catch { } }
+    function saveNotes() { try { localStorage.setItem(notesKey(), notesArea.value || ""); setStatus("Notes saved."); } catch { setStatus("Could not save notes.", "error"); } }
+    function updateMapIndicator() {
+      modelIndicator.textContent = callTypeSel?.value || "Not set";
+      mapLabel.textContent = callTypeSel?.value || "Not set";
     }
-
-    async function sendRequest(templateName) {
-      const payload = (typeof basePayload === "function" ? basePayload() : buildPayload());
-      if (!payload) return;
-      payload.template = templateName;
-
-      setStatus("Generating…");
-      responseBox.textContent = "Sending…";
-
-      const motion = ($("sales_motion").value || "").trim().toLowerCase();
-      const optimisticMode = templateName === "opportunity_qualification_light" ? "light" : "deep";
-      updateRunModePill(optimisticMode, motion);
-
-      // Only show the spinner on the clicked button (but disable both)
-      const activeBtn = (templateName === "opportunity_qualification_light") ? lightBtn : deepBtn;
-      const disable = (v) => {
-        [deepBtn, lightBtn].forEach(b => { if (b) b.disabled = v; });
-        if (activeBtn) activeBtn.classList.toggle("busy", v);
-      };
-      disable(true);
-
+    function loadCallPref() {
       try {
-        const res = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        if (!res.ok) {
-          const errText = await res.text().catch(() => "");
-          throw new Error(errText || res.statusText);
-        }
-
-        const srvMode = res.headers.get("x-qual-mode") || optimisticMode;
-        const srvMotion = res.headers.get("x-qual-motion") || motion;
-        updateRunModePill(srvMode, srvMotion);
-
-        const text = await res.text();     // read once
-        setSummary(text);
-        responseBox.textContent = text;
-
-        setStatus(
-          "Done. Ran: " +
-          (srvMode === "light" ? "Light touch" : "Deep dive") +
-          (srvMotion ? " (" + srvMotion + ")" : "") +
-          ".",
-          "ok"
-        );
-
-      } catch (e) {
-        setSummary("");
-        responseBox.textContent = "Request failed: " + (e?.message || String(e));
-        setStatus("Could not generate a qualification summary.", "error");
-      } finally {
-        disable(false);
-        if (typeof saveForm === "function") saveForm();
+        const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || "null");
+        if (pref?.call_type && callTypeSel && !callTypeSel.value) callTypeSel.value = pref.call_type;
+        if (pref?.remember === true && rememberCallType) rememberCallType.checked = true;
+      } catch { }
+      updateMapIndicator();
+    }
+    function saveCallPrefIfRequested() {
+      if (rememberCallType?.checked && callTypeSel?.value) {
+        localStorage.setItem(CALL_PREF_KEY, JSON.stringify({ remember: true, call_type: callTypeSel.value }));
+      } else if (rememberCallType && !rememberCallType.checked) {
+        localStorage.removeItem(CALL_PREF_KEY);
       }
+      updateMapIndicator();
     }
 
-    // ---------- Events ----------
-    fields.forEach(id => ($(id)?.addEventListener?.("input", () => {
-      validateInline();
-      if (id === "sources") updateSourcesList();
-      saveForm();
-    })));
-
-    // iXBRL triggers
-    $("company_reg").addEventListener("blur", () => { try { window.fetchIxbrlIfReady?.(); } catch { } });
-    $("company_reg").addEventListener("input", () => {
-      const box = $("ixbrlBox");
-      if (box) box.textContent = "—";
+    // File list
+    reportInput?.addEventListener("change", () => {
+      reportList.innerHTML = "";
+      const files = Array.from(reportInput.files || []);
+      files.slice(0, 2).forEach(f => {
+        const li = document.createElement("li");
+        li.textContent = f.name + " (" + Math.ceil(f.size / 1024) + "KB)";
+        reportList.appendChild(li);
+      });
     });
 
-    $("toggle-rail")?.addEventListener("click", () => {
-      const btn = $("toggle-rail");
-      const body = $("rail-body");
+    // iXBRL fetch
+    async function fetchIxbrl(companyNumber) {
+      if (!companyNumber) return { ok: false, status: 400, data: null };
+      ixbrlStatus.textContent = "Fetching…";
+      try {
+        a.download = "lead-qualification_" + who + "_" + new Date().toISOString().slice(0, 10) + ".txt";
+        const r = await fetch(url, { headers: { "Accept": "application/json" }, cache: "no-store" });
+        if (r.status === 204) { ixbrlStatus.textContent = "No iXBRL available."; return { ok: false, status: 204, data: null }; }
+        const data = await r.json();
+        if (!r.ok) throw new Error(data?.error || ("HTTP " + r.status));
+        ixbrlStatus.textContent = "Loaded.";
+        return { ok: true, status: 200, data };
+      } catch (e) {
+        ixbrlStatus.textContent = "Could not fetch iXBRL.";
+        return { ok: false, status: 500, data: null, error: String(e?.message || e) };
+      }
+    }
+
+    function pct(n) { return (n == null || isNaN(n)) ? "—" : (Math.round(n * 10) / 10) + "%"; }
+    function ratio(n) { return (n == null || isNaN(n)) ? "—" : String(Math.round(n * 100) / 100); }
+
+    function renderIxbrlChips(summary) {
+      ixbrlChips.innerHTML = "";
+      if (!summary?.summary?.derived && !summary?.summary?.years?.length) return;
+
+      const d = summary.summary.derived || {};
+      const y = summary.summary.years || [];
+      const chips = [];
+
+      if (d.revenueYoYPct != null) {
+        chips.push('<span class="chip">Revenue YoY: ' + pct(d.revenueYoYPct) + '</span>');
+      }
+      if (d && d.grossMarginPct && d.grossMarginPct.y1 != null)
+        chips.push('<span class="chip">Gross margin (Y1): ' + pct(d.grossMarginPct.y1) + '</span>');
+
+      if (d && d.grossMarginPct && d.grossMarginPct.y2 != null)
+        chips.push('<span class="chip">Gross margin (Y2): ' + pct(d.grossMarginPct.y2) + '</span>');
+
+      if (d && d.currentRatio != null)
+        chips.push('<span class="chip">Current ratio: ' + ratio(d.currentRatio) + '</span>');
+
+      if (d && d.cashRatio != null)
+        chips.push('<span class="chip">Cash ratio: ' + ratio(d.cashRatio) + '</span>');
+      ixbrlChips.innerHTML = chips.join(" ");
+
+      // Auto-flags for tips
+      const flags = [];
+      if (d.revenueYoYPct != null && d.revenueYoYPct < 0) flags.push("Revenue contracted YoY.");
+      if (d.currentRatio != null && d.currentRatio < 1) flags.push("Current ratio below 1.0 (liquidity pressure).");
+      if (d.cashRatio != null && d.cashRatio < 0.25) flags.push("Cash ratio very low.");
+      if (d.netDebtToEquity != null && d.netDebtToEquity > 1) flags.push("High leverage (net debt / equity > 1).");
+
+      flagsList.innerHTML = "";
+      flags.forEach(f => { const li = document.createElement("li"); li.textContent = f; flagsList.appendChild(li); });
+      applyAutoTips(flags);
+    }
+
+    // Tips
+    let tipsBank = null;
+    async function loadTipsBank() {
+      try {
+        const res = await fetch("./qualification-tips.json", { cache: "no-store" });
+        tipsBank = await res.json();
+      } catch {
+        tipsBank = { general: ["Keep claims evidenced. If you cannot cite it, do not say it."] };
+      }
+    }
+    function pickStaticTips(mode, buyer) {
+      const byMode = tipsBank?.[mode?.toLowerCase()] || tipsBank?.general || [];
+      const byBuyer = (tipsBank?.buyers && tipsBank.buyers[buyer]) || [];
+      return [...byMode, ...byBuyer].slice(0, 6);
+    }
+    function applyAutoTips(flags) {
+      // Convert flags to 1-2 actionable nudges
+      const auto = [];
+      flags.forEach(f => {
+        if (/Revenue contracted/i.test(f)) auto.push("Frame growth levers explicitly (coverage, conversion, ARPU) with conservative targets.");
+        if (/Current ratio below 1/i.test(f)) auto.push("Propose low-friction onboarding and activity-gated MDF to de-risk cash usage.");
+        if (/Cash ratio very low/i.test(f)) auto.push("Position light-touch pilots and postcode-led campaigns before scale.");
+        if (/High leverage/i.test(f)) auto.push("Avoid heavy upfront commitments; tie discounts to first wins.");
+      });
+      // Render tip list
+      renderTips(auto);
+    }
+    function renderTips(extras = []) {
+      const mode = (callTypeSel?.value || "Direct").toLowerCase();
+      const buyer = buyerSlug(document.getElementById("buyer_type")?.value || "Early majority");
+      const staticTips = pickStaticTips(mode, buyer);
+      const all = [...new Set([...extras, ...staticTips])].slice(0, 8);
+      tipsList.innerHTML = "";
+      all.forEach(t => { const li = document.createElement("li"); li.textContent = t; tipsList.appendChild(li); });
+      tipsEmpty.style.display = all.length ? "none" : "";
+    }
+
+    // Source rendering
+    function renderSources(citations) {
+      sourceList.innerHTML = "";
+      var items = Array.isArray(citations) ? citations : [];
+      if (!items.length) { sourcesCard.style.display = "none"; return; }
+
+      for (var i = 0; i < items.length; i++) {
+        var c = items[i] || {};
+        var li = document.createElement("li");
+        var label = (c.label || c.title || c.url || "Source");
+        var url = (c.url || "");
+
+        if (url) {
+          var a = document.createElement("a");
+          a.href = url;                    // assign directly (no escaping)
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.textContent = label;           // safe text
+          li.appendChild(a);
+        } else {
+          li.textContent = label;          // no link available
+        }
+
+        sourceList.appendChild(li);        // <-- you were missing this
+      }
+
+      sourcesCard.style.display = "";
+    }
+
+    // Buttons state
+    function setBusy(isBusy) {
+      const submitBtn = document.getElementById("submit");
+      if (submitBtn) submitBtn.disabled = isBusy || !allRequiredFilled();
+      document.getElementById("resetBtn")?.setAttribute("aria-disabled", isBusy ? "true" : "false");
+
+      const hasText = !!(outputEl?.textContent?.trim());
+      copyBtn.disabled = isBusy || !hasText;
+      dlBtn.disabled = isBusy || !hasText;
+      emailBtn.disabled = isBusy || !hasText;
+      docxBtn.disabled = isBusy || !hasText;
+      if (submitBtn) submitBtn.classList.toggle('busy', isBusy);
+    }
+
+    // Change log
+    function computeDelta(oldText, newText) {
+      const oldLines = (oldText || "").split("\n"), newLines = (newText || "").split("\n");
+      let added = 0, removed = 0;
+      const oldSet = new Set(oldLines), newSet = new Set(newLines);
+      newLines.forEach(l => { if (!oldSet.has(l) && l.trim()) added++; });
+      oldLines.forEach(l => { if (!newSet.has(l) && l.trim()) removed++; });
+      return { added, removed };
+    }
+
+    function renderDelta(delta) {
+      deltaLog.innerHTML = "";
+
+      var a = document.createElement("li");
+      a.textContent = "+" + delta.added + " new line" + (delta.added === 1 ? "" : "s");
+
+      var r = document.createElement("li"); // use "−" (U+2212) or "-" if you prefer ASCII
+      r.textContent = "−" + delta.removed + " removed line" + (delta.removed === 1 ? "" : "s");
+
+      deltaLog.appendChild(a);
+      deltaLog.appendChild(r);
+    }
+
+    function addActivity(entry) {
+      const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || "[]");
+      list.unshift(entry);
+      localStorage.setItem(ACTIVITY_KEY, JSON.stringify(list.slice(0, 3)));
+      renderActivity();
+    }
+    function renderActivity() {
+      var list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || "[]");
+      activityLog.innerHTML = "";
+
+      for (var i = 0; i < list.length; i++) {
+        var item = list[i] || {};
+
+        var li = document.createElement("li");
+
+        var timeSpan = document.createElement("span");
+        timeSpan.className = "time";
+        timeSpan.textContent = item.time || "";
+        li.appendChild(timeSpan);
+
+        li.appendChild(document.createTextNode(" "));
+
+        var pill1 = document.createElement("span");
+        pill1.className = "pill";
+        pill1.textContent = item.product || "";
+        li.appendChild(pill1);
+
+        li.appendChild(document.createTextNode(" "));
+
+        var pill2 = document.createElement("span");
+        pill2.className = "pill";
+        pill2.textContent = item.buyer || "";
+        li.appendChild(pill2);
+
+        activityLog.appendChild(li);
+      }
+    }
+
+    // Copy / Download / .docx / Email
+    copyBtn?.addEventListener("click", async () => {
+      const txt = outputEl?.innerText || "";
+      if (!txt.trim()) return;
+      await navigator.clipboard.writeText(txt);
+      setStatus("Copied.");
+    });
+    if (dlBtn) {
+      dlBtn.addEventListener("click", function () {
+        var txt = (outputEl && (outputEl.textContent || outputEl.innerText)) || "";
+        var companyEl = (form && form.elements) ? form.elements.prospect_company : null;
+        var who = ((companyEl && companyEl.value) ? companyEl.value : "report").trim().replace(/\s+/g, "-");
+
+        var blob = new Blob([txt], { type: "text/plain" });
+        var URL_ = window.URL || window.webkitURL; // Safari fallback
+        var url = URL_.createObjectURL(blob);
+
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "lead-qualification_" + who + "_" + new Date().toISOString().slice(0, 10) + ".txt";
+
+        // append+click+remove for broader browser support
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        URL_.revokeObjectURL(url);
+      });
+    }
+    if (docxBtn) {
+      docxBtn.addEventListener("click", function () {
+        try {
+          setStatus("Preparing .docx…");
+
+          var htmlOut = (outputEl && outputEl.innerHTML) || "";
+          var citationsAttr = outputEl ? outputEl.getAttribute("data-citations") : null;
+          var citations;
+          try { citations = JSON.parse(citationsAttr || "[]"); } catch (_e) { citations = []; }
+
+          var payload = {
+            kind: "qualification-docx",
+            basePrefix: basePrefix,
+            variables: collectVariables(),
+            html: htmlOut,
+            citations: citations
+          };
+
+          fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          })
+            .then(function (r) {
+              if (!r.ok) {
+                return r.json().then(function (d) {
+                  throw new Error((d && d.error) || ("HTTP " + r.status));
+                });
+              }
+              return r.blob();
+            })
+            .then(function (blob) {
+              var URL_ = window.URL || window.webkitURL;
+
+              if (blob && blob.size) {
+                var url = URL_.createObjectURL(blob);
+
+                var companyEl = (form && form.elements) ? form.elements.prospect_company : null;
+                var who = ((companyEl && companyEl.value) ? companyEl.value : "report")
+                  .replace(/\s+/g, "-");
+
+                var a = document.createElement("a");
+                a.href = url;
+                a.download = "lead-qualification_" + who + ".docx";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL_.revokeObjectURL(url);
+
+                setStatus("Exported .docx");
+              } else {
+                throw new Error("empty-blob");
+              }
+            })
+            .catch(function () {
+              // Fallback: export current HTML instead
+              var URL_ = window.URL || window.webkitURL;
+              var htmlBlob = new Blob([(outputEl && outputEl.innerHTML) || ""], { type: "text/html" });
+              var url = URL_.createObjectURL(htmlBlob);
+              var a = document.createElement("a");
+              a.href = url;
+              a.download = "lead-qualification.html";
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL_.revokeObjectURL(url);
+              setStatus("Exported HTML (server .docx not available).", "info");
+            });
+
+        } catch (e) {
+          setStatus("Could not export .docx", "error");
+        }
+      });
+    }
+    if (emailBtn) {
+      emailBtn.addEventListener("click", function () {
+        try {
+          var payload = {
+            kind: "qualification-email",
+            basePrefix: basePrefix,
+            variables: {
+              seller_name: ((form && form.elements && form.elements.seller_name && form.elements.seller_name.value) || "").trim(),
+              seller_company: ((form && form.elements && form.elements.seller_company && form.elements.seller_company.value) || "").trim(),
+              prospect_name: ((form && form.elements && form.elements.prospect_name && form.elements.prospect_name.value) || "").trim(),
+              prospect_role: ((form && form.elements && form.elements.prospect_role && form.elements.prospect_role.value) || "").trim(),
+              prospect_company: ((form && form.elements && form.elements.prospect_company && form.elements.prospect_company.value) || "").trim(),
+              buyer_type: ((form && form.elements && form.elements.buyer_type && form.elements.buyer_type.value) || "").trim()
+            },
+            reportMdText: localStorage.getItem(OUTPUT_KEY) || "",
+            notes: (notesArea && (notesArea.value || "")) || ""
+          };
+
+          setStatus("Building email…");
+
+          fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          })
+            .then(function (r) {
+              return r.json().then(function (data) {
+                if (!r.ok) {
+                  throw new Error((data && data.error) || "Could not build email.");
+                }
+                return data;
+              });
+            })
+            .then(function (data) {
+              var email =
+                (data && data.email && data.email.text) ||
+                (data && data.followup && data.followup.email) ||
+                "";
+
+              if (email) {
+                var to = "";
+                var companyEl = (form && form.elements) ? form.elements.prospect_company : null;
+                var subj = "Summary: " + (((companyEl && companyEl.value) ? companyEl.value : "Lead"));
+                var href = "mailto:" + encodeURIComponent(to) +
+                  "?subject=" + encodeURIComponent(subj) +
+                  "&body=" + encodeURIComponent(email);
+                window.location.href = href;
+                setStatus("Email composed.");
+              } else {
+                setStatus("No email content produced.", "error");
+              }
+            })
+            .catch(function (e) {
+              setStatus("Could not compose email", "error");
+              if (diag && diagJson) { diag.open = true; diagJson.textContent = String((e && e.message) || e); }
+            });
+
+        } catch (e) {
+          setStatus("Could not compose email", "error");
+          if (diag && diagJson) { diag.open = true; diagJson.textContent = String((e && e.message) || e); }
+        }
+      });
+    }
+    // CH modal
+    chHelp?.addEventListener("click", () => chModal?.showModal());
+    chClose?.addEventListener("click", () => chModal?.close());
+
+    // Help modal
+    helpBtn?.addEventListener("click", () => helpModal?.showModal());
+    helpClose?.addEventListener("click", () => helpModal?.close());
+
+    // Toggle tips panel
+    document.getElementById("toggle-intel")?.addEventListener("click", () => {
+      const btn = document.getElementById("toggle-intel");
+      const body = document.getElementById("intel-body");
       const expanded = btn.getAttribute("aria-expanded") === "true";
       btn.setAttribute("aria-expanded", String(!expanded));
       body.hidden = expanded;
       btn.textContent = expanded ? "Show" : "Hide";
     });
 
-    $("help")?.addEventListener("click", () => $("help-modal")?.showModal());
-    $("help-close")?.addEventListener("click", () => $("help-modal")?.close());
-
-    deepBtn.addEventListener("click", () => sendRequest("opportunity_qualification"));
-    lightBtn.addEventListener("click", () => sendRequest("opportunity_qualification_light"));
-
-    copyBtn.addEventListener("click", async () => {
-      const txt = output?.innerText || ""; if (!txt.trim()) return;
-      await navigator.clipboard.writeText(txt);
-      setStatus("Copied summary to clipboard.", "ok");
-    });
-
-    downloadBtn.addEventListener("click", () => {
-      const txt = output?.innerText || ""; if (!txt.trim()) return;
-      const name = ($("company").value || "qualification").trim().replace(/\s+/g, "-");
-      const blob = new Blob([txt], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `lead-qualification_${name}_${new Date().toISOString().slice(0, 10)}.txt`;
-      document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
-    });
-
-    remember.addEventListener("change", () => {
-      if (!remember.checked) localStorage.removeItem(STORAGE_KEY); else saveForm();
-    });
-
-    // ——— Right-rail financials state ———
-    window.ixbrlSummary = window.ixbrlSummary || null;
-
-    // Render the little financials box. Guarded so no duplicate-declare.
-    window.renderIxbrlBox = window.renderIxbrlBox || function (sum) {
-      const fmt = (v) => v == null ? "n/a" : new Intl.NumberFormat("en-GB").format(v);
-      const fmtPct = (v) => v == null ? "n/a" : (typeof v === "number" ? v.toFixed(1) + "%" : v);
-      const fmtDec = (v) => v == null ? "n/a" : (Number.isFinite(+v) ? Number(v).toFixed(2) : "n/a");
-
-      const y1 = sum?.years?.[0];
-      const y2 = sum?.years?.[1];
-      const d = sum?.derived || {};
-      return [
-        y1 ? `<div><strong>${y1.endDate || "Latest"}</strong>: turnover ${fmt(y1.turnover)}, op ${fmt(y1.operatingProfit)}, net assets ${fmt(y1.netAssets)}</div>` : "",
-        y2 ? `<div><strong>${y2.endDate}</strong>: turnover ${fmt(y2.turnover)}, op ${fmt(y2.operatingProfit)}, net assets ${fmt(y2.netAssets)}</div>` : "",
-        `<div class="muted">GM%: ${fmtPct(d.grossMarginPct?.y1)} • OPM%: ${fmtPct(d.operatingMarginPct?.y1)} • Current: ${fmtDec(d.currentRatio)} • Cash: ${fmtDec(d.cashRatio)}</div>`
-      ].filter(Boolean).join("");
-    };
-
-    // Fetch iXBRL from your backend when a valid reg no. is present. Guarded.
-    window.fetchIxbrlIfReady = window.fetchIxbrlIfReady || (async function fetchIxbrlIfReady() {
-      const box = document.getElementById("ixbrlBox");
-      const reg = (document.getElementById("company_reg")?.value || "").trim();
-      if (!box) return;
-
-      // Allow 6–8 alphanumeric CRNs (e.g., SC123456); tighten if you prefer digits only.
-      if (!/^[A-Z0-9]{6,8}$/i.test(reg)) {
-        box.textContent = "No reg no. / not valid.";
-        return;
-      }
-
-      box.textContent = "Fetching…";
-      try {
-        const r = await fetch(`/api/ixbrl/financials?companyNumber=${encodeURIComponent(reg)}`, { cache: "no-store" });
-        if (r.status === 204) {
-          box.textContent = "No iXBRL available for this company.";
-          window.ixbrlSummary = null;
-          return;
-        }
-        if (!r.ok) {
-          const t = await r.text().catch(() => "");
-          box.textContent = "Upstream error.";
-          console.warn("ixbrl error:", r.status, t);
-          window.ixbrlSummary = null;
-          return;
-        }
-        const data = await r.json();
-        window.ixbrlSummary = data?.summary || null;
-        box.innerHTML = window.ixbrlSummary ? window.renderIxbrlBox(window.ixbrlSummary) : "No financials found.";
-      } catch (e) {
-        box.textContent = "Fetch failed.";
-        console.error(e);
-        window.ixbrlSummary = null;
+    // Fetch iXBRL click
+    ixbrlBtn?.addEventListener("click", async () => {
+      const num = (form.elements.company_number?.value || "").trim();
+      if (!num) { setStatus("Enter a Companies House number or upload PDFs.", "error"); return; }
+      setBusy(true);
+      const res = await fetchIxbrl(num);
+      setBusy(false);
+      if (res.ok) {
+        renderIxbrlChips(res.data);
+        // attach to a hidden field for API
+        form.dataset.ixbrl = JSON.stringify(res.data?.summary || {});
+      } else if (res.status === 204) {
+        renderIxbrlChips(null);
+        form.dataset.ixbrl = JSON.stringify({}); // none
+        setStatus("iXBRL not available; you can upload PDFs or enter metrics manually.", "info");
       }
     });
 
-    // Connect the reg-no field to the fetcher (on blur)
-    document.getElementById("company_reg")?.addEventListener("blur", () => {
-      try { window.fetchIxbrlIfReady(); } catch { }
-    });
+    // Submit: build payload and call /api/generate
+    if (form) {
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (!allRequiredFilled()) return;
 
-    // ---------- OCR parser (multi-file) ----------
-    (function () {
-      // Don’t redefine if already present
-      if (window.parseAccountsFiles) return;
+        var values = collectVariables();
+        var ixbrlSummary = safeJson((form && form.dataset) ? form.dataset.ixbrl : null);
 
-      // Fallback formatters (use your existing ones if present)
-      const fmt = window.fmt || (v => v == null ? "n/a" : new Intl.NumberFormat("en-GB").format(v));
-      const fmtPct = window.fmtPct || (v => v == null ? "n/a" : (typeof v === "number" ? v.toFixed(1) + "%" : v));
-      const fmtDec = window.fmtDec || (v => v == null ? "n/a" : (Number.isFinite(+v) ? Number(v).toFixed(2) : "n/a"));
+        // Take up to 2 files safely
+        var filesList = (reportInput && reportInput.files) ? reportInput.files : [];
+        var files = [];
+        for (var i = 0; i < filesList.length && i < 2; i++) files.push(filesList[i]);
 
-      async function readPdfText(file) {
-        if (!window.pdfjsLib) throw new Error("pdf.js not loaded");
-        const url = URL.createObjectURL(file);
-        try {
-          const pdf = await pdfjsLib.getDocument(url).promise;
-          const maxPages = Math.min(pdf.numPages, 8);
-          let text = "";
-          for (let p = 1; p <= maxPages; p++) {
-            const page = await pdf.getPage(p);
-            const content = await page.getTextContent();
-            text += "\n" + content.items.map(it => it.str).join(" ");
+        // Evidence guardrail note to the backend
+        var policy = { evidenceOnly: true, dropUnsupportedClaims: true };
+
+        setBusy(true);
+        setStatus("Generating qualification…");
+        if (diag) { diag.open = false; }
+        if (diagJson) { diagJson.textContent = ""; }
+
+        // helper to render success path
+        function two(n) { return (n < 10 ? "0" : "") + n; }
+        function handleData(data) {
+          var md =
+            (data && data.report && (data.report.md || data.report.text)) ||
+            data.text || data.markdown || "";
+
+          var citations =
+            (data && data.report && data.report.citations) ||
+            data.citations || data.sources || [];
+
+          var tips = data.tips || [];
+
+          if (!String(md).trim()) { throw new Error("Empty report returned from API."); }
+
+          var html = mdToHtml(md);
+          if (outputEl) outputEl.innerHTML = html;
+
+          // store citations in a data-* attr (avoid optional chaining)
+          if (outputEl) outputEl.setAttribute("data-citations", JSON.stringify(citations || []));
+
+          if (outputMeta) {
+            outputMeta.textContent =
+              (values.prospect_company || "—") + " · " +
+              (values.product_service || "—") + " · " +
+              (values.call_type || "—");
           }
-          return text;
-        } finally { URL.revokeObjectURL(url); }
-      }
 
-      function lastNumberIn(s) {
-        const matches = String(s || "").match(/[-(]?\s*£?\d[\d,]*\)?/g);
-        if (!matches) return null;
-        let raw = matches[matches.length - 1].replace(/[£,\s]/g, "");
-        const neg = raw.startsWith("(") && raw.endsWith(")");
-        raw = raw.replace(/[()]/g, "");
-        const n = Number(raw);
-        return Number.isFinite(n) ? (neg ? -n : n) : null;
-      }
+          renderSources(citations);
+          renderTips(tips);
 
-      function findVal(lines, labels) {
-        const rx = new RegExp("\\b(" + labels.join("|").replace(/\s+/g, "\\s+") + ")\\b", "i");
-        for (const line of lines) {
-          if (rx.test(line)) {
-            const v = lastNumberIn(line);
-            if (v != null) return v;
+          // Enable actions now content exists
+          if (copyBtn) copyBtn.disabled = false;
+          if (dlBtn) dlBtn.disabled = false;
+          if (emailBtn) emailBtn.disabled = false;
+          if (docxBtn) docxBtn.disabled = false;
+
+          // Delta & activity
+          var old = localStorage.getItem(OUTPUT_KEY) || "";
+          var delta = computeDelta(old, md);
+          renderDelta(delta);
+          localStorage.setItem(OUTPUT_KEY, md);
+
+          var now = new Date();
+          var time = two(now.getHours()) + ":" + two(now.getMinutes());
+          addActivity({ time: time, product: values.product_service || "—", buyer: values.buyer_type || "—" });
+
+          setStatus("Done. (Generated from API)");
+          var ot = document.getElementById("output-title");
+          if (ot && ot.focus) { try { ot.focus(); } catch (_e) { } }
+        }
+
+        // common error path
+        function handleError(err) {
+          setStatus("Could not generate the report. See Diagnostics for details.", "error");
+          if (diag && diagJson) { diag.open = true; diagJson.textContent = String((err && err.message) || err); }
+        }
+
+        // send request (multipart when files present; JSON otherwise)
+        if (files.length) {
+          var fd = new FormData();
+          fd.append("kind", "lead-qualification");
+          fd.append("basePrefix", basePrefix);
+          fd.append("variables", JSON.stringify(values));
+          fd.append("ixbrlSummary", JSON.stringify(ixbrlSummary || {}));
+          fd.append("policy", JSON.stringify(policy));
+          for (var j = 0; j < files.length; j++) {
+            var f = files[j];
+            fd.append("files", f, f && f.name ? f.name : ("report-" + (j + 1) + ".pdf"));
           }
+
+          fetch("/api/generate", { method: "POST", body: fd })
+            .then(function (resp) {
+              return resp.json().catch(function () { return {}; }).then(function (data) {
+                if (!resp.ok) { throw new Error((data && data.error) || ("API " + resp.status)); }
+                return data;
+              });
+            })
+            .then(handleData)
+            .catch(handleError)
+            .then(function () { setBusy(false); });
+        } else {
+          var body = {
+            kind: "lead-qualification",
+            basePrefix: basePrefix,
+            variables: values,
+            ixbrlSummary: ixbrlSummary || {},
+            policy: policy
+          };
+
+          fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+          })
+            .then(function (resp) {
+              return resp.json().catch(function () { return {}; }).then(function (data) {
+                if (!resp.ok) { throw new Error((data && data.error) || ("API " + resp.status)); }
+                return data;
+              });
+            })
+            .then(handleData)
+            .catch(handleError)
+            .then(function () { setBusy(false); });
         }
-        return null;
-      }
+      });
+    }
 
-      function parseEndDateToISO(s) {
-        if (!s) return null;
-        const dmy = s.match(/^([0-3]?\d)[\/\-]([01]?\d)[\/\-](\d{4})$/);
-        if (dmy) {
-          const [_, d, m, y] = dmy;
-          return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-        }
-        const dt = new Date(s);
-        return isNaN(dt.getTime()) ? null :
-          `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
-      }
-
-      function findEndDate(text) {
-        const m = String(text || "").match(/\b(year\s+ended|for\s+the\s+year\s+ended)\s+([0-3]?\d[\/\-\s][A-Za-z]{3,9}[\/\-\s]\d{4}|[0-3]?\d[\/\-][01]?\d[\/\-]\d{4})/i);
-        return m ? parseEndDateToISO(m[2].replace(/\s+/g, " ").trim()) : null;
-      }
-
-      function extractYearFromText(text) {
-        if (!text || text.length < 200) return null;
-        const lines = String(text).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-
-        const turnover = findVal(lines, ["Turnover", "Revenue"]);
-        const grossProfit = findVal(lines, ["Gross profit"]);
-        const operatingProfit = findVal(lines, ["Operating profit", "Operating (loss)", "Operating loss"]);
-        const pbt = findVal(lines, ["Profit before tax", "(Loss) before tax", "(loss) before taxation"]);
-        const pat = findVal(lines, ["Profit for the financial year", "(Loss) for the financial year", "Profit for the year", "(Loss) for the year"]);
-        const netAssets = findVal(lines, ["Net assets", "Net (liabilities)", "Net liabilities"]);
-        const cash = findVal(lines, ["Cash at bank", "Cash and cash equivalents"]);
-        const currentAssets = findVal(lines, ["Current assets"]);
-        const currentLiabs = findVal(lines, ["Current liabilities"]);
-        const totalAssets = findVal(lines, ["Total assets", "Total assets less current liabilities"]);
-        const totalLiabs = findVal(lines, ["Total liabilities", "Total creditors"]);
-        const endDate = findEndDate(text);
-
-        if (turnover == null && operatingProfit == null && netAssets == null && currentAssets == null) return null;
-
-        return {
-          endDate, turnover, grossProfit, operatingProfit,
-          profitBeforeTax: pbt, profitAfterTax: pat,
-          cash, currentAssets, currentLiabilities: currentLiabs,
-          totalAssets, totalLiabilities, totalDebt: null,
-          netAssets
-        };
-      }
-
-      function mergeYearsToSummary(years) {
-        const byKey = new Map();
-        for (const y of years) {
-          if (!y || !y.endDate) continue;
-          const k = y.endDate;
-          if (!byKey.has(k)) { byKey.set(k, { ...y }); }
-          else {
-            const cur = byKey.get(k);
-            for (const f of Object.keys(y)) if (cur[f] == null && y[f] != null) cur[f] = y[f];
-          }
-        }
-        const merged = [...byKey.values()]
-          .sort((a, b) => String(b.endDate).localeCompare(String(a.endDate)))
-          .slice(0, 2);
-
-        const y1 = merged[0], y2 = merged[1];
-        const derived = {
-          revenueYoYPct: (y1?.turnover != null && y2?.turnover != null && y2.turnover !== 0)
-            ? ((y1.turnover - y2.turnover) / Math.abs(y2.turnover)) * 100 : null,
-          grossMarginPct: {
-            y1: (y1?.turnover && y1?.grossProfit != null) ? (y1.grossProfit / y1.turnover) * 100 : null,
-            y2: (y2?.turnover && y2?.grossProfit != null) ? (y2.grossProfit / y2.turnover) * 100 : null
+    function collectVariables() {
+      return {
+        call_type: (callTypeSel?.value || "").trim(),
+        seller_name: (form.elements.seller_name?.value || "").trim(),
+        seller_company: (form.elements.seller_company?.value || "").trim(),
+        prospect_name: (form.elements.prospect_name?.value || "").trim(),
+        prospect_role: (form.elements.prospect_role?.value || "").trim(),
+        prospect_company: (form.elements.prospect_company?.value || "").trim(),
+        prospect_website: (form.elements.prospect_website?.value || "").trim(),
+        company_number: (form.elements.company_number?.value || "").trim(),
+        product_service: (form.elements.product_service?.value || "").trim(),
+        competitors: (form.elements.competitors?.value || "").trim(),
+        existing_provider: (form.elements.existing_provider?.value || "").trim(),
+        context: (form.elements.context?.value || "").trim(),
+        company_linkedin: (form.elements.company_linkedin?.value || "").trim(),
+        contact_linkedins: (form.elements.contact_linkedins?.value || "").trim(),
+        events: (form.elements.events?.value || "").trim(),
+        buyer_type: (form.elements.buyer_type?.value || "").trim(),
+        // Manual metrics panel (optional)
+        manual: {
+          y1: {
+            endDate: (document.getElementById("m_end_y1")?.value || "").trim(),
+            turnover: num(document.getElementById("m_turnover_y1")?.value),
+            grossProfit: num(document.getElementById("m_gp_y1")?.value),
+            operatingProfit: num(document.getElementById("m_op_y1")?.value),
+            currentAssets: num(document.getElementById("m_ca_y1")?.value),
+            currentLiabilities: num(document.getElementById("m_cl_y1")?.value)
           },
-          operatingMarginPct: {
-            y1: (y1?.turnover && y1?.operatingProfit != null) ? (y1.operatingProfit / y1.turnover) * 100 : null,
-            y2: (y2?.turnover && y2?.operatingProfit != null) ? (y2.operatingProfit / y2.turnover) * 100 : null
-          },
-          currentRatio: (y1?.currentAssets && y1?.currentLiabilities) ? (y1.currentAssets / y1.currentLiabilities) : null,
-          cashRatio: (y1?.cash && y1?.currentLiabilities) ? (y1.cash / y1.currentLiabilities) : null,
-          netDebtToEquity: (y1?.totalDebt != null && y1?.netAssets) ? (y1.totalDebt / y1.netAssets) : null
-        };
-
-        return { companyNumber: "manual-upload", years: merged, derived };
-      }
-
-      // Only define renderer if you don’t already have one
-      if (!window.renderIxbrlBox) {
-        window.renderIxbrlBox = function (sum) {
-          const y1 = sum?.years?.[0];
-          const y2 = sum?.years?.[1];
-          const d = sum?.derived || {};
-          return [
-            y1 ? `<div><strong>${y1.endDate || "Latest"}</strong>: turnover ${fmt(y1.turnover)}, op ${fmt(y1.operatingProfit)}, net assets ${fmt(y1.netAssets)}</div>` : "",
-            y2 ? `<div><strong>${y2.endDate}</strong>: turnover ${fmt(y2.turnover)}, op ${fmt(y2.operatingProfit)}, net assets ${fmt(y2.netAssets)}</div>` : "",
-            `<div class="muted">GM%: ${fmtPct(d.grossMarginPct?.y1)} • OPM%: ${fmtPct(d.operatingMarginPct?.y1)} • Current: ${fmtDec(d.currentRatio)} • Cash: ${fmtDec(d.cashRatio)}</div>`
-          ].filter(Boolean).join("");
-        };
-      }
-
-      async function parseOneFileToYear(file) {
-        const isPdf = (file.type || "").includes("pdf") || file.name.toLowerCase().endsWith(".pdf");
-        const text = isPdf ? await readPdfText(file) : await file.text();
-        return extractYearFromText(text);
-      }
-
-      // Combine multiple files → summary in window.ixbrlSummary + render box
-      window.parseAccountsFiles = async function (files) {
-        const status = document.getElementById("accounts_status");
-        const box = document.getElementById("ixbrlBox");
-        try {
-          const yearsRaw = [];
-          for (const f of files) {
-            const y = await parseOneFileToYear(f);
-            if (y) yearsRaw.push(y);
+          y2: {
+            endDate: (document.getElementById("m_end_y2")?.value || "").trim(),
+            turnover: num(document.getElementById("m_turnover_y2")?.value),
+            grossProfit: num(document.getElementById("m_gp_y2")?.value),
+            operatingProfit: num(document.getElementById("m_op_y2")?.value),
+            currentAssets: num(document.getElementById("m_ca_y2")?.value),
+            currentLiabilities: num(document.getElementById("m_cl_y2")?.value)
           }
-          if (yearsRaw.length === 0) {
-            window.ixbrlSummary = null;
-            if (box) box.textContent = "No financials found in uploaded files.";
-            if (status) status.textContent = "No usable data in uploaded files.";
-            return;
-          }
-          window.ixbrlSummary = mergeYearsToSummary(yearsRaw);
-          if (box) box.innerHTML = window.renderIxbrlBox(window.ixbrlSummary);
-          if (status) status.textContent = `Loaded ${window.ixbrlSummary.years?.length || 0} period(s).`;
-        } catch (e) {
-          console.error(e);
-          if (status) status.textContent = e?.message || "Parse failed.";
-          window.ixbrlSummary = null;
         }
       };
+    }
+    function safeJson(raw) { if (!raw) return null; try { return JSON.parse(raw); } catch { return null; } }
+    function num(x) { const n = Number(String(x || "").replace(/[,£\s]/g, "")); return Number.isFinite(n) ? n : null; }
 
-      // ---------- OCR upload wiring (robust) ----------
-      (function () {
-        const input = document.getElementById("accounts_file");
-        const status = document.getElementById("accounts_status");
-        const list = document.getElementById("accounts_list");
-        const panel = input ? (input.closest(".intel-slot") || input.parentElement) : null;
+    // Sales model mirror + remember
+    callTypeSel?.addEventListener("change", () => {
+      if (callTypeSelXs) callTypeSelXs.value = callTypeSel.value;
+      validateField("call_type"); saveForm(); updateMapIndicator();
+      if (rememberCallType) saveCallPrefIfRequested();
+      enableSubmitIfValid();
+    });
+    callTypeSelXs?.addEventListener("change", () => {
+      if (callTypeSel) callTypeSel.value = callTypeSelXs.value;
+      validateField("call_type"); saveForm(); updateMapIndicator();
+      if (rememberCallType) saveCallPrefIfRequested();
+      enableSubmitIfValid();
+    });
 
-        if (!input || !status) return; // panel not present on this page
+    // Notes
+    saveNotesBtn?.addEventListener("click", saveNotes);
+    if (downloadNotesBtn) {
+      downloadNotesBtn.addEventListener("click", function () {
+        var companyEl = (form && form.elements) ? form.elements.prospect_company : null;
+        var who = (((companyEl && companyEl.value) ? companyEl.value : "notes")
+          .trim().replace(/\s+/g, "-"));
 
-        // Helpers
-        const esc = (s) => String(s || "").replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
-        function showList(files) {
-          if (!list) return;
-          if (!files?.length) { list.innerHTML = ""; return; }
-          list.innerHTML = files.map(f => `<li>${esc(f.name)} — ${Math.round(f.size / 1024)} KB</li>`).join("");
-        }
-        function setBusy(on) { status.classList.toggle("busy", !!on); }
+        var txt = (notesArea && (notesArea.value || "")) || "";
+        var blob = new Blob([txt], { type: "text/plain" });
 
-        async function handleFiles(files) {
-          if (!files || !files.length) return;
-          showList(files);
-          status.textContent = `Reading ${files.length} file(s)…`;
-          setBusy(true);
+        var URL_ = window.URL || window.webkitURL; // Safari fallback
+        var url = URL_.createObjectURL(blob);
 
-          try {
-            if (typeof window.parseAccountsFiles !== "function") {
-              status.textContent = "Parser not wired yet (internal error).";
-              console.warn("parseAccountsFiles missing");
-              return;
-            }
-            await window.parseAccountsFiles(files); // this will set window.ixbrlSummary and update #ixbrlBox
-            // also ensure payload picks it up:
-            // (Your buildPayload/basePayload should already include: ixbrl: window.ixbrlSummary || null)
-            if (window.ixbrlSummary) {
-              status.textContent = `Loaded ${window.ixbrlSummary.years?.length || 0} period(s).`;
-            } else {
-              status.textContent = "Couldn’t extract headline numbers from the files.";
-            }
-          } catch (e) {
-            console.error(e);
-            status.textContent = e?.message || "Failed to read files.";
-          } finally {
-            setBusy(false);
-            // Let user re-select the same file again if needed
-            input.value = "";
-          }
-        }
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "qualification-notes_" + who + "_" + new Date().toISOString().slice(0, 10) + ".txt";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
 
-        // Change handler (click-to-choose)
-        input.addEventListener("change", (e) => {
-          const files = Array.from(e.target?.files || []);
-          if (files.length) handleFiles(files);
-        });
+        URL_.revokeObjectURL(url);
+      });
+    }
 
-        // Drag & drop (nice UX)
-        if (panel) {
-          ["dragenter", "dragover"].forEach(ev =>
-            panel.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); panel.classList.add("is-drag"); })
-          );
-          ["dragleave", "drop"].forEach(ev =>
-            panel.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); panel.classList.remove("is-drag"); })
-          );
-          panel.addEventListener("drop", (e) => {
-            const files = Array.from(e.dataTransfer?.files || []);
-            if (files.length) handleFiles(files);
-          });
-        }
-      })();
+    // Enable submit
+    function enableSubmitIfValid() {
+      const submitBtn = document.getElementById("submit");
+      if (submitBtn) submitBtn.disabled = !allRequiredFilled();
+    }
 
-      // ---------- Init ----------
-      (function init() {
-        loadForm();
-        validateInline();
-        updateSourcesList();
+    // Form events
+    document.addEventListener("input", (e) => {
+      if (e.target.closest("#" + FORM_ID)) {
+        validateField(e.target.id);
+        saveForm();
+        enableSubmitIfValid();
+      }
+    });
 
+    // Reset handler
+    form?.addEventListener("reset", () => {
+      queueMicrotask(() => {
         try {
-          $("notes").value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}").notes || "";
+          localStorage.removeItem(FORM_KEY);
+          localStorage.removeItem(ACTIVITY_KEY);
+          localStorage.removeItem(OUTPUT_KEY);
+          localStorage.removeItem(notesKey());
         } catch { }
+        outputEl.innerHTML = "";
+        sourceList.innerHTML = "";
+        sourcesCard.style.display = "none";
+        flagsList.innerHTML = "";
+        tipsList.innerHTML = "";
+        tipsEmpty.style.display = "";
+        ixbrlChips.innerHTML = "";
+        statusEl.textContent = "";
+        copyBtn.disabled = true; dlBtn.disabled = true; emailBtn.disabled = true; docxBtn.disabled = true;
+        document.querySelector(".panel.left")?.scrollTo({ top: 0, behavior: "instant" });
+        document.getElementById("seller_name")?.focus();
+      });
+    });
 
-        $("notes").addEventListener("input", saveForm);
+    // Init
+    (async function init() {
+      try {
+        const me = await fetch("/.auth/me", { cache: "no-store" });
+        const j = await me.json();
+        const email = j?.clientPrincipal?.userDetails || j?.clientPrincipal?.identityProvider || "";
+        const userBadge = document.getElementById("user-badge");
+        const userEmail = document.getElementById("user-email");
+        if (email && userBadge && userEmail) { userEmail.textContent = email; userBadge.classList.remove("is-hidden"); }
+      } catch { }
 
-        // If a reg no. is already present, fetch iXBRL now
-        if ($("company_reg").value.trim()) {
-          try { window.fetchIxbrlIfReady?.(); } catch { }
-        }
-      })();
+      loadForm(); loadCallPref();
+      if (callTypeSelXs && callTypeSel) callTypeSelXs.value = callTypeSel.value || "";
+      updateMapIndicator();
+      await loadTipsBank();
+      renderTips();
+
+      // Preload “financial analysis needed” nudge if CH missing
+      const ch = (form.elements.company_number?.value || "").trim();
+      if (!ch) document.getElementById("company_number_hint").style.display = "";
+
+      enableSubmitIfValid();
+      renderActivity();
     })();
   </script>
 </body>
