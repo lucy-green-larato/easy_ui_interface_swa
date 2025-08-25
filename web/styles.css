@@ -973,5 +973,5 @@ select:not([multiple]) {
 }
 .output .script-sec > h3{
   font-size: var(--fs-output-h3) !important;
-  margin: 0 0 6px;
+  margin: 0 0 6px 6px;
 }
