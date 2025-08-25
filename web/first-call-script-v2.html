@@ -12,7 +12,7 @@
   <!-- HEADER -->
   <header class="app-header" role="banner">
     <div class="header-left">
-      <img class="logo" src="./assets/larato-logo.svg" alt="Larato" />
+      <img class="logo" src="./assets/larato-logo-bullet.svg" alt="Larato Inside Track Sales Tools" />
       <div class="brand-text">
         <h1 class="app-title">Inside Track Tools</h1>
         <p class="kicker">Sales call scripting and emailing</p>
@@ -172,8 +172,7 @@
             <span class="btn-label">Generate script</span>
             <span class="spinner" aria-hidden="true"></span>
           </button>
-          <button id="reset" class="btn" type="button">Reset</button>
-          <!-- (old Copy/Download moved under script) -->
+          <button id="resetBtn" type="reset" form="callForm" class="btn small">Reset</button>
         </div>
 
         <div id="status" class="status" role="status" aria-live="polite"></div>
@@ -358,7 +357,7 @@
       </aside>
 
       <!-- Helpful tips in the right rail with show/hide -->
-      <aside <aside class="tips-card card" style="margin-top:var(--s-4)">
+      <aside class="tips-card card" style="margin-top:var(--s-4)">
         <div class="row-between">
           <h3>Helpful tips</h3>
           <button id="toggle-tips" class="btn small" type="button" aria-expanded="true"
@@ -366,6 +365,7 @@
         </div>
         <ul id="tips-list"></ul>
       </aside>
+
     </section>
   </main>
 
@@ -1016,31 +1016,58 @@
       };
     }
 
-    // Reset button — clear form, local state, and UI
-    resetBtn?.addEventListener('click', () => {
-      try {
-        form.reset();
-        if (callTypeSelXs && callTypeSel) callTypeSelXs.value = callTypeSel.value || '';
-        localStorage.removeItem(STORAGE_KEY);
-        localStorage.removeItem(ACTIVITY_KEY);
-        localStorage.removeItem(OUTPUT_KEY);
-        outputEl.innerHTML = '';
-        tipsList.innerHTML = '';
-        applyTipsVisibility();
-        activityLog.innerHTML = '';
-        deltaLog.innerHTML = '';
-        statusEl.textContent = '';
-        copyScriptBtn.disabled = true;
-        downloadScriptBtn.disabled = true;
-        fillAll(['—']);
-        try { localStorage.removeItem(notesKey()); } catch { }
-        notesArea.value = '';
-        refreshSubmitState();
-        document.getElementById('seller_name')?.focus();
-      } catch (e) {
-        setStatus('Could not reset form.', 'error');
-      }
+    // Unified reset handler — runs AFTER native form reset completes
+    form?.addEventListener('reset', () => {
+      // Let the browser restore default values first
+      queueMicrotask(() => {
+        try {
+          // If you mirror the sales model in two selects, sync them
+          if (typeof callTypeSelXs !== 'undefined' && typeof callTypeSel !== 'undefined') {
+            callTypeSelXs.value = callTypeSel.value || '';
+          }
+
+          // Clear persisted state
+          try { localStorage.removeItem(STORAGE_KEY); } catch { }
+          try { localStorage.removeItem(ACTIVITY_KEY); } catch { }
+          try { localStorage.removeItem(OUTPUT_KEY); } catch { }
+          try { localStorage.removeItem(notesKey?.() ?? ''); } catch { }
+
+          // Wipe UI surfaces
+          outputEl && (outputEl.innerHTML = '');
+          tipsList && (tipsList.innerHTML = '');
+          activityLog && (activityLog.innerHTML = '');
+          deltaLog && (deltaLog.innerHTML = '');
+          statusEl && (statusEl.textContent = '');
+          copyScriptBtn && (copyScriptBtn.disabled = true);
+          downloadScriptBtn && (downloadScriptBtn.disabled = true);
+
+          // Notes (textarea or contenteditable fallback)
+          if (notesArea) {
+            if ('value' in notesArea) notesArea.value = '';
+            else notesArea.textContent = '';
+          }
+
+          // Remove any validation styling
+          form.querySelectorAll('.invalid')?.forEach(el => el.classList.remove('invalid'));
+
+          // Reset any derived placeholders
+          typeof fillAll === 'function' && fillAll(['—']);
+
+          // Recompute submit-state
+          typeof refreshSubmitState === 'function' && refreshSubmitState();
+
+          // Make sure left column is scrolled to top and focus first field
+          document.querySelector('.panel.left')?.scrollTo({ top: 0, behavior: 'instant' });
+          document.getElementById('seller_name')?.focus();
+
+          // Reapply tips visibility after UI wipe
+          typeof applyTipsVisibility === 'function' && applyTipsVisibility();
+        } catch (e) {
+          typeof setStatus === 'function' && setStatus('Could not reset form.', 'error');
+        }
+      });
     });
+
 
     // Init
     (async function init() {
