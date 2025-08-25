@@ -946,13 +946,13 @@ select:not([multiple]) {
 /* === Output sizing: make generated script text smaller =================== */
 :root{
   /* tweak these two numbers to taste */
-  --fs-output: clamp(12px, 0.22vw + 10px, 14px);
-  --fs-output-h3: clamp(13px, 0.24vw + 12px, 14px);
+  --fs-output: clamp(12px, 0.24vw + 10.5px, 14px);
+  --fs-output-h3: clamp(14px, 0.24vw + 12px, 16px);
 }
 
 .output{
   font-size: var(--fs-output);
-  line-height: 1.4; /* a touch tighter than the site default */
+  line-height: 1.45; /* a touch tighter than the site default */
 }
 
 /* headings inside the generated script */
