@@ -968,7 +968,7 @@ select:not([multiple]) {
 
 /* Generated script sizing */
 #output, .output{
-  font-size: var(--fs-output) !important;  /* force win while you verify */
+  font-size: var(--fs-output) !important; 
   line-height: 1.45;
 }
 .output .script-sec > h3{
