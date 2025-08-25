@@ -965,3 +965,13 @@ select:not([multiple]) {
 .output p{ margin: 6px 0; }
 .output ul{ margin: 6px 0 0 1.1rem; }
 .output li{ margin: 3px 0; }
+
+/* Generated script sizing */
+#output, .output{
+  font-size: var(--fs-output) !important;  /* force win while you verify */
+  line-height: 1.45;
+}
+.output .script-sec > h3{
+  font-size: var(--fs-output-h3) !important;
+  margin: 0 0 6px;
+}
