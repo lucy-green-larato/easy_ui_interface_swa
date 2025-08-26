@@ -403,12 +403,22 @@
     // Canon/aliases
     const REQUIRED_CANON = ["Opening", "Buyer Pain", "Buyer Desire", "Example Illustration", "Handling Objections", "Next Step"];
     const SECTION_ALIASES = {
-      "Opening": ["opening", "introduction"],
+      "Opening": ["opening", "introduction", "overview"],
       "Buyer Pain": ["buyer pain", "pains", "pain", "challenges", "problems"],
       "Buyer Desire": ["buyer desire", "desire", "goals", "objectives", "what they want"],
       "Example Illustration": ["example illustration", "example", "case study", "illustration"],
       "Handling Objections": ["handling objections", "objections", "objection handling"],
       "Next Step": ["next step", "next steps", "call to action", "cta"]
+    };
+    // UI-only heading overrides (logic still uses canonical names)
+    const DISPLAY_LABELS = {
+      "Opening": "Overview"
+      // add more if you ever want: "Buyer Pain": "Problems", etc.
+    };
+
+    const PREFACE = {
+      title: "About this guide",
+      body: `This guide gives you a head start by distilling the buyer’s likely pains and desired outcomes into a simple conversation plan with evidence, plus clear responses to common objections. It’s a shortcut, not a script. Use it to open stronger, ask sharper questions, earn trust quickly and secure a clear next step.`
     };
 
     /* Normalise + parse markdown into sections */
@@ -494,20 +504,34 @@
             ...sec.paras.map(p => `<p>${strongify(esc(p))}</p>`),
             ...(sec.list.length ? [`<ul>${sec.list.map(li => `<li>${strongify(esc(li))}</li>`).join("")}</ul>`] : [])
           ].join("");
-          blocks.push(`<section class="script-sec"><h3>${esc(canonName)}</h3>${body}</section>`);
+          blocks.push(`<section class="script-sec"><h3>${esc(labelFor(canonName))}</h3>${body}</section>`);
         } else {
           missing.push(canonName);
           if (canonName === "Next Step") {
             const nx = valuesForFallback?.next_step || "";
             const p = nx ? `<p>${strongify(esc(nx))}</p>` : `<p class="muted">Not provided in the generated script.</p>`;
-            blocks.push(`<section class="script-sec is-missing"><h3>Next Step</h3>${p}</section>`);
+            blocks.push(`<section class="script-sec is-missing"><h3>${esc(labelFor(canonName))}</h3><p class="muted">Not provided in the generated script.</p></section>`);
           } else {
-            blocks.push(`<section class="script-sec is-missing"><h3>${esc(canonName)}</h3><p class="muted">Not provided in the generated script.</p></section>`);
+            blocks.push(`<section class="script-sec is-missing"><h3>${esc(labelFor("Next Step"))}</h3>${p}</section>`);
           }
         }
       }
-      return { html: `<div class="script-body">${blocks.join("")}</div>`, found, missing, sections };
+      // Build preface block (only if body text exists)
+      const prefaceHtml = PREFACE?.body
+        ? `<section class="script-sec preface">
+       <h3>${esc(PREFACE.title || "About this guide")}</h3>
+       <p>${strongify(esc(PREFACE.body))}</p>
+     </section>`
+        : "";
+
+      // Prepend preface before the first canonical section (Overview/Opening)
+      return {
+        html: `<div class="script-body">${prefaceHtml}${blocks.join("")}</div>`,
+        found, missing, sections
+      };
     }
+
+    const labelFor = (canon) => (DISPLAY_LABELS[canon] || canon);
 
     /* Bullet view (kept for future) */
     function firstSentence(s, max = 220) { const txt = String(s || "").replace(/\s+/g, " ").trim(); if (!txt) return ""; const m = txt.match(/^(.{1,220}?[.!?])(\s|$)/); return (m ? m[1] : txt.slice(0, max)).trim(); }
@@ -818,7 +842,7 @@
       toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
     });
 
-    
+
     toggleTipsBtn?.addEventListener('click', () => {
       const hidden = localStorage.getItem(TIPS_HIDDEN_KEY) === '1';
       localStorage.setItem(TIPS_HIDDEN_KEY, hidden ? '0' : '1');
