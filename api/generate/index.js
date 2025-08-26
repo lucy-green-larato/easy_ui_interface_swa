@@ -563,6 +563,27 @@ function parseTargetLength(label) {
   return 300;
 }
 
+// Build follow-up email prompt (prospect-facing)
+function buildFollowupPrompt({ seller, prospect, tone, scriptMdText, callNotes }) {
+  return (
+    `You are a UK B2B salesperson. Draft a concise follow-up email after a discovery call.
+
+Tone: ${tone || "Professional (corporate)"}.
+Output: Plain text email with:
+- Subject line
+- Greeting ("Hello ${prospect.name},")
+- 2–3 short paragraphs that stitch together (1) the prepared call talking points and (2) the salesperson's call notes (prioritise the notes)
+- A single clear next step
+- Signature as "${seller.name}, ${seller.company}"
+
+Prepared talking points (from the script the rep used on the call):
+${scriptMdText || "(none)"}
+
+Salesperson's notes (verbatim):
+${callNotes || "(none)"}`
+  );
+}
+
 // Build prompt used for the model
 function buildPromptFromMarkdown(args) {
   const templateMdText = args.templateMdText || "";
@@ -617,6 +638,28 @@ function buildPromptFromMarkdown(args) {
     "Provide exactly 3 concise, practical tips (numbered 1., 2., 3.).\n"
   );
 }
+
+// Build follow-up email prompt (prospect-facing)
+function buildFollowupPrompt({ seller, prospect, tone, scriptMdText, callNotes }) {
+  return (
+    `You are a UK B2B salesperson. Draft a concise follow-up email after a discovery call.
+
+Tone: ${tone || "Professional (corporate)"}.
+Output: Plain text email with:
+- Subject line
+- Greeting ("Hello ${prospect.name},")
+- 2–3 short paragraphs that stitch together (1) the prepared call talking points and (2) the salesperson's call notes (prioritise the notes)
+- A single clear next step
+- Signature as "${seller.name}, ${seller.company}"
+
+Prepared talking points (from the script the rep used on the call):
+${scriptMdText || "(none)"}
+
+Salesperson's notes (verbatim):
+${callNotes || "(none)"}`
+  );
+}
+
 
 // Build JSON-only prompt (model must return JSON matching ScriptJsonSchema)
 function buildJsonPrompt(args) {
@@ -1561,6 +1604,30 @@ module.exports = async function (context, req) {
         context.res = { status: 200, headers: { ...cors, "Content-Type": "text/html; charset=utf-8" }, body: html };
         return;
       }
+    }
+    // ======================= NEW: call-followup (prospect email) =======================
+    if (kind === "call-followup") {
+      // Merge top-level and nested variables (nested wins)
+      const vars = { ...(body || {}), ...(body.variables || {}) };
+
+      const prompt = buildFollowupPrompt({
+        seller: { name: vars.seller_name || "", company: vars.seller_company || "" },
+        prospect: { name: vars.prospect_name || "", role: vars.prospect_role || "", company: vars.prospect_company || "" },
+        tone: normaliseTone(vars.tone || body.tone || ""),
+        scriptMdText: String(body.scriptMdText || vars.scriptMdText || vars.script_md || ""),
+        callNotes: String(body.callNotes || vars.callNotes || vars.call_notes || vars.notes || "")
+      });
+
+      const llmRes = await callModel({
+        system: "You write crisp UK business emails. No pleasantries. Keep it short and specific.",
+        prompt,
+        temperature: 0.5
+      });
+
+      const email = extractText(llmRes) || "";
+      // Keep the historical response shape the call front-end expects
+      context.res = { status: 200, headers: cors, body: { followup: { email }, version: VERSION } };
+      return;
     }
 
     // ---------- Markdown-first route ----------
