@@ -147,13 +147,14 @@ const ScriptJsonSchema = z.object({
     other_points_used: z.array(z.string()).optional(),
     next_step_source: z.enum(["salesperson", "template", "assistant"]).optional()
   }).optional(),
-  tips: z.array(z.string()).min(3).max(3),
+  tips: z.array(z.string()).min(1).max(12),
   summary_bullets: z.array(z.string()).min(6).max(12)  // NEW: concise outline
 });
 
 // ==== Dynamic length presets & schema factories (place right below ScriptJsonSchema) ====
-const DEFAULT_MIN_FULL = 9000;   // ~900–1,1500 words
-const DEFAULT_MIN_SUMMARY = 1800; // ~400 - 600 words
+const DEFAULT_MIN_FULL = 1500;   // characters (≈250–300 words)
+const DEFAULT_MIN_SUMMARY = 350; // characters (≈60–80 words)
+
 
 function makeQualSchema(minMd) {
   return z.object({
@@ -199,13 +200,87 @@ function makeOpenAIQualJsonSchema(minMd) {
         },
         tips: {
           type: "array",
-          minItems: 3,
-          maxItems: 3,
+          minItems: 1,
+          maxItems: 12,
           items: { type: "string", minLength: 3 }
         }
       }
     }
   };
+}
+
+// --- Helpers to parse/sanitise model JSON and detect "length only" failures ---
+function stripJsonFences(s) {
+  const t = String(s || "").trim();
+  if (/^```json/i.test(t)) return t.replace(/^```json/i, "").replace(/```$/i, "").trim();
+  if (/^```/.test(t)) return t.replace(/^```/i, "").replace(/```$/i, "").trim();
+  return t;
+}
+
+function sanitizeModelJson(obj) {
+  // If the whole thing is actually markdown, wrap it.
+  if (typeof obj === "string") {
+    return { report: { md: obj }, tips: [] };
+  }
+
+  const out = { ...obj };
+
+  // Normalise report
+  if (!out.report) out.report = {};
+  if (typeof out.report === "string") out.report = { md: out.report };
+  const r = out.report;
+
+  // Map common key variants to md
+  r.md = String(
+    r.md ??
+    r.markdown ??
+    out.markdown ??
+    out.text ??
+    r.text ??
+    ""
+  );
+
+  // Citations: allow strings or objects; coerce to {label,url?}
+  if (Array.isArray(r.citations)) {
+    r.citations = r.citations.map(c => {
+      if (typeof c === "string") return { label: c };
+      if (c && typeof c === "object") {
+        const label = String(c.label || c.title || c.url || "Source").trim();
+        const url = c.url ? String(c.url).trim() : undefined;
+        return url ? { label, url } : { label };
+      }
+      return { label: "Source" };
+    });
+  } else if (r.citations) {
+    r.citations = [{ label: String(r.citations) }];
+  }
+
+  // Tips: allow string or too many/few; coerce to exactly 3 when possible
+  if (typeof out.tips === "string") {
+    const parts = out.tips
+      .split(/\r?\n|^[-*]\s+|\d+\.\s+/m)
+      .map(s => s.trim()).filter(Boolean);
+    out.tips = parts.slice(0, 3);
+  } else if (Array.isArray(out.tips)) {
+    out.tips = out.tips.map(t => String(t || "").trim()).filter(Boolean).slice(0, 3);
+  } else {
+    out.tips = [];
+  }
+
+  return out;
+}
+
+function isOnlyMdTooSmall(zodError) {
+  const issues = (zodError && zodError.issues) || [];
+  if (!issues.length) return false;
+  // Only error: report.md too_small
+  return issues.every(it =>
+    it.code === "too_small" &&
+    Array.isArray(it.path) &&
+    it.path.length === 2 &&
+    it.path[0] === "report" &&
+    it.path[1] === "md"
+  );
 }
 
 function extractText(res) {
@@ -227,6 +302,65 @@ function extractText(res) {
       return String(res.data.choices[0].message.content);
     }
   } catch (e) { }
+  return "";
+}
+
+// --- Tips utilities ---
+const TIP_MIN = 3;   // how many we show
+const TIP_MAX = 3;   // clamp hard to 3
+
+function uniqCI(arr) {
+  const seen = new Set();
+  const out = [];
+  for (const s of arr) {
+    const k = String(s || "").trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(String(s).trim());
+  }
+  return out;
+}
+
+function defaultTipsFor(vars) {
+  const callType = String(vars?.call_type || "").toLowerCase().startsWith("p") ? "partner" : "direct";
+  if (callType === "partner") {
+    return [
+      "Co-plan the first 90 days with activity gates.",
+      "Start with a light, postcode-led pilot before scale.",
+      "Tie MDF/discounts to measurable wins."
+    ];
+  }
+  return [
+    "Lead with evidence and specific outcomes.",
+    "Propose a low-friction next step.",
+    "Handle common objections factually."
+  ];
+}
+
+function normaliseTips(rawTips, vars) {
+  const flat = Array.isArray(rawTips) ? rawTips : (rawTips ? [rawTips] : []);
+  let cleaned = uniqCI(flat.map(t => String(t || "").trim()).filter(Boolean));
+  if (cleaned.length < TIP_MIN) {
+    cleaned = uniqCI(cleaned.concat(defaultTipsFor(vars)));
+  }
+  return cleaned.slice(0, TIP_MAX);
+}
+
+function safeJson(input) {
+  const s = String(input || "");
+  try { return JSON.parse(s); } catch { }
+  const first = s.indexOf("{"), last = s.lastIndexOf("}");
+  if (first >= 0 && last > first) {
+    try { return JSON.parse(s.slice(first, last + 1)); } catch { }
+  }
+  return null;
+}
+
+function ensureHttpUrl(u) {
+  const s = String(u || "").trim();
+  if (!s) return "";
+  try { return new URL(s).href; } catch { }
+  try { return new URL("https://" + s).href; } catch { }
   return "";
 }
 
@@ -974,6 +1108,15 @@ module.exports = async function (context, req) {
       // Prospect links (optional)
       const websiteUrl = String(vars.prospect_website || "").trim();
       const linkedinUrl = String(vars.company_linkedin || vars.linkedin_company || "").trim();
+      // Enforce website presence for qualification
+      if (!websiteUrl) {
+        context.res = {
+          status: 400,
+          headers: cors,
+          body: { error: "prospect_website is required (e.g., https://example.com)", version: VERSION }
+        };
+        return;
+      }
 
       // Extract PDF texts (OCR PDFs expected)
       const pdfTexts = files.length ? await extractPdfTexts(files) : [];
@@ -1072,60 +1215,64 @@ module.exports = async function (context, req) {
       }
 
       // Robust parse (handles providers that sneak in stray text)
+      // Robust parse with fence stripping
       let parsed = null;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        const first = raw.indexOf("{"), last = raw.lastIndexOf("}");
+      const stripped = stripJsonFences(raw);
+      try { parsed = JSON.parse(stripped); }
+      catch {
+        const first = stripped.indexOf("{"), last = stripped.lastIndexOf("}");
         if (first >= 0 && last > first) {
-          try { parsed = JSON.parse(raw.slice(first, last + 1)); } catch { }
+          try { parsed = JSON.parse(stripped.slice(first, last + 1)); } catch { }
         }
       }
-
       if (!parsed) {
         context.res = {
           status: 502,
           headers: cors,
-          body: { error: "Model did not return valid JSON", version: VERSION, sample: raw.slice(0, 300) }
+          body: { error: "Model did not return valid JSON", version: VERSION, sample: stripped.slice(0, 300) }
         };
         return;
       }
 
-      // Validate against your Zod schema used by the UI (with graceful fallback)
-      const valid0 = QualSchemaDyn.safeParse(parsed);
+      // Coerce/normalise shape before validation
+      parsed = sanitizeModelJson(parsed);
 
-      // if it only failed because report.md was shorter than minMd, relax once
-      let valid = valid0;
-      if (!valid.success) {
-        const issues = (valid.error && valid.error.issues) ? valid.error.issues : [];
-        const onlyTooSmallMd = issues.length > 0 && issues.every(
-          i => i.code === "too_small" && (i.path || []).join(".") === "report.md"
-        );
-
-        if (onlyTooSmallMd) {
-          const relaxedMin = Math.max(200, Math.round(minMd * 0.5)); // halve, but not below 200 chars
-          const QualSchemaRelaxed = makeQualSchema(relaxedMin);
-          const valid2 = QualSchemaRelaxed.safeParse(parsed);
-          if (valid2.success) valid = valid2;
+      // Progressive validation: strict first, then relax if the ONLY problem is md length
+      let result = QualSchemaDyn.safeParse(parsed);
+      if (!result.success && isOnlyMdTooSmall(result.error)) {
+        const relaxedMin = Math.max(200, Math.floor(minMd * 0.7)); // relax to 70% (never below 200)
+        const RelaxedSchema = makeQualSchema(relaxedMin);
+        const r2 = RelaxedSchema.safeParse(parsed);
+        if (r2.success) {
+          result = r2;
         }
       }
 
-      if (!valid.success) {
+      if (!result.success) {
+        // Log a snippet to server logs to debug (safe/truncated)
+        try {
+          context.log(`[${VERSION}] Zod fail: ${JSON.stringify(result.error.issues).slice(0, 400)}`);
+        } catch { }
         context.res = {
-          status: 422, // schema validation failure (client/model), not server error
+          status: 502,
           headers: cors,
           body: {
             error: "Model JSON failed schema validation",
-            issues: String(valid.error),
+            issues: JSON.stringify(result.error.issues, null, 2),
             version: VERSION
           }
         };
         return;
       }
 
+      // From here on, use result.data (already validated/coerced)
+      const modelOut = result.data;
+      const finalTips = normaliseTips(modelOut.tips, vars);
 
       // Merge server-known citations (PDFs, iXBRL link, website) so the UI can render them
+      // Merge server-known citations (PDFs, iXBRL link, website) so the UI can render them
       const citations = [];
+
       // Website pages
       for (const p of (websiteBundle.pages || [])) {
         citations.push({ label: `Website: ${p.label}`, url: p.url });
@@ -1134,13 +1281,19 @@ module.exports = async function (context, req) {
       if (linkedinUrl) citations.push({ label: "Company LinkedIn", url: linkedinUrl });
       // Companies House (unchanged)
       const chNum = String(vars.ch_number || vars.company_number || vars.companies_house_number || "").trim();
-      if (chNum) citations.push({ label: "Companies House (filings)", url: "https://find-and-update.company-information.service.gov.uk/company/" + encodeURIComponent(chNum) });
+      if (chNum) {
+        citations.push({
+          label: "Companies House (filings)",
+          url: "https://find-and-update.company-information.service.gov.uk/company/" + encodeURIComponent(chNum)
+        });
+      }
       // PDF filenames
       for (let i = 0; i < pdfTexts.length; i++) {
         citations.push({ label: "Annual report: " + (pdfTexts[i].filename || ("report-" + (i + 1) + ".pdf")) });
       }
 
-      const modelCitations = Array.isArray(valid.data.report.citations) ? valid.data.report.citations : [];
+      // Model citations (safe)
+      const modelCitations = Array.isArray(modelOut.report?.citations) ? modelOut.report.citations : [];
 
       // Normalise URLs so different forms of the same link match (strip hash, trailing slash, lowercase)
       function normUrl(u) {
@@ -1164,13 +1317,12 @@ module.exports = async function (context, req) {
         return true;
       });
 
-
       context.res = {
         status: 200,
         headers: cors,
         body: {
-          report: { md: valid.data.report.md, citations: mergedCites },
-          tips: valid.data.tips || [],
+          report: { md: modelOut.report.md, citations: mergedCites },
+          tips: finalTips,
           version: VERSION,
           usedModel: true,
           mode: "qualification"
