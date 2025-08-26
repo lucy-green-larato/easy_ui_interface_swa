@@ -480,8 +480,28 @@
 
     /* Render sections -> HTML */
     function renderSectionsToHtml(rawMd, valuesForFallback) {
+      // local fallbacks to avoid external deps
+      const escapeRxLocal = (typeof escapeRx === "function")
+        ? escapeRx
+        : (s => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+      const labelForFn = (typeof labelFor === "function") ? labelFor : (s => s);
+      const PREF = (typeof PREFACE === "object" && PREFACE) ? PREFACE : {};
+
       const sections = parseSections(rawMd);
       const byKey = new Map(sections.map(s => [String(s.title).toLowerCase(), s]));
+
+      // Build a regex for the auto-greeting so we can strip it from "Opening"
+      const v = valuesForFallback || {};
+      const greetRx = (() => {
+        const pn = (v.prospect_name || "").trim();
+        const sn = (v.seller_name || "").trim();
+        const sc = (v.seller_company || "").trim();
+        if (!pn || !sn || !sc) return null;
+        return new RegExp(
+          `^hello\\s+${escapeRxLocal(pn)}\\s*,?\\s+it[’']?s\\s+${escapeRxLocal(sn)}\\s+from\\s+${escapeRxLocal(sc)}\\.?$`,
+          "i"
+        );
+      })();
 
       const getByAliases = (canonName) => {
         const aliases = SECTION_ALIASES[canonName] || [canonName];
@@ -495,41 +515,66 @@
         return null;
       };
 
-      const blocks = []; const found = []; const missing = [];
+      const blocks = [];
+      const found = [];
+      const missing = [];
+
       for (const canonName of REQUIRED_CANON) {
         const sec = getByAliases(canonName);
+
         if (sec) {
-          found.push(canonName);
+          // Strip auto-greeting line from Opening, if present
+          if (/^opening$/i.test(sec.title) && greetRx) {
+            sec.paras = (sec.paras || []).filter(p => !greetRx.test(String(p).trim()));
+          }
+
           const body = [
-            ...sec.paras.map(p => `<p>${strongify(esc(p))}</p>`),
-            ...(sec.list.length ? [`<ul>${sec.list.map(li => `<li>${strongify(esc(li))}</li>`).join("")}</ul>`] : [])
+            ...(sec.paras || []).map(p => `<p>${strongify(esc(p))}</p>`),
+            ...(sec.list && sec.list.length
+              ? [`<ul>${sec.list.map(li => `<li>${strongify(esc(li))}</li>`).join("")}</ul>`]
+              : [])
           ].join("");
-          blocks.push(`<section class="script-sec"><h3>${esc(labelFor(canonName))}</h3>${body}</section>`);
+
+          found.push(canonName);
+          blocks.push(
+            `<section class="script-sec"><h3>${esc(labelForFn(canonName))}</h3>${body}</section>`
+          );
         } else {
+          // Missing section rendering
           missing.push(canonName);
           if (canonName === "Next Step") {
-            const nx = valuesForFallback?.next_step || "";
-            const p = nx ? `<p>${strongify(esc(nx))}</p>` : `<p class="muted">Not provided in the generated script.</p>`;
-            blocks.push(`<section class="script-sec is-missing"><h3>${esc(labelFor(canonName))}</h3><p class="muted">Not provided in the generated script.</p></section>`);
+            const nx = v?.next_step || "";
+            const pHtml = nx
+              ? `<p>${strongify(esc(nx))}</p>`
+              : `<p class="muted">Not provided in the generated script.</p>`;
+            blocks.push(
+              `<section class="script-sec is-missing"><h3>${esc(labelForFn("Next Step"))}</h3>${pHtml}</section>`
+            );
           } else {
-            blocks.push(`<section class="script-sec is-missing"><h3>${esc(labelFor("Next Step"))}</h3>${p}</section>`);
+            blocks.push(
+              `<section class="script-sec is-missing"><h3>${esc(labelForFn(canonName))}</h3><p class="muted">Not provided in the generated script.</p></section>`
+            );
           }
         }
       }
-      // Build preface block (only if body text exists)
-      const prefaceHtml = PREFACE?.body
+
+      // Preface block (only if body text exists)
+      const prefaceHtml = PREF?.body
         ? `<section class="script-sec preface">
-       <h3>${esc(PREFACE.title || "About this guide")}</h3>
-       <p>${strongify(esc(PREFACE.body))}</p>
-     </section>`
+        <h3>${esc(PREF.title || "About this guide")}</h3>
+        <p>${strongify(esc(PREF.body))}</p>
+      </section>`
         : "";
 
-      // Prepend preface before the first canonical section (Overview/Opening)
+      // Prepend preface before the first canonical section
       return {
         html: `<div class="script-body">${prefaceHtml}${blocks.join("")}</div>`,
-        found, missing, sections
+        found,
+        missing,
+        sections
       };
     }
+
 
     const labelFor = (canon) => (DISPLAY_LABELS[canon] || canon);
 
@@ -951,6 +996,7 @@
         const tips = data?.script?.tips || [];
         if (!script || !script.trim()) throw new Error("Empty script returned from API");
 
+        const escapeRx = s => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const rendered = renderSectionsToHtml(script, values);
         const bulletsHtml = renderBulletScriptFromSections(rendered.sections);
         lastRender = { html: rendered.html, bulletsHtml }; window.lastRender = lastRender;
