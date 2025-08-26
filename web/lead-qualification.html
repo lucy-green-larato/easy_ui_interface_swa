@@ -87,7 +87,6 @@
               <p class="error" id="seller_company_error" role="alert" aria-live="polite"></p>
             </div>
 
-            <!-- NEW: Your website (right of Your company) -->
             <div class="field">
               <label for="seller_company_url">Your website</label>
               <input id="seller_company_url" name="seller_company_url" type="url" inputmode="url"
@@ -95,7 +94,6 @@
               <p class="error" id="seller_company_url_error" role="alert" aria-live="polite"></p>
             </div>
 
-            <!-- NEW: Output length (before prospect company) -->
             <div class="field">
               <label for="detail">Output length</label>
               <select id="detail" name="detail">
@@ -117,6 +115,14 @@
               <p class="error" id="prospect_role_error" role="alert" aria-live="polite"></p>
             </div>
 
+            <!-- Prospect website (required) -->
+            <div class="field">
+              <label for="prospect_website">Prospect website <span aria-hidden="true" class="req">*</span></label>
+              <input id="prospect_website" name="prospect_website" type="url" inputmode="url" required
+                placeholder="https://prospect.com" />
+              <p class="error" id="prospect_website_error" role="alert" aria-live="polite"></p>
+            </div>
+
             <div class="field">
               <label for="prospect_company">Prospect company <span aria-hidden="true" class="req">*</span></label>
               <input id="prospect_company" name="prospect_company" required />
@@ -125,61 +131,60 @@
           </div>
         </fieldset>
 
+        <div class="field">
+          <label class="label-with-help" for="company_number">
+            Companies House no.
+            <button id="ch-help" class="btn info" type="button" title="Important information for financial analysis"
+              aria-controls="ch-modal" aria-expanded="false">i</button>
+          </label>
+
+          <input id="company_number" name="company_number" placeholder="Optional (e.g., 01234567)" />
+
+          <p id="company_number_hint" class="fineprint">
+            Important information for financial analysis. Click the button to read.
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="product_service">Product / service offered <span aria-hidden="true" class="req">*</span></label>
+          <input id="product_service" name="product_service" required
+            placeholder="Free-form (e.g., FTTP, SIP, IoT, UCaaS, managed LAN)" />
+          <p class="error" id="product_service_error" role="alert" aria-live="polite"></p>
+        </div>
+
+        <div class="grid-2">
           <div class="field">
-            <label class="label-with-help" for="company_number">
-              Companies House no.
-              <button id="ch-help" class="btn info" type="button" title="Important information for financial analysis"
-                aria-controls="ch-modal" aria-expanded="false">i</button>
-            </label>
-
-            <input id="company_number" name="company_number" placeholder="Optional (e.g., 01234567)" />
-
-            <p id="company_number_hint" class="fineprint">
-              Important information for financial analysis. Click the button to read.
-            </p>
+            <label for="competitors">Competition</label>
+            <input id="competitors" name="competitors" placeholder="e.g., BT Wholesale, CityFibre, Gamma" />
           </div>
-
           <div class="field">
-            <label for="product_service">Product / service offered <span aria-hidden="true" class="req">*</span></label>
-            <input id="product_service" name="product_service" required
-              placeholder="Free-form (e.g., FTTP, SIP, IoT, UCaaS, managed LAN)" />
-            <p class="error" id="product_service_error" role="alert" aria-live="polite"></p>
+            <label for="existing_provider">Existing provider(s)</label>
+            <input id="existing_provider" name="existing_provider" placeholder="e.g., Openreach, Microsoft, Vodafone" />
           </div>
+        </div>
 
-          <div class="grid-2">
-            <div class="field">
-              <label for="competitors">Competition</label>
-              <input id="competitors" name="competitors" placeholder="e.g., BT Wholesale, CityFibre, Gamma" />
-            </div>
-            <div class="field">
-              <label for="existing_provider">Existing provider(s)</label>
-              <input id="existing_provider" name="existing_provider"
-                placeholder="e.g., Openreach, Microsoft, Vodafone" />
-            </div>
-          </div>
+        <div class="field">
+          <label for="context">Other context to analyse</label>
+          <textarea id="context" name="context" rows="2"
+            placeholder="Constraints, timelines, budget signals, known suppliers, etc."></textarea>
+        </div>
 
+        <div class="grid-2">
           <div class="field">
-            <label for="context">Other context to analyse</label>
-            <textarea id="context" name="context" rows="2"
-              placeholder="Constraints, timelines, budget signals, known suppliers, etc."></textarea>
+            <label for="company_linkedin">Company LinkedIn</label>
+            <input id="company_linkedin" name="company_linkedin" placeholder="https://www.linkedin.com/company/..."
+              inputmode="url" />
           </div>
-
-          <div class="grid-2">
-            <div class="field">
-              <label for="company_linkedin">Company LinkedIn</label>
-              <input id="company_linkedin" name="company_linkedin" placeholder="https://www.linkedin.com/company/..."
-                inputmode="url" />
-            </div>
-            <div class="field">
-              <label for="contact_linkedins">Key contact LinkedIn URLs</label>
-              <input id="contact_linkedins" name="contact_linkedins" placeholder="Comma or newline separated" />
-            </div>
-          </div>
-
           <div class="field">
-            <label for="events">Trade show(s) this year</label>
-            <input id="events" name="events" placeholder="e.g., Channel Live; Connected North" />
+            <label for="contact_linkedins">Key contact LinkedIn URLs</label>
+            <input id="contact_linkedins" name="contact_linkedins" placeholder="Comma or newline separated" />
           </div>
+        </div>
+
+        <div class="field">
+          <label for="events">Trade show(s) this year</label>
+          <input id="events" name="events" placeholder="e.g., Channel Live; Connected North" />
+        </div>
         </fieldset>
 
         <fieldset class="card" aria-labelledby="legend-evidence">
@@ -524,7 +529,16 @@
     const reportInput = document.getElementById("report_files");
     const reportList = document.getElementById("file_list");
 
-    const requiredIds = ["call_type", "seller_name", "seller_company", "prospect_name", "prospect_role", "prospect_company", "prospect_website", "product_service"];
+    const requiredIds = [
+      "call_type",
+      "seller_name",
+      "seller_company",
+      "prospect_name",
+      "prospect_role",
+      "prospect_company",
+      "prospect_website",
+      "product_service"
+    ];
 
     // Accessibility helpers
     function setStatus(msg, kind = "info") {
@@ -940,23 +954,35 @@
 
     function safeJson(raw) { if (!raw) return null; try { return JSON.parse(raw); } catch { return null; } }
     function num(x) { const n = Number(String(x || "").replace(/[,£\s]/g, "")); return Number.isFinite(n) ? n : null; }
+    function normUrl(u) {
+      u = String(u || "").trim();
+      return u && !/^https?:\/\//i.test(u) ? "https://" + u : u;
+    }
+    ["seller_company_url", "prospect_website"].forEach(id => {
+      const el = document.getElementById(id);
+      el?.addEventListener("blur", () => {
+        el.value = normUrl(el.value);
+        saveForm();
+        validateField(id);
+      });
+    });
 
     function collectVariables() {
       return {
         // --- top-level selectors / controls ---
         call_type: (callTypeSel?.value || "").trim(),
-        detail: (form.elements.detail?.value || "full").trim(),                   // NEW
+        detail: (form.elements.detail?.value || "full").trim(),
 
         // --- you / your company ---
         seller_name: (form.elements.seller_name?.value || "").trim(),
         seller_company: (form.elements.seller_company?.value || "").trim(),
-        seller_company_url: (form.elements.seller_company_url?.value || "").trim(), // NEW
+        seller_company_url: normUrl(form.elements.seller_company_url?.value),
 
         // --- prospect person & company ---
         prospect_name: (form.elements.prospect_name?.value || "").trim(),
         prospect_role: (form.elements.prospect_role?.value || "").trim(),
         prospect_company: (form.elements.prospect_company?.value || "").trim(),
-        prospect_website: (form.elements.prospect_website?.value || "").trim(),
+        prospect_website: normUrl(form.elements.prospect_website?.value),
         company_number: (form.elements.company_number?.value || "").trim(),
 
         // --- offer / context ---
