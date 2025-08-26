@@ -511,34 +511,63 @@ textarea.invalid {
 }
 
 /* --- utilities --- */
-.fineprint{
+.fineprint {
   font-style: italic;
   font-size: clamp(0.80rem, 1.2vw, 0.92rem);
   color: var(--text-3, #667085);
 }
 
+.stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.stack .fineprint {
+  margin-top: 4px;
+}
+
 /* keep label + help button on one row but allow wrap on narrow screens */
-.label-with-help{
-  display:inline-flex;
-  align-items:center;
-  gap:.5rem;
-  flex-wrap:wrap;
+.label-with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
 }
 
 /* attention “info” button (fits the left column nicely) */
-.btn.info{
+.btn.info {
+  --icon-size: clamp(1.6rem, 3vw, 1.9rem);
+  display: inline-grid;
+  /* centers the icon */
+  place-items: center;
+  width: var(--icon-size);
+  height: var(--icon-size);
+  padding: 0;
+  line-height: 1;
+  border-radius: 9999px;
   background: var(--brand, #0b5fff);
-  color:#fff;
-  border:0;
-  width: clamp(1.6rem, 3vw, 1.9rem);
-  height: clamp(1.6rem, 3vw, 1.9rem);
-  line-height: 1;           /* center the “i” */
-  border-radius: 9999px;    /* pill */
-  font-weight: 700;
-  padding:0;
+  color: #fff;
+  border: 0;
 }
-.btn.info:hover{ filter: brightness(1.05); }
-.btn.info:focus-visible{
+
+.btn.info .icon-info {
+  width: 60%;
+  height: 60%;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* keep your existing hover + focus rules */
+.btn.info:hover {
+  filter: brightness(1.05);
+}
+
+.btn.info:focus-visible {
   outline: 3px solid color-mix(in oklab, var(--brand, #0b5fff) 55%, white);
   outline-offset: 2px;
 }
@@ -934,77 +963,103 @@ select:not([multiple]) {
 }
 
 /* Tips header layout – put the button on the right */
-.tips-card .row-between{
-  display:flex;
-  align-items:center;
-  gap:.5rem;
+.tips-card .row-between {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
 }
 
 /* push the toggle all the way right */
-.tips-card .row-between > :last-child{
-  margin-left:auto;
+.tips-card .row-between> :last-child {
+  margin-left: auto;
 }
 
 /* title underline like Buyer Needs */
-.tips-card h3{
-  font-size:.95rem;
-  font-weight:550;
-  margin:0 0 8px;
-  padding-bottom:6px;
-  border-bottom:1px solid var(--border);
+.tips-card h3 {
+  font-size: .95rem;
+  font-weight: 550;
+  margin: 0 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
 }
 
 /* optional: make tips list chips match intel styles */
-#tips-list{
-  list-style:none;
-  margin:6px 0 0;
-  padding-left:0;
-  display:flex;
-  flex-wrap:wrap;
-  gap:6px;
+#tips-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding-left: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
-#tips-list li{
-  display:inline-block;
-  padding:4px 8px;
-  border:1px solid var(--border);
-  border-radius:8px;
-  background:var(--card-bg);
-  font-size:.85rem;
-  color:var(--text-2);
+
+#tips-list li {
+  display: inline-block;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg);
+  font-size: .85rem;
+  color: var(--text-2);
 }
 
 /* Make the [hidden] attribute win over our custom display rules */
-[hidden] { display: none !important; }
+[hidden] {
+  display: none !important;
+}
 
 /* === Output sizing: make generated script text smaller =================== */
-:root{
+:root {
   /* tweak these two numbers to taste */
   --fs-output: clamp(14px, 0.22vw + 12px, 16px);
   --fs-output-h3: clamp(15px, 0.26vw + 13px, 18px);
 }
 
-.output{
+.output {
   font-size: var(--fs-output);
-  line-height: 1.45; /* a touch tighter than the site default */
+  line-height: 1.45;
+  /* a touch tighter than the site default */
 }
 
 /* headings inside the generated script */
-.output .script-sec > h3{
+.output .script-sec>h3 {
   font-size: var(--fs-output-h3);
   margin: 0 0 6px;
 }
 
 /* optional: tighten paragraph + list spacing slightly */
-.output p{ margin: 6px 0; }
-.output ul{ margin: 6px 0 0 1.1rem; }
-.output li{ margin: 3px 0; }
+.output p {
+  margin: 6px 0;
+}
+
+.output ul {
+  margin: 6px 0 0 1.1rem;
+}
+
+.output li {
+  margin: 3px 0;
+}
+
+/* Generated report — extra space between sections */
+.output h3 {
+  margin-top: var(--s-5);
+  /* adds a blank line before each section */
+  margin-bottom: var(--s-2);
+}
+
+.output h3:first-child {
+  margin-top: 0;
+  /* no extra gap before the very first heading */
+}
 
 /* Generated script sizing */
-#output, .output{
-  font-size: var(--fs-output) !important; 
+#output,
+.output {
+  font-size: var(--fs-output) !important;
   line-height: 1.45;
 }
-.output .script-sec > h3{
+
+.output .script-sec>h3 {
   font-size: var(--fs-output-h3) !important;
   margin: 0 0 6px 6px;
 }
