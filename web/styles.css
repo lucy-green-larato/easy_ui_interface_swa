@@ -551,6 +551,19 @@ textarea.invalid {
   border: 0;
 }
 
+/* SVG inside the info button */
+.btn.info svg {
+  width: 60%;
+  height: 60%;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+  /* ← removes the black fill */
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .btn.info .icon-info {
   width: 60%;
   height: 60%;
