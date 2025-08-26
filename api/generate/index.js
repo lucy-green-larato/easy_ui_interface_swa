@@ -152,8 +152,8 @@ const ScriptJsonSchema = z.object({
 });
 
 // ==== Dynamic length presets & schema factories (place right below ScriptJsonSchema) ====
-const DEFAULT_MIN_FULL = 7000  // characters (≈1,150–1,300 words minimum)
-const DEFAULT_MIN_SUMMARY = 900 // characters (≈130–170 words)
+const DEFAULT_MIN_FULL = 7000;  // characters (≈1,150–1,300 words minimum)
+const DEFAULT_MIN_SUMMARY = 900; // characters (≈130–170 words)
 
 
 function makeQualSchema(minMd) {
@@ -927,6 +927,22 @@ function buildQualificationJsonPrompt(args) {
         "- Quote figures with year labels; include relevant operational context from sources.",
         "- Still avoid speculation; if unknown, state it explicitly."
       ].join("\n");
+  const banlist = [
+    "well-positioned", "decades of experience", "cybersecurity landscape",
+    "market differentiation", "client-centric", "cutting-edge",
+    "robust posture", "holistic", "industry-leading", "best-in-class"
+  ];
+
+  const banlistLine =
+    "BANNED WORDING (do not use any of these): " + banlist.join(", ") + ".";
+
+  const evidDensityRules = [
+    "EVIDENCE DENSITY:",
+    "- Company profile MUST include labelled figures where available (e.g., “FY24: £20.76m revenue; Loss before tax £824k; Average employees 92”).",
+    "- If a required number is not present in the provided sources, write a one-line ‘No public evidence found’ under that section—do NOT generalise.",
+    "- Only list partners/technologies if explicitly present in the provided WEBSITE TEXT or PDFs you’ve been given.",
+    "- Trade shows: list only those explicitly evidenced in WEBSITE TEXT; otherwise write ‘No public evidence found this calendar year.’",
+  ].join("\n");
   const ix = args.ixbrl || {};
   const ixBrief = JSON.stringify(ix && ix.years ? ix.years : (ix.summary && ix.summary.years) || ix);
 
@@ -1002,6 +1018,8 @@ JSON schema:
     `MODE: ${detailMode.toUpperCase()}`,
     modeLine,
     targetWordsLine,
+    banlistLine,
+    evidDensityRules,
     `Prospect website (scraped pages included): ${v.prospect_website || "(not provided)"}`,
     `LinkedIn (URL only, content not scraped): ${v.company_linkedin || "(not provided)"}`,
     "",
@@ -1225,7 +1243,7 @@ module.exports = async function (context, req) {
         llmRes = await callModel({
           system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.",
           prompt,
-          temperature: 0.4,
+          temperature: 0.2,
           max_tokens: maxTokens,
           response_format
         });
@@ -1292,10 +1310,76 @@ module.exports = async function (context, req) {
       }
 
       // From here on, use result.data (already validated/coerced)
-      const modelOut = result.data;
-      const finalTips = normaliseTips(modelOut.tips, vars);
+      // From here on, use result.data (already validated/coerced)
+      let finalData = result.data;   // <-- make it let so we can overwrite after redo
+      let redoNote = "";
 
-      // Merge server-known citations (PDFs, iXBRL link, website) so the UI can render them
+      // -------- Quality Gate (auto-redo once if generic/unevidenced) --------
+      function looksGeneric(md) {
+        const bannedRx = /\b(well-positioned|decades of experience|cybersecurity landscape|market differentiation|client-centric|cutting-edge|holistic|industry-leading|best-in-class)\b/i;
+        return bannedRx.test(md || "");
+      }
+
+      // Require at least two £-figures and one FY label in the whole report
+      function hasEvidenceMarks(md) {
+        const pounds = (md.match(/£\s?\d/gi) || []).length;
+        const fy = /FY\d{2}/i.test(md);
+        return pounds >= 2 && fy;
+      }
+
+      if (!hasEvidenceMarks(finalData.report.md) || looksGeneric(finalData.report.md)) {
+        // Re-call once with an addendum that explains the failure
+        const addendum = [
+          "=== STRICT REWRITE INSTRUCTIONS ===",
+          "Your previous draft contained generic wording or insufficient evidence.",
+          "Rewrite the ENTIRE report now:",
+          "- Include labelled figures (e.g., “FY24: £… revenue; Loss before tax £…; Average employees …”).",
+          "- Remove ALL generic wording (banlist in prompt).",
+          "- If a data point is NOT evidenced in the provided sources, write exactly: “No public evidence found.”",
+          "- Only name partners/technologies that appear in the provided WEBSITE TEXT or PDFs.",
+          "- Retain the exact section headings and order."
+        ].join("\n");
+
+        const promptRedo = buildQualificationJsonPrompt({
+          values: vars,
+          ixbrl,
+          pdfs: pdfTexts,
+          websiteText,
+          seller: {
+            name: String(vars.seller_name || ""),
+            company: String(vars.seller_company || ""),
+            url: String(vars.seller_company_url || "")
+          },
+          ourOffer: {
+            product: String(vars.product_service || ""),
+            otherContext: String(vars.context || "")
+          },
+          detailMode,
+          targetWords
+        }) + "\n\n" + addendum;
+
+        const rf = isAzure ? { type: "json_object" } : { type: "json_schema", json_schema: oaJsonSchema };
+        const redoRes = await callModel({
+          system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.",
+          prompt: promptRedo,
+          temperature: 0.2,
+          max_tokens: maxTokens,
+          response_format: rf
+        });
+        const redoRaw = extractText(redoRes) || "";
+        let redoParsed = safeJson(stripJsonFences(redoRaw)) || {};
+        redoParsed = sanitizeModelJson(redoParsed);
+        const redoValid = QualSchemaDyn.safeParse(redoParsed);
+
+        if (redoValid.success && hasEvidenceMarks(redoValid.data.report.md) && !looksGeneric(redoValid.data.report.md)) {
+          finalData = redoValid.data;
+          redoNote = "[quality-gate: redo applied]";
+        }
+      }
+
+      // from here on, use finalData
+      const finalTips = normaliseTips(finalData.tips, vars);
+
       // Merge server-known citations (PDFs, iXBRL link, website) so the UI can render them
       const citations = [];
 
@@ -1319,7 +1403,7 @@ module.exports = async function (context, req) {
       }
 
       // Model citations (safe)
-      const modelCitations = Array.isArray(modelOut.report?.citations) ? modelOut.report.citations : [];
+      const modelCitations = Array.isArray(finalData.report?.citations) ? finalData.report.citations : [];
 
       // Normalise URLs so different forms of the same link match (strip hash, trailing slash, lowercase)
       function normUrl(u) {
@@ -1347,11 +1431,12 @@ module.exports = async function (context, req) {
         status: 200,
         headers: cors,
         body: {
-          report: { md: modelOut.report.md, citations: mergedCites },
+          report: { md: finalData.report.md, citations: mergedCites },
           tips: finalTips,
           version: VERSION,
           usedModel: true,
-          mode: "qualification"
+          mode: "qualification",
+          note: redoNote || undefined
         }
       };
       return;
