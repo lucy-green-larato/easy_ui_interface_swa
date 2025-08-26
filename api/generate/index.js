@@ -968,16 +968,16 @@ JSON schema:
 {
   "report": {
     "md": string,              // Markdown with these headings ONLY and in this exact order:
-                               // "Here’s a partner-readiness, evidence-only view of {Company}..."
-                               // ## Company profile (what we can evidence)
+                               // "Here is your evidence-based qualification for your opportunity with {Company}..."
+                               // ## Company profile (what can be evidenced)
                                // ## Pain points
                                // ## Relationship value
                                // ## Decision-making process
                                // ## Competition & differentiation
-                               // ## Bottom line
+                               // ## Bottom line for you
                                // ## What we could not evidence (and why)
                                // If CALL_TYPE = Partner, ALSO include:
-                               // ## Partner-readiness risks & mitigations
+                               // ## Potential partnership risks and mitigations
     "citations": [ { "label": string, "url": string } ]
   },
   "tips": [string, string, string]
@@ -1500,28 +1500,43 @@ module.exports = async function (context, req) {
     // ======================= NEW: qualification-email =======================
     if (kind === "qualification-email") {
       const v = body.variables || {};
-      const co = (v.prospect_company || "Lead");
+      const co = (v.prospect_company || "Lead").trim();
       const notes = (body.notes || "").trim();
       const report = (body.reportMdText || "").trim();
 
+      // Required subject
+      const subject = `Summary of opportunity with ${co} for sales management`;
+
+      // Prompt tailored for sales management (internal, not the prospect)
       const prompt =
-        "You are a UK B2B salesperson. Draft a concise follow-up email based on the attached qualification report and the rep’s notes.\n" +
-        "Constraints:\n" +
-        "- UK business English; no pleasantries (no 'Hope you’re well').\n" +
-        "- Plain text output.\n" +
-        "- Include: Subject line; Greeting ('Hello " + (v.prospect_name || "").split(" ")[0] + ",');\n" +
-        "  2 short paragraphs stitching evidence from the report; one clear next step; signature '" + (v.seller_name || "") + ", " + (v.seller_company || "") + "'.\n\n" +
-        "--- REPORT (markdown) ---\n" + report + "\n\n" +
-        "--- NOTES (verbatim) ---\n" + (notes || "(none)") + "\n";
+        `You are a UK B2B sales person writing an internal executive summary for Sales Management.\n` +
+        `Audience: sales management (internal). Purpose: keep management informed — not a prospect follow-up.\n` +
+        `Constraints:\n` +
+        `- UK business English. Plain text only. No pleasantries. No greeting to a prospect.\n` +
+        `- Length: up to 350 words.\n` +
+        `- Must begin with: "Subject: ${subject}"\n` +
+        `- Structure (in prose or tight bullets):\n` +
+        `  • Headline assessment (fit, size, timing)\n` +
+        `  • Evidence-based summary from the report/notes\n` +
+        `  • Key risks & mitigations\n` +
+        `  • Recommendation & explicit ask (e.g., go/no-go, resources)\n` +
+        `- Refer to ${co} in the third person. Do not address the prospect directly.\n\n` +
+        `--- REPORT (markdown) ---\n${report || "(none)"}\n\n` +
+        `--- NOTES (verbatim) ---\n${notes || "(none)"}\n`;
 
       const llmRes = await callModel({
-        system: "Write crisp UK business emails. No small talk. Specific and short.",
-        prompt: prompt,
-        temperature: 0.5
+        system: "Write crisp internal executive summaries. No small talk. UK business English.",
+        prompt,
+        temperature: 0.3
       });
-      const email = extractText(llmRes) || "";
 
-      context.res = { status: 200, headers: cors, body: { email: { text: email }, version: VERSION } };
+      let text = extractText(llmRes) || "";
+      // Guarantee the Subject line is present and correct at the top
+      if (!/^Subject:/i.test(text)) {
+        text = `Subject: ${subject}\n\n` + text;
+      }
+
+      context.res = { status: 200, headers: cors, body: { email: { subject, text }, version: VERSION } };
       return;
     }
 
