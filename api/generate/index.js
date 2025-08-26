@@ -151,17 +151,62 @@ const ScriptJsonSchema = z.object({
   summary_bullets: z.array(z.string()).min(6).max(12)  // NEW: concise outline
 });
 
-// Model output schema for lead-qualification
-const QualSchema = z.object({
-  report: z.object({
-    md: z.string().min(100),
-    citations: z.array(z.object({
-      label: z.string().min(1),
-      url: z.string().min(1).optional()
-    })).optional()
-  }),
-  tips: z.array(z.string()).min(3).max(3)
-});
+// ==== Dynamic length presets & schema factories (place right below ScriptJsonSchema) ====
+const DEFAULT_MIN_FULL = 9000;   // ~900–1,1500 words
+const DEFAULT_MIN_SUMMARY = 1800; // ~400 - 600 words
+
+function makeQualSchema(minMd) {
+  return z.object({
+    report: z.object({
+      md: z.string().min(minMd),
+      citations: z.array(z.object({
+        label: z.string().min(1),
+        url: z.string().min(1).optional()
+      })).optional()
+    }),
+    tips: z.array(z.string()).min(3).max(3)
+  });
+}
+
+function makeOpenAIQualJsonSchema(minMd) {
+  return {
+    name: "qualification_report_schema",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["report", "tips"],
+      properties: {
+        report: {
+          type: "object",
+          additionalProperties: false,
+          required: ["md"],
+          properties: {
+            md: { type: "string", minLength: minMd },
+            citations: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["label"],
+                properties: {
+                  label: { type: "string", minLength: 1 },
+                  url: { type: "string" }
+                }
+              }
+            }
+          }
+        },
+        tips: {
+          type: "array",
+          minItems: 3,
+          maxItems: 3,
+          items: { type: "string", minLength: 3 }
+        }
+      }
+    }
+  };
+}
 
 function extractText(res) {
   if (!res) return "";
@@ -186,7 +231,7 @@ function extractText(res) {
 }
 
 async function callModel(opts) {
-  const max_tokens = typeof opts.max_tokens === "number" ? opts.max_tokens : 3200;
+  const max_tokens = typeof opts.max_tokens === "number" ? opts.max_tokens : 5000;
   const system = opts.system || "";
   const prompt = opts.prompt || "";
   const temperature = typeof opts.temperature === "number" ? opts.temperature : 0.6;
@@ -854,6 +899,14 @@ module.exports = async function (context, req) {
 
       // Variables from client
       const vars = jparse(fields.variables, fields.variables || {});
+      // per-request length & dynamic schemas
+      const detailRaw = String(vars.detail || vars.detail_level || "").toLowerCase();
+      const isSummary = /^(summary|short|exec|brief)$/.test(detailRaw);
+      const minMd = isSummary ? DEFAULT_MIN_SUMMARY : DEFAULT_MIN_FULL;
+
+      const QualSchemaDyn = makeQualSchema(minMd);
+      const oaJsonSchema = makeOpenAIQualJsonSchema(minMd);
+
       const ixbrl = jparse(fields.ixbrlSummary, fields.ixbrlSummary || {});
       const policy = jparse(fields.policy, fields.policy || {});
       const basePrefix = String(fields.basePrefix || "").trim();
@@ -930,7 +983,11 @@ module.exports = async function (context, req) {
       // Call LLM (json_object format)
       // Ask the model for JSON that matches our schema; Azure ignores json_schema (that's OK).
       // Choose a response_format the backend supports (Azure vs OpenAI)
-      const response_format = { type: "json_object" };
+      // Choose a response_format the backend supports (Azure vs OpenAI)
+      const isAzure = !!process.env.AZURE_OPENAI_ENDPOINT;
+      const response_format = isAzure
+        ? { type: "json_object" }                      // Azure (2024-06-01) path
+        : { type: "json_schema", json_schema: oaJsonSchema }; // OpenAI path (uses your dynamic schema)
       context.log(`[${VERSION}] qual LLM rf=${response_format.type}, promptChars=${prompt.length}`);
 
       let llmRes, raw;
@@ -974,7 +1031,7 @@ module.exports = async function (context, req) {
       }
 
       // Validate against your Zod schema used by the UI
-      const valid = QualSchema.safeParse(parsed);
+      const valid = QualSchemaDyn.safeParse(parsed);
       if (!valid.success) {
         context.res = {
           status: 502,
@@ -1001,7 +1058,29 @@ module.exports = async function (context, req) {
       }
 
       const modelCitations = Array.isArray(valid.data.report.citations) ? valid.data.report.citations : [];
-      const mergedCites = [].concat(modelCitations, citations);
+
+      // Normalise URLs so different forms of the same link match (strip hash, trailing slash, lowercase)
+      function normUrl(u) {
+        try {
+          const x = new URL(u);
+          x.hash = "";
+          return x.href.replace(/\/+$/, "").toLowerCase();
+        } catch {
+          return "";
+        }
+      }
+
+      // Keep model order first, then server-added; drop duplicates by URL (or by label if no URL)
+      const seen = new Set();
+      const mergedCites = [...modelCitations, ...citations].filter(c => {
+        const urlKey = c?.url ? normUrl(c.url) : "";
+        const labelKey = String(c?.label || "").trim().toLowerCase();
+        const key = urlKey || `label:${labelKey}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
 
       context.res = {
         status: 200,
