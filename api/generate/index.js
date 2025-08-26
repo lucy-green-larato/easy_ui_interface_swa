@@ -619,7 +619,6 @@ function buildPromptFromMarkdown(args) {
     "MANDATES:\n" +
     "- Use professional British business English; no Americanisms; no assumptive closes.\n" +
     "- Never include pleasantries or check-ins such as \"I hope you are well\", \"Are you well?\", \"Hope you're doing well\", \"How are you?\", \"Trust you are well\". Start directly.\n" +
-    "- Open with: Hello " + prospect.name + ", it’s " + seller.name + " from " + seller.company + ".\n" +
     "- Elegantly weave the USPs and Other points where they make sense in context; do not ignore them if provided.\n" +
     "- Include one specific, relevant customer example with measurable results.\n" +
     "- Handle common objections factually and without pressure.\n" +
