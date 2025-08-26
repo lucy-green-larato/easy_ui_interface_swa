@@ -1,0 +1,6 @@
+// Stub: place for exhibitor-directory matches if/when you add them.
+// Returns empty array now (keeps schema stable).
+async function buildDirectoriesPack(/* variables */) {
+  return [];
+}
+module.exports = { buildDirectoriesPack };
