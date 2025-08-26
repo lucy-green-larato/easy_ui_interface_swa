@@ -265,7 +265,11 @@ async function callModel(opts) {
     });
     let data = {};
     try { data = await r.json(); } catch (e) { }
-    if (!r.ok) throw new Error((data && data.error && data.error.message) || r.statusText || "Azure OpenAI request failed");
+    if (!r.ok) {
+      const code = data?.error?.code || r.status;
+      const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
+      throw new Error(`[AZURE ${code}] ${msg}`);
+    }
     return data;
   }
 
@@ -295,7 +299,11 @@ async function callModel(opts) {
     });
     let data = {};
     try { data = await r.json(); } catch (e) { }
-    if (!r.ok) throw new Error((data && data.error && data.error.message) || r.statusText || "OpenAI request failed");
+    if (!r.ok) {
+      const type = data?.error?.type || r.status;
+      const msg = data?.error?.message || r.statusText || "OpenAI request failed";
+      throw new Error(`[OPENAI ${type}] ${msg}`);
+    }
     return data;
   }
 
