@@ -200,8 +200,8 @@ function makeOpenAIQualJsonSchema(minMd) {
         },
         tips: {
           type: "array",
-          minItems: 1,
-          maxItems: 12,
+          minItems: 3,
+          maxItems: 3,
           items: { type: "string", minLength: 3 }
         }
       }
@@ -1087,7 +1087,6 @@ module.exports = async function (context, req) {
   try {
     context.log("[" + VERSION + "] handler start");
 
-    // ---- Robust body parsing
     // ---- Robust body parsing (multipart-aware)
     const ct = String((req.headers && (req.headers["content-type"] || req.headers["Content-Type"])) || "");
     const isMultipart = /multipart\/form-data/i.test(ct);
@@ -1280,6 +1279,8 @@ module.exports = async function (context, req) {
 
       // Coerce/normalise shape before validation
       parsed = sanitizeModelJson(parsed);
+      // Ensure we have exactly 3 tips before validation (prevents minItems failures)
+      parsed.tips = normaliseTips(parsed.tips, vars);
 
       // Progressive validation: strict first, then relax if the ONLY problem is md length
       let result = QualSchemaDyn.safeParse(parsed);
@@ -1310,8 +1311,7 @@ module.exports = async function (context, req) {
       }
 
       // From here on, use result.data (already validated/coerced)
-      // From here on, use result.data (already validated/coerced)
-      let finalData = result.data;   // <-- make it let so we can overwrite after redo
+      let finalData = result.data;   // let, so we can overwrite after redo
       let redoNote = "";
 
       // -------- Quality Gate (auto-redo once if generic/unevidenced) --------
@@ -1359,23 +1359,37 @@ module.exports = async function (context, req) {
         }) + "\n\n" + addendum;
 
         const rf = isAzure ? { type: "json_object" } : { type: "json_schema", json_schema: oaJsonSchema };
-        const redoRes = await callModel({
-          system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.",
-          prompt: promptRedo,
-          temperature: 0.2,
-          max_tokens: maxTokens,
-          response_format: rf
-        });
-        const redoRaw = extractText(redoRes) || "";
-        let redoParsed = safeJson(stripJsonFences(redoRaw)) || {};
-        redoParsed = sanitizeModelJson(redoParsed);
-        const redoValid = QualSchemaDyn.safeParse(redoParsed);
 
-        if (redoValid.success && hasEvidenceMarks(redoValid.data.report.md) && !looksGeneric(redoValid.data.report.md)) {
-          finalData = redoValid.data;
-          redoNote = "[quality-gate: redo applied]";
+        // ⬇⬇⬇ Defensive guard goes here ⬇⬇⬇
+        try {
+          const redoRes = await callModel({
+            system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.",
+            prompt: promptRedo,
+            temperature: 0.2,
+            max_tokens: maxTokens,
+            response_format: rf
+          });
+
+          const redoRaw = extractText(redoRes) || "";
+          let redoParsed = safeJson(stripJsonFences(redoRaw)) || {};
+          redoParsed = sanitizeModelJson(redoParsed);
+          // ensure tips are valid before validation
+          redoParsed.tips = normaliseTips(redoParsed.tips, vars);
+
+          const redoValid = QualSchemaDyn.safeParse(redoParsed);
+          if (redoValid.success &&
+            hasEvidenceMarks(redoValid.data.report.md) &&
+            !looksGeneric(redoValid.data.report.md)) {
+            finalData = redoValid.data;
+            redoNote = "[quality-gate: redo applied]";
+          }
+        } catch (e) {
+          try { context.log(`[${VERSION}] redo attempt failed: ${e && e.message}`); } catch { }
+          // swallow redo errors; keep first-pass finalData
         }
+        // ⬆⬆⬆ End defensive guard ⬆⬆⬆
       }
+
 
       // from here on, use finalData
       const finalTips = normaliseTips(finalData.tips, vars);
