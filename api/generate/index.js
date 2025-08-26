@@ -163,6 +163,45 @@ const QualSchema = z.object({
   tips: z.array(z.string()).min(3).max(3)
 });
 
+// OpenAI JSON Schema used by response_format: { type: "json_schema" }
+const OpenAIQualJsonSchema = {
+  name: "QualificationResponse",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["report", "tips"],
+    properties: {
+      report: {
+        type: "object",
+        additionalProperties: false,
+        required: ["md"],
+        properties: {
+          md: { type: "string", minLength: 100 },
+          citations: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["label"],
+              properties: {
+                label: { type: "string", minLength: 1 },
+                url: { type: "string" } // optional
+              }
+            }
+          }
+        }
+      },
+      tips: {
+        type: "array",
+        minItems: 3,
+        maxItems: 3,
+        items: { type: "string", minLength: 2 }
+      }
+    }
+  },
+  strict: true
+};
+
 // OpenAI json_schema for stricter enforcement (ignored for Azure)
 const OpenAIQualJsonSchema = {
   name: "lead_qualification_payload",
@@ -225,6 +264,7 @@ function extractText(res) {
 }
 
 async function callModel(opts) {
+  const max_tokens = typeof opts.max_tokens === "number" ? opts.max_tokens : 3200;
   const system = opts.system || "";
   const prompt = opts.prompt || "";
   const temperature = typeof opts.temperature === "number" ? opts.temperature : 0.6;
@@ -246,6 +286,7 @@ async function callModel(opts) {
       },
       body: JSON.stringify({
         temperature,
+        max_tokens,
         messages: [
           { role: "system", content: system },
           { role: "user", content: prompt }
@@ -265,6 +306,7 @@ async function callModel(opts) {
     const payload = {
       model: oaModel,
       temperature,
+      max_tokens,
       messages: [
         { role: "system", content: system },
         { role: "user", content: prompt }
@@ -595,7 +637,8 @@ async function extractPdfTexts(fileObjs) {
     const f = fileObjs[i];
     try {
       const parsed = await pdfParse(f.buffer);
-      const text = (parsed && parsed.text) ? String(parsed.text).replace(/\r/g, "").trim() : "";
+      const raw = (parsed && parsed.text) ? String(parsed.text).replace(/\r/g, "").trim() : "";
+      const text = raw.slice(0, 120000); // ~120k chars per PDF (~30k tokens) safety cap
       out.push({ filename: f.filename || ("report-" + (i + 1) + ".pdf"), text });
     } catch (e) {
       out.push({ filename: f.filename || ("report-" + (i + 1) + ".pdf"), text: "" });
@@ -700,42 +743,33 @@ async function crawlSite(rootUrl, opts, context) {
 function buildQualificationJsonPrompt(args) {
   const v = args.values || {};
   const callType = String(v.call_type || "").toLowerCase().startsWith("p") ? "Partner" : "Direct";
+
   const ix = args.ixbrl || {};
-  const pdfs = args.pdfs || []; // [{filename,text}]
-  const websiteUrl = v.prospect_website || "";
-  const linkedinUrl = v.company_linkedin || v.linkedin_company || v.linkedin_url || "";
-  const contactLinks = (v.linkedin_contacts || v.key_contacts_linkedin || "");
-  const events = (v.events || v.event_names || "");
-
-  // Support multi-page site bundles
-  const websitePages = Array.isArray(args.websitePages) ? args.websitePages : [];
-  const siteBundle = websitePages.map(p =>
-    `--- WEBSITE PAGE: ${p.title || p.url} (${p.url}) ---\n${(p.text || "").slice(0, 30000)}`
-  ).join("\n\n");
-
-  // Compact iXBRL (your ixbrlSummary is already a minimal object)
   const ixBrief = JSON.stringify(ix && ix.years ? ix.years : (ix.summary && ix.summary.years) || ix);
 
-  const pdfBundle = pdfs
-    .map(p => (`--- PDF: ${p.filename || "report.pdf"} ---\n${(p.text || "").slice(0, 120000)}`))
-    .join("\n\n");
+  const pdfs = Array.isArray(args.pdfs) ? args.pdfs : []; // [{filename,text}]
+  const pdfBundle = pdfs.map(p => (`--- PDF: ${p.filename || "report.pdf"} ---\n${p.text || ""}`)).join("\n\n");
 
-  const directives = [
+  const websiteText = args.websiteText || "";
+  const seller = args.seller || { name: "", company: "", url: "" };
+  const offer = args.ourOffer || { product: "", otherContext: "" };
+
+  const websiteBlock = websiteText ? (`--- WEBSITE TEXT (multiple pages) ---\n${websiteText}`) : "";
+
+  // Clear, role-primed instructions with a financials checklist
+  const role = [
     "You are a top-performing UK B2B/channel salesperson and GTM strategist.",
-    "Output **valid JSON only** (no markdown outside JSON).",
-    "Only make claims you can evidence from the provided sources (PDFs, iXBRL summary, website pages).",
-    "If you cannot evidence an item (e.g., current-year trade-shows), write a clear 'No public evidence found' line for that bullet.",
-    "Do not generalise. No assumptions. UK business English."
+    "You are a CMO-level operator focused on partner recruitment and enablement.",
+    "Write **valid JSON only** (no markdown outside JSON).",
+    "All insights must be specific and evidenced from the provided sources only."
   ].join("\n");
 
-  return (
-    `${directives}
-
+  const schema = `
 JSON schema:
 {
   "report": {
-    "md": string,              // markdown with these headings ONLY and in this exact order:
-                               // Here’s a partner-readiness, evidence-only view of {Company}...
+    "md": string,              // Markdown with these headings ONLY and in this exact order:
+                               // "Here’s a partner-readiness, evidence-only view of {Company}..."
                                // ## Company profile (what we can evidence)
                                // ## Pain points
                                // ## Relationship value
@@ -743,39 +777,60 @@ JSON schema:
                                // ## Competition & differentiation
                                // ## Bottom line
                                // ## What we could not evidence (and why)
-                               // If CALL_TYPE = Partner, append:
+                               // If CALL_TYPE = Partner, ALSO include:
                                // ## Partner-readiness risks & mitigations
     "citations": [ { "label": string, "url": string } ]
   },
   "tips": [string, string, string]
 }
+`.trim();
 
-Constraints for the markdown:
-- Be specific; use exact figures with year labels where present (iXBRL/PDFs).
-- If income statement is not filed (small-company regime), say so and use balance-sheet items you *do* have.
-- Trade shows: only estimate budgets/opportunity counts **if** attendance this calendar year is evidenced in the sources; else state not applicable.
-- Decision-makers: only list if named in the included sources; else say “No public evidence in provided sources.”
-- Keep each section tight and skimmable.
+  const constraints = [
+    "CONSTRAINTS:",
+    "- UK business English; no generalisations; no assumptions.",
+    "- Cite only from the PDFs, iXBRL summary and website text provided here.",
+    "- If something is not evidenced, write a clear “No public evidence found” line.",
+    "",
+    "FINANCIALS (MANDATORY if present in sources):",
+    "- Search PDFs/iXBRL for: Revenue/Turnover, Gross profit, Operating profit/loss, Cash (bank and in hand),",
+    "  Current assets, Current liabilities, Net assets/liabilities, Average monthly employees.",
+    "- Quote figures with currency symbols and YEAR LABELS (e.g., “FY24: £20.76m”).",
+    "- If the income statement is not filed (small companies regime), state that explicitly and use balance-sheet items you DO have.",
+    "- If no numbers are in the sources, you MUST say so in “What we could not evidence”.",
+    "",
+    "DECISION MAKERS & PARTNERS (if in website text):",
+    "- Extract named roles/titles (CEO, CFO, Directors, etc.) and partner/vendor logos/lists where visible.",
+    "- If none are present in the scraped pages, say “No public evidence in provided sources.”",
+    "",
+    "TRADE SHOWS:",
+    "- Only list attendance this calendar year if present in the provided website text; otherwise say none and DO NOT estimate budgets.",
+    "",
+    "TIE TO THE SALESPERSON’S COMPANY:",
+    `- Salesperson: ${seller.name || "(unknown)"} · Company: ${seller.company || "(unknown)"} ${seller.url ? "· URL: " + seller.url : ""}`,
+    `- Offer/product focus: ${offer.product || "(unspecified)"}`,
+    `- Other context from seller: ${offer.otherContext || "(none)"}`,
+    "- In “Relationship value” and/or “Competition & differentiation”, explicitly map how the seller’s company can add value to the prospect’s stack. If it cannot, say why."
+  ].join("\n");
 
-Context (may be cited if included as sources):
-- CALL_TYPE: ${callType}
-- Prospect company: ${v.prospect_company || ""}
-- Prospect website: ${websiteUrl || "(not provided)"}
-- Company LinkedIn: ${linkedinUrl || "(not provided / gated)"}
-- Contact LinkedIn(s): ${contactLinks || "(none provided)"}
-- Event names given by seller (treat as hints only): ${events || "(none provided)"}
-
-iXBRL summary (most recent first):
-${ixBrief}
-
-${siteBundle}
-
-${pdfBundle}
-`);
+  return [
+    role,
+    "",
+    `CALL_TYPE: ${callType}`,
+    `Prospect website (scraped pages included): ${v.prospect_website || "(not provided)"}`,
+    `LinkedIn (URL only, content not scraped): ${v.company_linkedin || "(not provided)"}`,
+    "",
+    schema,
+    "",
+    constraints,
+    "",
+    "iXBRL summary (most recent first):",
+    ixBrief,
+    "",
+    websiteBlock,
+    "",
+    pdfBundle
+  ].join("\n");
 }
-
-
-
 
 /* ----------------------------- Legacy schema ---------------------------- */
 
@@ -888,13 +943,65 @@ module.exports = async function (context, req) {
       // Fetch website text (LinkedIn is gated; we keep URL only for citations)
       const site = websiteUrl ? await crawlSite(websiteUrl, { limit: 6 }, context) : { text: "", pages: [] };
 
+      // Fetch multiple important website pages (leadership/partners/events/etc.)
+      async function expandWebsiteBundle(rootUrl, context) {
+        if (!rootUrl) return { text: "", pages: [] };
+        let base;
+        try { base = new URL(rootUrl); } catch { return { text: "", pages: [] }; }
+
+        const SLUGS = [
+          "", "/about", "/company", "/who-we-are", "/leadership", "/team", "/board",
+          "/management", "/executive", "/partners", "/technology-partners", "/vendors",
+          "/alliances", "/news", "/insights", "/media", "/press", "/blog",
+          "/events", "/webinars", "/industries", "/sectors", "/solutions", "/services"
+        ];
+
+        const seen = new Set();
+        const pages = [];
+        let textChunks = [];
+
+        for (const slug of SLUGS) {
+          let u;
+          try {
+            u = new URL(slug, base.origin + (base.pathname.endsWith("/") ? base.pathname : base.pathname + "/"));
+          } catch { continue; }
+          if (u.origin !== base.origin) continue;
+          const href = u.toString().replace(/#.*$/, "");
+          if (seen.has(href)) continue;
+          seen.add(href);
+
+          const t = await fetchUrlText(href, context);
+          if (t) {
+            pages.push({ url: href, label: slug || "/" });
+            textChunks.push(`=== PAGE: ${href} ===\n${t}`);
+          }
+        }
+
+        const text = textChunks.join("\n\n").slice(0, 180000); // safety cap
+        return { text, pages };
+      }
+
+      // Use the bundler (replaces old single-page scrape)
+      const websiteBundle = websiteUrl ? await expandWebsiteBundle(websiteUrl, context) : { text: "", pages: [] };
+      const websiteText = websiteBundle.text;
+
       // Build JSON-only prompt
       const prompt = buildQualificationJsonPrompt({
         values: vars,
         ixbrl,
         pdfs: pdfTexts,
-        websitePages: site.pages
+        websiteText,
+        seller: {
+          name: String(vars.seller_name || ""),
+          company: String(vars.seller_company || ""),
+          url: String(vars.seller_company_url || "")
+        },
+        ourOffer: {
+          product: String(vars.product_service || ""),
+          otherContext: String(vars.context || "")
+        }
       });
+
 
       // Call LLM (json_object format)
       // Ask the model for JSON that matches our schema; Azure ignores json_schema (that's OK).
@@ -943,16 +1050,18 @@ module.exports = async function (context, req) {
 
       // Merge server-known citations (PDFs, iXBRL link, website) so the UI can render them
       const citations = [];
-      if (websiteUrl) citations.push({ label: "Company website", url: websiteUrl });
+      // Website pages
+      for (const p of (websiteBundle.pages || [])) {
+        citations.push({ label: `Website: ${p.label}`, url: p.url });
+      }
+      // LinkedIn (unchanged)
       if (linkedinUrl) citations.push({ label: "Company LinkedIn", url: linkedinUrl });
-
-      // Try to derive a Companies House link if we have a company number
+      // Companies House (unchanged)
       const chNum = String(vars.ch_number || vars.company_number || vars.companies_house_number || "").trim();
-      if (chNum) {
-        citations.push({
-          label: "Companies House (iXBRL/filings)",
-          url: "https://find-and-update.company-information.service.gov.uk/company/" + encodeURIComponent(chNum)
-        });
+      if (chNum) citations.push({ label: "Companies House (filings)", url: "https://find-and-update.company-information.service.gov.uk/company/" + encodeURIComponent(chNum) });
+      // PDF filenames
+      for (let i = 0; i < pdfTexts.length; i++) {
+        citations.push({ label: "Annual report: " + (pdfTexts[i].filename || ("report-" + (i + 1) + ".pdf")) });
       }
 
       // Add PDF “citations” as filenames (no URL)
