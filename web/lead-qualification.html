@@ -134,15 +134,16 @@
         <div class="field">
           <label class="label-with-help" for="company_number">
             Companies House no.
-            <button id="ch-help" class="btn info" type="button" title="Important information for financial analysis"
-              aria-label="Important information for financial analysis" aria-controls="ch-modal" aria-expanded="false">
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" class="icon-info">
+            <button id="ch-help" class="btn info" type="button" aria-controls="ch-modal" aria-expanded="false"
+              title="Important information for financial analysis"
+              aria-label="Important information for financial analysis">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" stroke="currentColor" fill="none"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="9"></circle>
                 <line x1="12" y1="10" x2="12" y2="16"></line>
-                <circle cx="12" cy="7" r="1.25"></circle>
+                <circle cx="12" cy="7" r="1.25" fill="currentColor"></circle> <!-- solid dot -->
               </svg>
             </button>
-
           </label>
 
           <input id="company_number" name="company_number" placeholder="Optional (e.g., 01234567)" />
