@@ -152,8 +152,8 @@ const ScriptJsonSchema = z.object({
 });
 
 // ==== Dynamic length presets & schema factories (place right below ScriptJsonSchema) ====
-const DEFAULT_MIN_FULL = 1500;   // characters (≈250–300 words)
-const DEFAULT_MIN_SUMMARY = 350; // characters (≈60–80 words)
+const DEFAULT_MIN_FULL = 7000  // characters (≈1,150–1,300 words minimum)
+const DEFAULT_MIN_SUMMARY = 900 // characters (≈130–170 words)
 
 
 function makeQualSchema(minMd) {
@@ -907,7 +907,26 @@ async function crawlSite(rootUrl, opts, context) {
 function buildQualificationJsonPrompt(args) {
   const v = args.values || {};
   const callType = String(v.call_type || "").toLowerCase().startsWith("p") ? "Partner" : "Direct";
-
+  const detailMode = (args.detailMode === "summary") ? "summary" : "full";
+  const targetWords = Number(args.targetWords || 0);
+  const targetWordsLine = targetWords
+    ? `TARGET LENGTH: Aim for about ${targetWords} words (±10%). HARD CAP: Do not exceed ${Math.round(targetWords * 1.06)} words.`
+    : "";
+  const modeLine =
+    (detailMode === "summary")
+      ? [
+        "OUTPUT MODE: EXECUTIVE SUMMARY.",
+        "- Keep each section to 1–2 crisp sentences maximum.",
+        "- Include only the highest-signal facts with figures and year labels (e.g., “FY24: £20.76m”).",
+        "- If a point lacks evidence in the provided sources, write “No public evidence found.” Do NOT speculate.",
+        "- No softeners or generalisations; be direct and specific."
+      ].join("\n")
+      : [
+        "OUTPUT MODE: FULL DETAIL.",
+        "- Provide complete, evidenced detail across all sections.",
+        "- Quote figures with year labels; include relevant operational context from sources.",
+        "- Still avoid speculation; if unknown, state it explicitly."
+      ].join("\n");
   const ix = args.ixbrl || {};
   const ixBrief = JSON.stringify(ix && ix.years ? ix.years : (ix.summary && ix.summary.years) || ix);
 
@@ -980,6 +999,9 @@ JSON schema:
     role,
     "",
     `CALL_TYPE: ${callType}`,
+    `MODE: ${detailMode.toUpperCase()}`,
+    modeLine,
+    targetWordsLine,
     `Prospect website (scraped pages included): ${v.prospect_website || "(not provided)"}`,
     `LinkedIn (URL only, content not scraped): ${v.company_linkedin || "(not provided)"}`,
     "",
@@ -1097,7 +1119,9 @@ module.exports = async function (context, req) {
       const detailRaw = String(vars.detail || vars.detail_level || "").toLowerCase();
       const isSummary = /^(summary|short|exec|brief)$/.test(detailRaw);
       const minMd = isSummary ? DEFAULT_MIN_SUMMARY : DEFAULT_MIN_FULL;
-
+      const detailMode = isSummary ? "summary" : "full";
+      const FULL_TARGET_WORDS = Number(process.env.QUAL_FULL_TARGET_WORDS || "1750");
+      const targetWords = isSummary ? 0 : FULL_TARGET_WORDS;
       const QualSchemaDyn = makeQualSchema(minMd);
       const oaJsonSchema = makeOpenAIQualJsonSchema(minMd);
 
@@ -1179,7 +1203,9 @@ module.exports = async function (context, req) {
         ourOffer: {
           product: String(vars.product_service || ""),
           otherContext: String(vars.context || "")
-        }
+        },
+        detailMode,
+        targetWords
       });
 
 
@@ -1192,7 +1218,7 @@ module.exports = async function (context, req) {
         ? { type: "json_object" }                      // Azure (2024-06-01) path
         : { type: "json_schema", json_schema: oaJsonSchema }; // OpenAI path (uses your dynamic schema)
       context.log(`[${VERSION}] qual LLM rf=${response_format.type}, promptChars=${prompt.length}`);
-      const maxTokens = isSummary ? 2200 : 4200;
+      const maxTokens = isSummary ? 1800 : Math.min(4000, Math.ceil((targetWords || 1750) * 1.6) + 400);
 
       let llmRes, raw;
       try {
