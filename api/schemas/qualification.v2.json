@@ -1,0 +1,50 @@
+{
+  "type": "object",
+  "required": ["companyProfile","painPoints","relationshipValue","decisionMaking","competition","bottomLine","notEvidenced"],
+  "properties": {
+    "companyProfile": {
+      "type": "object",
+      "required": ["founded","industry","size","recentPerformance","gtm","tradeShows","leaders"],
+      "properties": {
+        "founded": {"type":"string"},
+        "industry": {"type":"string"},
+        "size": {
+          "type":"object",
+          "properties":{
+            "employees":{"type":"string"},
+            "revenue":{"type":"string"}
+          }
+        },
+        "gtm": {
+          "type":"object",
+          "properties":{
+            "model":{"type":"string"},
+            "segments":{"type":"array","items":{"type":"string"}}
+          }
+        },
+        "recentPerformance": {"type":"array","items":{"type":"string"}},
+        "leaders": {"type":"array","items":{"type":"string"}},
+        "tradeShows": {"type":"array","items":{
+          "type":"object",
+          "properties":{
+            "name":{"type":"string"},
+            "year":{"type":"integer"},
+            "notes":{"type":"string"},
+            "estimatedBudget":{"type":"string"},
+            "estimatedOpportunities":{"type":"string"}
+          }
+        }}
+      }
+    },
+    "painPoints": {"type":"array","items":{"type":"string"}},
+    "relationshipValue": {"type":"array","items":{"type":"string"}},
+    "decisionMaking": {"type":"array","items":{"type":"string"}},
+    "competition": {"type":"array","items":{"type":"string"}},
+    "bottomLine": {"type":"string"},
+    "notEvidenced": {"type":"array","items":{"type":"string"}},
+    "citations": {"type":"array","items":{
+      "type":"object",
+      "properties":{"label":{"type":"string"},"url":{"type":"string"}}
+    }}
+  }
+}
