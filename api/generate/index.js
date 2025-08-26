@@ -163,18 +163,17 @@ const QualSchema = z.object({
   tips: z.array(z.string()).min(3).max(3)
 });
 
-// OpenAI JSON Schema used by response_format: { type: "json_schema" }
+// --- OpenAI/Azure JSON schema for the qualification route (JSON Mode) ---
 const OpenAIQualJsonSchema = {
-  name: "QualificationResponse",
+  name: "qualification_report_schema",
+  strict: true,
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["report", "tips"],
     properties: {
       report: {
         type: "object",
         additionalProperties: false,
-        required: ["md"],
         properties: {
           md: { type: "string", minLength: 100 },
           citations: {
@@ -182,63 +181,25 @@ const OpenAIQualJsonSchema = {
             items: {
               type: "object",
               additionalProperties: false,
-              required: ["label"],
-              properties: {
-                label: { type: "string", minLength: 1 },
-                url: { type: "string" } // optional
-              }
-            }
-          }
-        }
-      },
-      tips: {
-        type: "array",
-        minItems: 3,
-        maxItems: 3,
-        items: { type: "string", minLength: 2 }
-      }
-    }
-  },
-  strict: true
-};
-
-// OpenAI json_schema for stricter enforcement (ignored for Azure)
-const OpenAIQualJsonSchema = {
-  name: "lead_qualification_payload",
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    required: ["report", "tips"],
-    properties: {
-      report: {
-        type: "object",
-        additionalProperties: false,
-        required: ["md"],
-        properties: {
-          md: { type: "string", minLength: 100 },
-          citations: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              required: ["label"],
               properties: {
                 label: { type: "string", minLength: 1 },
                 url: { type: "string" }
-              }
+              },
+              required: ["label"]
             }
           }
-        }
+        },
+        required: ["md"]
       },
       tips: {
         type: "array",
         minItems: 3,
         maxItems: 3,
-        items: { type: "string" }
+        items: { type: "string", minLength: 3 }
       }
-    }
-  },
-  strict: true
+    },
+    required: ["report", "tips"]
+  }
 };
 
 function extractText(res) {
@@ -286,12 +247,15 @@ async function callModel(opts) {
       },
       body: JSON.stringify({
         temperature,
-        max_tokens,
+        max_tokens, // optional; see note below
         messages: [
           { role: "system", content: system },
           { role: "user", content: prompt }
         ],
+        // forward JSON Mode / schema to Azure if provided
+        ...(opts.response_format ? { response_format: opts.response_format } : {})
       }),
+
     });
     let data = {};
     try { data = await r.json(); } catch (e) { }
