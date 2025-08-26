@@ -135,7 +135,14 @@
           <label class="label-with-help" for="company_number">
             Companies House no.
             <button id="ch-help" class="btn info" type="button" title="Important information for financial analysis"
-              aria-controls="ch-modal" aria-expanded="false">i</button>
+              aria-label="Important information for financial analysis" aria-controls="ch-modal" aria-expanded="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" class="icon-info">
+                <circle cx="12" cy="12" r="9"></circle>
+                <line x1="12" y1="10" x2="12" y2="16"></line>
+                <circle cx="12" cy="7" r="1.25"></circle>
+              </svg>
+            </button>
+
           </label>
 
           <input id="company_number" name="company_number" placeholder="Optional (e.g., 01234567)" />
@@ -203,7 +210,7 @@
 
           <!-- Manual metrics (fallback if 204 or user preference) -->
           <details id="manual-metrics" class="card" style="margin-top:var(--s-3)">
-            <summary>Enter key metrics manually (use if iXBRL isn’t available)</summary>
+            <summary>Open this panel to enter metrics manually</summary>
             <div class="grid-3" style="margin-top:var(--s-3)">
               <div class="field"><label for="m_end_y1">Year 1 end date</label><input id="m_end_y1"
                   placeholder="YYYY-MM-DD"></div>
@@ -281,7 +288,7 @@
     <!-- MIDDLE -->
     <section class="panel middle">
       <div class="row-between output-head">
-        <h2 id="output-title">Partner-readiness report</h2>
+        <h2 id="output-title">Opportunity qualification analysis</h2>
         <div class="row-between" style="gap:8px">
           <div class="meta" id="output-meta" aria-live="polite" style="color:var(--text-2);font-size:.9rem"></div>
         </div>
@@ -299,8 +306,15 @@
         <button id="copy-report" class="btn inline" type="button" disabled>Copy</button>
         <button id="download-report" class="btn inline" type="button" disabled>Download .txt</button>
         <button id="export-docx" class="btn inline" type="button" disabled>Export .docx</button>
-        <button id="email-report" class="btn inline" type="button" disabled>Email</button>
+
+        <!-- Wrap the Email button to place a label under it -->
+        <span class="stack">
+          <button id="email-report" class="btn inline" type="button" disabled
+            aria-describedby="email-hint">Email</button>
+          <span id="email-hint" class="fineprint">Email is for sales management</span>
+        </span>
       </div>
+
 
       <!-- Notes -->
       <div class="notes-card card" style="margin-top:var(--s-4)">
@@ -904,7 +918,8 @@
             const email = data?.email?.text || data?.followup?.email || "";
             if (email) {
               const to = "";
-              const subj = `Summary: ${(form.elements.prospect_company?.value || "Lead")}`;
+              const subj = data?.email?.subject
+                || `Summary of opportunity with ${(form.elements.prospect_company?.value || "Lead")} for sales management`;
               const href = "mailto:" + encodeURIComponent(to) + "?subject=" + encodeURIComponent(subj) + "&body=" + encodeURIComponent(email);
               location.href = href;
               setStatus("Email composed.");
@@ -948,7 +963,7 @@
       } else if (res.status === 204) {
         renderIxbrlChips(null);
         form.dataset.ixbrl = JSON.stringify({});
-        setStatus("iXBRL not available; you can upload PDFs or enter metrics manually.", "info");
+        setStatus("iXBRL not available; you can upload PDFs or open the panel to enter metrics manually.", "info");
       }
     });
 
