@@ -1,7 +1,7 @@
 // index.js – Azure Function handler for /api/generate
 // Version: v3-markdown-first-2025-08-20-patch8-fixed (normalized vars; strict buyer; safe base; logs; sanitizer; length trim)
 
-const VERSION = "DEV-verify-2025-08-21-2"; // <-- bump this every edit
+const VERSION = "DEV-verify-2025-08-26-1"; // <-- bump this every edit
 try {
   console.log(`[${VERSION}] module loaded at ${new Date().toISOString()} cwd=${process.cwd()} dir=${__dirname}`);
 } catch { }
@@ -162,6 +162,45 @@ const QualSchema = z.object({
   }),
   tips: z.array(z.string()).min(3).max(3)
 });
+
+// OpenAI json_schema for stricter enforcement (ignored for Azure)
+const OpenAIQualJsonSchema = {
+  name: "lead_qualification_payload",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["report", "tips"],
+    properties: {
+      report: {
+        type: "object",
+        additionalProperties: false,
+        required: ["md"],
+        properties: {
+          md: { type: "string", minLength: 100 },
+          citations: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["label"],
+              properties: {
+                label: { type: "string", minLength: 1 },
+                url: { type: "string" }
+              }
+            }
+          }
+        }
+      },
+      tips: {
+        type: "array",
+        minItems: 3,
+        maxItems: 3,
+        items: { type: "string" }
+      }
+    }
+  },
+  strict: true
+};
 
 function extractText(res) {
   if (!res) return "";
@@ -586,32 +625,106 @@ async function fetchUrlText(url, context) {
   }
 }
 
+// Crawl a few high-signal pages on the same site (about/leadership/news/events/partners/etc.)
+async function crawlSite(rootUrl, opts, context) {
+  const limit = (opts && opts.limit) || 6; // total pages incl. homepage
+  const out = { text: "", pages: [] };
+  if (!/^https?:\/\//i.test(rootUrl)) return out;
+
+  function norm(u) { try { return new URL(u, rootUrl).href.replace(/#.*$/, ""); } catch { return ""; } }
+  function sameHost(u) { try { return new URL(u).host === new URL(rootUrl).host; } catch { return false; } }
+
+  // fetch one page and return {url, title, text}
+  async function fetchPage(u) {
+    try {
+      const r = await fetch(u, { headers: { "User-Agent": "inside-track-tools/" + VERSION } });
+      if (!r.ok) return null;
+      const html = await r.text();
+      const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const title = titleMatch ? titleMatch[1].replace(/\s+/g, " ").trim() : u;
+      const text = String(html || "")
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 30000); // per page cap
+      return { url: u, title, text };
+    } catch (e) {
+      try { context && context.log && context.log(`[crawlSite] ${e.message}`); } catch { }
+      return null;
+    }
+  }
+
+  // 1) homepage
+  const home = await fetchPage(rootUrl);
+  if (!home) return out;
+  out.pages.push(home);
+
+  // 2) extract candidate internal links from homepage (lightweight)
+  const linkRx = /href\s*=\s*"(.*?)"/gi;
+  const htmlHome = home.text; // already stripped, but we can still mine urls from the original html if needed
+  // Re-fetch raw html for links (cheap, already in cache)
+  let rawHtml = "";
+  try {
+    const rr = await fetch(rootUrl, { headers: { "User-Agent": "inside-track-tools/" + VERSION } });
+    rawHtml = rr.ok ? (await rr.text()) : "";
+  } catch { }
+  const candidates = new Set();
+  const prefer = /(about|team|leadership|board|management|who[-\s]*we|careers|news|insights|blog|press|events|exhibit|tradeshows|partners?|ecosystem|vendors?|solutions?|services?)/i;
+
+  let m;
+  while ((m = linkRx.exec(rawHtml))) {
+    const href = norm(m[1]);
+    if (!href || !sameHost(href)) continue;
+    if (/\.(pdf|docx?|xlsx?|png|jpe?g|gif|svg)$/i.test(href)) continue;
+    candidates.add(href);
+  }
+
+  // 3) score and pick
+  const scored = Array.from(candidates).map(u => ({ u, score: prefer.test(u) ? 2 : 1 }));
+  scored.sort((a, b) => b.score - a.score);
+  const pick = scored.map(x => x.u).filter(u => u !== home.url).slice(0, Math.max(0, limit - 1));
+
+  for (const u of pick) {
+    const p = await fetchPage(u);
+    if (p) out.pages.push(p);
+  }
+
+  // 4) compile text block
+  out.text = out.pages.map(p => `--- WEBSITE PAGE: ${p.title} (${p.url}) ---\n${p.text}`).join("\n\n");
+  return out;
+}
+
 // Evidence-only, JSON-returning prompt for qualification
 function buildQualificationJsonPrompt(args) {
   const v = args.values || {};
   const callType = String(v.call_type || "").toLowerCase().startsWith("p") ? "Partner" : "Direct";
   const ix = args.ixbrl || {};
   const pdfs = args.pdfs || []; // [{filename,text}]
-  const websiteText = args.websiteText || ""; // distilled text
   const websiteUrl = v.prospect_website || "";
   const linkedinUrl = v.company_linkedin || v.linkedin_company || v.linkedin_url || "";
   const contactLinks = (v.linkedin_contacts || v.key_contacts_linkedin || "");
   const events = (v.events || v.event_names || "");
 
-  // Compact iXBRL for the model (years[0] is most recent if your ixbrl API sorted it)
+  // Support multi-page site bundles
+  const websitePages = Array.isArray(args.websitePages) ? args.websitePages : [];
+  const siteBundle = websitePages.map(p =>
+    `--- WEBSITE PAGE: ${p.title || p.url} (${p.url}) ---\n${(p.text || "").slice(0, 30000)}`
+  ).join("\n\n");
+
+  // Compact iXBRL (your ixbrlSummary is already a minimal object)
   const ixBrief = JSON.stringify(ix && ix.years ? ix.years : (ix.summary && ix.summary.years) || ix);
 
   const pdfBundle = pdfs
-    .map(p => ("--- PDF: " + (p.filename || "report.pdf") + " ---\n" + (p.text || "")))
+    .map(p => (`--- PDF: ${p.filename || "report.pdf"} ---\n${(p.text || "").slice(0, 120000)}`))
     .join("\n\n");
-
-  const websiteBlock = websiteText ? ("--- WEBSITE TEXT (" + websiteUrl + ") ---\n" + websiteText) : "";
 
   const directives = [
     "You are a top-performing UK B2B/channel salesperson and GTM strategist.",
     "Output **valid JSON only** (no markdown outside JSON).",
-    "Only make claims you can evidence from the provided sources (PDFs, iXBRL summary, and any website text we included).",
-    "If you cannot evidence an item (e.g., 2025 trade-show attendance), write a clear 'No public evidence found' line for that bullet.",
+    "Only make claims you can evidence from the provided sources (PDFs, iXBRL summary, website pages).",
+    "If you cannot evidence an item (e.g., current-year trade-shows), write a clear 'No public evidence found' line for that bullet.",
     "Do not generalise. No assumptions. UK business English."
   ].join("\n");
 
@@ -622,7 +735,7 @@ JSON schema:
 {
   "report": {
     "md": string,              // markdown with these headings ONLY and in this exact order:
-                               // "Here’s a partner-readiness, evidence-only view of {Company}..."
+                               // Here’s a partner-readiness, evidence-only view of {Company}...
                                // ## Company profile (what we can evidence)
                                // ## Pain points
                                // ## Relationship value
@@ -630,37 +743,37 @@ JSON schema:
                                // ## Competition & differentiation
                                // ## Bottom line
                                // ## What we could not evidence (and why)
-                               // If call_type = Partner, append:
+                               // If CALL_TYPE = Partner, append:
                                // ## Partner-readiness risks & mitigations
-    "citations": [ { "label": string, "url": string } ] // include any sources you actually used that have URLs (website/LinkedIn). PDFs are cited as filenames only.
+    "citations": [ { "label": string, "url": string } ]
   },
-  "tips": [string, string, string]  // 3 concise tips for reps using this analysis
+  "tips": [string, string, string]
 }
 
 Constraints for the markdown:
-- Be specific. Use exact figures from iXBRL where present: turnover, gross profit, employees, cash/current assets/liabilities, etc. Include year labels.
-- If no income statement is filed (small-companies regime), say so explicitly and use balance-sheet items you *do* have.
-- Trade-shows: only estimate budgets/opportunity counts **if** you found actual attendance this calendar year in the provided sources; otherwise state estimates not applicable.
-- Decision-makers: list those **only** if they’re named in PDFs/website text included; otherwise say “No public evidence in provided sources.”
-- Keep each section tight and skimmable; bullets are fine where useful.
+- Be specific; use exact figures with year labels where present (iXBRL/PDFs).
+- If income statement is not filed (small-company regime), say so and use balance-sheet items you *do* have.
+- Trade shows: only estimate budgets/opportunity counts **if** attendance this calendar year is evidenced in the sources; else state not applicable.
+- Decision-makers: only list if named in the included sources; else say “No public evidence in provided sources.”
+- Keep each section tight and skimmable.
 
-Context you may use *as evidence*:
+Context (may be cited if included as sources):
 - CALL_TYPE: ${callType}
 - Prospect company: ${v.prospect_company || ""}
 - Prospect website: ${websiteUrl || "(not provided)"}
 - Company LinkedIn: ${linkedinUrl || "(not provided / gated)"}
 - Contact LinkedIn(s): ${contactLinks || "(none provided)"}
-- Event names given by seller (don’t assume attendance; treat as hints only): ${events || "(none provided)"}
+- Event names given by seller (treat as hints only): ${events || "(none provided)"}
 
-iXBRL summary (most recent first, include year labels if you quote numbers):
+iXBRL summary (most recent first):
 ${ixBrief}
 
-${websiteBlock}
+${siteBundle}
 
 ${pdfBundle}
-`
-  );
+`);
 }
+
 
 
 
@@ -773,27 +886,51 @@ module.exports = async function (context, req) {
       const pdfTexts = files.length ? await extractPdfTexts(files) : [];
 
       // Fetch website text (LinkedIn is gated; we keep URL only for citations)
-      const websiteText = websiteUrl ? await fetchUrlText(websiteUrl, context) : "";
+      const site = websiteUrl ? await crawlSite(websiteUrl, { limit: 6 }, context) : { text: "", pages: [] };
 
       // Build JSON-only prompt
       const prompt = buildQualificationJsonPrompt({
         values: vars,
         ixbrl,
         pdfs: pdfTexts,
-        websiteText
+        websitePages: site.pages
       });
 
       // Call LLM (json_object format)
+      // Ask the model for JSON that matches our schema; Azure ignores json_schema (that's OK).
       const llmRes = await callModel({
         system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.",
-        prompt: prompt,
+        prompt,
         temperature: 0.4,
-        response_format: { type: "json_object" }
+        response_format: {
+          type: "json_schema",
+          json_schema: OpenAIQualJsonSchema   // <-- ensure this constant is defined as shown earlier
+        }
       });
-      const raw = extractText(llmRes) || "";
-      let parsed = {};
-      try { parsed = JSON.parse(raw); } catch (e) { }
 
+      const raw = extractText(llmRes) || "";
+
+      // Robust parse (handles providers that sneak in stray text)
+      let parsed = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        const first = raw.indexOf("{"), last = raw.lastIndexOf("}");
+        if (first >= 0 && last > first) {
+          try { parsed = JSON.parse(raw.slice(first, last + 1)); } catch { }
+        }
+      }
+
+      if (!parsed) {
+        context.res = {
+          status: 502,
+          headers: cors,
+          body: { error: "Model did not return valid JSON", version: VERSION, sample: raw.slice(0, 300) }
+        };
+        return;
+      }
+
+      // Validate against your Zod schema used by the UI
       const valid = QualSchema.safeParse(parsed);
       if (!valid.success) {
         context.res = {
