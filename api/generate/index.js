@@ -1384,10 +1384,51 @@ module.exports = async function (context, req) {
             redoNote = "[quality-gate: redo applied]";
           }
         } catch (e) {
-          try { context.log(`[${VERSION}] redo attempt failed: ${e && e.message}`); } catch { }
-          // swallow redo errors; keep first-pass finalData
+          // If Azure throttles (429/“rate limit”), fall back to OpenAI once
+          const msg = String(e && e.message || "");
+          const oaKey = process.env.OPENAI_API_KEY;
+
+          if (oaKey && (/\[AZURE\s+429\]/i.test(msg) || /rate\s*limit|thrott/i.test(msg))) {
+            try {
+              const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
+              const payload = {
+                model: oaModel,
+                temperature,
+                messages: [
+                  { role: "system", content: system },
+                  { role: "user", content: prompt }
+                ],
+                // reuse the same response_format & max_tokens you asked Azure for
+                ...(opts.response_format ? { response_format: opts.response_format } : {}),
+                ...(max_tokens ? { max_tokens } : {})
+              };
+
+              const r = await fetch("https://api.openai.com/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer " + oaKey,
+                  "User-Agent": "inside-track-tools/" + VERSION
+                },
+                body: JSON.stringify(payload),
+              });
+
+              let data; try { data = await r.json(); } catch { data = {}; }
+              if (!r.ok) {
+                const code = data?.error?.type || r.status;
+                const msg2 = data?.error?.message || r.statusText || "OpenAI request failed";
+                throw new Error(`[OPENAI ${code}] ${msg2}`);
+              }
+              return data; // success via OpenAI fallback
+            } catch (e2) {
+              e.message = `[callModel/Azure] ${e.message} | [fallback OpenAI failed] ${e2.message}`;
+              throw e;
+            }
+          }
+
+          e.message = `[callModel/Azure] ${e.message}`;
+          throw e;
         }
-        // ⬆⬆⬆ End defensive guard ⬆⬆⬆
       }
 
 
