@@ -231,7 +231,7 @@ function extractText(res) {
 }
 
 async function callModel(opts) {
-  const max_tokens = typeof opts.max_tokens === "number" ? opts.max_tokens : 5000;
+  const maxTokens = isSummary ? 1600 : 5000;
   const system = opts.system || "";
   const prompt = opts.prompt || "";
   const temperature = typeof opts.temperature === "number" ? opts.temperature : 0.6;
@@ -996,7 +996,7 @@ module.exports = async function (context, req) {
           system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.",
           prompt,
           temperature: 0.4,
-          max_tokens: 3000,
+          max_tokens: maxTokens,
           response_format
         });
         raw = extractText(llmRes) || "";
@@ -1030,16 +1030,38 @@ module.exports = async function (context, req) {
         return;
       }
 
-      // Validate against your Zod schema used by the UI
-      const valid = QualSchemaDyn.safeParse(parsed);
+      // Validate against your Zod schema used by the UI (with graceful fallback)
+      const valid0 = QualSchemaDyn.safeParse(parsed);
+
+      // if it only failed because report.md was shorter than minMd, relax once
+      let valid = valid0;
+      if (!valid.success) {
+        const issues = (valid.error && valid.error.issues) ? valid.error.issues : [];
+        const onlyTooSmallMd = issues.length > 0 && issues.every(
+          i => i.code === "too_small" && (i.path || []).join(".") === "report.md"
+        );
+
+        if (onlyTooSmallMd) {
+          const relaxedMin = Math.max(200, Math.round(minMd * 0.5)); // halve, but not below 200 chars
+          const QualSchemaRelaxed = makeQualSchema(relaxedMin);
+          const valid2 = QualSchemaRelaxed.safeParse(parsed);
+          if (valid2.success) valid = valid2;
+        }
+      }
+
       if (!valid.success) {
         context.res = {
-          status: 502,
+          status: 422, // schema validation failure (client/model), not server error
           headers: cors,
-          body: { error: "Model returned invalid JSON for qualification", issues: String(valid.error), version: VERSION }
+          body: {
+            error: "Model JSON failed schema validation",
+            issues: String(valid.error),
+            version: VERSION
+          }
         };
         return;
       }
+
 
       // Merge server-known citations (PDFs, iXBRL link, website) so the UI can render them
       const citations = [];
