@@ -10,8 +10,10 @@
   },
   "dependencies": {
     "busboy": "^1.6.0",
+    "cheerio": "^1.1.2",
     "html-docx-js": "^0.3.1",
     "pdf-parse": "^1.1.1",
+    "undici": "^7.15.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
