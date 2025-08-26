@@ -43,6 +43,7 @@ Using the researched sales pitch and context below, generate a cold call script 
 - Flows as a natural spoken conversation
 - Starts with a polite introduction of the salesperson to the prospect:
   "Hello <prospectName>, this is <sellerName> from <sellerCompany>."
+-Create a soft conversational starter based on the salespersons input into other points to cover.
 - References observations from similar businesses, but makes no assumptions about the prospect’s current situation
 - Introduces the offer as a lightweight operational enhancement, not a rebuild
 - Elegantly weaves in the provided Unique Selling Points (if any) and Other Points (if any), placing them where they naturally strengthen the conversation
@@ -56,12 +57,14 @@ Tone setting: ${toneDescriptor}
 
 If tone is "warm and professional":
 - Use natural phrasing and a more conversational rhythm
+- Be highly conversational and friendly
 - Soften transitions and remove overly formal connectors
 - Prioritise clarity and rapport over technical density
 
 If tone is "formal and corporate":
 - Use precise, structured business language
 - Maintain professional distance and clear articulation
+- Be conversational and friendly
 - Avoid casual phrasing or implied familiarity
 
 After the script, add a short section:
