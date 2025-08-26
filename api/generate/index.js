@@ -231,7 +231,11 @@ function extractText(res) {
 }
 
 async function callModel(opts) {
-  const maxTokens = isSummary ? 1600 : 5000;
+  // Accept either opts.max_tokens or opts.maxTokens
+  const max_tokens =
+    Number.isFinite(opts?.max_tokens) ? opts.max_tokens :
+      (Number.isFinite(opts?.maxTokens) ? opts.maxTokens : undefined);
+
   const system = opts.system || "";
   const prompt = opts.prompt || "";
   const temperature = typeof opts.temperature === "number" ? opts.temperature : 0.6;
@@ -241,73 +245,86 @@ async function callModel(opts) {
   const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
   const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
 
-  // ---- Azure path (NO response_format) ----
+  // ---- Azure path (supports json_object; some deployments support response_format) ----
   if (azEndpoint && azKey && azDeployment) {
-    const url = azEndpoint.replace(/\/+$/, "") + "/openai/deployments/" + encodeURIComponent(azDeployment) + "/chat/completions?api-version=" + encodeURIComponent(azApiVersion);
-    const r = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "api-key": azKey,
-        "User-Agent": "inside-track-tools/" + VERSION
-      },
-      body: JSON.stringify({
-        temperature,
-        max_tokens, // optional; see note below
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: prompt }
-        ],
-        // forward JSON Mode / schema to Azure if provided
-        ...(opts.response_format ? { response_format: opts.response_format } : {})
-      }),
+    const url = azEndpoint.replace(/\/+$/, "") +
+      "/openai/deployments/" + encodeURIComponent(azDeployment) +
+      "/chat/completions?api-version=" + encodeURIComponent(azApiVersion);
 
-    });
-    let data = {};
-    try { data = await r.json(); } catch (e) { }
-    if (!r.ok) {
-      const code = data?.error?.code || r.status;
-      const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
-      throw new Error(`[AZURE ${code}] ${msg}`);
+    let data;
+    const body = {
+      temperature,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: prompt }
+      ],
+      ...(opts.response_format ? { response_format: opts.response_format } : {}),
+      ...(max_tokens ? { max_tokens } : {})
+    };
+
+    try {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": azKey,
+          "User-Agent": "inside-track-tools/" + VERSION
+        },
+        body: JSON.stringify(body),
+      });
+      try { data = await r.json(); } catch { data = {}; }
+      if (!r.ok) {
+        const code = data?.error?.code || r.status;
+        const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
+        throw new Error(`[AZURE ${code}] ${msg}`);
+      }
+      return data;
+    } catch (e) {
+      e.message = `[callModel/Azure] ${e.message}`;
+      throw e;
     }
-    return data;
   }
 
-  // ---- OpenAI path (response_format allowed) ----
+  // ---- OpenAI path (supports response_format incl. json_schema) ----
   const oaKey = process.env.OPENAI_API_KEY;
   const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
   if (oaKey) {
     const payload = {
       model: oaModel,
       temperature,
-      max_tokens,
       messages: [
         { role: "system", content: system },
         { role: "user", content: prompt }
       ],
+      ...(opts.response_format ? { response_format: opts.response_format } : {}),
+      ...(max_tokens ? { max_tokens } : {})
     };
-    if (opts.response_format) payload.response_format = opts.response_format;
 
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + oaKey,
-        "User-Agent": "inside-track-tools/" + VERSION
-      },
-      body: JSON.stringify(payload),
-    });
-    let data = {};
-    try { data = await r.json(); } catch (e) { }
-    if (!r.ok) {
-      const type = data?.error?.type || r.status;
-      const msg = data?.error?.message || r.statusText || "OpenAI request failed";
-      throw new Error(`[OPENAI ${type}] ${msg}`);
+    let data;
+    try {
+      const r = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + oaKey,
+          "User-Agent": "inside-track-tools/" + VERSION
+        },
+        body: JSON.stringify(payload),
+      });
+      try { data = await r.json(); } catch { data = {}; }
+      if (!r.ok) {
+        const code = data?.error?.type || r.status;
+        const msg = data?.error?.message || r.statusText || "OpenAI request failed";
+        throw new Error(`[OPENAI ${code}] ${msg}`);
+      }
+      return data;
+    } catch (e) {
+      e.message = `[callModel/OpenAI] ${e.message}`;
+      throw e;
     }
-    return data;
   }
 
-  return null; // no model configured
+  throw new Error("No model configured. Set AZURE_OPENAI_* or OPENAI_API_KEY.");
 }
 
 function toModeId(v) {
@@ -536,6 +553,8 @@ ${templateMdText}
 const Busboy = require("busboy");
 const pdfParse = require("pdf-parse");
 const htmlDocx = require("html-docx-js");
+const PDF_PAGE_CAPS = (process.env.PDF_PAGE_CAPS || "10,25").split(",").map(n => Number(n.trim())).filter(Boolean); // progressive caps
+const PDF_CHAR_CAP = Number(process.env.PDF_CHAR_CAP || "120000"); // final safety cap per PDF
 
 function jparse(x, fallback) { try { return x && typeof x === "string" ? JSON.parse(x) : (x || fallback); } catch { return fallback; } }
 
@@ -609,18 +628,51 @@ function parseMultipart(req, opts) {
   });
 }
 
+function hasFinancialSignals(text) {
+  if (!text) return false;
+  const rx = /(turnover|revenue|gross\s+profit|operating\s+profit|profit\s+and\s+loss|statement\s+of\s+comprehensive\s+income|balance\s+sheet|cash\s*(?:at\s*bank|and\s*in\s*hand)|current\s+assets|current\s+liabilities|net\s+assets|£\s?\d|\d{1,3}(?:,\d{3}){1,3})/i;
+  return rx.test(text);
+}
+
 async function extractPdfTexts(fileObjs) {
   const out = [];
-  for (let i = 0; i < fileObjs.length; i++) {
-    const f = fileObjs[i];
-    try {
-      const parsed = await pdfParse(f.buffer);
-      const raw = (parsed && parsed.text) ? String(parsed.text).replace(/\r/g, "").trim() : "";
-      const text = raw.slice(0, 120000); // ~120k chars per PDF (~30k tokens) safety cap
-      out.push({ filename: f.filename || ("report-" + (i + 1) + ".pdf"), text });
-    } catch (e) {
-      out.push({ filename: f.filename || ("report-" + (i + 1) + ".pdf"), text: "" });
+  for (const f of fileObjs) {
+    let pickedText = "";
+    let usedCap = 0;
+
+    // Try progressively wider page windows (e.g., 10 then 25), stop when we see signals
+    for (const cap of PDF_PAGE_CAPS.length ? PDF_PAGE_CAPS : [10]) {
+      try {
+        // pdf-parse supports { max } to limit pages; pagerender keeps it lightweight
+        const parsed = await pdfParse(f.buffer, {
+          max: cap,
+          pagerender: page => page.getTextContent().then(tc => tc.items.map(i => i.str).join(" "))
+        });
+        const raw = (parsed?.text || "").replace(/\r/g, "").trim();
+        const sliced = raw.slice(0, PDF_CHAR_CAP);
+        pickedText = sliced;
+        usedCap = cap;
+
+        if (hasFinancialSignals(sliced)) break; // we got what we need in first `cap` pages
+      } catch (e) {
+        // If a limited parse fails (rare), fall back to full parse once
+        try {
+          const parsedFull = await pdfParse(f.buffer);
+          const rawFull = (parsedFull?.text || "").replace(/\r/g, "").trim();
+          pickedText = rawFull.slice(0, PDF_CHAR_CAP);
+          usedCap = 0; // 0 = full
+        } catch {
+          pickedText = "";
+        }
+        break; // stop widening on hard errors
+      }
     }
+
+    out.push({
+      filename: f.filename || "report.pdf",
+      text: pickedText,
+      pagesTried: usedCap || undefined  // purely for diagnostics
+    });
   }
   return out;
 }
@@ -997,6 +1049,7 @@ module.exports = async function (context, req) {
         ? { type: "json_object" }                      // Azure (2024-06-01) path
         : { type: "json_schema", json_schema: oaJsonSchema }; // OpenAI path (uses your dynamic schema)
       context.log(`[${VERSION}] qual LLM rf=${response_format.type}, promptChars=${prompt.length}`);
+      const maxTokens = isSummary ? 2200 : 4200;
 
       let llmRes, raw;
       try {
