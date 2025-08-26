@@ -1,5 +1,5 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-08-20-patch8-fixed (normalized vars; strict buyer; safe base; logs; sanitizer; length trim)
+// Version: v3-markdown-first-2025-08-26 json compatibility
 
 const VERSION = "DEV-verify-2025-08-26-1"; // <-- bump this every edit
 try {
@@ -162,45 +162,6 @@ const QualSchema = z.object({
   }),
   tips: z.array(z.string()).min(3).max(3)
 });
-
-// --- OpenAI/Azure JSON schema for the qualification route (JSON Mode) ---
-const OpenAIQualJsonSchema = {
-  name: "qualification_report_schema",
-  strict: true,
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      report: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          md: { type: "string", minLength: 100 },
-          citations: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                label: { type: "string", minLength: 1 },
-                url: { type: "string" }
-              },
-              required: ["label"]
-            }
-          }
-        },
-        required: ["md"]
-      },
-      tips: {
-        type: "array",
-        minItems: 3,
-        maxItems: 3,
-        items: { type: "string", minLength: 3 }
-      }
-    },
-    required: ["report", "tips"]
-  }
-};
 
 function extractText(res) {
   if (!res) return "";
@@ -904,9 +865,6 @@ module.exports = async function (context, req) {
       // Extract PDF texts (OCR PDFs expected)
       const pdfTexts = files.length ? await extractPdfTexts(files) : [];
 
-      // Fetch website text (LinkedIn is gated; we keep URL only for citations)
-      const site = websiteUrl ? await crawlSite(websiteUrl, { limit: 6 }, context) : { text: "", pages: [] };
-
       // Fetch multiple important website pages (leadership/partners/events/etc.)
       async function expandWebsiteBundle(rootUrl, context) {
         if (!rootUrl) return { text: "", pages: [] };
@@ -948,6 +906,8 @@ module.exports = async function (context, req) {
       // Use the bundler (replaces old single-page scrape)
       const websiteBundle = websiteUrl ? await expandWebsiteBundle(websiteUrl, context) : { text: "", pages: [] };
       const websiteText = websiteBundle.text;
+      context.log(`[${VERSION}] qual inputs: pdfs=${pdfTexts.length} pages=${(websiteBundle.pages || []).length} website=${websiteUrl || '-'} linkedin=${linkedinUrl || '-'}`);
+
 
       // Build JSON-only prompt
       const prompt = buildQualificationJsonPrompt({
@@ -969,17 +929,29 @@ module.exports = async function (context, req) {
 
       // Call LLM (json_object format)
       // Ask the model for JSON that matches our schema; Azure ignores json_schema (that's OK).
-      const llmRes = await callModel({
-        system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.",
-        prompt,
-        temperature: 0.4,
-        response_format: {
-          type: "json_schema",
-          json_schema: OpenAIQualJsonSchema   // <-- ensure this constant is defined as shown earlier
-        }
-      });
+      // Choose a response_format the backend supports (Azure vs OpenAI)
+      const response_format = { type: "json_object" };
+      context.log(`[${VERSION}] qual LLM rf=${response_format.type}, promptChars=${prompt.length}`);
 
-      const raw = extractText(llmRes) || "";
+      let llmRes, raw;
+      try {
+        llmRes = await callModel({
+          system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.",
+          prompt,
+          temperature: 0.4,
+          max_tokens: 3000,
+          response_format
+        });
+        raw = extractText(llmRes) || "";
+      } catch (err) {
+        context.log.error(`[${VERSION}] callModel error: ${err && err.message}`);
+        context.res = {
+          status: 502,
+          headers: cors,
+          body: { error: "LLM call failed", detail: String(err && err.message || err), version: VERSION }
+        };
+        return;
+      }
 
       // Robust parse (handles providers that sneak in stray text)
       let parsed = null;
@@ -1024,11 +996,6 @@ module.exports = async function (context, req) {
       const chNum = String(vars.ch_number || vars.company_number || vars.companies_house_number || "").trim();
       if (chNum) citations.push({ label: "Companies House (filings)", url: "https://find-and-update.company-information.service.gov.uk/company/" + encodeURIComponent(chNum) });
       // PDF filenames
-      for (let i = 0; i < pdfTexts.length; i++) {
-        citations.push({ label: "Annual report: " + (pdfTexts[i].filename || ("report-" + (i + 1) + ".pdf")) });
-      }
-
-      // Add PDF “citations” as filenames (no URL)
       for (let i = 0; i < pdfTexts.length; i++) {
         citations.push({ label: "Annual report: " + (pdfTexts[i].filename || ("report-" + (i + 1) + ".pdf")) });
       }
