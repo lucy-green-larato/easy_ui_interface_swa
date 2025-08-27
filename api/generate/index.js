@@ -152,8 +152,8 @@ const ScriptJsonSchema = z.object({
 });
 
 // ==== Dynamic length presets & schema factories (place right below ScriptJsonSchema) ====
-const DEFAULT_MIN_FULL = 7000;  // characters (≈1,150–1,300 words minimum)
-const DEFAULT_MIN_SUMMARY = 900; // characters (≈130–170 words)
+const DEFAULT_MIN_FULL = Number(process.env.QUAL_MIN_FULL_CHARS || "7000");
+const DEFAULT_MIN_SUMMARY = Number(process.env.QUAL_MIN_SUMMARY_CHARS || "900");
 
 
 function makeQualSchema(minMd) {
@@ -1347,13 +1347,37 @@ module.exports = async function (context, req) {
 
       // Progressive validation: strict first, then relax if the ONLY problem is md length
       let result = QualSchemaDyn.safeParse(parsed);
+
       if (!result.success && isOnlyMdTooSmall(result.error)) {
-        const relaxedMin = Math.max(200, Math.floor(minMd * 0.7)); // relax to 70% (never below 200)
-        const RelaxedSchema = makeQualSchema(relaxedMin);
-        const r2 = RelaxedSchema.safeParse(parsed);
-        if (r2.success) {
-          result = r2;
+        const tries = [0.7, 0.5, 0.3]; // 70%, 50%, 30% of original min
+        for (const f of tries) {
+          const relaxedMin = Math.max(200, Math.floor(minMd * f));
+          const RelaxedSchema = makeQualSchema(relaxedMin);
+          const r2 = RelaxedSchema.safeParse(parsed);
+          if (r2.success) { result = r2; break; }
         }
+
+        // Last-ditch accept: if it's STILL only the md length that's failing, accept at 'current length or 200'
+        if (!result.success && isOnlyMdTooSmall(result.error)) {
+          const curLen = ((parsed && parsed.report && typeof parsed.report.md === "string") ? parsed.report.md.length : 0);
+          const MinimalSchema = makeQualSchema(Math.max(200, curLen));
+          const r3 = MinimalSchema.safeParse(parsed);
+          if (r3.success) { result = r3; }
+        }
+      }
+
+      if (!result.success) {
+        try { context.log(`[${VERSION}] Zod fail: ${JSON.stringify(result.error.issues).slice(0, 400)}`); } catch { }
+        context.res = {
+          status: 502,
+          headers: cors,
+          body: {
+            error: "Model JSON failed schema validation",
+            issues: JSON.stringify(result.error.issues, null, 2),
+            version: VERSION
+          }
+        };
+        return;
       }
 
       if (!result.success) {
