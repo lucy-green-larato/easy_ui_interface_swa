@@ -370,9 +370,9 @@
           <button id="toggle-openers" class="btn small" type="button" aria-expanded="false"
             aria-controls="openers-body">Show</button>
         </div>
+
         <div id="openers-body" hidden>
-          <!-- Keep the same visual language: paragraphs inside an intel-slot -->
-          <div id="openers-list" class="intel-slot"></div>
+          <ul id="openers-list"></ul>
         </div>
       </aside>
 
@@ -389,19 +389,6 @@
       </aside>
     </section>
   </main>
-
-  <!-- Call opener ideas (right rail) -->
-  <aside class="tips-card card" style="margin-top:var(--s-4)">
-    <div class="row-between">
-      <h3>Call opener ideas</h3>
-      <button id="toggle-openers" class="btn small" type="button" aria-expanded="false"
-        aria-controls="openers-list">Show</button>
-    </div>
-    <ul id="openers-list" hidden></ul>
-    <p id="openers-empty" class="muted">Add tips in <code>./assets/call-opener-ideas.json</code> or
-      <code>./assets/call-opener-ideas.txt</code> (one per line). We’ll show 3.
-    </p>
-  </aside>
 
   <template id="activity-item">
     <li>
@@ -636,7 +623,6 @@
     const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
     const TIPS_HIDDEN_KEY = 'first_call_script_v2.tips_hidden';
     const OPENERS_HIDDEN_KEY = 'first_call_script_v2.openers_hidden';
-    const OPENERS_URL_TXT = './assets/call-opener-ideas.txt';
     const NOTES_KEY_PREFIX = 'first_call_script_v2.notes';
     const INTEL_URL = './intel.json';
 
@@ -645,17 +631,15 @@
     // Refs
     const form = document.getElementById(FORM_ID);
     const submitBtn = document.getElementById('submit');
-    const resetBtn = document.getElementById('reset');
+    const resetBtn = document.getElementById('resetBtn');
     const outputEl = document.getElementById('output');
     const copyScriptBtn = document.getElementById('copy-script');
     const downloadScriptBtn = document.getElementById('download-script');
     const tipsList = document.getElementById('tips-list');
     const toggleTipsBtn = document.getElementById('toggle-tips');
     const openersList = document.getElementById('openers-list');
-    const openersList = document.getElementById('openers-list');
     const toggleOpenersBtn = document.getElementById('toggle-openers');
     const tipsBody = document.getElementById('tips-body'); // new wrapper for Helpful tips body
-    const toggleOpenersBtn = document.getElementById('toggle-openers');
     const popoutBtn = document.getElementById('popout');
     const notesArea = document.getElementById('notes');
     const saveNotesBtn = document.getElementById('save-notes');
@@ -902,32 +886,32 @@
     function renderOpeners(list) {
       if (!openersList) return;
       openersList.innerHTML = '';
-      if (!list.length) {
-        // show a gentle placeholder in the same visual style (paragraphs)
-        const p = document.createElement('p');
-        p.className = 'muted';
-        p.textContent = 'Add up to 3 ideas in ./assets/call-opener-ideas.json or .txt';
-        openersList.appendChild(p);
-        return;
-      }
-      // Match Buyer needs body style: paragraphs inside the slot
-      list.forEach(t => {
-        const p = document.createElement('p');
-        p.textContent = t;
-        openersList.appendChild(p);
+
+      const items = (list && list.length) ? list.slice(0, 3) : [
+        'Add up to 3 ideas in ./assets/call-opener-ideas.json or .txt'
+      ];
+
+      items.forEach(t => {
+        const li = document.createElement('li');
+        li.textContent = t;
+        if (!list || !list.length) li.className = 'muted';
+        openersList.appendChild(li);
       });
     }
 
     function applyOpenersVisibility() {
       const openersBody = document.getElementById('openers-body');
       if (!toggleOpenersBtn || !openersBody) return;
-      const hidden = localStorage.getItem(OPENERS_HIDDEN_KEY) === '1'; // default hidden unless user shows it
+
+      const raw = localStorage.getItem(OPENERS_HIDDEN_KEY);
+      const hidden = (raw === null) ? true : (raw === '1');  // default = hidden
+
       openersBody.hidden = hidden;
       toggleOpenersBtn.textContent = hidden ? 'Show' : 'Hide';
       toggleOpenersBtn.setAttribute('aria-expanded', String(!hidden));
     }
 
-   // Tips toggle + auto-hide (works for any tip source)
+    // Tips toggle + auto-hide (works for any tip source)
     function applyTipsVisibility() {
       const body = document.getElementById('tips-body');   // new wrapper div around the list
       if (!body || !tipsList || !toggleTipsBtn) return;
@@ -954,54 +938,6 @@
       } else if (empty) {
         empty.remove();
       }
-    }
-
-    async function loadOpenersFromAssets() {
-      // Try JSON array first
-      try {
-        const rj = await fetch(OPENERS_URL_JSON, { cache: 'no-store' });
-        if (rj.ok) {
-          const arr = await rj.json();
-          const tips = (Array.isArray(arr) ? arr : []).map(String).map(s => s.trim()).filter(Boolean);
-          if (tips.length) return tips.slice(0, 3);
-        }
-      } catch { }
-
-      // Fallback to .txt (one tip per line)
-      try {
-        const rt = await fetch(OPENERS_URL_TXT, { cache: 'no-store' });
-        if (rt.ok) {
-          const t = await rt.text();
-          const tips = t.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-          if (tips.length) return tips.slice(0, 3);
-        }
-      } catch { }
-
-      return []; // nothing found
-    }
-
-    function renderOpeners(list) {
-      if (!openersList) return;
-      openersList.innerHTML = '';
-      if (list.length === 0) {
-        // leave the placeholder paragraph visible
-        return;
-      }
-      list.forEach(t => {
-        const li = document.createElement('li');
-        li.textContent = t;
-        openersList.appendChild(li);
-      });
-      // Remove placeholder if we now have items
-      document.getElementById('openers-empty')?.remove();
-    }
-
-    function applyOpenersVisibility() {
-      if (!openersList || !toggleOpenersBtn) return;
-      const hidden = localStorage.getItem(OPENERS_HIDDEN_KEY) === '1';
-      openersList.hidden = hidden;
-      toggleOpenersBtn.textContent = hidden ? 'Show' : 'Hide';
-      toggleOpenersBtn.setAttribute('aria-expanded', String(!hidden));
     }
 
     // Events
@@ -1045,8 +981,9 @@
     });
 
     toggleOpenersBtn?.addEventListener('click', () => {
-      const hidden = localStorage.getItem(OPENERS_HIDDEN_KEY) === '1';
-      localStorage.setItem(OPENERS_HIDDEN_KEY, hidden ? '0' : '1');
+      const raw = localStorage.getItem(OPENERS_HIDDEN_KEY);
+      const currentlyHidden = (raw === null) ? true : (raw === '1');
+      localStorage.setItem(OPENERS_HIDDEN_KEY, currentlyHidden ? '0' : '1');
       applyOpenersVisibility();
     });
 
@@ -1172,7 +1109,7 @@
           const openerTips = await loadOpenersFromAssets();
           renderOpeners(openerTips);
         } catch { }
-        applyOpenersVisibility(); s
+        applyOpenersVisibility();
 
         // Enable copy/download now there is content
         copyScriptBtn.disabled = false; downloadScriptBtn.disabled = false;
