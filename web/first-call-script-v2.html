@@ -407,6 +407,28 @@
   <!-- === SCRIPT === -->
   <script type="module">
     import { getIndex, loadTemplate, canonical } from "./src/lib/callLibrary.js?v=fix6";
+    // FIX: robust product index loader (works with old/new getIndex and direct fetch)
+    async function loadProductIndex(mode, basePrefix) {
+      const m = String(mode || '').toLowerCase() === 'partner' ? 'partner' : 'direct';
+
+      // Try old signature: getIndex(mode, basePrefix)
+      try {
+        const r1 = await getIndex(m, basePrefix);
+        if (r1) return r1;
+      } catch { }
+
+      // Try new signature: getIndex({ mode, basePrefix })
+      try {
+        const r2 = await getIndex({ mode: m, basePrefix });
+        if (r2) return r2;
+      } catch { }
+
+      // Fallback: fetch index.json directly from the content folder
+      const url = `${basePrefix || ''}/content/call-library/v1/${m}/index.json`;
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+      return await res.json();
+    }
 
     /* basePrefix for subpath hosting */
     const basePrefix = (() => {
@@ -1163,7 +1185,7 @@
       if (!sel) return;
       sel.innerHTML = `<option value="">Loading…</option>`;
       try {
-        const idx = await getIndex(mode, basePrefix);
+        const idx = await loadProductIndex(mode, basePrefix);
         const items = Array.isArray(idx?.products) ? idx.products : Array.isArray(idx?.items) ? idx.items : Array.isArray(idx) ? idx : [];
         if (!items.length) { sel.innerHTML = `<option value="">No products found</option>`; console.warn('[Product] index.json loaded but empty', idx); return; }
         const saved = (form?.elements?.product?.value || '').trim().toLowerCase();
