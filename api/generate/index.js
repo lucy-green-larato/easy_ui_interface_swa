@@ -370,95 +370,115 @@ async function callModel(opts) {
     Number.isFinite(opts?.max_tokens) ? opts.max_tokens :
       (Number.isFinite(opts?.maxTokens) ? opts.maxTokens : undefined);
 
-  const system = opts.system || "";
-  const prompt = opts.prompt || "";
-  const temperature = typeof opts.temperature === "number" ? opts.temperature : 0.6;
+  const system = opts?.system || "";
+  const prompt = opts?.prompt || "";
+  const temperature = typeof opts?.temperature === "number" ? opts.temperature : 0.6;
+  const response_format = opts?.response_format; // pass-through (json_object/json_schema/etc.)
+  const messages = [
+    { role: "system", content: system },
+    { role: "user", content: prompt }
+  ];
 
+  // ---- OpenAI fallback config ----
+  const oaKey = process.env.OPENAI_API_KEY;
+  const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+  async function callOpenAI() {
+    if (!oaKey) throw new Error("No OpenAI key configured for fallback");
+    const payload = {
+      model: oaModel,
+      temperature,
+      messages,
+      ...(response_format ? { response_format } : {}),
+      ...(max_tokens ? { max_tokens } : {})
+    };
+
+    let data;
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + oaKey,
+        "User-Agent": "inside-track-tools/" + VERSION
+      },
+      body: JSON.stringify(payload),
+    });
+    try { data = await r.json(); } catch { data = {}; }
+    if (!r.ok) {
+      const code = data?.error?.type || r.status;
+      const msg = data?.error?.message || r.statusText || "OpenAI request failed";
+      throw new Error(`[OPENAI ${code}] ${msg}`);
+    }
+    return data;
+  }
+
+  // ---- Azure primary config ----
   const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
   const azKey = process.env.AZURE_OPENAI_API_KEY;
   const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
   const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
 
-  // ---- Azure path (supports json_object; some deployments support response_format) ----
-  if (azEndpoint && azKey && azDeployment) {
+  function looksRateLimited(status, code, msg) {
+    const m = String(msg || "");
+    return status === 429 ||
+      /rate\s*limit|thrott/i.test(m) ||
+      String(code || "").includes("429");
+  }
+
+  async function callAzure() {
     const url = azEndpoint.replace(/\/+$/, "") +
       "/openai/deployments/" + encodeURIComponent(azDeployment) +
       "/chat/completions?api-version=" + encodeURIComponent(azApiVersion);
 
-    let data;
     const body = {
       temperature,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: prompt }
-      ],
-      ...(opts.response_format ? { response_format: opts.response_format } : {}),
-      ...(max_tokens ? { max_tokens } : {})
-    };
-
-    try {
-      const r = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "api-key": azKey,
-          "User-Agent": "inside-track-tools/" + VERSION
-        },
-        body: JSON.stringify(body),
-      });
-      try { data = await r.json(); } catch { data = {}; }
-      if (!r.ok) {
-        const code = data?.error?.code || r.status;
-        const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
-        throw new Error(`[AZURE ${code}] ${msg}`);
-      }
-      return data;
-    } catch (e) {
-      e.message = `[callModel/Azure] ${e.message}`;
-      throw e;
-    }
-  }
-
-  // ---- OpenAI path (supports response_format incl. json_schema) ----
-  const oaKey = process.env.OPENAI_API_KEY;
-  const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
-  if (oaKey) {
-    const payload = {
-      model: oaModel,
-      temperature,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: prompt }
-      ],
-      ...(opts.response_format ? { response_format: opts.response_format } : {}),
+      messages,
+      ...(response_format ? { response_format } : {}),
       ...(max_tokens ? { max_tokens } : {})
     };
 
     let data;
+    const r = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": azKey,
+        "User-Agent": "inside-track-tools/" + VERSION
+      },
+      body: JSON.stringify(body),
+    });
+    try { data = await r.json(); } catch { data = {}; }
+
+    if (!r.ok) {
+      const code = data?.error?.code || r.status;
+      const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
+      const err = new Error(`[AZURE ${code}] ${msg}`);
+      // tag for the caller (below) so we know when to fallback
+      err.__isRateLimit = looksRateLimited(r.status, code, msg);
+      throw err;
+    }
+    return data;
+  }
+
+  // ---- Decision tree: Azure first (if configured), else OpenAI ----
+  if (azEndpoint && azKey && azDeployment) {
     try {
-      const r = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer " + oaKey,
-          "User-Agent": "inside-track-tools/" + VERSION
-        },
-        body: JSON.stringify(payload),
-      });
-      try { data = await r.json(); } catch { data = {}; }
-      if (!r.ok) {
-        const code = data?.error?.type || r.status;
-        const msg = data?.error?.message || r.statusText || "OpenAI request failed";
-        throw new Error(`[OPENAI ${code}] ${msg}`);
-      }
-      return data;
+      return await callAzure();
     } catch (e) {
-      e.message = `[callModel/OpenAI] ${e.message}`;
-      throw e;
+      // Prefer fallback on rate-limit/throttle or transport issues
+      const msg = String(e && e.message || "");
+      const canFallback = !!oaKey && (e.__isRateLimit || /fetch|network|timeout|ENOTFOUND|ECONN/i.test(msg));
+      if (canFallback) {
+        try { return await callOpenAI(); }
+        catch (e2) { throw new Error(`[callModel] ${msg} | [fallback OpenAI failed] ${e2.message}`); }
+      }
+      // Non-rate-limit Azure errors bubble up (prompt errors, bad params, etc.)
+      throw new Error(`[callModel] ${msg}`);
     }
   }
 
-  throw new Error("No model configured. Set AZURE_OPENAI_* or OPENAI_API_KEY.");
+  // No Azure configured → straight to OpenAI
+  return await callOpenAI();
 }
 
 function toModeId(v) {
