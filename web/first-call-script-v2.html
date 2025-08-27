@@ -623,10 +623,13 @@
     const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
     const TIPS_HIDDEN_KEY = 'first_call_script_v2.tips_hidden';
     const OPENERS_HIDDEN_KEY = 'first_call_script_v2.openers_hidden';
-    // Default: openers hidden unless the user chose otherwise before
+    // One-time reset so openers start hidden after this deploy
+    const OPENERS_PREF_VERSION = '2';
     try {
-      if (localStorage.getItem(OPENERS_HIDDEN_KEY) === null) {
+      const vkey = 'first_call_script_v2.openers_pref_version';
+      if (localStorage.getItem(vkey) !== OPENERS_PREF_VERSION) {
         localStorage.setItem(OPENERS_HIDDEN_KEY, '1'); // 1 = hidden, 0 = shown
+        localStorage.setItem(vkey, OPENERS_PREF_VERSION);
       }
     } catch { }
 
