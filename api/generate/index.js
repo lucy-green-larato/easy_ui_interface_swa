@@ -702,7 +702,6 @@ Constraints:
 - Tone: ${tone}.
 - UK business English only. No Americanisms. No pleasantries (“Hope you’re well”, “How are you?”, etc.).
 - Do not use filler lines like “Is there anything else I can help with?”
-- Open with: "Hello ${prospect.name}, it’s ${seller.name} from ${seller.company}."
 - Sections to cover (your JSON keys map to these): opening, buyer_pain, buyer_desire, example_illustration, handling_objections, next_step.
 - **Weave** the salesperson inputs (USPs & Other points) into the most relevant sections **as natural sentences**. Do **not** dump them as separate bullet lists.
 - Next step precedence: (1) salesperson-provided; else (2) template <!-- suggested_next_step -->; else (3) a clear, low-friction next step.
