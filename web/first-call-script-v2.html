@@ -323,8 +323,8 @@
       <aside class="intel card">
         <div class="intel-head">
           <h2 id="intel-title">Buyer needs</h2>
-          <button id="toggle-intel" class="btn small" type="button" aria-expanded="true"
-            aria-controls="intel-body">Hide</button>
+          <button id="toggle-intel" class="btn small" type="button" aria-expanded="false"
+            aria-controls="intel-body">Show</button>
         </div>
         <div id="intel-body">
           <div class="intel-grid">
@@ -368,6 +368,19 @@
 
     </section>
   </main>
+
+  <!-- Call opener ideas (right rail) -->
+  <aside class="tips-card card" style="margin-top:var(--s-4)">
+    <div class="row-between">
+      <h3>Call opener ideas</h3>
+      <button id="toggle-openers" class="btn small" type="button" aria-expanded="false"
+        aria-controls="openers-list">Show</button>
+    </div>
+    <ul id="openers-list" hidden></ul>
+    <p id="openers-empty" class="muted">Add tips in <code>./assets/call-opener-ideas.json</code> or
+      <code>./assets/call-opener-ideas.txt</code> (one per line). We’ll show 3.
+    </p>
+  </aside>
 
   <template id="activity-item">
     <li>
@@ -601,6 +614,8 @@
     const OUTPUT_KEY = 'first_call_script_v2.last_output';
     const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
     const TIPS_HIDDEN_KEY = 'first_call_script_v2.tips_hidden';
+    const OPENERS_HIDDEN_KEY = 'first_call_script_v2.openers_hidden';
+    const OPENERS_URL_TXT = './assets/call-opener-ideas.txt';
     const NOTES_KEY_PREFIX = 'first_call_script_v2.notes';
     const INTEL_URL = './intel.json';
 
@@ -615,6 +630,8 @@
     const downloadScriptBtn = document.getElementById('download-script');
     const tipsList = document.getElementById('tips-list');
     const toggleTipsBtn = document.getElementById('toggle-tips');
+    const openersList = document.getElementById('openers-list');
+    const toggleOpenersBtn = document.getElementById('toggle-openers');
     const popoutBtn = document.getElementById('popout');
     const notesArea = document.getElementById('notes');
     const saveNotesBtn = document.getElementById('save-notes');
@@ -646,6 +663,12 @@
     const modeFromCallType = v => canonical.mode(v);
     const buyerCanon = v => canonical.buyer(v);
     const nowTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    // Default Buyer needs to collapsed on first load
+    if (toggleIntelBtn && intelBody) {
+      toggleIntelBtn.setAttribute('aria-expanded', 'false');
+      toggleIntelBtn.textContent = 'Show';
+      intelBody.hidden = true;
+    }
 
     if (closeModal) closeModal.addEventListener("click", () => modal.close());
     if (helpBtn) helpBtn.addEventListener('click', () => helpModal?.showModal());
@@ -854,6 +877,54 @@
       }
     }
 
+    async function loadOpenersFromAssets() {
+      // Try JSON array first
+      try {
+        const rj = await fetch(OPENERS_URL_JSON, { cache: 'no-store' });
+        if (rj.ok) {
+          const arr = await rj.json();
+          const tips = (Array.isArray(arr) ? arr : []).map(String).map(s => s.trim()).filter(Boolean);
+          if (tips.length) return tips.slice(0, 3);
+        }
+      } catch { }
+
+      // Fallback to .txt (one tip per line)
+      try {
+        const rt = await fetch(OPENERS_URL_TXT, { cache: 'no-store' });
+        if (rt.ok) {
+          const t = await rt.text();
+          const tips = t.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+          if (tips.length) return tips.slice(0, 3);
+        }
+      } catch { }
+
+      return []; // nothing found
+    }
+
+    function renderOpeners(list) {
+      if (!openersList) return;
+      openersList.innerHTML = '';
+      if (list.length === 0) {
+        // leave the placeholder paragraph visible
+        return;
+      }
+      list.forEach(t => {
+        const li = document.createElement('li');
+        li.textContent = t;
+        openersList.appendChild(li);
+      });
+      // Remove placeholder if we now have items
+      document.getElementById('openers-empty')?.remove();
+    }
+
+    function applyOpenersVisibility() {
+      if (!openersList || !toggleOpenersBtn) return;
+      const hidden = localStorage.getItem(OPENERS_HIDDEN_KEY) === '1';
+      openersList.hidden = hidden;
+      toggleOpenersBtn.textContent = hidden ? 'Show' : 'Hide';
+      toggleOpenersBtn.setAttribute('aria-expanded', String(!hidden));
+    }
+
     // Events
     const onChangeRecalcIntel = () => {
       const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
@@ -892,6 +963,12 @@
       const hidden = localStorage.getItem(TIPS_HIDDEN_KEY) === '1';
       localStorage.setItem(TIPS_HIDDEN_KEY, hidden ? '0' : '1');
       applyTipsVisibility();
+    });
+
+    toggleOpenersBtn?.addEventListener('click', () => {
+      const hidden = localStorage.getItem(OPENERS_HIDDEN_KEY) === '1';
+      localStorage.setItem(OPENERS_HIDDEN_KEY, hidden ? '0' : '1');
+      applyOpenersVisibility();
     });
 
     saveNotesBtn?.addEventListener('click', saveNotes);
@@ -1010,6 +1087,13 @@
         // Tips
         tipsList.innerHTML = ""; (tips || []).forEach(t => { const li = document.createElement("li"); li.textContent = t; tipsList.appendChild(li); });
         applyTipsVisibility();
+
+        // Load and render Call opener ideas (defaults to hidden)
+        try {
+          const openerTips = await loadOpenersFromAssets();
+          renderOpeners(openerTips);
+        } catch { }
+        applyOpenersVisibility();s
 
         // Enable copy/download now there is content
         copyScriptBtn.disabled = false; downloadScriptBtn.disabled = false;
