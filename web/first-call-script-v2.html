@@ -134,6 +134,7 @@
               <select id="tone" name="tone">
                 <option selected>Professional (corporate)</option>
                 <option>Warm (professional)</option>
+                <option>Straightforward</option>
               </select>
             </div>
 
@@ -425,6 +426,18 @@
     // Small helpers
     const esc = s => String(s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     const strongify = s => String(s || "").replace(/\*\*([^\*\n][\s\S]*?)\*\*/g, "<strong>$1</strong>");
+    // Derive a nice display name from a login/email
+    function deriveNameFromLogin(login) {
+      const s = String(login || "").trim();
+      if (!s) return "";
+      // prefer "First Last" if present, else derive from email local-part
+      const raw = s.includes("@") ? s.split("@")[0] : s;
+      const parts = raw.replace(/[_.-]+/g, " ").split(" ").filter(Boolean);
+      return parts.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    }
+
+    // Will hold the friendly name for welcome copy
+    let currentUserName = "";
 
     // Canon/aliases
     const REQUIRED_CANON = ["Opening", "Buyer Pain", "Buyer Desire", "Example Illustration", "Handling Objections", "Next Step"];
@@ -442,10 +455,18 @@
       // add more if you ever want: "Buyer Pain": "Problems", etc.
     };
 
-    const PREFACE = {
-      title: "About this guide",
-      body: `This guide gives you a head start by distilling the buyer’s likely pains and desired outcomes into a simple conversation plan with evidence, plus clear responses to common objections. It’s a shortcut, not a script. Use it to open stronger, ask sharper questions, earn trust quickly and secure a clear next step.`
-    };
+    // Build a friendly/motivational preface (always warm style + emojis)
+    function buildPreface(values = {}) {
+      const formName = String(values.seller_name || "").trim();
+      const who = formName || currentUserName || "there";
+      const title = "About this guide";
+      const body = [
+        `Hi ${esc(who)} 👋`,
+        `You’ve got this. This guide gives you concise, practical coaching for your next call — what to focus on, how to steer the conversation, and how to land a clear next step.`,
+        `Pick the ideas that fit your style. Keep it simple, be curious, and use the buyer insights on the right to back your judgement. Good selling! 🚀`
+      ].map(p => `<p>${p}</p>`).join("");
+      return { title, html: body };
+    }
 
     /* Normalise + parse markdown into sections */
     function normaliseMd(raw) {
@@ -556,7 +577,7 @@
         ? escapeRx
         : (s => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
       const labelForFn = (typeof labelFor === "function") ? labelFor : (s => s);
-      const PREF = (typeof PREFACE === "object" && PREFACE) ? PREFACE : {};
+      const PREF = buildPreface(valuesForFallback || {});
 
       const sections = parseSections(rawMd);
       const byKey = new Map(sections.map(s => [String(s.title).toLowerCase(), s]));
@@ -630,12 +651,10 @@
       }
 
       // Preface block (only if body text exists)
-      const prefaceHtml = PREF?.body
-        ? `<section class="script-sec preface">
+      const prefaceHtml = `<section class="script-sec preface">
         <h3>${esc(PREF.title || "About this guide")}</h3>
-        <p>${strongify(esc(PREF.body))}</p>
-      </section>`
-        : "";
+        ${PREF.html}
+      </section>`;
 
       // Prepend preface before the first canonical section
       return {
