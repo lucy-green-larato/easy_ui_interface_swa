@@ -24,9 +24,45 @@ function pluckSuggestedNextStep(md) {
 
 function normaliseTone(raw) {
   const s = String(raw || "").toLowerCase();
+  if (s.includes("straight")) return "Straightforward";
   if (s.includes("warm")) return "Warm (professional)";
-  // default to the corporate tone if empty or anything else
   return "Professional (corporate)";
+}
+
+function readabilityLineFor(tone) {
+  if (String(tone).toLowerCase().includes("straight")) {
+    return "Target readability: Flesch–Kincaid ≈ 50. Use short, plain sentences (avg 12–15 words), concrete verbs, minimal jargon.";
+  }
+  return "";
+}
+
+function toneStyleGuide(tone) {
+  const t = String(tone || "").toLowerCase();
+  if (t.includes("straight")) {
+    return [
+      "STYLE: Straightforward.",
+      "Sentences: short (8–14 words), direct; avoid subordinate clauses.",
+      "Vocabulary: plain; avoid jargon and abstractions (no “leverage”, “synergy”, “enablement”).",
+      "Voice: imperative (“Ask…”, “Confirm…”, “Offer…”).",
+      "No emojis. No exclamation marks."
+    ].join("\n");
+  }
+  if (t.includes("warm")) {
+    return [
+      "STYLE: Warm (professional).",
+      "Sentences: short-to-medium (14–18 words).",
+      "Voice: friendly and collaborative; soften edges with “let’s”, “worth exploring”.",
+      "Use UK contractions sparingly (“we’ll”, “you’ll”).",
+      "No emojis."
+    ].join("\n");
+  }
+  return [
+    "STYLE: Professional (corporate).",
+    "Sentences: medium (18–24 words); precise and structured.",
+    "Voice: measured, neutral; avoid colloquialisms and contractions.",
+    "Prefer “we can”, “we propose”, “we recommend”.",
+    "No emojis."
+  ].join("\n");
 }
 
 function ensureHeadings(text) {
@@ -587,27 +623,6 @@ function parseTargetLength(label) {
   return 300;
 }
 
-// Build follow-up email prompt (prospect-facing)
-function buildFollowupPrompt({ seller, prospect, tone, scriptMdText, callNotes }) {
-  return (
-    `You are a UK B2B salesperson. Draft a concise follow-up email after a discovery call.
-
-Tone: ${tone || "Professional (corporate)"}.
-Output: Plain text email with:
-- Subject line
-- Greeting ("Hello ${prospect.name},")
-- 2–3 short paragraphs that stitch together (1) the prepared call talking points and (2) the salesperson's call notes (prioritise the notes)
-- A single clear next step
-- Signature as "${seller.name}, ${seller.company}"
-
-Prepared talking points (from the script the rep used on the call):
-${scriptMdText || "(none)"}
-
-Salesperson's notes (verbatim):
-${callNotes || "(none)"}`
-  );
-}
-
 // Build prompt used for the model
 function buildPromptFromMarkdown(args) {
   const templateMdText = args.templateMdText || "";
@@ -624,43 +639,44 @@ function buildPromptFromMarkdown(args) {
 
   const toneLine = tone ? 'Write in a "' + tone + '" tone.\n' : "";
   const lengthLine = targetWords ? "Aim for about " + targetWords + " words (±10%).\n" : "";
+  const readability = readabilityLineFor(tone);
+  const styleGuide = toneStyleGuide(tone);
 
-  // Optional: strongly steer headings
   const headingRules =
-    "Use these exact markdown headings, each on its own line and in this order:\n" +
+    "Use these exact markdown headings, in this order, each on its own line:\n" +
     "## Opening\n" +
     "## Buyer Pain\n" +
     "## Buyer Desire\n" +
     "## Example Illustration\n" +
     "## Handling Objections\n" +
     "## Next Step\n" +
-    "Do not change, rename, bold, add punctuation to, or re-level these headings. They must begin with '## ' exactly.\n\n";
+    "Do not rename or add headings.\n\n";
 
   return (
-    "You are a highly effective UK B2B salesperson.\n\n" +
-    toneLine + lengthLine + headingRules +
-    "Use the Markdown template below as the skeleton for the call. Preserve the section headings and overall order. Fill the content so it reads as a natural, spoken conversation.\n\n" +
+    "You are a top UK sales coach creating **instructional advice for the salesperson** (not a spoken script).\n\n" +
+    toneLine + readability + "\n" + styleGuide + "\n" + lengthLine + headingRules +
+    "Under each heading, write clear, imperative guidance telling the salesperson what to do, what to listen for, and how to phrase key moments.\n" +
     "MANDATES:\n" +
-    "- Use professional British business English; no Americanisms; no assumptive closes.\n" +
-    "- Never include pleasantries or check-ins such as \"I hope you are well\", \"Are you well?\", \"Hope you're doing well\", \"How are you?\", \"Trust you are well\". Start directly.\n" +
-    "- Elegantly weave the USPs and Other points where they make sense in context; do not ignore them if provided.\n" +
-    "- Include one specific, relevant customer example with measurable results.\n" +
-    "- Handle common objections factually and without pressure.\n" +
-    "- For the \"Next Step\": if the salesperson provided one, use it; otherwise if the template contains <!-- suggested_next_step: ... -->, use that; otherwise propose a clear, low-friction next step.\n" +
+    "- UK business English. No pleasantries or small talk. No Americanisms.\n" +
+    "- **Adhere to the STYLE above** so tone drives vocabulary and sentence length.\n" +
+    "- Weave the salesperson’s USPs/Other points naturally into the most relevant sections.\n" +
+    "- Include one specific, relevant customer example with measurable results and when to use it.\n" +
+    "- For \"Next Step\": if the salesperson provided one, use it; else if the template contains <!-- suggested_next_step: ... -->, use that; else propose a clear, low-friction next step.\n" +
     "Buyer type: " + buyerType + "\n" +
     "Product: " + productLabel + "\n\n" +
     "USPs (from salesperson): " + (valueProposition || "(none provided)") + "\n" +
     "Other points to consider: " + (context || "(none provided)") + "\n" +
     "Requested Next Step (from salesperson, if any): " + (nextStep || "(none)") + "\n" +
     "Suggested Next Step (from template, if any): " + (suggestedNext || "(none)") + "\n\n" +
-    "--- BEGIN TEMPLATE ---\n" +
+    "--- TEMPLATE (for ideas only) ---\n" +
     templateMdText +
     "\n--- END TEMPLATE ---\n\n" +
-    "After the script, add this heading and content:\n" +
+    "After the advice, add this heading and content:\n" +
     "**Sales tips for colleagues conducting similar calls**\n" +
     "Provide exactly 3 concise, practical tips (numbered 1., 2., 3.).\n"
   );
 }
+
 
 // Build follow-up email prompt (prospect-facing)
 function buildFollowupPrompt({ seller, prospect, tone, scriptMdText, callNotes }) {
@@ -698,41 +714,45 @@ function buildJsonPrompt(args) {
   const tone = args.tone || "Professional (corporate)";
   const targetWords = Number(args.targetWords || 0);
   const lengthHint = targetWords ? `Aim for about ${targetWords} words (±10%).` : "";
+  const readability = readabilityLineFor(tone);
+  const styleGuide = toneStyleGuide(tone);
 
   return (
-    `You are a highly effective UK B2B salesperson. 
-Write **valid JSON only** (no markdown; no text outside JSON).
+    `You are a top UK sales coach. Produce **instructional advice for the salesperson** (not a spoken script).
+Write **valid JSON only** (no markdown; no text outside JSON). Address the salesperson directly ("you"), in the requested tone: ${tone}.
+${readability}
+${styleGuide}
+${lengthHint}
 
-JSON schema:
+Your advice must use these six sections (these map to our UI and must ALL be present):
+
 {
   "sections": {
-    "opening": string,                 // min 20 chars
-    "buyer_pain": string,              // min 20
-    "buyer_desire": string,            // min 20
-    "example_illustration": string,    // min 20
-    "handling_objections": string,     // min 10
-    "next_step": string                // min 5
+    "opening": string,                 // What you should do first on the call and how to set context.
+    "buyer_pain": string,              // How to uncover pains for this buyer type; what to listen for.
+    "buyer_desire": string,            // How to test for desired outcomes and decision criteria.
+    "example_illustration": string,    // A relevant customer example you can draw on; how to use it.
+    "handling_objections": string,     // Specific objection patterns + how you should respond (in this tone).
+    "next_step": string                // The exact next step you should propose and how to ask for it.
   },
   "integration_notes": {
     "usps_used": string[]?,
     "other_points_used": string[]?,
     "next_step_source": "salesperson" | "template" | "assistant"?
   },
-  "tips": [string, string, string],    // exactly 3 concise tips
-  "summary_bullets": string[]          // 6–12 crisp bullets summarising the call flow for an experienced rep
+  "tips": [string, string, string],
+  "summary_bullets": string[]
 }
 
 Constraints:
-- Tone: ${tone}.
-- UK business English only. No Americanisms. No pleasantries (“Hope you’re well”, “How are you?”, etc.).
-- Do not use filler lines like “Is there anything else I can help with?”
-- Sections to cover (your JSON keys map to these): opening, buyer_pain, buyer_desire, example_illustration, handling_objections, next_step.
-- **Weave** the salesperson inputs (USPs & Other points) into the most relevant sections **as natural sentences**. Do **not** dump them as separate bullet lists.
-- Next step precedence: (1) salesperson-provided; else (2) template <!-- suggested_next_step -->; else (3) a clear, low-friction next step.
-- Include one specific, relevant customer example with measurable results.
-- ${lengthHint}
+- UK business English. No pleasantries. **Adhere to the STYLE above** so tone materially affects vocabulary and sentence length.
+   - **Weave** the salesperson inputs (USPs & Other points) into the most relevant sections as natural guidance.
+   - Next step precedence: (1) salesperson-provided; else (2) template <!-- suggested_next_step -->; else (3) a clear, low-friction next step.
+   - Include one specific, relevant customer example with measurable results; show how and **when** the salesperson should use it.
+   - Return "summary_bullets" with 6–12 short bullets (5–10 words each) summarising the advice.
 
-Context for you to incorporate:
+
+Context to incorporate:
 - Product: ${productLabel}
 - Buyer type: ${buyerType}
 - Salesperson USPs (optional): ${valueProposition || "(none)"}
@@ -1679,7 +1699,7 @@ module.exports = async function (context, req) {
 
       // tone / target words
       const toneRaw = String(vars.tone || body.tone || "").trim();
-      const effectiveTone = normaliseTone(toneRaw);              // ← always resolve to one of two allowed tones
+      const effectiveTone = normaliseTone(toneRaw);              // ← always resolve to one of three allowed tones
       const targetWords = parseTargetLength(
         vars.script_length || vars.length || body.script_length || body.length
       );
@@ -1874,8 +1894,7 @@ module.exports = async function (context, req) {
         }
 
         // 5) Length control AFTER weaving, then ensure a single clean closing line
-        let woven = targetWords ? trimToTargetWords(md, targetWords) : md;
-        const finalMd = ensureThanksClose(woven);
+        const finalMd = targetWords ? trimToTargetWords(md, targetWords) : md;
 
         // 6) Return
         context.res = {
@@ -1908,7 +1927,7 @@ module.exports = async function (context, req) {
 
       const llmRes = await callModel({
         system:
-          "You are a highly effective UK B2B salesperson writing a sales call script.\n" +
+          "You are a top UK sales coach writing instructional advice for a salesperson (not dialogue). Adhere to the requested tone and style.\n" +
           "STRICT BANS (never include): pleasantries like \"I hope you are well\", \"Are you well?\", \"How are you?\", \"Hope you're well\", \"Trust you're well\"" +
           "STYLE: UK business English. Follow the provided structure and headings exactly.",
         prompt: prompt,
@@ -2009,9 +2028,6 @@ module.exports = async function (context, req) {
           scriptText = scriptText.replace(/{{\s*next_step\s*}}/gi, finalNext2);
         }
       }
-
-      // 6) Ensure a single clean closing line at the very end
-      scriptText = ensureThanksClose(scriptText);
 
       // ───────────────── POST-PROCESS END ─────────────────
 
