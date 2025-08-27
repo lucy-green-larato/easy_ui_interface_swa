@@ -521,6 +521,98 @@
       return "early-majority";
     }
 
+    // --- Prioritisation (local-only, no server calls) ---
+    function scoreOpportunityFromText(text) {
+      const t = String(text || "").toLowerCase();
+
+      // You can tune these lists anytime without affecting other logic
+      const strategicTerms = [
+        "board", "strategy", "strategic", "transformation", "digital transformation", "operating model",
+        "market entry", "expansion", "acquisition", "merger", "regulatory", "compliance mandate",
+        "capex", "multi-year plan", "growth thesis", "turnaround", "replatform", "modernisation"
+      ];
+      const operationalTerms = [
+        "process", "workflow", "cost", "efficiency", "automation", "sla", "ticket", "backlog",
+        "incident", "downtime", "utilisation", "throughput", "rollout", "migration",
+        "integration", "time to value", "productivity", "service desk", "operational"
+      ];
+
+      function countHits(terms) {
+        let c = 0;
+        for (const s of terms) {
+          const rx = new RegExp("\\b" + s.replace(/\s+/g, "\\s+") + "\\b", "gi");
+          const m = t.match(rx);
+          if (m) c += m.length;
+        }
+        return c;
+      }
+
+      const sCount = countHits(strategicTerms);
+      const oCount = countHits(operationalTerms);
+
+      // Simple thresholds; adjust if you wish
+      const hasStrategic = sCount >= 2;
+      const hasOperational = oCount >= 2;
+
+      // "Only partially" if exactly one bucket is strong OR both are weak
+      const partialFit = (hasStrategic ^ hasOperational) || (!hasStrategic && !hasOperational);
+
+      return {
+        strategicImpact: {
+          yesNo: hasStrategic,
+          rationale: hasStrategic
+            ? `Found ${sCount} strong strategic signal(s).`
+            : `Insufficient strategic signals (found ${sCount}).`
+        },
+        operationalImpact: {
+          yesNo: hasOperational,
+          rationale: hasOperational
+            ? `Found ${oCount} strong operational signal(s).`
+            : `Insufficient operational signals (found ${oCount}).`
+        },
+        partialFit: {
+          yesNo: partialFit,
+          rationale: partialFit
+            ? "Signals indicate incomplete coverage (strong in one area or weak overall)."
+            : "Signals indicate good coverage across strategic and operational."
+        }
+      };
+    }
+
+    function buildPrioritisationPayload({ scores, inputs, scriptText }) {
+      return {
+        createdAt: new Date().toISOString(),
+        sourceTool: "InsideTrack-LeadQualification",
+        // The three fields you want to hand to the ranking tool later:
+        strategicImpact: scores.strategicImpact,     // { yesNo, rationale }
+        operationalImpact: scores.operationalImpact, // { yesNo, rationale }
+        partialFit: scores.partialFit,               // { yesNo, rationale }
+        // Optional extras (for future use)
+        prospect_company: inputs.prospect_company || "",
+        product_service: inputs.product_service || "",
+        buyer_type: inputs.buyer_type || "",
+        excerpt: String(scriptText || "").slice(0, 800)
+      };
+    }
+
+    function renderPrioritisationPreviewHTML(scores) {
+      function badge(val) {
+        return `<span class="pill" style="margin-left:.5rem">${val ? "Yes" : "No"}</span>`;
+      }
+      return `
+    <h4>Review</h4>
+    <ul>
+      <li><strong>Strategic problem solved?</strong> ${badge(scores.strategicImpact.yesNo)}<br>
+          <span class="muted">${esc(scores.strategicImpact.rationale)}</span></li>
+      <li style="margin-top:.5rem"><strong>Operational problem solved?</strong> ${badge(scores.operationalImpact.yesNo)}<br>
+          <span class="muted">${esc(scores.operationalImpact.rationale)}</span></li>
+      <li style="margin-top:.5rem"><strong>Only partially solves the buyer’s problems?</strong> ${badge(scores.partialFit.yesNo)}<br>
+          <span class="muted">${esc(scores.partialFit.rationale)}</span></li>
+    </ul>
+    <p class="fineprint" style="margin-top:var(--s-3)">This is a lightweight client-side assessment based on the generated report’s text.</p>
+  `;
+    }
+
     // DOM refs
     const form = document.getElementById(FORM_ID);
     const statusEl = document.getElementById("status");
@@ -545,6 +637,14 @@
     const tipsEmpty = document.getElementById("tips-empty");
     const sourcesCard = document.getElementById("sources");
     const sourceList = document.getElementById("source-list");
+    // Prioritisation UI
+    const prioBtn = document.getElementById("send-prioritise");
+    const prioModal = document.getElementById("prio-modal");
+    const prioClose = document.getElementById("prio-close");
+    const prioBody = document.getElementById("prio-body");
+    const prioCopy = document.getElementById("prio-copy");
+
+    let LAST_PRIO_PAYLOAD = null; // set on each score for Copy JSON
 
     const callTypeSel = document.getElementById("call_type");
     const callTypeSelXs = document.getElementById("call_type_xs");
@@ -800,6 +900,7 @@
       dlBtn && (dlBtn.disabled = isBusy || !hasText);
       emailBtn && (emailBtn.disabled = isBusy || !hasText);
       docxBtn && (docxBtn.disabled = isBusy || !hasText);
+      prioBtn && (prioBtn.disabled = isBusy || !hasText);
     }
 
     // Change log
@@ -950,6 +1051,29 @@
           })
           .catch(e => { setStatus("Could not compose email", "error"); diag.open = true; diagJson.textContent = String(e?.message || e); });
       } catch (e) { setStatus("Could not compose email", "error"); diag.open = true; diagJson.textContent = String(e?.message || e); }
+    });
+
+    prioBtn?.addEventListener("click", () => {
+      const scriptText = (outputEl?.innerText || "").trim() || (localStorage.getItem(OUTPUT_KEY) || "");
+      if (!scriptText) { setStatus("No report to score.", "error"); return; }
+
+      const inputs = collectVariables();                // reuse your existing function
+      const scores = scoreOpportunityFromText(scriptText);
+      LAST_PRIO_PAYLOAD = buildPrioritisationPayload({ scores, inputs, scriptText });
+
+      if (prioBody) prioBody.innerHTML = renderPrioritisationPreviewHTML(scores);
+      prioModal?.showModal();
+    });
+
+    prioClose?.addEventListener("click", () => prioModal?.close());
+
+    prioCopy?.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(LAST_PRIO_PAYLOAD || {}, null, 2));
+        setStatus("Prioritisation JSON copied.");
+      } catch {
+        setStatus("Could not copy prioritisation JSON.", "error");
+      }
     });
 
     // CH modal
@@ -1148,6 +1272,7 @@
         dlBtn && (dlBtn.disabled = false);
         emailBtn && (emailBtn.disabled = false);
         docxBtn && (docxBtn.disabled = false);
+        prioBtn && (prioBtn.disabled = false);
 
         // Delta & activity
         const old = localStorage.getItem(OUTPUT_KEY) || "";
@@ -1223,6 +1348,9 @@
         dlBtn && (dlBtn.disabled = true);
         emailBtn && (emailBtn.disabled = true);
         docxBtn && (docxBtn.disabled = true);
+        prioBtn && (prioBtn.disabled = true);
+        try { prioModal?.close(); } catch { }
+        LAST_PRIO_PAYLOAD = null;
         document.querySelector(".panel.left")?.scrollTo({ top: 0, behavior: "auto" });
         document.getElementById("seller_name")?.focus();
         BASE_TIPS = []; AUTO_TIPS = []; renderTips();
