@@ -967,6 +967,19 @@
       validateField('product');
     });
 
+    // Recalculate Buyer needs when Product or Buyer behaviour changes
+    productSel?.addEventListener('change', () => {
+      validateField('product');
+      saveForm();
+      onChangeRecalcIntel();
+    });
+
+    buyerBehSel?.addEventListener('change', () => {
+      validateField('buyer_behaviour');
+      saveForm();
+      onChangeRecalcIntel();
+    });
+
     // Mobile mirror (async to use await)
     callTypeSelXs?.addEventListener('change', async () => {
       if (!callTypeSel) return;
