@@ -901,14 +901,16 @@
 
     function applyOpenersVisibility() {
       const openersBody = document.getElementById('openers-body');
-      if (!toggleOpenersBtn || !openersBody) return;
+      const btn = document.getElementById('toggle-openers');
+      if (!openersBody || !btn) return;
 
-      const raw = localStorage.getItem(OPENERS_HIDDEN_KEY);
-      const hidden = (raw === null) ? true : (raw === '1');  // default = hidden
+      // default to hidden when there's no stored choice yet
+      const stored = localStorage.getItem(OPENERS_HIDDEN_KEY);
+      const hidden = (stored === null) ? true : stored === '1';
 
       openersBody.hidden = hidden;
-      toggleOpenersBtn.textContent = hidden ? 'Show' : 'Hide';
-      toggleOpenersBtn.setAttribute('aria-expanded', String(!hidden));
+      btn.textContent = hidden ? 'Show' : 'Hide';
+      btn.setAttribute('aria-expanded', String(!hidden));
     }
 
     // Tips toggle + auto-hide (works for any tip source)
