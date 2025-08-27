@@ -373,145 +373,116 @@ async function callModel(opts) {
   const system = opts?.system || "";
   const prompt = opts?.prompt || "";
   const temperature = typeof opts?.temperature === "number" ? opts.temperature : 0.6;
-  const response_format = opts?.response_format; // pass-through (json_object / json_schema / etc.)
+  const response_format = opts?.response_format; // pass-through
+
   const messages = [
     { role: "system", content: system },
     { role: "user", content: prompt }
   ];
 
-  // ---------- OpenAI fallback config ----------
+  // ENV
+  const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
+  const azKey = process.env.AZURE_OPENAI_API_KEY;
+  const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+  const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
+
   const oaKey = process.env.OPENAI_API_KEY;
   const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-  async function callModel(opts) {
-    const max_tokens =
-      Number.isFinite(opts?.max_tokens) ? opts.max_tokens :
-        (Number.isFinite(opts?.maxTokens) ? opts.maxTokens : undefined);
+  const forceOpenAI = process.env.FORCE_OPENAI === "1";
+  const azureConfigured = Boolean(azEndpoint && azKey && azDeployment);
 
-    const system = opts.system || "";
-    const prompt = opts.prompt || "";
-    const temperature = typeof opts.temperature === "number" ? opts.temperature : 0.6;
+  async function callAzureOnce() {
+    const url = azEndpoint.replace(/\/+$/, "") +
+      "/openai/deployments/" + encodeURIComponent(azDeployment) +
+      "/chat/completions?api-version=" + encodeURIComponent(azApiVersion);
 
-    const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-    const azKey = process.env.AZURE_OPENAI_API_KEY;
-    const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-    const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
+    const body = {
+      temperature,
+      messages,
+      ...(response_format ? { response_format } : {}),
+      ...(max_tokens ? { max_tokens } : {})
+    };
 
-    const oaKey = process.env.OPENAI_API_KEY;
-    const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    const r = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": azKey,
+        "User-Agent": "inside-track-tools/" + VERSION
+      },
+      body: JSON.stringify(body),
+    });
 
-    const forceOpenAI = process.env.FORCE_OPENAI === "1";
+    let data; try { data = await r.json(); } catch { data = {}; }
 
-    async function callAzureOnce() {
-      const url = azEndpoint.replace(/\/+$/, "") +
-        "/openai/deployments/" + encodeURIComponent(azDeployment) +
-        "/chat/completions?api-version=" + encodeURIComponent(azApiVersion);
-
-      const body = {
-        temperature,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: prompt }
-        ],
-        ...(opts.response_format ? { response_format: opts.response_format } : {}),
-        ...(max_tokens ? { max_tokens } : {})
-      };
-
-      const r = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "api-key": azKey,
-          "User-Agent": "inside-track-tools/" + VERSION
-        },
-        body: JSON.stringify(body),
-      });
-
-      let data; try { data = await r.json(); } catch { data = {}; }
-
-      if (!r.ok) {
-        const code = data?.error?.code || r.status;
-        const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
-        const retryAfter = r.headers.get("retry-after") || "";
-        const err = new Error(`[AZURE ${code}] ${msg}${retryAfter ? ` (retry-after=${retryAfter}s)` : ""}`);
-        // mark common rate-limit signatures so we can safely fallback
-        err.__isAzure429 = (String(code) === "429" || /rate\s*limit|thrott|too\s*many\s*requests/i.test(msg));
-        throw err;
-      }
-      return data;
+    if (!r.ok) {
+      const code = data?.error?.code || r.status;
+      const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
+      const retryAfter = r.headers.get("retry-after") || "";
+      const err = new Error(`[AZURE ${code}] ${msg}${retryAfter ? ` (retry-after=${retryAfter}s)` : ""}`);
+      // Tag rate-limit/transient errors so we can fall back
+      err.__isAzure429 = (String(code) === "429" || /rate\s*limit|thrott|too\s*many\s*requests/i.test(msg));
+      err.__isTransient = /ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed/i.test(msg);
+      throw err;
     }
-
-    async function callOpenAIOnce() {
-      const payload = {
-        model: oaModel,
-        temperature,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: prompt }
-        ],
-        ...(opts.response_format ? { response_format: opts.response_format } : {}),
-        ...(max_tokens ? { max_tokens } : {})
-      };
-
-      const r = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer " + oaKey,
-          "User-Agent": "inside-track-tools/" + VERSION
-        },
-        body: JSON.stringify(payload),
-      });
-
-      let data; try { data = await r.json(); } catch { data = {}; }
-
-      if (!r.ok) {
-        const code = data?.error?.type || r.status;
-        const msg = data?.error?.message || r.statusText || "OpenAI request failed";
-        throw new Error(`[OPENAI ${code}] ${msg}`);
-      }
-      return data;
-    }
-
-    // --- Routing logic ---
-
-    // (A) Manual override for demos or incidents
-    if (forceOpenAI && oaKey) {
-      console.warn("[callModel] FORCE_OPENAI=1 → using OpenAI directly");
-      return await callOpenAIOnce();
-    }
-
-    const azureConfigured = Boolean(azEndpoint && azKey && azDeployment);
-
-    // (B) Azure first
-    if (azureConfigured) {
-      try {
-        return await callAzureOnce();
-      } catch (e) {
-        const msg = String(e && e.message || "");
-        const is429 = e && e.__isAzure429;
-        const networkish = /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(msg);
-        const canFallback = Boolean(oaKey);
-
-        if ((is429 || networkish) && canFallback) {
-          console.warn("[callModel] Azure unavailable/rate-limited → falling back to OpenAI");
-          return await callOpenAIOnce();
-        }
-        if (!canFallback) {
-          console.warn("[callModel] Azure error and OPENAI_API_KEY not available → cannot fallback");
-        }
-        throw new Error(`[callModel] ${msg}`);
-      }
-    }
-
-    // (C) If Azure not configured, use OpenAI if available
-    if (oaKey) {
-      console.warn("[callModel] Azure not configured → using OpenAI");
-      return await callOpenAIOnce();
-    }
-
-    throw new Error("No model configured. Set AZURE_OPENAI_* or OPENAI_API_KEY.");
+    return data;
   }
+
+  async function callOpenAIOnce() {
+    const payload = {
+      model: oaModel,
+      temperature,
+      messages,
+      ...(response_format ? { response_format } : {}),
+      ...(max_tokens ? { max_tokens } : {})
+    };
+
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + oaKey,
+        "User-Agent": "inside-track-tools/" + VERSION
+      },
+      body: JSON.stringify(payload),
+    });
+
+    let data; try { data = await r.json(); } catch { data = {}; }
+    if (!r.ok) {
+      const code = data?.error?.type || r.status;
+      const msg = data?.error?.message || r.statusText || "OpenAI request failed";
+      throw new Error(`[OPENAI ${code}] ${msg}`);
+    }
+    return data;
+  }
+
+  // Routing
+  if (forceOpenAI && oaKey) {
+    console.warn("[callModel] FORCE_OPENAI=1 → using OpenAI");
+    return await callOpenAIOnce();
+  }
+
+  if (azureConfigured) {
+    try {
+      return await callAzureOnce();
+    } catch (e) {
+      const canFallback = Boolean(oaKey);
+      if ((e.__isAzure429 || e.__isTransient) && canFallback) {
+        console.warn("[callModel] Azure rate-limited/unavailable → falling back to OpenAI");
+        return await callOpenAIOnce();
+      }
+      // No fallback available or non-retriable error
+      throw new Error(`[callModel] ${e.message || e}`);
+    }
+  }
+
+  if (oaKey) {
+    console.warn("[callModel] Azure not configured → using OpenAI");
+    return await callOpenAIOnce();
+  }
+
+  throw new Error("No model configured. Set AZURE_OPENAI_* or OPENAI_API_KEY.");
 }
 
 function toModeId(v) {
@@ -1450,7 +1421,7 @@ module.exports = async function (context, req) {
       }
 
       if (!hasEvidenceMarks(finalData.report.md) || looksGeneric(finalData.report.md)) {
-        // Re-call once with an addendum that explains the failure
+        // Re-call once with an addendum that enforces evidence and removes generic wording
         const addendum = [
           "=== STRICT REWRITE INSTRUCTIONS ===",
           "Your previous draft contained generic wording or insufficient evidence.",
@@ -1480,9 +1451,11 @@ module.exports = async function (context, req) {
           targetWords
         }) + "\n\n" + addendum;
 
-        const rf = isAzure ? { type: "json_object" } : { type: "json_schema", json_schema: oaJsonSchema };
+        // Use json_schema only where supported/short; prefer json_object otherwise for long outputs
+        const rf = isSummary
+          ? (isAzure ? { type: "json_object" } : { type: "json_schema", json_schema: oaJsonSchema })
+          : { type: "json_object" };
 
-        // ⬇⬇⬇ Defensive guard goes here ⬇⬇⬇
         try {
           const redoRes = await callModel({
             system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.",
@@ -1493,66 +1466,46 @@ module.exports = async function (context, req) {
           });
 
           const redoRaw = extractText(redoRes) || "";
-          let redoParsed = safeJson(stripJsonFences(redoRaw)) || {};
+          const stripped = stripJsonFences(redoRaw);
+
+          let redoParsed = safeJson(stripped);
+          if (!redoParsed) {
+            throw new Error("Redo attempt did not return valid JSON");
+          }
+
           redoParsed = sanitizeModelJson(redoParsed);
           // ensure tips are valid before validation
           redoParsed.tips = normaliseTips(redoParsed.tips, vars);
 
-          const redoValid = QualSchemaDyn.safeParse(redoParsed);
+          // Primary validation
+          let redoValid = QualSchemaDyn.safeParse(redoParsed);
+
+          // If the ONLY problem is md length, progressively relax once (never below 200 chars)
+          if (!redoValid.success && isOnlyMdTooSmall(redoValid.error)) {
+            const baseMin = isSummary ? DEFAULT_MIN_SUMMARY : DEFAULT_MIN_FULL;
+            const relaxedMin = Math.max(200, Math.floor(baseMin * 0.7));
+            const RelaxedSchema = makeQualSchema(relaxedMin);
+            const relaxed = RelaxedSchema.safeParse(redoParsed);
+            if (relaxed.success) {
+              redoValid = relaxed;
+            }
+          }
+
+          // Accept the redo only if schema passes AND evidence/generic checks pass
           if (redoValid.success &&
             hasEvidenceMarks(redoValid.data.report.md) &&
             !looksGeneric(redoValid.data.report.md)) {
             finalData = redoValid.data;
             redoNote = "[quality-gate: redo applied]";
+          } else {
+            // Keep original finalData if redo does not clearly beat the quality gate
+            context.log.warn(`[${VERSION}] quality-gate redo did not meet acceptance criteria; keeping original draft`);
           }
         } catch (e) {
-          // If Azure throttles (429/“rate limit”), fall back to OpenAI once
-          const msg = String(e && e.message || "");
-          const oaKey = process.env.OPENAI_API_KEY;
-
-          if (oaKey && (/\[AZURE\s+429\]/i.test(msg) || /rate\s*limit|thrott/i.test(msg))) {
-            try {
-              const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
-              const payload = {
-                model: oaModel,
-                temperature,
-                messages: [
-                  { role: "system", content: system },
-                  { role: "user", content: prompt }
-                ],
-                // reuse the same response_format & max_tokens you asked Azure for
-                ...(opts.response_format ? { response_format: opts.response_format } : {}),
-                ...(max_tokens ? { max_tokens } : {})
-              };
-
-              const r = await fetch("https://api.openai.com/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "Authorization": "Bearer " + oaKey,
-                  "User-Agent": "inside-track-tools/" + VERSION
-                },
-                body: JSON.stringify(payload),
-              });
-
-              let data; try { data = await r.json(); } catch { data = {}; }
-              if (!r.ok) {
-                const code = data?.error?.type || r.status;
-                const msg2 = data?.error?.message || r.statusText || "OpenAI request failed";
-                throw new Error(`[OPENAI ${code}] ${msg2}`);
-              }
-              return data; // success via OpenAI fallback
-            } catch (e2) {
-              e.message = `[callModel/Azure] ${e.message} | [fallback OpenAI failed] ${e2.message}`;
-              throw e;
-            }
-          }
-
-          e.message = `[callModel/Azure] ${e.message}`;
-          throw e;
+          // Do not fail the whole request if the redo fails; keep original finalData
+          context.log.warn(`[${VERSION}] quality-gate redo failed: ${e && e.message ? e.message : e}`);
         }
       }
-
 
       // from here on, use finalData
       const finalTips = normaliseTips(finalData.tips, vars);
