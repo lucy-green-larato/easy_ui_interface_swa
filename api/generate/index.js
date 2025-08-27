@@ -383,65 +383,40 @@ async function callModel(opts) {
   const oaKey = process.env.OPENAI_API_KEY;
   const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-  async function callOpenAI() {
-    if (!oaKey) throw new Error("No OpenAI key configured for fallback");
-    const payload = {
-      model: oaModel,
-      temperature,
-      messages,
-      ...(response_format ? { response_format } : {}),
-      ...(max_tokens ? { max_tokens } : {})
-    };
+  async function callModel(opts) {
+    const max_tokens =
+      Number.isFinite(opts?.max_tokens) ? opts.max_tokens :
+        (Number.isFinite(opts?.maxTokens) ? opts.maxTokens : undefined);
 
-    let data;
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + oaKey,
-        "User-Agent": "inside-track-tools/" + VERSION
-      },
-      body: JSON.stringify(payload),
-    });
-    try { data = await r.json(); } catch { data = {}; }
-    if (!r.ok) {
-      const code = data?.error?.type || r.status;
-      const msg = data?.error?.message || r.statusText || "OpenAI request failed";
-      throw new Error(`[OPENAI ${code}] ${msg}`);
-    }
-    return data;
-  }
+    const system = opts.system || "";
+    const prompt = opts.prompt || "";
+    const temperature = typeof opts.temperature === "number" ? opts.temperature : 0.6;
 
-  // ---------- Azure primary config ----------
-  const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-  const azKey = process.env.AZURE_OPENAI_API_KEY;
-  const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-  const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
+    const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
+    const azKey = process.env.AZURE_OPENAI_API_KEY;
+    const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+    const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
 
-  function isAzureRateLimit(status, code, msg) {
-    const s = String(msg || "");
-    return status === 429 ||
-      /rate\s*limit|thrott/i.test(s) ||
-      /quota|exceed/i.test(s) ||
-      String(code || "").includes("429");
-  }
+    const oaKey = process.env.OPENAI_API_KEY;
+    const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-  // ---------- Decision tree: Azure first (if configured), else OpenAI ----------
-  if (azEndpoint && azKey && azDeployment) {
-    const url = azEndpoint.replace(/\/+$/, "") +
-      "/openai/deployments/" + encodeURIComponent(azDeployment) +
-      "/chat/completions?api-version=" + encodeURIComponent(azApiVersion);
+    const forceOpenAI = process.env.FORCE_OPENAI === "1";
 
-    const body = {
-      temperature,
-      messages,
-      ...(response_format ? { response_format } : {}),
-      ...(max_tokens ? { max_tokens } : {})
-    };
+    async function callAzureOnce() {
+      const url = azEndpoint.replace(/\/+$/, "") +
+        "/openai/deployments/" + encodeURIComponent(azDeployment) +
+        "/chat/completions?api-version=" + encodeURIComponent(azApiVersion);
 
-    // Try Azure; if it 429s or network-fails and we have OpenAI creds, immediately fall back.
-    try {
-      let data;
+      const body = {
+        temperature,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: prompt }
+        ],
+        ...(opts.response_format ? { response_format: opts.response_format } : {}),
+        ...(max_tokens ? { max_tokens } : {})
+      };
+
       const r = await fetch(url, {
         method: "POST",
         headers: {
@@ -451,36 +426,92 @@ async function callModel(opts) {
         },
         body: JSON.stringify(body),
       });
-      try { data = await r.json(); } catch { data = {}; }
 
-      if (r.ok) return data;
+      let data; try { data = await r.json(); } catch { data = {}; }
 
-      // Azure returned an error → decide whether to fall back
-      const code = data?.error?.code || r.status;
-      const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
-
-      if (isAzureRateLimit(r.status, code, msg) && oaKey) {
-        // Preferred behaviour: use OpenAI tokens on Azure throttle/quota
-        try { return await callOpenAI(); }
-        catch (e2) { throw new Error(`[callModel] [AZURE ${code}] ${msg} | [fallback OpenAI failed] ${e2.message}`); }
+      if (!r.ok) {
+        const code = data?.error?.code || r.status;
+        const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
+        const retryAfter = r.headers.get("retry-after") || "";
+        const err = new Error(`[AZURE ${code}] ${msg}${retryAfter ? ` (retry-after=${retryAfter}s)` : ""}`);
+        // mark common rate-limit signatures so we can safely fallback
+        err.__isAzure429 = (String(code) === "429" || /rate\s*limit|thrott|too\s*many\s*requests/i.test(msg));
+        throw err;
       }
-
-      // Not a rate limit (or no OpenAI key) → bubble up Azure error
-      throw new Error(`[callModel] [AZURE ${code}] ${msg}`);
-    } catch (e) {
-      // Transport-level Azure failure (DNS/timeouts/etc.)
-      const emsg = String(e && e.message || "");
-      if (oaKey && /fetch|network|timeout|ENOTFOUND|ECONN|EAI_AGAIN|ETIMEDOUT/i.test(emsg)) {
-        console.log(`[${VERSION}] callModel: Azure network/transport error → falling back to OpenAI (key present)`);
-        try { return await callOpenAI(); }
-        catch (e2) { throw new Error(`[callModel] ${emsg} | [fallback OpenAI failed] ${e2.message}`); }
-      }
-      throw new Error(`[callModel] ${emsg}`);
+      return data;
     }
-  }
 
-  // No Azure configured → go straight to OpenAI
-  return await callOpenAI();
+    async function callOpenAIOnce() {
+      const payload = {
+        model: oaModel,
+        temperature,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: prompt }
+        ],
+        ...(opts.response_format ? { response_format: opts.response_format } : {}),
+        ...(max_tokens ? { max_tokens } : {})
+      };
+
+      const r = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + oaKey,
+          "User-Agent": "inside-track-tools/" + VERSION
+        },
+        body: JSON.stringify(payload),
+      });
+
+      let data; try { data = await r.json(); } catch { data = {}; }
+
+      if (!r.ok) {
+        const code = data?.error?.type || r.status;
+        const msg = data?.error?.message || r.statusText || "OpenAI request failed";
+        throw new Error(`[OPENAI ${code}] ${msg}`);
+      }
+      return data;
+    }
+
+    // --- Routing logic ---
+
+    // (A) Manual override for demos or incidents
+    if (forceOpenAI && oaKey) {
+      console.warn("[callModel] FORCE_OPENAI=1 → using OpenAI directly");
+      return await callOpenAIOnce();
+    }
+
+    const azureConfigured = Boolean(azEndpoint && azKey && azDeployment);
+
+    // (B) Azure first
+    if (azureConfigured) {
+      try {
+        return await callAzureOnce();
+      } catch (e) {
+        const msg = String(e && e.message || "");
+        const is429 = e && e.__isAzure429;
+        const networkish = /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(msg);
+        const canFallback = Boolean(oaKey);
+
+        if ((is429 || networkish) && canFallback) {
+          console.warn("[callModel] Azure unavailable/rate-limited → falling back to OpenAI");
+          return await callOpenAIOnce();
+        }
+        if (!canFallback) {
+          console.warn("[callModel] Azure error and OPENAI_API_KEY not available → cannot fallback");
+        }
+        throw new Error(`[callModel] ${msg}`);
+      }
+    }
+
+    // (C) If Azure not configured, use OpenAI if available
+    if (oaKey) {
+      console.warn("[callModel] Azure not configured → using OpenAI");
+      return await callOpenAIOnce();
+    }
+
+    throw new Error("No model configured. Set AZURE_OPENAI_* or OPENAI_API_KEY.");
+  }
 }
 
 function toModeId(v) {
