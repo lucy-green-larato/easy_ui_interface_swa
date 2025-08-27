@@ -152,7 +152,7 @@ const ScriptJsonSchema = z.object({
 });
 
 // ==== Dynamic length presets & schema factories (place right below ScriptJsonSchema) ====
-const DEFAULT_MIN_FULL = Number(process.env.QUAL_MIN_FULL_CHARS || "7000");
+const DEFAULT_MIN_FULL = Number(process.env.QUAL_MIN_FULL_CHARS || "5000");
 const DEFAULT_MIN_SUMMARY = Number(process.env.QUAL_MIN_SUMMARY_CHARS || "900");
 
 
@@ -1294,11 +1294,15 @@ module.exports = async function (context, req) {
       // Choose a response_format the backend supports (Azure vs OpenAI)
       // Choose a response_format the backend supports (Azure vs OpenAI)
       const isAzure = !!process.env.AZURE_OPENAI_ENDPOINT;
-      const response_format = isAzure
-        ? { type: "json_object" }                      // Azure (2024-06-01) path
-        : { type: "json_schema", json_schema: oaJsonSchema }; // OpenAI path (uses your dynamic schema)
+      // Use json_schema only for the short Exec/Summary; use json_object for Full to avoid provider-side length friction
+      const response_format = isSummary
+        ? (isAzure ? { type: "json_object" } : { type: "json_schema", json_schema: oaJsonSchema })
+        : { type: "json_object" };
+
       context.log(`[${VERSION}] qual LLM rf=${response_format.type}, promptChars=${prompt.length}`);
-      const maxTokens = isSummary ? 1800 : Math.min(4000, Math.ceil((targetWords || 1750) * 1.6) + 400);
+      const maxTokens = isSummary
+        ? 2000
+        : Math.min(6000, Math.ceil((targetWords || 1750) * 1.8) + 600);
 
       let llmRes, raw;
       try {
