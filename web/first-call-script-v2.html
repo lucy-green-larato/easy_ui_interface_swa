@@ -203,6 +203,10 @@
       <div class="output-actions">
         <button id="copy-script" class="btn inline" type="button" disabled>Copy script</button>
         <button id="download-script" class="btn inline" type="button" disabled>Download script</button>
+
+        <!-- NEW: highlighter controls -->
+        <button id="toggle-highlighter" class="btn inline" type="button" aria-pressed="false">Highlighter</button>
+        <button id="clear-highlights" class="btn inline" type="button">Clear highlights</button>
       </div>
 
       <!-- Notes under the output -->
@@ -413,6 +417,7 @@
 
     // State shared by views (keep on window for pop-out)
     let bulletMode = false;
+    let highlightMode = false;
     let lastRender = { html: "", bulletsHtml: "" };
     window.bulletMode = bulletMode;
     window.lastRender = lastRender;
@@ -497,6 +502,51 @@
       }
       pushCurrent();
       return sections;
+    }
+
+    function commonBlock(node) {
+      // restrict to a single paragraph OR list item (keeps HTML valid)
+      const el = node?.nodeType === 3 ? node.parentElement : node;
+      return el?.closest?.('p, li') || null;
+    }
+
+    function highlightCurrentSelection() {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+
+      const range = sel.getRangeAt(0);
+      // only allow highlights inside the script output
+      if (!outputEl.contains(range.commonAncestorContainer)) return;
+
+      const a = commonBlock(sel.anchorNode);
+      const b = commonBlock(sel.focusNode);
+      if (!a || !b || a !== b) {
+        setStatus('Select within a single paragraph or bullet to highlight.', 'error');
+        sel.removeAllRanges();
+        return;
+      }
+
+      // Wrap selection contents safely
+      const r = range.cloneRange();
+      const frag = r.extractContents();
+      const mark = document.createElement('mark');
+      mark.className = 'hl';
+      mark.appendChild(frag);
+      r.insertNode(mark);
+
+      // clear selection and confirm
+      sel.removeAllRanges();
+      setStatus('Highlighted.');
+    }
+
+    function clearHighlights() {
+      outputEl.querySelectorAll('mark.hl').forEach(m => {
+        const parent = m.parentNode;
+        while (m.firstChild) parent.insertBefore(m.firstChild, m);
+        parent.removeChild(m);
+        parent.normalize();
+      });
+      setStatus('Highlights cleared.');
     }
 
     /* Render sections -> HTML */
@@ -677,7 +727,8 @@
     const helpClose = document.getElementById('help-close');
     const userBadge = document.getElementById('user-badge');
     const userEmail = document.getElementById('user-email');
-
+    const toggleHighlighterBtn = document.getElementById('toggle-highlighter');
+    const clearHighlightsBtn = document.getElementById('clear-highlights');
     const modeFromCallType = v => canonical.mode(v);
     const buyerCanon = v => canonical.buyer(v);
     const nowTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -691,6 +742,28 @@
     if (closeModal) closeModal.addEventListener("click", () => modal.close());
     if (helpBtn) helpBtn.addEventListener('click', () => helpModal?.showModal());
     if (helpClose) helpClose.addEventListener('click', () => helpModal?.close());
+
+    toggleHighlighterBtn?.addEventListener('click', () => {
+      highlightMode = !highlightMode;
+      toggleHighlighterBtn.setAttribute('aria-pressed', String(highlightMode));
+      setStatus(highlightMode ? 'Highlighter on — select text in the guide.' : 'Highlighter off.');
+    });
+
+    clearHighlightsBtn?.addEventListener('click', clearHighlights);
+
+    // Create a highlight when user selects text and releases the mouse
+    outputEl?.addEventListener('mouseup', () => {
+      if (highlightMode) highlightCurrentSelection();
+    });
+
+    // Optional: ESC turns the highlighter off
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && highlightMode) {
+        highlightMode = false;
+        toggleHighlighterBtn?.setAttribute('aria-pressed', 'false');
+        setStatus('Highlighter off.');
+      }
+    });
 
     function setBusy(isBusy) {
       if (submitBtn) submitBtn.disabled = isBusy || !allRequiredFilled(form);
