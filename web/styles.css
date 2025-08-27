@@ -306,7 +306,7 @@ fieldset {
 /* Clean section rhythm (remove dotted dividers) */
 .panel.left .card {
   padding-top: 8px;
-  margin-top: 10px;
+  margin-top: 8px;
   border-top: 0;
 }
 
@@ -433,7 +433,7 @@ textarea.invalid {
   align-items: center;
   flex-wrap: wrap;
   margin-top: var(--s-4);
-  padding-top: 12px;
+  padding-top: 8px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0, var(--card-bg) 24px);
   border-top: 1px solid var(--border);
 }
@@ -1092,20 +1092,50 @@ select:not([multiple]) {
   margin: 0 0 6px 6px;
 }
 
-/* === Conversation Guide spacing tweaks === */
-.output .script-body .script-sec:first-child { margin-top: 0; }
-.output .script-body .script-sec:last-child  { margin-bottom: 0; }
-
-/* Tighten the “About this guide” preface card */
-.output .script-body .script-sec.preface {
-  margin: 0 0 var(--s-3);
-  padding: var(--s-3);
-  border: 1px solid var(--border-2);
-  background: var(--surface-2);
-  border-radius: 12px;
+/* Tighten the output card so the first heading sits closer to the top */
+.output {
+  padding-top: var(--s-3);
+  /* was probably larger */
 }
 
-/* Remove extra white space inside the preface */
-.output .script-body .script-sec.preface > *:first-child { margin-top: 0; }
-.output .script-body .script-sec.preface > *:last-child  { margin-bottom: 0; }
-/* (covers the h3 and the paragraph) */
+/* Remove extra margins on the very first section (“About this guide”) */
+.output .script-body>.script-sec:first-child {
+  margin-top: 0;
+}
+
+.output .script-body>.script-sec:first-child>*:first-child {
+  margin-top: 0;
+}
+
+.output .script-body>.script-sec:first-child>*:last-child {
+  margin-bottom: 0;
+}
+
+/* If you DON'T want the preface to look like a separate card at all: */
+.output .script-body .script-sec.preface {
+  padding: 0;
+  margin: 0 0 var(--s-3);
+  background: transparent;
+  border: 0;
+}
+/* Call opener ideas: reuse Helpful tips styling */
+#openers-body {
+  padding: 0;
+}
+
+#openers-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--s-2);
+}
+
+#openers-list li {
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  padding: .55rem .7rem;
+  background: var(--surface-1);
+  font-size: .95rem;
+  line-height: 1.35;
+}
