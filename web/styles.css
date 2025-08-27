@@ -1139,3 +1139,33 @@ select:not([multiple]) {
   font-size: .95rem;
   line-height: 1.35;
 }
+
+/* The generated guide is HTML, so don't preserve raw newlines */
+.output { white-space: normal !important; }
+
+/* (Optional) a touch tighter above the first heading */
+#output { padding-top: 8px; }               /* was 14px earlier */
+#output .script-body > .script-sec:first-child h3 { margin-top: 0; }
+/* Call opener ideas — same chip style as Helpful tips */
+#openers-body { padding: 0; }
+
+#openers-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding-left: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#openers-list li {
+  display: inline-block;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg);
+  font-size: .85rem;
+  color: var(--text-2);
+}
+
+#openers-list li.muted { opacity: .7; }
