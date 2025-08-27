@@ -173,7 +173,7 @@
             <span class="btn-label">Go</span>
             <span class="spinner" aria-hidden="true"></span>
           </button>
-          <button id="resetBtn" type="reset" form="callForm" class="btn small">Reset</button>
+          <button id="resetBtn" type="reset" class="btn small">Reset</button>
         </div>
 
         <div id="status" class="status" role="status" aria-live="polite"></div>
@@ -714,12 +714,14 @@
     const outputEl = document.getElementById('output');
     const copyScriptBtn = document.getElementById('copy-script');
     const downloadScriptBtn = document.getElementById('download-script');
+    const toggleBulletsBtn = document.getElementById('toggle-bullets');
     const tipsList = document.getElementById('tips-list');
     const toggleTipsBtn = document.getElementById('toggle-tips');
     const openersList = document.getElementById('openers-list');
     const toggleOpenersBtn = document.getElementById('toggle-openers');
     const tipsBody = document.getElementById('tips-body'); // new wrapper for Helpful tips body
     const popoutBtn = document.getElementById('popout');
+    const toggleBulletsBtn = document.getElementById('toggle-bullets');
     const notesArea = document.getElementById('notes');
     const saveNotesBtn = document.getElementById('save-notes');
     const downloadNotesBtn = document.getElementById('download-notes');
@@ -769,6 +771,21 @@
     });
 
     clearHighlightsBtn?.addEventListener('click', clearHighlights);
+
+    // Toggle between full guide and bullet point view
+    toggleBulletsBtn?.addEventListener('click', () => {
+      bulletMode = !bulletMode;
+      window.bulletMode = bulletMode; // keep global in sync (pop-out uses this)
+
+      toggleBulletsBtn.setAttribute('aria-pressed', String(bulletMode));
+      toggleBulletsBtn.textContent = bulletMode ? 'Show full guide' : 'Show bullet point script';
+
+      const htmlToShow = bulletMode ? (lastRender.bulletsHtml || '') : (lastRender.html || '');
+      if (htmlToShow) {
+        outputEl.innerHTML = htmlToShow;
+        modalScript.innerHTML = htmlToShow;
+      }
+    });
 
     // Create a highlight when user selects text and releases the mouse
     outputEl?.addEventListener('mouseup', () => {
@@ -1104,6 +1121,25 @@
       applyOpenersVisibility();
     });
 
+    toggleBulletsBtn?.addEventListener('click', () => {
+      // flip state
+      bulletMode = !bulletMode;
+      window.bulletMode = bulletMode; // so Pop-out uses the current mode
+
+      // update button a11y + label
+      toggleBulletsBtn.setAttribute('aria-pressed', String(bulletMode));
+      toggleBulletsBtn.textContent = bulletMode
+        ? 'Show full guide'
+        : 'Show bullet point script';
+
+      // swap what’s shown (only if we have something to show)
+      const html = bulletMode ? (lastRender.bulletsHtml || '') : (lastRender.html || '');
+      if (html.trim()) {
+        outputEl.innerHTML = html;
+        modalScript.innerHTML = html;
+      }
+    });
+
     saveNotesBtn?.addEventListener('click', saveNotes);
     downloadNotesBtn?.addEventListener('click', () => {
       const who = (form?.elements?.prospect_name?.value || 'prospect').trim().replace(/\s+/g, '-');
@@ -1214,8 +1250,14 @@
         const htmlToShow = bulletMode ? bulletsHtml : rendered.html;
         outputEl.innerHTML = htmlToShow;
         modalScript.innerHTML = htmlToShow;
+        if (toggleBulletsBtn) {
+          toggleBulletsBtn.setAttribute('aria-pressed', String(bulletMode));
+          toggleBulletsBtn.textContent = bulletMode
+            ? 'Show full guide'
+            : 'Show bullet point script';
+        }
 
-        outputMeta.textContent = `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"}`;
+        outputMeta.textContent = `Library · ${productSel?.options?.[productSel.selectedIndex]?.text || productId} · ${values.buyer_behaviour || "—"} · ${values.call_type || "—"} · Tone: ${values.tone || "—"}`;
 
         // Tips
         tipsList.innerHTML = ""; (tips || []).forEach(t => { const li = document.createElement("li"); li.textContent = t; tipsList.appendChild(li); });
