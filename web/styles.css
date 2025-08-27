@@ -1016,6 +1016,21 @@ select:not([multiple]) {
   color: var(--text-2);
 }
 
+/* Make Call opener ideas use the same pill list style as Helpful tips */
+#openers-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#openers-list li {
+  padding: .5rem .75rem;
+  border: 1px solid var(--border-2);
+  background: var(--surface-2);
+  border-radius: var(--radius-2);
+  margin: .5rem 0;
+}
+
 /* Make the [hidden] attribute win over our custom display rules */
 [hidden] {
   display: none !important;
@@ -1076,3 +1091,21 @@ select:not([multiple]) {
   font-size: var(--fs-output-h3) !important;
   margin: 0 0 6px 6px;
 }
+
+/* === Conversation Guide spacing tweaks === */
+.output .script-body .script-sec:first-child { margin-top: 0; }
+.output .script-body .script-sec:last-child  { margin-bottom: 0; }
+
+/* Tighten the “About this guide” preface card */
+.output .script-body .script-sec.preface {
+  margin: 0 0 var(--s-3);
+  padding: var(--s-3);
+  border: 1px solid var(--border-2);
+  background: var(--surface-2);
+  border-radius: 12px;
+}
+
+/* Remove extra white space inside the preface */
+.output .script-body .script-sec.preface > *:first-child { margin-top: 0; }
+.output .script-body .script-sec.preface > *:last-child  { margin-bottom: 0; }
+/* (covers the h3 and the paragraph) */
