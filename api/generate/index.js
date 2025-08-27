@@ -373,13 +373,13 @@ async function callModel(opts) {
   const system = opts?.system || "";
   const prompt = opts?.prompt || "";
   const temperature = typeof opts?.temperature === "number" ? opts.temperature : 0.6;
-  const response_format = opts?.response_format; // pass-through (json_object/json_schema/etc.)
+  const response_format = opts?.response_format; // pass-through (json_object / json_schema / etc.)
   const messages = [
     { role: "system", content: system },
     { role: "user", content: prompt }
   ];
 
-  // ---- OpenAI fallback config ----
+  // ---------- OpenAI fallback config ----------
   const oaKey = process.env.OPENAI_API_KEY;
   const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
@@ -412,20 +412,22 @@ async function callModel(opts) {
     return data;
   }
 
-  // ---- Azure primary config ----
+  // ---------- Azure primary config ----------
   const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
   const azKey = process.env.AZURE_OPENAI_API_KEY;
   const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
   const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
 
-  function looksRateLimited(status, code, msg) {
-    const m = String(msg || "");
+  function isAzureRateLimit(status, code, msg) {
+    const s = String(msg || "");
     return status === 429 ||
-      /rate\s*limit|thrott/i.test(m) ||
+      /rate\s*limit|thrott/i.test(s) ||
+      /quota|exceed/i.test(s) ||
       String(code || "").includes("429");
   }
 
-  async function callAzure() {
+  // ---------- Decision tree: Azure first (if configured), else OpenAI ----------
+  if (azEndpoint && azKey && azDeployment) {
     const url = azEndpoint.replace(/\/+$/, "") +
       "/openai/deployments/" + encodeURIComponent(azDeployment) +
       "/chat/completions?api-version=" + encodeURIComponent(azApiVersion);
@@ -437,47 +439,47 @@ async function callModel(opts) {
       ...(max_tokens ? { max_tokens } : {})
     };
 
-    let data;
-    const r = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "api-key": azKey,
-        "User-Agent": "inside-track-tools/" + VERSION
-      },
-      body: JSON.stringify(body),
-    });
-    try { data = await r.json(); } catch { data = {}; }
+    // Try Azure; if it 429s or network-fails and we have OpenAI creds, immediately fall back.
+    try {
+      let data;
+      const r = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": azKey,
+          "User-Agent": "inside-track-tools/" + VERSION
+        },
+        body: JSON.stringify(body),
+      });
+      try { data = await r.json(); } catch { data = {}; }
 
-    if (!r.ok) {
+      if (r.ok) return data;
+
+      // Azure returned an error → decide whether to fall back
       const code = data?.error?.code || r.status;
       const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
-      const err = new Error(`[AZURE ${code}] ${msg}`);
-      // tag for the caller (below) so we know when to fallback
-      err.__isRateLimit = looksRateLimited(r.status, code, msg);
-      throw err;
-    }
-    return data;
-  }
 
-  // ---- Decision tree: Azure first (if configured), else OpenAI ----
-  if (azEndpoint && azKey && azDeployment) {
-    try {
-      return await callAzure();
-    } catch (e) {
-      // Prefer fallback on rate-limit/throttle or transport issues
-      const msg = String(e && e.message || "");
-      const canFallback = !!oaKey && (e.__isRateLimit || /fetch|network|timeout|ENOTFOUND|ECONN/i.test(msg));
-      if (canFallback) {
+      if (isAzureRateLimit(r.status, code, msg) && oaKey) {
+        // Preferred behaviour: use OpenAI tokens on Azure throttle/quota
         try { return await callOpenAI(); }
-        catch (e2) { throw new Error(`[callModel] ${msg} | [fallback OpenAI failed] ${e2.message}`); }
+        catch (e2) { throw new Error(`[callModel] [AZURE ${code}] ${msg} | [fallback OpenAI failed] ${e2.message}`); }
       }
-      // Non-rate-limit Azure errors bubble up (prompt errors, bad params, etc.)
-      throw new Error(`[callModel] ${msg}`);
+
+      // Not a rate limit (or no OpenAI key) → bubble up Azure error
+      throw new Error(`[callModel] [AZURE ${code}] ${msg}`);
+    } catch (e) {
+      // Transport-level Azure failure (DNS/timeouts/etc.)
+      const emsg = String(e && e.message || "");
+      if (oaKey && /fetch|network|timeout|ENOTFOUND|ECONN|EAI_AGAIN|ETIMEDOUT/i.test(emsg)) {
+        console.log(`[${VERSION}] callModel: Azure network/transport error → falling back to OpenAI (key present)`);
+        try { return await callOpenAI(); }
+        catch (e2) { throw new Error(`[callModel] ${emsg} | [fallback OpenAI failed] ${e2.message}`); }
+      }
+      throw new Error(`[callModel] ${emsg}`);
     }
   }
 
-  // No Azure configured → straight to OpenAI
+  // No Azure configured → go straight to OpenAI
   return await callOpenAI();
 }
 
