@@ -319,14 +319,21 @@
     </dialog>
 
     <!-- RIGHT -->
-    <section class="panel right" aria-labelledby="intel-title">
+    <section class="panel right" aria-labelledby="helpers-title">
+
+      <!-- Helpers title (same style as Conversation Guide) -->
+      <div class="row-between output-head">
+        <h2 id="helpers-title">Helpers</h2>
+      </div>
+
+      <!-- Buyer needs (UNCHANGED look; still collapsible) -->
       <aside class="intel card">
         <div class="intel-head">
           <h2 id="intel-title">Buyer needs</h2>
           <button id="toggle-intel" class="btn small" type="button" aria-expanded="false"
             aria-controls="intel-body">Show</button>
         </div>
-        <div id="intel-body">
+        <div id="intel-body" hidden>
           <div class="intel-grid">
             <section>
               <h3>1) Buyer Priorities</h3>
@@ -356,16 +363,30 @@
         </div>
       </aside>
 
-      <!-- Helpful tips in the right rail with show/hide -->
-      <aside class="tips-card card" style="margin-top:var(--s-4)">
-        <div class="row-between">
-          <h3>Helpful tips</h3>
-          <button id="toggle-tips" class="btn small" type="button" aria-expanded="true"
-            aria-controls="tips-list">Hide</button>
+      <!-- Call opener ideas (NEW — looks like Buyer needs) -->
+      <aside class="intel card" style="margin-top:var(--s-4)">
+        <div class="intel-head">
+          <h2 id="openers-title">Call opener ideas</h2>
+          <button id="toggle-openers" class="btn small" type="button" aria-expanded="false"
+            aria-controls="openers-body">Show</button>
         </div>
-        <ul id="tips-list"></ul>
+        <div id="openers-body" hidden>
+          <!-- Keep the same visual language: paragraphs inside an intel-slot -->
+          <div id="openers-list" class="intel-slot"></div>
+        </div>
       </aside>
 
+      <!-- Helpful tips (RESTYLED to match Buyer needs) -->
+      <aside class="intel card" style="margin-top:var(--s-4)">
+        <div class="intel-head">
+          <h2 id="tips-title">Helpful tips</h2>
+          <button id="toggle-tips" class="btn small" type="button" aria-expanded="true"
+            aria-controls="tips-body">Hide</button>
+        </div>
+        <div id="tips-body">
+          <ul id="tips-list"></ul>
+        </div>
+      </aside>
     </section>
   </main>
 
@@ -631,6 +652,9 @@
     const tipsList = document.getElementById('tips-list');
     const toggleTipsBtn = document.getElementById('toggle-tips');
     const openersList = document.getElementById('openers-list');
+    const openersList = document.getElementById('openers-list');
+    const toggleOpenersBtn = document.getElementById('toggle-openers');
+    const tipsBody = document.getElementById('tips-body'); // new wrapper for Helpful tips body
     const toggleOpenersBtn = document.getElementById('toggle-openers');
     const popoutBtn = document.getElementById('popout');
     const notesArea = document.getElementById('notes');
@@ -847,29 +871,84 @@
       if (mapLabel) mapLabel.textContent = pref?.call_type || (callTypeSel?.value || 'Not set');
     }
 
-    // Tips toggle + auto-hide
-    function applyTipsVisibility() {
-      const card = document.querySelector(".tips-card");
-      if (!card || !tipsList || !toggleTipsBtn) return;
+    // Assets for Call opener ideas
+    const OPENERS_URL_JSON = './assets/call-opener-ideas.json';
+    const OPENERS_URL_TXT = './assets/call-opener-ideas.txt';
 
-      // Respect the user's show/hide choice
+    async function loadOpenersFromAssets() {
+      // Try JSON first
+      try {
+        const rj = await fetch(OPENERS_URL_JSON, { cache: 'no-store' });
+        if (rj.ok) {
+          const arr = await rj.json();
+          const tips = (Array.isArray(arr) ? arr : []).map(s => String(s).trim()).filter(Boolean);
+          if (tips.length) return tips.slice(0, 3);
+        }
+      } catch { }
+
+      // Fallback to TXT (one per line)
+      try {
+        const rt = await fetch(OPENERS_URL_TXT, { cache: 'no-store' });
+        if (rt.ok) {
+          const t = await rt.text();
+          const tips = t.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+          if (tips.length) return tips.slice(0, 3);
+        }
+      } catch { }
+
+      return [];
+    }
+
+    function renderOpeners(list) {
+      if (!openersList) return;
+      openersList.innerHTML = '';
+      if (!list.length) {
+        // show a gentle placeholder in the same visual style (paragraphs)
+        const p = document.createElement('p');
+        p.className = 'muted';
+        p.textContent = 'Add up to 3 ideas in ./assets/call-opener-ideas.json or .txt';
+        openersList.appendChild(p);
+        return;
+      }
+      // Match Buyer needs body style: paragraphs inside the slot
+      list.forEach(t => {
+        const p = document.createElement('p');
+        p.textContent = t;
+        openersList.appendChild(p);
+      });
+    }
+
+    function applyOpenersVisibility() {
+      const openersBody = document.getElementById('openers-body');
+      if (!toggleOpenersBtn || !openersBody) return;
+      const hidden = localStorage.getItem(OPENERS_HIDDEN_KEY) === '1'; // default hidden unless user shows it
+      openersBody.hidden = hidden;
+      toggleOpenersBtn.textContent = hidden ? 'Show' : 'Hide';
+      toggleOpenersBtn.setAttribute('aria-expanded', String(!hidden));
+    }
+
+   // Tips toggle + auto-hide (works for any tip source)
+    function applyTipsVisibility() {
+      const body = document.getElementById('tips-body');   // new wrapper div around the list
+      if (!body || !tipsList || !toggleTipsBtn) return;
+
+      // Respect user's choice
       const hidden = localStorage.getItem(TIPS_HIDDEN_KEY) === '1';
-      tipsList.hidden = hidden;
-      toggleTipsBtn.textContent = hidden ? 'Show tips' : 'Hide';
+      body.hidden = hidden;
+      toggleTipsBtn.textContent = hidden ? 'Show' : 'Hide';
       toggleTipsBtn.setAttribute('aria-expanded', String(!hidden));
 
-      // Ensure the card is ALWAYS visible (even when there are no tips yet)
-      // and show a friendly placeholder until the API provides tips.
+      // Placeholder when there are no tips yet (kept from your original behaviour)
       const hasTips = tipsList.children.length > 0;
-      let empty = card.querySelector('#tips-empty');
+      let empty = document.getElementById('tips-empty');
 
       if (!hasTips) {
         if (!empty) {
           empty = document.createElement('p');
           empty.id = 'tips-empty';
           empty.className = 'muted';
-          empty.textContent = 'Tips will appear after you generate a script.';
-          // Insert the placeholder right after the tips list
+          empty.textContent = 'More tips for this conversation will be offered after you generate your guide.';
+          // place after the list but still inside the body wrapper
           tipsList.insertAdjacentElement('afterend', empty);
         }
       } else if (empty) {
@@ -1093,7 +1172,7 @@
           const openerTips = await loadOpenersFromAssets();
           renderOpeners(openerTips);
         } catch { }
-        applyOpenersVisibility();s
+        applyOpenersVisibility(); s
 
         // Enable copy/download now there is content
         copyScriptBtn.disabled = false; downloadScriptBtn.disabled = false;
@@ -1253,6 +1332,13 @@
       downloadScriptBtn.disabled = !hasText;
       submitBtn.disabled = !allRequiredFilled(form);
       loadNotes();
+
+      // Load Call opener ideas (defaults hidden; button shows "Show")
+      try {
+        const openerTips = await loadOpenersFromAssets();
+        renderOpeners(openerTips);
+      } catch { }
+      applyOpenersVisibility();
 
       document.addEventListener('input', (e) => {
         if (e.target.closest('#' + FORM_ID)) { validateField(e.target); saveForm(); refreshSubmitState(); }
