@@ -307,7 +307,7 @@
         <button id="copy-report" class="btn inline" type="button" disabled>Copy</button>
         <button id="download-report" class="btn inline" type="button" disabled>Download .txt</button>
         <button id="export-docx" class="btn inline" type="button" disabled>Export .docx</button>
-
+        <button id="send-prioritise" class="btn inline" type="button" disabled>Send for prioritisation</button>
         <!-- Wrap the Email button to place a label under it -->
         <span class="stack">
           <button id="email-report" class="btn inline" type="button" disabled
@@ -438,6 +438,26 @@
         <li>Notes are stored locally in your browser.</li>
         <li>Generation runs server-side. If you see 401, sign in again via the Diagnostics link.</li>
       </ul>
+    </div>
+  </dialog>
+
+  <!-- PRIORITISATION MODAL -->
+  <dialog id="prio-modal" class="modal">
+    <div class="card" style="max-width:700px">
+      <div class="row-between" style="align-items:center">
+        <h3 style="margin:0">Opportunity prioritisation</h3>
+        <button id="prio-close" class="btn inline" type="button">Close ×</button>
+      </div>
+
+      <div id="prio-body" style="margin-top:var(--s-3)">
+        <!-- Scoring results are injected here -->
+      </div>
+
+      <div class="row-between" style="margin-top:var(--s-3); gap:8px">
+        <button id="prio-copy" class="btn inline" type="button" title="Copy JSON payload for the next tool">Copy
+          JSON</button>
+        <span class="fineprint">This JSON contains: strategicImpact, operationalImpact, partialFit.</span>
+      </div>
     </div>
   </dialog>
 
