@@ -20,8 +20,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // ===== Power BI embed =====
 let pbiReport = null;
-let filtersVisible = true; // start with filters shown
-
 
 function scheduleTokenRefresh(report) {
   // refresh ~55 mins after issuing the token
@@ -45,19 +43,19 @@ async function renderReport() {
     const { embedUrl, reportId, token } = await res.json();
 
     const pbiGlobal = window["powerbi-client"] || window.powerbi;
-    if (!pbiGlobal || !window.powerbi) {
-      throw new Error("Power BI client not loaded (window.powerbi missing).");
-    }
+    if (!pbiGlobal || !window.powerbi) throw new Error("Power BI client not loaded (window.powerbi missing).");
     const models = pbiGlobal.models || window.powerbi.models;
 
-    const container = document.getElementById("pbi");
+    const container =
+      document.getElementById("pbi") ||
+      document.getElementById("reportContainer"); // support either id
     if (!container) return;
 
     // reset if re-rendering
     try {
       const existing = window.powerbi.get(container);
       if (existing) window.powerbi.reset(container);
-    } catch (_) { /* ignore */ }
+    } catch {}
 
     pbiReport = window.powerbi.embed(container, {
       type: "report",
@@ -66,17 +64,23 @@ async function renderReport() {
       accessToken: token,
       tokenType: models.TokenType.Embed,
       permissions: models.Permissions.All,
-      settings: { panes: { filters: { visible: filtersVisible, expanded: filtersVisible } } }
+      viewMode: models.ViewMode.View,
+      settings: {
+        panes: { filters: { visible: false } },   // hide Filters pane
+        pageNavigation: { visible: true },        // show page tabs (Direct | Channel)
+        navContentPaneEnabled: true,              // keep left nav enabled on older SDKs
+        layoutType: models.LayoutType.Custom,
+        customLayout: { displayOption: models.DisplayOption.FitToPage }
+      }
     });
 
     pbiReport.on("loaded", () => console.log("Report loaded"));
     pbiReport.on("error", (evt) => console.error("PowerBI embed error:", evt?.detail || evt));
 
-    // schedule refresh for THIS report (was referencing an undefined variable before)
     scheduleTokenRefresh(pbiReport);
   } catch (err) {
     console.error("Embed failed:", err);
-    throw err; // bubble up to init() so you see the alert if you add one
+    throw err;
   }
 }
 
@@ -107,7 +111,6 @@ async function renderReport() {
       outBtn.addEventListener("click", logout);
       authButtons.appendChild(outBtn);
 
-      // render report on the menu page
       await renderReport();
     } else {
       welcome.classList.remove("hide");
@@ -120,7 +123,6 @@ async function renderReport() {
       authButtons.appendChild(inBtn);
     }
   } catch (e) {
-    // default to signed-out view if auth check fails
     console.warn("Auth check failed, showing signed-out view.", e);
     const welcome = document.getElementById("welcome");
     const dash = document.getElementById("dashboard");
