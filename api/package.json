@@ -9,9 +9,9 @@
     "node": ">=20.18.1"
   },
   "dependencies": {
-    "@azure/functions": "^4.4.0",
-    "@azure/msal-node": "^2.6.4",
-    "axios": "^1.7.7",
+    "@azure/functions": "^4.7.2",
+    "@azure/msal-node": "^2.16.3",
+    "axios": "^1.11.0",
     "busboy": "^1.6.0",
     "cheerio": "^1.1.2",
     "html-docx-js": "^0.3.1",
