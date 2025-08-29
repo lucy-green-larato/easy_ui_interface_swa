@@ -47,10 +47,10 @@ async function renderReport() {
   if (!container) return;
 
   // reset if re-rendering
-  try { const existing = window.powerbi.get(container); if (existing) window.powerbi.reset(container); } catch {}
-
-  // ensure concrete height before embed
-  container.style.minHeight = getComputedStyle(container).height;
+  try {
+    const existing = window.powerbi.get(container);
+    if (existing) window.powerbi.reset(container);
+  } catch {}
 
   pbiReport = window.powerbi.embed(container, {
     type: "report",
@@ -60,23 +60,36 @@ async function renderReport() {
     tokenType: models.TokenType.Embed,
     permissions: models.Permissions.All,
     settings: {
-      panes: { filters: { visible: false, expanded: false } }, // hide Filters pane
+      panes: {
+        filters: { visible: false, expanded: false }     // HIDE Filters pane
+      },
       pageNavigationPosition: models.PageNavigationPosition.Bottom, // keep Direct/Channel tabs
-      navContentPaneEnabled: false,
-      layoutType: models.LayoutType.Responsive
+      navContentPaneEnabled: false,                      // no left nav
+      layoutType: models.LayoutType.Custom               // we'll force fit-to-width below
     }
   });
 
-  pbiReport.on("loaded", () => console.log("Report loaded"));
-  pbiReport.on("error", (evt) => console.error("PowerBI embed error:", evt?.detail || evt));
+  pbiReport.on("loaded", async () => {
+    // Force **Fit to width** so the page fills the box (no tiny canvas)
+    try {
+      await pbiReport.updateSettings({
+        layoutType: models.LayoutType.Custom,
+        customLayout: { displayOption: models.DisplayOption.FitToWidth }
+      });
+    } catch (e) {
+      console.warn("Could not set FitToWidth:", e);
+    }
+    console.log("Report loaded");
+  });
 
+  pbiReport.on("error", (evt) => console.error("PowerBI embed error:", evt?.detail || evt));
   scheduleTokenRefresh(pbiReport);
 
-  // keep layout crisp on resize
+  // Nudge layout after window resizes
   let t;
   window.addEventListener("resize", () => {
     clearTimeout(t);
-    t = setTimeout(() => { pbiReport?.refresh(); }, 150);
+    t = setTimeout(() => { pbiReport?.refresh().catch(()=>{}); }, 120);
   });
 }
 
@@ -109,6 +122,7 @@ async function renderReport() {
     } else {
       welcome?.classList.remove("hide");
       dash?.classList.add("hide");
+
       const inBtn = document.createElement("button");
       inBtn.className = "btn";
       inBtn.textContent = "Sign in";
