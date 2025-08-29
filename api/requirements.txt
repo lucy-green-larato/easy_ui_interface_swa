@@ -1,0 +1,3 @@
+azure-functions
+msal>=1.28.0
+requests
