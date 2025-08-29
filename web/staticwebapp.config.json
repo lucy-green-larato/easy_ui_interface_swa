@@ -5,9 +5,11 @@
     { "route": "/reports", "rewrite": "/reports.html" },
     { "route": "/reports/*", "rewrite": "/reports.html" },
 
-    { "route": "/script", "rewrite": "/first-call-script-v2.html" },
     { "route": "/first-call-script-v2", "rewrite": "/first-call-script-v2.html" },
     { "route": "/first-call-script-v2/*", "rewrite": "/first-call-script-v2.html" },
+
+    { "route": "/lead-qualification", "rewrite": "/lead-qualification.html" },
+    { "route": "/lead-qualification/*", "rewrite": "/lead-qualification.html" },
 
     { "route": "/api/*", "allowedRoles": ["anonymous"] },
 
@@ -33,6 +35,10 @@
       "/src/*",
       "/reports",
       "/reports/*",
+      "/first-call-script-v2",
+      "/first-call-script-v2/*",
+      "/lead-qualification",
+      "/lead-qualification/*",
       "/*.css",
       "/*.js",
       "/*.mjs",
