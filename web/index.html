@@ -362,13 +362,11 @@
       <!-- PowerBI Inside Track-->
       <h3 class="section-heading" style="margin-top:28px">Inside Track market intelligence</h3>
       <div class="pbi-card" id="pbiCard">
-        <button class="pbi-fullscreen-btn" aria-label="Toggle full screen"
+        <button class="pbi-fullscreen-btn" type="button" aria-label="Toggle full screen"
           onclick="document.getElementById('pbiCard').classList.toggle('is-fullscreen')">
           ⤢
         </button>
-
-        <!-- Power BI embed -->
-        <iframe class="pbi-frame" src="https://app.powerbi.com/view?r=YOUR-REPORT-ID" allowfullscreen></iframe>
+        <div id="reportContainer" class="pbi-host"></div>
       </div>
     </section>
   </main>
