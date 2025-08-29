@@ -18,11 +18,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btnSignInPrimary")?.addEventListener("click", login);
 });
 
-// ===== Power BI embed =====
+// ===== Power BI embed (clean: tabs yes, filters no) =====
 let pbiReport = null;
 
 function scheduleTokenRefresh(report) {
-  // refresh ~55 mins after issuing the token
   setTimeout(async () => {
     try {
       const r = await fetch("/api/pbi-token", { credentials: "include" });
@@ -30,9 +29,7 @@ function scheduleTokenRefresh(report) {
       const { token } = await r.json();
       await report.setAccessToken(token);
       scheduleTokenRefresh(report);
-    } catch (e) {
-      console.error("Token refresh failed:", e);
-    }
+    } catch (e) { console.error("Token refresh failed:", e); }
   }, 55 * 60 * 1000);
 }
 
@@ -43,20 +40,20 @@ async function renderReport() {
     const { embedUrl, reportId, token } = await res.json();
 
     const pbiGlobal = window["powerbi-client"] || window.powerbi;
-    if (!pbiGlobal || !window.powerbi) throw new Error("Power BI client not loaded (window.powerbi missing).");
+    if (!pbiGlobal || !window.powerbi) throw new Error("Power BI client not loaded.");
     const models = pbiGlobal.models || window.powerbi.models;
 
-    const container =
-      document.getElementById("pbi") ||
-      document.getElementById("reportContainer"); // support either id
+    // Host div: support either id="pbi" (preferred) or legacy id="reportContainer"
+    const container = document.getElementById("pbi") || document.getElementById("reportContainer");
     if (!container) return;
 
-    // reset if re-rendering
+    // Reset if re-rendering
     try {
       const existing = window.powerbi.get(container);
       if (existing) window.powerbi.reset(container);
     } catch {}
 
+    // Embed with Filters hidden and page tabs visible at the bottom
     pbiReport = window.powerbi.embed(container, {
       type: "report",
       id: reportId,
@@ -66,17 +63,27 @@ async function renderReport() {
       permissions: models.Permissions.All,
       viewMode: models.ViewMode.View,
       settings: {
-        panes: { filters: { visible: false } },   // hide Filters pane
-        pageNavigation: { visible: true },        // show page tabs (Direct | Channel)
-        navContentPaneEnabled: true,              // keep left nav enabled on older SDKs
+        panes: { filters: { visible: false } },                 // HIDE Filters
+        pageNavigation: { visible: true,                        // SHOW tabs (Direct | Channel)
+                          position: models.PageNavigationPosition.Bottom },
+        navContentPaneEnabled: true,                            // compatibility
         layoutType: models.LayoutType.Custom,
         customLayout: { displayOption: models.DisplayOption.FitToPage }
       }
     });
 
-    pbiReport.on("loaded", () => console.log("Report loaded"));
-    pbiReport.on("error", (evt) => console.error("PowerBI embed error:", evt?.detail || evt));
+    // Belt & braces: some reports remember pane state; force-hide after load too
+    pbiReport.on("loaded", async () => {
+      try {
+        await pbiReport.updateSettings({
+          panes: { filters: { visible: false } },
+          pageNavigation: { visible: true, position: models.PageNavigationPosition.Bottom }
+        });
+      } catch {}
+      console.log("Report loaded");
+    });
 
+    pbiReport.on("error", (evt) => console.error("PowerBI embed error:", evt?.detail || evt));
     scheduleTokenRefresh(pbiReport);
   } catch (err) {
     console.error("Embed failed:", err);
