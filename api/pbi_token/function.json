@@ -1,7 +1,8 @@
 {
   "bindings": [
-    { "type": "httpTrigger", "direction": "in", "name": "req",
-      "methods": ["get"], "authLevel": "anonymous", "route": "pbi-token" },
-    { "type": "http", "direction": "out", "name": "$return" }
+    { "authLevel": "anonymous", "type": "httpTrigger", "direction": "in", "name": "req",
+      "methods": ["get"], "route": "pbi-token" },
+    { "type": "http", "direction": "out", "name": "res" }
   ]
 }
+
