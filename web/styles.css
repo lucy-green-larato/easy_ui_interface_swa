@@ -1182,13 +1182,8 @@ select:not([multiple]) {
   outline: 2px solid var(--accent-5, #d97706);
   outline-offset: 1px;
 }
-:root{
-  /* tune these to your layout */
-  --header-h: 88px;          /* height of your top nav/header */
-  --page-pad: 24px;          /* vertical padding around the card */
-}
 
-/* Card chrome */
+/* Card shell */
 .pbi-card{
   position: relative;
   width: min(1200px, 100%);
@@ -1200,15 +1195,25 @@ select:not([multiple]) {
   overflow: hidden;
 }
 
-/* The host div the SDK injects into */
+/* The embed host */
 .pbi-host{
   width: 100%;
-  /* Smaller than the old 70vh; tune to taste */
-  height: clamp(420px, 58vh, 900px);
+  /* 16:9 is what most reports use; keeps it from “letterboxing” */
+  aspect-ratio: 16 / 9;
+  min-height: 520px;          /* good on laptops */
+  max-height: 78vh;           /* never exceed viewport too much */
 }
 
-/* Even smaller on narrow screens */
-@media (max-width: 768px){
-  .pbi-host{ height: clamp(360px, 48vh, 720px); }
+/* Make sure the injected iframe fills the host */
+.pbi-card iframe{
+  display:block;
+  width:100% !important;
+  height:100% !important;
+  border:0;
 }
+
+@media (max-width: 768px){
+  .pbi-host{ aspect-ratio: 4 / 3; min-height: 420px; }
+}
+
 
