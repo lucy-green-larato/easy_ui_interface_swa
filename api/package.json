@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "commonjs",
   "engines": {
-    "node": ">=18"
+    "node": ">=18<21"
   },
   "dependencies": {
     "@azure/functions": "^4.7.2",
