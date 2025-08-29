@@ -1183,37 +1183,17 @@ select:not([multiple]) {
   outline-offset: 1px;
 }
 
-/* Card shell */
-.pbi-card{
-  position: relative;
-  width: min(1200px, 100%);
-  margin-inline: auto;
-  background: var(--surface, #fff);
-  border: 1px solid var(--outline, #e5e7eb);
-  border-radius: var(--radius, 12px);
-  box-shadow: var(--shadow, 0 1px 2px rgba(0,0,0,.06));
-  overflow: hidden;
-}
-
-/* The embed host */
-.pbi-host{
+/* Simple big box */
+.pbi-box{
   width: 100%;
-  /* 16:9 is what most reports use; keeps it from “letterboxing” */
-  aspect-ratio: 16 / 9;
-  min-height: 520px;          /* good on laptops */
-  max-height: 78vh;           /* never exceed viewport too much */
-}
-
-/* Make sure the injected iframe fills the host */
-.pbi-card iframe{
-  display:block;
-  width:100% !important;
-  height:100% !important;
-  border:0;
-}
-
-@media (max-width: 768px){
-  .pbi-host{ aspect-ratio: 4 / 3; min-height: 420px; }
+  height: 75vh;          /* big, responsive */
+  min-height: 620px;     /* keeps it usable on small laptops */
+  max-height: 1100px;    /* stops it getting silly on 4K */
+  background: #fff;
+  border: 1px solid var(--outline, #e5e7eb);
+  border-radius: 12px;
+  box-shadow: var(--shadow, 0 8px 24px rgba(2,6,23,.08));
+  overflow: hidden;      /* hides the iframe edges */
 }
 
 
