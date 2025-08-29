@@ -1,11 +1,16 @@
 {
   "routes": [
     { "route": "/", "rewrite": "/index.html" },
+
+    { "route": "/reports", "rewrite": "/reports.html" },
+    { "route": "/reports/*", "rewrite": "/reports.html" },
+
     { "route": "/script", "rewrite": "/first-call-script-v2.html" },
     { "route": "/first-call-script-v2", "rewrite": "/first-call-script-v2.html" },
     { "route": "/first-call-script-v2/*", "rewrite": "/first-call-script-v2.html" },
 
     { "route": "/api/*", "allowedRoles": ["anonymous"] },
+
     {
       "route": "/content/call-library/*",
       "allowedRoles": ["anonymous", "authenticated"],
@@ -26,6 +31,8 @@
       "/api/*",
       "/content/*",
       "/src/*",
+      "/reports",
+      "/reports/*",
       "/*.css",
       "/*.js",
       "/*.mjs",
@@ -36,6 +43,12 @@
       "/*.svg",
       "/*.ico"
     ]
+  },
+
+  "globalHeaders": {
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' https://cdn.powerbi.com; frame-src https://app.powerbi.com https://*.analysis.windows.net; connect-src 'self' https://api.powerbi.com https://*.powerbi.com https://*.analysis.windows.net; img-src 'self' data: blob: https://*.powerbi.com https://*.analysis.windows.net; style-src 'self' 'unsafe-inline';",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "X-Content-Type-Options": "nosniff"
   },
 
   "responseOverrides": {
