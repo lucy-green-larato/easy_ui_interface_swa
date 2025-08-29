@@ -1182,3 +1182,13 @@ select:not([multiple]) {
   outline: 2px solid var(--accent-5, #d97706);
   outline-offset: 1px;
 }
+.pbi-card{
+  width:100%;
+  background:#fff;
+  border:1px solid var(--outline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow:hidden;
+  /* responsive height, but never tiny or gigantic */
+  min-height: clamp(520px, 72vh, 980px);
+}
