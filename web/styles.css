@@ -1182,13 +1182,70 @@ select:not([multiple]) {
   outline: 2px solid var(--accent-5, #d97706);
   outline-offset: 1px;
 }
+:root{
+  /* tune these to your layout */
+  --header-h: 88px;          /* height of your top nav/header */
+  --page-pad: 24px;          /* vertical padding around the card */
+}
+
+/* Power BI card wrapper */
 .pbi-card{
-  width:100%;
-  background:#fff;
-  border:1px solid var(--outline);
+  width: min(1400px, 100%);              /* align with your content max width */
+  margin-inline: auto;
+  background: var(--surface, #fff);
+  border: 1px solid var(--outline);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  overflow:hidden;
-  /* responsive height, but never tiny or gigantic */
-  min-height: clamp(520px, 72vh, 980px);
+  overflow: hidden;                      /* keeps rounded corners with iframe */
+
+  /* Big, sensible height for UK screens (laptop to desktop) */
+  /*  - min 680px so it never feels cramped
+      - preferred: viewport minus header/padding
+      - max ~1200px for tall displays */
+  height: clamp(680px, calc(100svh - var(--header-h) - (var(--page-pad) * 2)), 1200px);
+}
+
+/* Make the embedded report fill the card */
+.pbi-card iframe,
+.pbi-frame{
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* Slightly taller on medium screens; a touch shorter on very small ones */
+@media (max-width: 640px){
+  .pbi-card{
+    height: clamp(560px, calc(100svh - var(--header-h) - 16px), 920px);
+  }
+}
+@media (min-width: 1280px){
+  .pbi-card{
+    height: clamp(720px, calc(100svh - var(--header-h) - (var(--page-pad) * 2)), 1200px);
+  }
+}
+
+/* Optional: fullscreen mode */
+.pbi-card.is-fullscreen{
+  position: fixed;
+  inset: var(--header-h) 0 0 0;          /* sit under the header */
+  z-index: 1000;
+  width: 100vw;
+  height: calc(100svh - var(--header-h));
+  max-height: none;
+  border-radius: 0;
+}
+
+/* Optional: a small, consistent icon button */
+.pbi-card .pbi-fullscreen-btn{
+  position: absolute;
+  top: 10px; right: 10px;
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px solid var(--outline);
+  border-radius: calc(var(--radius) / 1.2);
+  box-shadow: var(--shadow);
+  font: inherit;
+  cursor: pointer;
 }
