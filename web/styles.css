@@ -1202,14 +1202,23 @@ select:not([multiple]) {
 #reportContainer{
   display:block;
   width:100%;
-  height:1080px;              /* adjust if needed (680–900px works well) */
+  height:1080px;           /* fixed height so the report fits */
   background:#fff;
   border:1px solid #e5e7eb;
   border-radius:12px;
-  overflow:hidden;           /* hides any iframe chrome */
+  overflow:hidden;         /* hide any host scrollbars */
   box-shadow:0 8px 24px rgba(2,6,23,.06);
 }
 
-@media (min-width: 1200px){
-  #reportContainer{ height:860px; }
+/* Make the embedded Power BI iframe fill the host (no inner scrollbar) */
+#reportContainer iframe,
+#reportContainer .powerbi-frame{
+  width:100% !important;
+  height:100% !important;
+  border:0;
+  display:block;
 }
+
+/* Optional: reduce height on small screens (not larger ones) */
+@media (max-width: 900px){ #reportContainer{ height:720px; } }
+@media (max-width: 640px){ #reportContainer{ height:560px; } }
