@@ -8,17 +8,16 @@ function logout() { location.href = "/.auth/logout"; }
 
 // Prevent navigation from disabled tiles
 document.addEventListener("click", (e) => {
-  const t = e.target.closest(".tool.disabled");
-  if (t) e.preventDefault();
+  if (e.target.closest(".tool.disabled")) e.preventDefault();
 });
 
-// Wire up sign-in buttons (no inline handlers)
+// Wire up sign-in buttons
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btnSignIn")?.addEventListener("click", login);
   document.getElementById("btnSignInPrimary")?.addEventListener("click", login);
 });
 
-// ===== Power BI embed (clean: tabs yes, filters no) =====
+// ===== Power BI embed =====
 let pbiReport = null;
 
 function scheduleTokenRefresh(report) {
@@ -29,88 +28,76 @@ function scheduleTokenRefresh(report) {
       const { token } = await r.json();
       await report.setAccessToken(token);
       scheduleTokenRefresh(report);
-    } catch (e) { console.error("Token refresh failed:", e); }
+    } catch (err) {
+      console.error("Token refresh failed:", err);
+    }
   }, 55 * 60 * 1000);
 }
 
 async function renderReport() {
-  try {
-    const res = await fetch("/api/pbi-token", { credentials: "include" });
-    if (!res.ok) throw new Error(await res.text());
-    const { embedUrl, reportId, token } = await res.json();
+  const res = await fetch("/api/pbi-token", { credentials: "include" });
+  if (!res.ok) throw new Error(await res.text());
+  const { embedUrl, reportId, token } = await res.json();
 
-    const pbiGlobal = window["powerbi-client"] || window.powerbi;
-    if (!pbiGlobal || !window.powerbi) throw new Error("Power BI client not loaded.");
-    const models = pbiGlobal.models || window.powerbi.models;
+  const pbiGlobal = window["powerbi-client"] || window.powerbi;
+  if (!pbiGlobal || !window.powerbi) throw new Error("Power BI client not loaded.");
+  const models = pbiGlobal.models || window.powerbi.models;
 
-    // Host div: support either id="pbi" (preferred) or legacy id="reportContainer"
-    const container = document.getElementById("pbi") || document.getElementById("reportContainer");
-    if (!container) return;
+  const container = document.getElementById("reportContainer");
+  if (!container) return;
 
-    // Reset if re-rendering
-    try {
-      const existing = window.powerbi.get(container);
-      if (existing) window.powerbi.reset(container);
-    } catch {}
+  // reset if re-rendering
+  try { const existing = window.powerbi.get(container); if (existing) window.powerbi.reset(container); } catch {}
 
-    // Embed with Filters hidden and page tabs visible at the bottom
-    pbiReport = window.powerbi.embed(container, {
-      type: "report",
-      id: reportId,
-      embedUrl,
-      accessToken: token,
-      tokenType: models.TokenType.Embed,
-      permissions: models.Permissions.All,
-      viewMode: models.ViewMode.View,
-      settings: {
-        panes: { filters: { visible: false } },                 // HIDE Filters
-        pageNavigation: { visible: true,                        // SHOW tabs (Direct | Channel)
-                          position: models.PageNavigationPosition.Bottom },
-        navContentPaneEnabled: true,                            // compatibility
-        layoutType: models.LayoutType.Custom,
-        customLayout: { displayOption: models.DisplayOption.FitToPage }
-      }
-    });
+  // ensure concrete height before embed
+  container.style.minHeight = getComputedStyle(container).height;
 
-    // Belt & braces: some reports remember pane state; force-hide after load too
-    pbiReport.on("loaded", async () => {
-      try {
-        await pbiReport.updateSettings({
-          panes: { filters: { visible: false } },
-          pageNavigation: { visible: true, position: models.PageNavigationPosition.Bottom }
-        });
-      } catch {}
-      console.log("Report loaded");
-    });
+  pbiReport = window.powerbi.embed(container, {
+    type: "report",
+    id: reportId,
+    embedUrl,
+    accessToken: token,
+    tokenType: models.TokenType.Embed,
+    permissions: models.Permissions.All,
+    settings: {
+      panes: { filters: { visible: false, expanded: false } }, // hide Filters pane
+      pageNavigationPosition: models.PageNavigationPosition.Bottom, // keep Direct/Channel tabs
+      navContentPaneEnabled: false,
+      layoutType: models.LayoutType.Responsive
+    }
+  });
 
-    pbiReport.on("error", (evt) => console.error("PowerBI embed error:", evt?.detail || evt));
-    scheduleTokenRefresh(pbiReport);
-  } catch (err) {
-    console.error("Embed failed:", err);
-    throw err;
-  }
+  pbiReport.on("loaded", () => console.log("Report loaded"));
+  pbiReport.on("error", (evt) => console.error("PowerBI embed error:", evt?.detail || evt));
+
+  scheduleTokenRefresh(pbiReport);
+
+  // keep layout crisp on resize
+  let t;
+  window.addEventListener("resize", () => {
+    clearTimeout(t);
+    t = setTimeout(() => { pbiReport?.refresh(); }, 150);
+  });
 }
 
-// ===== Init: toggle signed-in/out UI and render report on dashboard =====
+// ===== Init: toggle signed-in/out UI and render report =====
 (async function init() {
   try {
     const res = await fetch("/.auth/me", { credentials: "include" });
     if (!res.ok) throw new Error("auth check failed");
     const data = await res.json();
-    const princ = data && data.clientPrincipal;
+    const princ = data?.clientPrincipal;
 
     const welcome = document.getElementById("welcome");
     const dash = document.getElementById("dashboard");
     const nameEl = document.getElementById("userName");
     const authButtons = document.getElementById("authButtons");
-
-    // clear header auth area
     authButtons.replaceChildren();
 
     if (princ) {
-      welcome.classList.add("hide");
-      dash.classList.remove("hide");
-      nameEl.textContent = princ.userDetails ? `, ${princ.userDetails}` : "";
+      welcome?.classList.add("hide");
+      dash?.classList.remove("hide");
+      if (nameEl) nameEl.textContent = princ.userDetails ? `, ${princ.userDetails}` : "";
 
       const outBtn = document.createElement("button");
       outBtn.className = "btn";
@@ -120,9 +107,8 @@ async function renderReport() {
 
       await renderReport();
     } else {
-      welcome.classList.remove("hide");
-      dash.classList.add("hide");
-
+      welcome?.classList.remove("hide");
+      dash?.classList.add("hide");
       const inBtn = document.createElement("button");
       inBtn.className = "btn";
       inBtn.textContent = "Sign in";
@@ -130,7 +116,7 @@ async function renderReport() {
       authButtons.appendChild(inBtn);
     }
   } catch (e) {
-    console.warn("Auth check failed, showing signed-out view.", e);
+    console.warn("Auth check failed; showing signed-out view.", e);
     const welcome = document.getElementById("welcome");
     const dash = document.getElementById("dashboard");
     const authButtons = document.getElementById("authButtons");
