@@ -281,7 +281,7 @@
       </div>
     </a>
     <div id="authButtons">
-      <button class="btn" onclick="login()">Sign in</button>
+      <button class="btn" id="btnSignIn">Sign in</button>
     </div>
   </header>
 
@@ -292,7 +292,7 @@
       <p>These tools will save you time and assure that you deliver the best sales and marketing experience to your
         prospects. Please sign in to get started.</p>
       <div style="margin-top:10px">
-        <button class="btn btn-primary" onclick="login()" aria-label="Sign in with Microsoft">Sign in with
+        <button class="btn btn-primary" id="btnSignInPrimary" aria-label="Sign in with Microsoft">Sign in with
           Microsoft</button>
       </div>
     </section>
@@ -359,61 +359,15 @@
         </a>
       </div>
       <!-- PowerBI Inside Track-->
+      <h3 class="section-heading" style="margin-top:28px">Inside Track market intelligence</h3>
+      <div id="pbi"
+        style="height:70vh; width:100%; border:1px solid var(--outline); border-radius:12px; background:#fff;"></div>
     </section>
   </main>
 
   <footer>
     <div class="card">© Larato</div>
   </footer>
-
-  <script>
-    // Prevent navigation from disabled tiles
-    document.addEventListener('click', function (e) {
-      const t = e.target.closest('.tool.disabled');
-      if (t) { e.preventDefault(); }
-    });
-
-    function buildReturnTarget() {
-      const target = window.location.pathname + window.location.search + window.location.hash;
-      return encodeURIComponent(target || "/");
-    }
-
-    async function login() {
-      location.href = "/.auth/login/aad?post_login_redirect_uri=" + buildReturnTarget();
-    }
-
-    async function logout() {
-      location.href = '/.auth/logout';
-    }
-
-    (async function init() {
-      try {
-        const res = await fetch('/.auth/me', { credentials: 'include' });
-        if (!res.ok) throw new Error('auth check failed');
-        const data = await res.json();
-        const princ = (data && data.clientPrincipal) || null;
-
-        const welcome = document.getElementById('welcome');
-        const dash = document.getElementById('dashboard');
-        const name = document.getElementById('userName');
-        const authButtons = document.getElementById('authButtons');
-
-        if (princ) {
-          welcome.classList.add('hide');
-          dash.classList.remove('hide');
-          name.textContent = princ.userDetails ? `, ${princ.userDetails}` : '';
-          // Single sign-out in header only
-          authButtons.innerHTML = '<button class="btn" onclick="logout()">Sign out</button>';
-        } else {
-          welcome.classList.remove('hide');
-          dash.classList.add('hide');
-          authButtons.innerHTML = '<button class="btn" onclick="login()">Sign in</button>';
-        }
-      } catch {
-        // default to signed-out view if auth check fails
-      }
-    })();
-  </script>
 </body>
 
 </html>
