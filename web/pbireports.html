@@ -1,0 +1,31 @@
+<!doctype html><meta charset="utf-8">
+<title>Insights</title>
+<script src="https://cdn.powerbi.com/libs/powerbi-client/2.23.1/powerbi.min.js"></script>
+<div id="pbi" style="height:80vh"></div>
+<script>
+(async () => {
+  const res = await fetch("/api/pbi-token");
+  if (!res.ok) throw new Error(await res.text());
+  const { embedUrl, reportId, token } = await res.json();
+
+  const models = window["powerbi-client"].models;
+  const container = document.getElementById("pbi");
+
+  const report = powerbi.embed(container, {
+    type: "report",
+    id: reportId,
+    embedUrl,
+    accessToken: token,
+    tokenType: models.TokenType.Embed,
+    permissions: models.Permissions.All,
+    settings: { panes: { filters: { visible: true } } }
+  });
+
+  // Optional: auto-refresh token when it expires
+  report.on("tokenExpired", async () => {
+    const r = await fetch("/api/pbi-token");
+    const j = await r.json();
+    await report.setAccessToken(j.token);
+  });
+})();
+</script>
