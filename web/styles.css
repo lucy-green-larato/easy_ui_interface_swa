@@ -1118,6 +1118,7 @@ select:not([multiple]) {
   background: transparent;
   border: 0;
 }
+
 /* Call opener ideas: reuse Helpful tips styling */
 #openers-body {
   padding: 0;
@@ -1141,13 +1142,24 @@ select:not([multiple]) {
 }
 
 /* The generated guide is HTML, so don't preserve raw newlines */
-.output { white-space: normal !important; }
+.output {
+  white-space: normal !important;
+}
 
 /* (Optional) a touch tighter above the first heading */
-#output { padding-top: 8px; }               /* was 14px earlier */
-#output .script-body > .script-sec:first-child h3 { margin-top: 0; }
+#output {
+  padding-top: 8px;
+}
+
+/* was 14px earlier */
+#output .script-body>.script-sec:first-child h3 {
+  margin-top: 0;
+}
+
 /* Call opener ideas — same chip style as Helpful tips */
-#openers-body { padding: 0; }
+#openers-body {
+  padding: 0;
+}
 
 #openers-list {
   list-style: none;
@@ -1168,11 +1180,14 @@ select:not([multiple]) {
   color: var(--text-2);
 }
 
-#openers-list li.muted { opacity: .7; }
+#openers-list li.muted {
+  opacity: .7;
+}
 
 /* Highlighter look */
 .output mark.hl {
-  background: #fff59d;            /* soft yellow */
+  background: #fff59d;
+  /* soft yellow */
   padding: 0 .08em;
   border-radius: .18em;
 }
@@ -1184,16 +1199,15 @@ select:not([multiple]) {
 }
 
 /* Simple big box */
-.pbi-box{
+.pbi-box {
   width: 100%;
-  height: 75vh;          /* big, responsive */
-  min-height: 620px;     /* keeps it usable on small laptops */
-  max-height: 1100px;    /* stops it getting silly on 4K */
+  height: 75vh;
+  /* shows tabs comfortably */
+  min-height: 620px;
+  /* laptops */
   background: #fff;
-  border: 1px solid var(--outline, #e5e7eb);
+  border: 1px solid #e5e7eb;
   border-radius: 12px;
-  box-shadow: var(--shadow, 0 8px 24px rgba(2,6,23,.08));
-  overflow: hidden;      /* hides the iframe edges */
+  box-shadow: 0 8px 24px rgba(2, 6, 23, .08);
+  overflow: hidden;
 }
-
-
