@@ -20,6 +20,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // ===== Power BI embed =====
 let pbiReport = null;
+let filtersVisible = true; // start with filters shown
+
 
 function scheduleTokenRefresh(report) {
   // refresh ~55 mins after issuing the token
@@ -63,9 +65,8 @@ async function renderReport() {
       embedUrl,
       accessToken: token,
       tokenType: models.TokenType.Embed,
-      // permissions is optional; keep if you want full UI actions enabled
-      permissions: models.Permissions?.All ?? undefined,
-      settings: { panes: { filters: { visible: true } } }
+      permissions: models.Permissions.All,
+      settings: { panes: { filters: { visible: filtersVisible, expanded: filtersVisible } } }
     });
 
     pbiReport.on("loaded", () => console.log("Report loaded"));
