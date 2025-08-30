@@ -161,14 +161,59 @@ async function renderReport() {
     showSignIn();
   }
 
-  // Always wire the Expand button (both paths)
-  const expandBtn = document.getElementById("btnExpandPBI");
-  expandBtn?.addEventListener("click", () => {
-    const root = document.getElementById("pbiSection");
-    const on = root.classList.toggle("pbi-fullscreen");
-    expandBtn.setAttribute("aria-pressed", on ? "true" : "false");
-    expandBtn.textContent = on ? "Close" : "Expand";
-    setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
+  // ===== Light/Dark theme toggle (persists, respects system when unset) =====
+  (function themeToggle() {
+    const root = document.documentElement;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+
+    function currentIsDark() {
+      const explicit = root.getAttribute('data-theme');
+      if (explicit === 'dark') return true;
+      if (explicit === 'light') return false;
+      return mq.matches;
+    }
+
+    function updateButton() {
+      const btn = document.getElementById('themeToggle');
+      if (!btn) return;
+      const dark = currentIsDark();
+      btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+      btn.textContent = dark ? '☀️' : '🌙';
+      btn.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+      document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', 'light dark');
+    }
+
+    function setTheme(value) { // 'light' | 'dark' | '' (system)
+      if (value === 'light' || value === 'dark') {
+        root.setAttribute('data-theme', value);
+        localStorage.setItem('theme', value);
+      } else {
+        root.removeAttribute('data-theme');
+        localStorage.removeItem('theme');
+      }
+      updateButton();
+    }
+    // Always wire the Expand button (both paths)
+    const expandBtn = document.getElementById("btnExpandPBI");
+    expandBtn?.addEventListener("click", () => {
+      const root = document.getElementById("pbiSection");
+      const on = root.classList.toggle("pbi-fullscreen");
+      expandBtn.setAttribute("aria-pressed", on ? "true" : "false");
+      expandBtn.textContent = on ? "Close" : "Expand";
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
+    });
+  })();
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const saved = localStorage.getItem('theme'); // 'light' | 'dark' | null
+    setTheme(saved || ''); // '' => follow system
+    document.getElementById('themeToggle')?.addEventListener('click', () => {
+      const now = root.getAttribute('data-theme');
+      setTheme(now === 'dark' ? 'light' : 'dark');
+    });
+  });
+
+  mq.addEventListener?.('change', () => {
+    if (!localStorage.getItem('theme')) updateButton();
   });
 })();
-
