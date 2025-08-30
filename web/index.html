@@ -52,19 +52,13 @@
 
       /* soft blue glows */
       background-image:
-        radial-gradient(1200px 600px at 10% -10%,
-          rgba(14, 165, 233, .18) 0%,
-          rgba(14, 165, 233, .08) 40%,
-          rgba(14, 165, 233, .03) 62%,
-          rgba(14, 165, 233, 0) 75%),
-        radial-gradient(900px 500px at 110% -20%,
-          rgba(30, 64, 175, .16) 0%,
-          rgba(30, 64, 175, .06) 42%,
-          rgba(30, 64, 175, .02) 60%,
-          rgba(30, 64, 175, 0) 72%);
+        radial-gradient(1200px 700px at -200px -200px,
+          rgba(14, 165, 233, .18) 0%, rgba(14, 165, 233, .08) 40%, rgba(14, 165, 233, 0) 75%),
+        radial-gradient(1000px 600px at calc(100% + 200px) -200px,
+          rgba(30, 64, 175, .16) 0%, rgba(30, 64, 175, .06) 42%, rgba(30, 64, 175, 0) 72%);
       background-repeat: no-repeat, no-repeat;
-      background-position: 10% -10%, 110% -20%;
-      background-size: 1200px 600px, 900px 500px;
+      background-position: -200px -200px, calc(100% + 200px) -200px;
+      background-size: 1200px 700px, 1000px 600px;
     }
 
     a {
@@ -82,7 +76,7 @@
     header,
     main,
     footer,
-    .container {
+    #pbiSection .container {
       max-width: var(--stage);
       margin: 0 auto;
       padding: 24px;
@@ -132,8 +126,6 @@
 
     /* Hero card */
     .hero {
-      height: auto;
-      overflow: visible;
       background: linear-gradient(135deg, #ffffff, #fbfdff 35%, rgba(14, 165, 233, .06) 100%);
       border: 1px solid var(--outline);
       border-radius: var(--radius);
@@ -308,18 +300,10 @@
     }
 
     .pbi-card {
-      position: relative;
-      margin-top: 16px;
-      background: #fff;
       border: 1px solid var(--outline);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
-      padding: 16px;
-      overflow: hidden;
-      /* stops gradient showing through edges */
-      isolation: isolate;
-      /* new stacking context */
-      background-clip: padding-box;
+      padding: 28px;
     }
 
     /* Card header with actions (Expand) */
@@ -390,6 +374,8 @@
       z-index: 1000;
       background: var(--bg);
       padding: 24px;
+      display: flex;
+      overflow: hidden;
     }
 
     .pbi-card .card-head {
@@ -398,11 +384,10 @@
     }
 
     .pbi-fullscreen .pbi-card {
-      max-width: none;
-      height: 100%;
-      border-radius: 18px;
+      flex: 1;
       display: flex;
       flex-direction: column;
+      height: 100%;
     }
 
     .pbi-fullscreen #reportContainer {
@@ -521,7 +506,7 @@
   <section id="pbiSection" class="container hide">
     <div class="pbi-card">
       <div class="card-head">
-        <h3>Inside Track market intelligence</h3>
+        <h2 id="welcome-heading" style="margin:0 0 6px 0">Inside Track market intelligence data stream</h2>
         <div class="actions">
           <button id="btnExpandPBI" class="btn-ghost" aria-pressed="false">Expand</button>
         </div>
@@ -530,7 +515,7 @@
     </div>
   </section>
   <footer>
-    <div class="card">© Larato Limited Company Registration Number</div>
+    <div class="card">© Larato Limited. Company Registration Number 5451360. Registered in the UK.</div>
   </footer>
 </body>
 
