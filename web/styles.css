@@ -488,3 +488,54 @@ select:not([multiple]){
   z-index: 10;
   pointer-events: none;
 }
+
+/* ---- Theme tokens (shared across tools) ---- */
+
+/* Light (default & explicit) */
+:root,
+:root[data-theme="light"] {
+  --bg: #f6f7fb;
+  --card-bg: #fff;
+  --border: #e2e5ea;
+  --text-1: #1d2129;
+  --text-2: #4a5160;
+  --accent: #72369d;
+  --accent-pressed: #5f2d81;
+  --danger: #c43d4b;
+  --ok: #1b8f5a;
+
+  --radius: 12px;
+  --ring-shadow: 0 0 0 2px rgba(114,54,157,.35);
+  --ring-outline: 3px solid rgba(114,54,157,.8);
+  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.06);
+}
+
+/* Dark (explicit) */
+:root[data-theme="dark"] {
+  --bg: #0f1318;
+  --card-bg: #141a1f;
+  --border: #2a3342;
+  --text-1: #e6eaf2;
+  --text-2: #a9b2c3;
+  --accent: #9b7abd;
+  --accent-pressed: #8461a7;
+  --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 30px rgba(0,0,0,.35);
+  --danger: #e05b67;
+  --ok: #29a06b;
+}
+
+/* Respect OS preference unless an explicit data-theme="light" is set */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1318;
+    --card-bg: #141a1f;
+    --border: #2a3342;
+    --text-1: #e6eaf2;
+    --text-2: #a9b2c3;
+    --accent: #9b7abd;
+    --accent-pressed: #8461a7;
+    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 30px rgba(0,0,0,.35);
+    --danger: #e05b67;
+    --ok: #29a06b;
+  }
+}
