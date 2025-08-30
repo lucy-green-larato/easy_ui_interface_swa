@@ -66,7 +66,7 @@ async function renderReport() {
         layoutType: models.LayoutType.FitToWidth,
         panes: {
           filters: { visible: false, expanded: false },
-          pageNavigation: { visible: false }         // was true – hide bottom tab bar
+          pageNavigation: { visible: true }         // was true – hide bottom tab bar
         },
         navContentPaneEnabled: false,
         background: models.BackgroundType.Transparent
