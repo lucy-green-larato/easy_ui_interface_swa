@@ -26,8 +26,8 @@
       --shadow: 0 8px 24px rgba(2, 6, 23, .08);
 
       /* page width control */
-      --stage: 1040px;
-      /* set 1240px here if you want it wider later */
+      --stage: 1240px;
+      /* set to suit most common laptop viewports */
     }
 
     * {
@@ -76,7 +76,7 @@
     header,
     main,
     footer,
-    #pbiSection .container {
+    .container {
       max-width: var(--stage);
       margin: 0 auto;
       padding: 24px;
@@ -342,11 +342,6 @@
       border-color: #dce6ff;
     }
 
-    :root {
-      --stage: 1240px;
-      /* wider page so the report is larger; 1280px also looks great */
-    }
-
     #reportContainer {
       width: 100%;
       height: auto;
@@ -365,6 +360,40 @@
       height: 100% !important;
       display: block;
       border: 0;
+    }
+
+    /* Header row */
+    .pbi-card .card-head {
+      display: flex;
+      align-items: flex-start;
+      /* aligns with multi-line title+lead */
+      gap: 12px;
+      margin: 0 0 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(30, 64, 175, .10);
+    }
+
+    /* Match the Welcome h2 */
+    .pbi-card .card-title {
+      margin: 0;
+      font-size: clamp(18px, 2.6vw, 24px);
+      font-weight: 700;
+      letter-spacing: .2px;
+    }
+
+    /* Match the Welcome paragraph style */
+    .pbi-card .card-lead {
+      margin: 6px 0 0;
+      /* Welcome uses ~6–8px top margin */
+      color: var(--muted);
+      max-width: 72ch;
+    }
+
+    /* Keep actions on the right */
+    .pbi-card .actions {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
     }
 
     /* Optional fullscreen mode (toggled via class on #pbiSection) */
@@ -506,8 +535,10 @@
   <section id="pbiSection" class="container hide">
     <div class="pbi-card">
       <div class="card-head">
-        <h2 class="card-title">Inside Track market intelligence</h2>
-        <p class="card-lead">These insights update continuously to support your sales and marketing decisions.</p>
+        <div class="card-titleblock">
+          <h2 class="card-title">Inside Track market intelligence</h2>
+          <p class="card-lead">These insights update continuously to support your sales and marketing decisions.</p>
+        </div>
         <div class="actions">
           <button id="btnExpandPBI" class="btn-ghost" aria-pressed="false">Expand</button>
         </div>
