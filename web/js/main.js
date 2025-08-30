@@ -17,6 +17,53 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btnSignInPrimary")?.addEventListener("click", login);
 });
 
+// ===== Theme toggle (persisted, overrides OS) =====
+(() => {
+  const KEY = "theme"; // 'light' | 'dark' | 'auto'
+  const btn = document.getElementById("themeToggle") || document.getElementById("btnThemeToggle");
+
+  const prefersDark = () =>
+    window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+  function applyTheme(mode) {
+    const root = document.documentElement;
+    if (mode === "light" || mode === "dark") {
+      root.setAttribute("data-theme", mode);
+    } else {
+      root.removeAttribute("data-theme"); // 'auto' => follow OS
+    }
+    updateToggleUI(mode);
+  }
+
+  function updateToggleUI(mode) {
+    if (!btn) return;
+    const isDark = mode === "dark" || (mode === "auto" && prefersDark());
+    btn.setAttribute("aria-pressed", isDark ? "true" : "false");
+    btn.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
+    btn.title = btn.getAttribute("aria-label");
+    // show the opposite action as the icon
+    btn.textContent = isDark ? "☀️" : "🌙";
+  }
+
+  const getTheme = () => localStorage.getItem(KEY) || "auto";
+  const setTheme = (mode) => { localStorage.setItem(KEY, mode); applyTheme(mode); };
+
+  // init
+  applyTheme(getTheme());
+
+  // react to OS changes only when user is on 'auto'
+  const mql = window.matchMedia("(prefers-color-scheme: dark)");
+  mql.addEventListener?.("change", () => { if (getTheme() === "auto") applyTheme("auto"); });
+
+  // click: toggle light <-> dark (first click from 'auto' chooses the opposite of OS)
+  btn?.addEventListener("click", () => {
+    const cur = getTheme();
+    if (cur === "dark") setTheme("light");
+    else if (cur === "light") setTheme("dark");
+    else setTheme(prefersDark() ? "light" : "dark");
+  });
+})();
+
 // ===== Power BI embed =====
 let pbiReport = null;
 
