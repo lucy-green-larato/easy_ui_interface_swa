@@ -58,7 +58,7 @@
     header,
     main,
     footer {
-      max-width: 1040px;
+      max-width: 1400px;
       margin: 0 auto;
       padding: 24px
     }
@@ -112,6 +112,25 @@
       border-radius: var(--radius);
       box-shadow: var(--shadow);
       padding: 28px;
+    }
+
+    main.hero {
+      max-width: 1400px !important;
+      width: min(95vw, 1400px) !important;
+    }
+
+    /* optional: allow even wider on big monitors */
+    @media (min-width: 1600px) {
+
+      header,
+      main,
+      footer {
+        max-width: 1600px !important;
+      }
+
+      main.hero {
+        max-width: 1600px !important;
+      }
     }
 
     /* Keep welcome, fix wrapping by using block layout + max-width */
