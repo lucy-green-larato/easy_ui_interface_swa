@@ -72,15 +72,18 @@
       display: block;
     }
 
-    /* Stage width */
     header,
     main,
     footer,
-    .container {
+    .container,
+    #pbiSection {
+      /* ← include the element itself */
       max-width: var(--stage);
-      margin: 0 auto;
+      width: min(100%, var(--stage));
+      margin-inline: auto;
       padding: 24px;
     }
+
 
     header {
       padding-top: 28px;
@@ -113,7 +116,7 @@
     .title-wrap h1 {
       margin: 0;
       font-size: clamp(18px, 2.6vw, 24px);
-      font-weight: 700;
+      font-weight: 550;
       letter-spacing: .2px;
     }
 
@@ -124,13 +127,51 @@
       margin-top: 2px;
     }
 
-    /* Hero card */
-    .hero {
-      background: linear-gradient(135deg, #ffffff, #fbfdff 35%, rgba(14, 165, 233, .06) 100%);
+    /* Card shells (hero + PBI) */
+    .hero,
+    .pbi-card {
+      margin: 0;
+      position: relative;
+      background: #fff;
+      /* solid base so borders read cleanly */
       border: 1px solid var(--outline);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
       padding: 28px;
+      overflow: hidden;
+      /* trims any inner overflow */
+      background-clip: padding-box;
+      /* keeps background inside the border */
+    }
+
+    #pbiSection {
+      margin-top: 28px;
+    }
+
+    .hero h2,
+    .pbi-card h2 {
+      margin: 0 0 8px;
+    }
+
+    /* Gentle inner wash, safely inside the radius/border */
+    .hero::before,
+    .pbi-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      background: linear-gradient(135deg,
+          #ffffff 0%,
+          #fbfdff 35%,
+          rgba(14, 165, 233, .06) 100%);
+    }
+
+    /* Ensure content sits above the decorative layer */
+    .hero>*,
+    .pbi-card>* {
+      position: relative;
+      z-index: 1;
     }
 
     /* Welcome */
@@ -147,7 +188,7 @@
     .section-heading {
       margin: 24px 0 8px;
       font-size: 18px;
-      font-weight: 800;
+      font-weight: 700;
       letter-spacing: .2px;
     }
 
@@ -299,13 +340,6 @@
       margin-top: 28px;
     }
 
-    .pbi-card {
-      border: 1px solid var(--outline);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      padding: 28px;
-    }
-
     /* Card header with actions (Expand) */
     .pbi-card .card-head {
       display: flex;
@@ -377,7 +411,7 @@
     .pbi-card .card-title {
       margin: 0;
       font-size: clamp(18px, 2.6vw, 24px);
-      font-weight: 700;
+      font-weight: 550;
       letter-spacing: .2px;
     }
 
