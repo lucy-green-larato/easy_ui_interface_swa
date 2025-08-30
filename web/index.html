@@ -47,27 +47,24 @@
       -webkit-font-smoothing: antialiased;
       text-rendering: optimizeLegibility;
 
-      /* base colour */
+      /* base */
       background-color: var(--bg);
 
-      /* two decorative glows (based on #72396d) */
+      /* soft blue glows */
       background-image:
         radial-gradient(1200px 600px at 10% -10%,
-          rgba(114, 57, 109, .15) 0%,
-          rgba(114, 57, 109, .10) 40%,
-          rgba(114, 57, 109, .04) 60%,
-          rgba(114, 57, 109, 0) 75%),
+          rgba(14, 165, 233, .18) 0%,
+          rgba(14, 165, 233, .08) 40%,
+          rgba(14, 165, 233, .03) 62%,
+          rgba(14, 165, 233, 0) 75%),
         radial-gradient(900px 500px at 110% -20%,
-          rgba(114, 57, 109, .12) 0%,
-          rgba(114, 57, 109, .06) 40%,
-          rgba(114, 57, 109, .03) 58%,
-          rgba(114, 57, 109, 0) 72%);
+          rgba(30, 64, 175, .16) 0%,
+          rgba(30, 64, 175, .06) 42%,
+          rgba(30, 64, 175, .02) 60%,
+          rgba(30, 64, 175, 0) 72%);
       background-repeat: no-repeat, no-repeat;
-      /* ← prevents tiling seam */
       background-position: 10% -10%, 110% -20%;
-      /* same anchors as before */
       background-size: 1200px 600px, 900px 500px;
-      /* explicit sizes */
     }
 
     a {
@@ -137,7 +134,7 @@
     .hero {
       height: auto;
       overflow: visible;
-      background: linear-gradient(135deg, #ffffff, #fbfdff 35%, rgba(114, 57, 109, .06) 100%);
+      background: linear-gradient(135deg, #ffffff, #fbfdff 35%, rgba(14, 165, 233, .06) 100%);
       border: 1px solid var(--outline);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
@@ -357,7 +354,8 @@
     }
 
     .btn-ghost:hover {
-      background: #f8fafc;
+      background: #f2f6ff;
+      border-color: #dce6ff;
     }
 
     :root {
@@ -392,6 +390,11 @@
       z-index: 1000;
       background: var(--bg);
       padding: 24px;
+    }
+
+    .pbi-card .card-head {
+      border-bottom: 1px solid rgba(30, 64, 175, .10);
+      padding-bottom: 8px;
     }
 
     .pbi-fullscreen .pbi-card {
