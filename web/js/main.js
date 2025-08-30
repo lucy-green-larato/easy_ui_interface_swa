@@ -103,12 +103,13 @@ async function renderReport() {
   const host = document.getElementById('reportContainer');
   if (!host) return;
 
-  if (!(window.CSS && CSS.supports && CSS.supports('aspect-ratio: 16 / 9'))) {
-    const resize = () => { host.style.height = Math.round(host.clientWidth * 9 / 16) + 'px'; };
-    resize();
-    window.addEventListener('resize', resize);
-    new ResizeObserver(resize).observe(host.parentElement || document.body);
-  }
+  // Respect explicit sizing/modern browsers
+  if (host.style.height || (window.CSS && CSS.supports && CSS.supports('aspect-ratio: 16 / 9'))) return;
+
+  const resize = () => { host.style.height = Math.round(host.clientWidth * 9 / 16) + 'px'; };
+  resize();
+  window.addEventListener('resize', resize);
+  new ResizeObserver(resize).observe(host.parentElement || document.body);
 })();
 
 // ===== Init: toggle signed-in/out UI and render report =====
