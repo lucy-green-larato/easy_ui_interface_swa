@@ -3,7 +3,7 @@ function buildReturnTarget() {
   const target = window.location.pathname + window.location.search + window.location.hash;
   return encodeURIComponent(target || "/");
 }
-function login()  { location.href = "/.auth/login/aad?post_login_redirect_uri=" + buildReturnTarget(); }
+function login() { location.href = "/.auth/login/aad?post_login_redirect_uri=" + buildReturnTarget(); }
 function logout() { location.href = "/.auth/logout"; }
 
 // Prevent navigation from disabled tiles
@@ -51,7 +51,7 @@ async function renderReport() {
     try {
       const existing = window.powerbi.get(container);
       if (existing) window.powerbi.reset(container);
-    } catch {}
+    } catch { /* no-op */ }
 
     pbiReport = window.powerbi.embed(container, {
       type: "report",
@@ -86,7 +86,7 @@ async function renderReport() {
             navContentPaneEnabled: false
           }
         });
-      } catch {}
+      } catch { /* no-op */ }
       console.log("Report loaded");
     });
 
@@ -98,6 +98,19 @@ async function renderReport() {
   }
 }
 
+// Fallback if a browser ignores CSS aspect-ratio (rare, but safe)
+(function ensureAspectRatio() {
+  const host = document.getElementById('reportContainer');
+  if (!host) return;
+
+  if (!(window.CSS && CSS.supports && CSS.supports('aspect-ratio: 16 / 9'))) {
+    const resize = () => { host.style.height = Math.round(host.clientWidth * 9 / 16) + 'px'; };
+    resize();
+    window.addEventListener('resize', resize);
+    new ResizeObserver(resize).observe(host.parentElement || document.body);
+  }
+})();
+
 // ===== Init: toggle signed-in/out UI and render report =====
 (async function init() {
   try {
@@ -108,6 +121,7 @@ async function renderReport() {
 
     const welcome = document.getElementById("welcome");
     const dash = document.getElementById("dashboard");
+    const pbiSection = document.getElementById("pbiSection");
     const nameEl = document.getElementById("userName");
     const authButtons = document.getElementById("authButtons");
     authButtons.replaceChildren();
@@ -115,6 +129,7 @@ async function renderReport() {
     if (princ) {
       welcome?.classList.add("hide");
       dash?.classList.remove("hide");
+      pbiSection?.classList.remove("hide"); // show the PBI section when signed in
       if (nameEl) nameEl.textContent = princ.userDetails ? `, ${princ.userDetails}` : "";
 
       const outBtn = document.createElement("button");
@@ -123,10 +138,11 @@ async function renderReport() {
       outBtn.addEventListener("click", logout);
       authButtons.appendChild(outBtn);
 
-      await renderReport();
+      await renderReport(); // embed after the host is visible
     } else {
       welcome?.classList.remove("hide");
       dash?.classList.add("hide");
+      pbiSection?.classList.add("hide"); // hide PBI section when signed out
 
       const inBtn = document.createElement("button");
       inBtn.className = "btn";
@@ -138,9 +154,12 @@ async function renderReport() {
     console.warn("Auth check failed; showing signed-out view.", e);
     const welcome = document.getElementById("welcome");
     const dash = document.getElementById("dashboard");
+    const pbiSection = document.getElementById("pbiSection");
     const authButtons = document.getElementById("authButtons");
     welcome?.classList.remove("hide");
     dash?.classList.add("hide");
+    pbiSection?.classList.add("hide");
+
     if (authButtons && !authButtons.children.length) {
       const inBtn = document.createElement("button");
       inBtn.className = "btn";
