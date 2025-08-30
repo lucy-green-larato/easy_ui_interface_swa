@@ -417,6 +417,36 @@
         min-height: 460px;
       }
     }
+
+    /* Manual dark tokens when user forces dark */
+    :root[data-theme="dark"] {
+      /* index.html tokens */
+      --bg: #0f1318;
+      --surface: #141a1f;
+      --text: #e6eaf2;
+      --muted: #a9b2c3;
+      --outline: #2a3342;
+      /* styles.css tokens (bridge) */
+      --card-bg: #141a1f;
+      --border: #2a3342;
+      --text-1: #e6eaf2;
+      --text-2: #a9b2c3;
+    }
+
+    /* If OS is dark but user forces light, re-assert light tokens */
+    @media (prefers-color-scheme: dark) {
+      :root[data-theme="light"] {
+        --bg: #f6f8fb;
+        --surface: #ffffff;
+        --text: #0f172a;
+        --muted: #64748b;
+        --outline: #e2e8f0;
+        --card-bg: #ffffff;
+        --border: #e2e5ea;
+        --text-1: #1d2129;
+        --text-2: #4a5160;
+      }
+    }
   </style>
 </head>
 
