@@ -314,6 +314,55 @@
         height: 460px;
       }
     }
+
+    /* 1) Alignment: match header/main/footer exactly */
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    /* 2) Professional card shell + no gradient bleed */
+    .pbi-card {
+      position: relative;
+      background: #fff;
+      border: 1px solid var(--outline);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+      overflow: hidden;
+      /* hides any inner overflow/shadows */
+      isolation: isolate;
+      /* new stacking context; prevents blending with page bg */
+      background-clip: padding-box;
+    }
+
+    /* Optional: tidy spacing above the card */
+    #pbiSection {
+      margin-top: 28px;
+    }
+
+    /* 3) Height that just works (fills without huge whitespace) */
+    #reportContainer {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      /* keeps the report’s natural page ratio */
+      min-height: 720px;
+      /* enough vertical space to be usable */
+      max-height: 1100px;
+      /* soft ceiling so it doesn’t get cartoon-tall */
+      background: #fff;
+      /* ensures no background show-through behind iframe */
+    }
+
+    /* Make the injected iframe fill the host perfectly */
+    #reportContainer iframe,
+    #reportContainer .powerbi-frame {
+      width: 100% !important;
+      height: 100% !important;
+      display: block;
+      border: 0;
+    }
   </style>
 </head>
 
