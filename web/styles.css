@@ -1202,18 +1202,15 @@ select:not([multiple]) {
 #reportContainer {
   display: block;
   width: 100%;
-  /* responsive height: never shorter than 420px, never taller than 1080px,
-     and aim for ~78% of the small-viewport height on mobile */
-  height: clamp(420px, 78svh, 1080px);
-
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
+  height: 900px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(2, 6, 23, .06);
   overflow: hidden;
 }
 
-/* Make the embedded Power BI iframe fill the host (no inner scrollbar) */
+/* Make the SDK iframe fully fill the host */
 #reportContainer iframe,
 #reportContainer .powerbi-frame {
   width: 100% !important;
@@ -1222,6 +1219,5 @@ select:not([multiple]) {
   display: block;
 }
 
-@supports (height: 100dvh) {
-  #reportContainer{ height: clamp(420px, 78dvh, 1080px); }
-}
+@media (max-width: 900px){ #reportContainer{ height:720px; } }
+@media (max-width: 640px){ #reportContainer{ height:560px; } }
