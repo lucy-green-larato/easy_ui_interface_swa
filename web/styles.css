@@ -1198,18 +1198,6 @@ select:not([multiple]) {
   outline-offset: 1px;
 }
 
-/* Make the “Welcome…” card wider so the report can breathe */
-main.hero{
-  max-width: 1400px !important;     /* was 1040px */
-  width: min(1400px, 95vw);
-  overflow: visible;                 /* don't clip the report */
-}
-
-/* (Nice on very wide monitors) */
-@media (min-width: 1600px){
-  main.hero{ max-width: 1600px; }
-}
-
 /* Card shell around the report (optional style) */
 .pbi-card{
   margin-top: 16px;
