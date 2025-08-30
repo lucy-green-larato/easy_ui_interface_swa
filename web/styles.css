@@ -1197,23 +1197,3 @@ select:not([multiple]) {
   outline: 2px solid var(--accent-5, #d97706);
   outline-offset: 1px;
 }
-
-/* Give the PBI host real height without changing width */
-#pbiSection #reportContainer{
-  width: 100%;
-  height: clamp(900px, 80vh, 1200px); /* more vertical room */
-}
-
-/* Make the injected iframe fill the host */
-#pbiSection #reportContainer iframe,
-#pbiSection #reportContainer .powerbi-frame{
-  width: 100% !important;
-  height: 100% !important;
-  display: block;
-  border: 0;
-}
-
-/* Smaller screens: reduce height so it fits */
-@media (max-width: 900px){ #pbiSection #reportContainer{ height: 560px; } }
-@media (max-width: 600px){ #pbiSection #reportContainer{ height: 460px; } }
-
