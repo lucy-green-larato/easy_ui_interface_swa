@@ -81,7 +81,6 @@ async function renderReport() {
           settings: {
             layoutType: models.LayoutType.FitToWidth,
             panes: { filters: { visible: false, expanded: false }, pageNavigation: { visible: true } },
-            panes: { filters: { visible: false, expanded: false }, pageNavigation: { visible: false } },
             navContentPaneEnabled: false,
             background: models.BackgroundType.Transparent
           }
@@ -111,65 +110,18 @@ async function renderReport() {
 
 // ===== Init: toggle signed-in/out UI and render report =====
 (async function init() {
-  try {
-    const res = await fetch("/.auth/me", { credentials: "include" });
-    if (!res.ok) throw new Error("auth check failed");
-    const data = await res.json();
-    const princ = data?.clientPrincipal;
+  const welcome = document.getElementById("welcome");
+  const dash = document.getElementById("dashboard");
+  const pbiSection = document.getElementById("pbiSection");
+  const nameEl = document.getElementById("userName");
+  const authButtons = document.getElementById("authButtons");
 
-    const welcome = document.getElementById("welcome");
-    const dash = document.getElementById("dashboard");
-    const pbiSection = document.getElementById("pbiSection");
-    const nameEl = document.getElementById("userName");
-    const authButtons = document.getElementById("authButtons");
-    authButtons.replaceChildren();
-
-    if (princ) {
-      welcome?.classList.add("hide");
-      dash?.classList.remove("hide");
-      pbiSection?.classList.remove("hide"); // show the PBI section when signed in
-      if (nameEl) nameEl.textContent = princ.userDetails ? `, ${princ.userDetails}` : "";
-
-      const outBtn = document.createElement("button");
-      outBtn.className = "btn";
-      outBtn.textContent = "Sign out";
-      outBtn.addEventListener("click", logout);
-      authButtons.appendChild(outBtn);
-
-      await renderReport(); // embed after the host is visible
-    } else {
-      welcome?.classList.remove("hide");
-      dash?.classList.add("hide");
-      pbiSection?.classList.add("hide"); // hide PBI section when signed out
-
-      const inBtn = document.createElement("button");
-      inBtn.className = "btn";
-      inBtn.textContent = "Sign in";
-      inBtn.addEventListener("click", login);
-      authButtons.appendChild(inBtn);
-    }
-  } catch (e) {
-    console.warn("Auth check failed; showing signed-out view.", e);
-    const welcome = document.getElementById("welcome");
-    const dash = document.getElementById("dashboard");
-    const pbiSection = document.getElementById("pbiSection");
-    const authButtons = document.getElementById("authButtons");
+  function showSignIn() {
     welcome?.classList.remove("hide");
     dash?.classList.add("hide");
     pbiSection?.classList.add("hide");
-
-    const expandBtn = document.getElementById('btnExpandPBI');
-    expandBtn?.addEventListener('click', () => {
-      const root = document.getElementById('pbiSection');
-      const on = root.classList.toggle('pbi-fullscreen');
-      expandBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
-      expandBtn.textContent = on ? 'Close' : 'Expand';
-      // Nudge Power BI to recalc layout after container size change
-      setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
-    });
-
-
-    if (authButtons && !authButtons.children.length) {
+    if (authButtons) {
+      authButtons.replaceChildren();
       const inBtn = document.createElement("button");
       inBtn.className = "btn";
       inBtn.textContent = "Sign in";
@@ -177,4 +129,46 @@ async function renderReport() {
       authButtons.appendChild(inBtn);
     }
   }
+
+  function showSignedIn(userDetails) {
+    welcome?.classList.add("hide");
+    dash?.classList.remove("hide");
+    pbiSection?.classList.remove("hide");
+    if (nameEl) nameEl.textContent = userDetails ? `, ${userDetails}` : "";
+    if (authButtons) {
+      authButtons.replaceChildren();
+      const outBtn = document.createElement("button");
+      outBtn.className = "btn";
+      outBtn.textContent = "Sign out";
+      outBtn.addEventListener("click", logout);
+      authButtons.appendChild(outBtn);
+    }
+  }
+
+  try {
+    const res = await fetch("/.auth/me", { credentials: "include" });
+    if (!res.ok) throw new Error("auth check failed");
+    const { clientPrincipal: princ } = await res.json();
+
+    if (princ) {
+      showSignedIn(princ.userDetails);
+      await renderReport(); // embed after host is visible
+    } else {
+      showSignIn();
+    }
+  } catch (e) {
+    console.warn("Auth check failed; showing signed-out view.", e);
+    showSignIn();
+  }
+
+  // Always wire the Expand button (both paths)
+  const expandBtn = document.getElementById("btnExpandPBI");
+  expandBtn?.addEventListener("click", () => {
+    const root = document.getElementById("pbiSection");
+    const on = root.classList.toggle("pbi-fullscreen");
+    expandBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    expandBtn.textContent = on ? "Close" : "Expand";
+    setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
+  });
 })();
+
