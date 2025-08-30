@@ -2,8 +2,9 @@
 <html lang="en">
 
 <head>
+  <link rel="stylesheet" href="/styles.css?v=2025-08-30-2">
   <script src="/vendor/powerbi.min.js"></script>
-  <script defer src="/js/main.js"></script>
+  <script defer src="/js/main.js?v=2025-08-30-2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Larato | Inside Track Business Growth Tools</title>
@@ -41,14 +42,32 @@
     body {
       margin: 0;
       font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans";
-      background:
-        radial-gradient(1200px 600px at 10% -10%, #72396d26, transparent 60%),
-        radial-gradient(900px 500px at 110% -20%, #72396d1F, transparent 60%),
-        var(--bg);
       color: var(--text);
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
       text-rendering: optimizeLegibility;
+
+      /* base colour */
+      background-color: var(--bg);
+
+      /* two decorative glows (based on #72396d) */
+      background-image:
+        radial-gradient(1200px 600px at 10% -10%,
+          rgba(114, 57, 109, .15) 0%,
+          rgba(114, 57, 109, .10) 40%,
+          rgba(114, 57, 109, .04) 60%,
+          rgba(114, 57, 109, 0) 75%),
+        radial-gradient(900px 500px at 110% -20%,
+          rgba(114, 57, 109, .12) 0%,
+          rgba(114, 57, 109, .06) 40%,
+          rgba(114, 57, 109, .03) 58%,
+          rgba(114, 57, 109, 0) 72%);
+      background-repeat: no-repeat, no-repeat;
+      /* ← prevents tiling seam */
+      background-position: 10% -10%, 110% -20%;
+      /* same anchors as before */
+      background-size: 1200px 600px, 900px 500px;
+      /* explicit sizes */
     }
 
     a {
@@ -118,7 +137,7 @@
     .hero {
       height: auto;
       overflow: visible;
-      background: linear-gradient(135deg, #ffffff, #fbfdff 35%, rgba(14, 165, 233, .06) 100%);
+      background: linear-gradient(135deg, #ffffff, #fbfdff 35%, rgba(114, 57, 109, .06) 100%);
       border: 1px solid var(--outline);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
@@ -341,10 +360,19 @@
       background: #f8fafc;
     }
 
-    /* Report host: real height (no aspect-ratio gap) */
+    :root {
+      --stage: 1240px;
+      /* wider page so the report is larger; 1280px also looks great */
+    }
+
     #reportContainer {
       width: 100%;
-      height: clamp(860px, 82vh, 1200px);
+      height: auto;
+      /* let aspect-ratio drive height */
+      aspect-ratio: 16 / 9;
+      /* matches most Power BI pages */
+      min-height: 640px;
+      /* reasonable floor on laptops */
       background: #fff;
     }
 
@@ -376,20 +404,20 @@
 
     .pbi-fullscreen #reportContainer {
       flex: 1;
-      height: auto;
+      height: 100%;
       min-height: 0;
+      aspect-ratio: auto;
     }
 
-    /* Responsive report height floors */
     @media (max-width:900px) {
       #reportContainer {
-        height: 560px;
+        min-height: 560px;
       }
     }
 
     @media (max-width:600px) {
       #reportContainer {
-        height: 460px;
+        min-height: 460px;
       }
     }
   </style>
