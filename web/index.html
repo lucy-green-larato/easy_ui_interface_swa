@@ -1,562 +1,311 @@
 <!doctype html>
 <html lang="en">
-
 <head>
-  <link rel="stylesheet" href="/styles.css?v=2025-08-30-2">
-  <script src="/vendor/powerbi.min.js"></script>
-  <script defer src="/js/main.js?v=2025-08-30-2"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Larato | Inside Track Business Growth Tools</title>
-  <meta name="description"
-    content="Inside Track Business Growth Tools by Larato — fast, consistent sales and marketing workflows." />
-  <meta name="color-scheme" content="light only">
+  <meta name="description" content="Inside Track Business Growth Tools by Larato — fast, consistent sales and marketing workflows." />
+  <meta name="color-scheme" content="light dark">
+
+  <!-- Global app styles (conversation guide, panels, etc.) -->
+  <link rel="stylesheet" href="/styles.css?v=2025-08-30-3">
+
+  <!-- Power BI SDK + app code -->
+  <script src="/vendor/powerbi.min.js"></script>
+  <script defer src="/js/main.js?v=2025-08-30-2"></script>
+
   <style>
-    /* ====== Design tokens ====== */
-    :root {
-      --bg: #f6f8fb;
-      --surface: #ffffff;
-      --text: #0f172a;
-      --muted: #64748b;
-      --outline: #e2e8f0;
-      --brand: #1e40af;
-      --accent: #0ea5e9;
-      --focus: #6366f1;
-      --radius: 16px;
-      --shadow: 0 8px 24px rgba(2, 6, 23, .08);
-
-      /* page width control */
-      --stage: 1240px;
-      /* set to suit most common laptop viewports */
+    /* ================= Design tokens (menu page) ================= */
+    :root{
+      --bg:#f6f8fb;
+      --surface:#ffffff;
+      --text:#0f172a;
+      --muted:#64748b;
+      --outline:#e2e8f0;
+      --brand:#1e40af;
+      --accent:#0ea5e9;
+      --focus:#6366f1;
+      --radius:16px;
+      --shadow:0 8px 24px rgba(2,6,23,.08);
+      --stage:1240px;
+      /* decorative background blobs (light) */
+      --blob-1:radial-gradient(1200px 700px at -200px -200px,
+                  rgba(14,165,233,.18) 0%,
+                  rgba(14,165,233,.08) 40%,
+                  rgba(14,165,233,0) 75%);
+      --blob-2:radial-gradient(1000px 600px at calc(100% + 200px) -200px,
+                  rgba(30,64,175,.16) 0%,
+                  rgba(30,64,175,.06) 42%,
+                  rgba(30,64,175,0) 72%);
+    }
+    /* Respect OS dark when no manual override */
+    @media (prefers-color-scheme: dark){
+      :root:not([data-theme]){
+        --bg:#0f1318;
+        --surface:#141a1f;
+        --text:#e6eaf2;
+        --muted:#a9b2c3;
+        --outline:#2a3342;
+        --brand:#8aa2ff;
+        --accent:#62b5f5;
+        --focus:#8b9df8;
+        --shadow:0 10px 30px rgba(0,0,0,.45);
+        --blob-1:radial-gradient(1100px 650px at -200px -200px,
+                    rgba(99,102,241,.12) 0%,
+                    rgba(99,102,241,.06) 40%,
+                    rgba(99,102,241,0) 75%);
+        --blob-2:radial-gradient(900px 550px at calc(100% + 200px) -200px,
+                    rgba(14,165,233,.10) 0%,
+                    rgba(14,165,233,.05) 42%,
+                    rgba(14,165,233,0) 72%);
+      }
+    }
+    /* Manual overrides */
+    :root[data-theme="dark"]{
+      --bg:#0f1318; --surface:#141a1f; --text:#e6eaf2; --muted:#a9b2c3;
+      --outline:#2a3342; --brand:#8aa2ff; --accent:#62b5f5; --focus:#8b9df8;
+      --shadow:0 10px 30px rgba(0,0,0,.45);
+      --blob-1:radial-gradient(1100px 650px at -200px -200px,
+                  rgba(99,102,241,.12) 0%,
+                  rgba(99,102,241,.06) 40%,
+                  rgba(99,102,241,0) 75%);
+      --blob-2:radial-gradient(900px 550px at calc(100% + 200px) -200px,
+                  rgba(14,165,233,.10) 0%,
+                  rgba(14,165,233,.05) 42%,
+                  rgba(14,165,233,0) 72%);
     }
 
-    * {
-      box-sizing: border-box;
+    *{box-sizing:border-box}
+    html,body{height:100%}
+
+    body{
+      margin:0;
+      font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,"Noto Sans";
+      color:var(--text);
+      line-height:1.5;
+      -webkit-font-smoothing:antialiased;
+      text-rendering:optimizeLegibility;
+      background-color:var(--bg);
+      background-image:var(--blob-1),var(--blob-2);
+      background-repeat:no-repeat,no-repeat;
+      background-position:-200px -200px,calc(100% + 200px) -200px;
+      background-size:1200px 700px,1000px 600px;
     }
 
-    html,
-    body {
-      height: 100%;
+    a{color:inherit;text-decoration:none}
+    img{max-width:100%;height:auto;display:block}
+
+    /* ============== Stage width alignment ============== */
+    header,main,footer,.container{
+      max-width:var(--stage);
+      width:min(100%,var(--stage));
+      margin-inline:auto;
+      padding:24px;
     }
+    header{padding-top:28px}
 
-    body {
-      margin: 0;
-      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans";
-      color: var(--text);
-      line-height: 1.5;
-      -webkit-font-smoothing: antialiased;
-      text-rendering: optimizeLegibility;
+    /* ============== Top bar ============== */
+    .nav{display:flex;align-items:center;justify-content:space-between;gap:16px}
+    .brand{display:flex;align-items:center;gap:14px}
+    .logo{width:40px;height:40px}
+    .title-wrap{display:flex;flex-direction:column}
+    .title-wrap h1{margin:0;font-size:clamp(18px,2.6vw,24px);font-weight:700;letter-spacing:.2px}
+    .subtag{color:var(--muted);font-weight:500;font-size:13px;margin-top:2px}
+    .header-actions{display:flex;gap:8px;align-items:center}
 
-      /* base */
-      background-color: var(--bg);
-
-      /* soft blue glows */
-      background-image:
-        radial-gradient(1200px 700px at -200px -200px,
-          rgba(14, 165, 233, .18) 0%, rgba(14, 165, 233, .08) 40%, rgba(14, 165, 233, 0) 75%),
-        radial-gradient(1000px 600px at calc(100% + 200px) -200px,
-          rgba(30, 64, 175, .16) 0%, rgba(30, 64, 175, .06) 42%, rgba(30, 64, 175, 0) 72%);
-      background-repeat: no-repeat, no-repeat;
-      background-position: -200px -200px, calc(100% + 200px) -200px;
-      background-size: 1200px 700px, 1000px 600px;
+    /* ============== Card shells (Hero + PBI) ============== */
+    .hero,.pbi-card{
+      margin:0;
+      position:relative;
+      background:var(--surface);
+      border:1px solid var(--outline);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      padding:28px;
+      overflow:hidden;
+      background-clip:padding-box;
     }
-
-    a {
-      color: inherit;
-      text-decoration: none;
+    .hero::before,.pbi-card::before{
+      content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+      background:linear-gradient(135deg,#ffffff 0%,#fbfdff 35%,rgba(14,165,233,.06) 100%);
+      opacity:1;
     }
-
-    img {
-      max-width: 100%;
-      height: auto;
-      display: block;
+    /* Dark: subtler wash */
+    :root[data-theme="dark"] .hero::before,
+    :root[data-theme="dark"] .pbi-card::before{
+      background:linear-gradient(135deg,rgba(255,255,255,.04) 0%,rgba(255,255,255,.03) 35%,rgba(14,165,233,.06) 100%);
     }
-
-    header,
-    main,
-    footer,
-    .container,
-    #pbiSection {
-      /* ← include the element itself */
-      max-width: var(--stage);
-      width: min(100%, var(--stage));
-      margin-inline: auto;
-      padding: 24px;
+    @media (prefers-color-scheme: dark){
+      :root:not([data-theme]) .hero::before,
+      :root:not([data-theme]) .pbi-card::before{
+        background:linear-gradient(135deg,rgba(255,255,255,.04) 0%,rgba(255,255,255,.03) 35%,rgba(14,165,233,.06) 100%);
+      }
     }
+    .hero>*,.pbi-card>*{position:relative;z-index:1}
+    .hero h2,.pbi-card h2{margin:0 0 8px}
 
+    /* ============== Welcome + tiles ============== */
+    .welcome{display:block}
+    .welcome p{margin:8px 0 0;color:var(--muted);max-width:72ch}
+    .section-heading{margin:24px 0 8px;font-size:18px;font-weight:650;letter-spacing:.2px}
 
-    header {
-      padding-top: 28px;
+    .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin-top:12px}
+    .tool{
+      display:block;position:relative;background:var(--surface);border:1px solid var(--outline);
+      border-radius:14px;padding:16px 16px 18px;box-shadow:var(--shadow);
+      transition:transform .06s ease,box-shadow .15s ease,background .15s ease;font-weight:650;
     }
+    .tool small{display:block;font-weight:500;color:var(--muted);margin-top:6px}
+    .tool:hover{background:#f9fbff;transform:translateY(-1px)}
+    :root[data-theme="dark"] .tool:hover{background:#17202a}
+    .tool:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 
-    /* Top bar */
-    .nav {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
+    .pill{
+      display:inline-block;font-size:12px;line-height:1;padding:6px 8px;border-radius:999px;
+      background:rgba(14,165,233,.1);color:#0369a1;border:1px solid rgba(14,165,233,.25);margin-top:10px;
     }
+    :root[data-theme="dark"] .pill{background:rgba(14,165,233,.14);color:#9dd6ff;border-color:rgba(14,165,233,.25)}
 
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-
-    .logo {
-      width: 40px;
-      height: 40px;
-    }
-
-    .title-wrap {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .title-wrap h1 {
-      margin: 0;
-      font-size: clamp(18px, 2.6vw, 24px);
-      font-weight: 550;
-      letter-spacing: .2px;
-    }
-
-    .subtag {
-      color: var(--muted);
-      font-weight: 500;
-      font-size: 13px;
-      margin-top: 2px;
-    }
-
-    /* Card shells (hero + PBI) */
-    .hero,
-    .pbi-card {
-      margin: 0;
-      position: relative;
-      background: #fff;
-      /* solid base so borders read cleanly */
-      border: 1px solid var(--outline);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      padding: 28px;
-      overflow: hidden;
-      /* trims any inner overflow */
-      background-clip: padding-box;
-      /* keeps background inside the border */
-    }
-
-    #pbiSection {
-      margin-top: 28px;
-    }
-
-    .hero h2,
-    .pbi-card h2 {
-      margin: 0 0 8px;
-    }
-
-    /* Gentle inner wash, safely inside the radius/border */
-    .hero::before,
-    .pbi-card::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      border-radius: inherit;
-      pointer-events: none;
-      background: linear-gradient(135deg,
-          #ffffff 0%,
-          #fbfdff 35%,
-          rgba(14, 165, 233, .06) 100%);
-    }
-
-    /* Ensure content sits above the decorative layer */
-    .hero>*,
-    .pbi-card>* {
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Welcome */
-    .welcome {
-      display: block;
-    }
-
-    .welcome p {
-      margin: 8px 0 0;
-      color: var(--muted);
-      max-width: 72ch;
-    }
-
-    .section-heading {
-      margin: 24px 0 8px;
-      font-size: 18px;
-      font-weight: 700;
-      letter-spacing: .2px;
-    }
-
-    /* Tiles grid */
-    .grid {
-      display: grid;
-      gap: 14px;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      margin-top: 12px;
-    }
+    .tool.disabled{cursor:not-allowed;color:#475569;background:linear-gradient(180deg,var(--surface),#f6f6f6);opacity:.72;box-shadow:none}
+    :root[data-theme="dark"] .tool.disabled{background:linear-gradient(180deg,var(--surface),#10161d)}
+    .tool.disabled:hover{transform:none}
+    .tool.disabled:focus{outline:none}
 
     /* Buttons */
-    .btn {
-      appearance: none;
-      padding: 10px 14px;
-      border-radius: 12px;
-      border: 1px solid var(--outline);
-      background: #fff;
-      cursor: pointer;
-      transition: transform .04s ease, background .15s ease, filter .15s ease, box-shadow .15s ease;
-      font-weight: 600;
+    .btn{
+      appearance:none;padding:10px 14px;border-radius:12px;border:1px solid var(--outline);
+      background:var(--surface);cursor:pointer;transition:transform .04s ease,background .15s ease,filter .15s ease,box-shadow .15s ease;font-weight:600;
+    }
+    .btn:hover{background:#f8fafc;color:#173991}
+    :root[data-theme="dark"] .btn:hover{background:#1a2230;color:#cfe0ff}
+    .btn:active{transform:translateY(1px)}
+    .btn:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+
+    .btn-primary{
+      background:linear-gradient(180deg,var(--brand),#173991);color:#fff;border-color:transparent;
+      box-shadow:0 6px 14px rgba(30,64,175,.25);
+    }
+    .btn-primary:hover{filter:brightness(1.03)}
+    .btn-ghost{
+      appearance:none;border:1px solid var(--outline);background:var(--surface);
+      border-radius:999px;padding:8px 12px;font-weight:600;cursor:pointer;
+    }
+    .btn-ghost:hover{background:#f2f6ff;border-color:#dce6ff}
+    :root[data-theme="dark"] .btn-ghost:hover{background:#1a2230;border-color:#2f3a4f}
+
+    /* ============== Inside Track / Power BI ============== */
+    #pbiSection{margin-top:28px}
+    .pbi-card .card-head{
+      display:flex;align-items:flex-start;gap:12px;margin:0 0 12px;padding-bottom:8px;
+      border-bottom:1px solid rgba(30,64,175,.10);
+    }
+    .pbi-card .card-title{margin:0;font-size:clamp(18px,2.6vw,24px);font-weight:650;letter-spacing:.2px}
+    .pbi-card .card-lead{margin:6px 0 0;color:var(--muted);max-width:72ch}
+    .pbi-card .actions{margin-left:auto;display:flex;gap:8px}
+
+    #reportContainer{
+      width:100%;
+      aspect-ratio:16 / 9;
+      min-height:640px;
+      background:var(--surface); /* behind transparent iframe */
+    }
+    #reportContainer iframe,#reportContainer .powerbi-frame{
+      width:100% !important;height:100% !important;display:block;border:0;
     }
 
-    .btn:hover {
-      background: #f8fafc;
-      color: #173991;
+    /* Fullscreen toggle state */
+    .pbi-fullscreen{position:fixed;inset:0;z-index:1000;background:var(--bg);padding:24px;display:flex;overflow:hidden}
+    .pbi-fullscreen .pbi-card{flex:1;display:flex;flex-direction:column;height:100%}
+    .pbi-fullscreen #reportContainer{flex:1;min-height:0;aspect-ratio:auto}
+
+    /* Footer */
+    footer .card{
+      background:var(--surface);border:1px solid var(--outline);border-radius:var(--radius);
+      padding:16px;box-shadow:var(--shadow);color:var(--muted);
     }
 
-    .btn:active {
-      transform: translateY(1px);
-    }
+    .hide{display:none}
 
-    .btn:focus-visible {
-      outline: 3px solid var(--focus);
-      outline-offset: 2px;
-    }
-
-    .btn-primary {
-      background: linear-gradient(180deg, var(--brand), #173991);
-      color: #fff;
-      border-color: transparent;
-      box-shadow: 0 6px 14px rgba(30, 64, 175, .25);
-    }
-
-    .btn-primary:hover {
-      filter: brightness(1.03);
-    }
-
-    /* Tool tiles */
-    .tool {
-      display: block;
-      position: relative;
-      background: #fff;
-      border: 1px solid var(--outline);
-      border-radius: 14px;
-      padding: 16px 16px 18px;
-      box-shadow: var(--shadow);
-      transition: transform .06s ease, box-shadow .15s ease, background .15s ease;
-      font-weight: 700;
-    }
-
-    .tool small {
-      display: block;
-      font-weight: 500;
-      color: var(--muted);
-      margin-top: 6px;
-    }
-
-    .tool:hover {
-      background: #f9fbff;
-      transform: translateY(-1px);
-    }
-
-    .tool:focus-visible {
-      outline: 3px solid var(--focus);
-      outline-offset: 2px;
-    }
-
-    .pill {
-      display: inline-block;
-      font-size: 12px;
-      line-height: 1;
-      padding: 6px 8px;
-      border-radius: 999px;
-      background: rgba(14, 165, 233, .1);
-      color: #0369a1;
-      border: 1px solid rgba(14, 165, 233, .25);
-      margin-top: 10px;
-    }
-
-    .tool.disabled {
-      cursor: not-allowed;
-      color: #475569;
-      background: linear-gradient(180deg, #fff, #fafafa);
-      opacity: .72;
-      box-shadow: none;
-    }
-
-    .tool.disabled:hover {
-      transform: none;
-      background: linear-gradient(180deg, #fff, #f6f6f6);
-    }
-
-    .tool.disabled:focus {
-      outline: none;
-    }
-
-    /* Tooltip for tiles */
-    .tool[data-tip] {
-      position: relative;
-    }
-
-    .tool[data-tip]:hover::after {
-      content: attr(data-tip);
-      position: absolute;
-      left: 50%;
-      top: 100%;
-      transform: translate(-50%, 10px);
-      background: #0b1220;
-      color: #fff;
-      padding: 8px 10px;
-      border-radius: 8px;
-      font-size: 12px;
-      line-height: 1.3;
-      width: 280px;
-      max-width: 78vw;
-      text-align: center;
-      box-shadow: 0 8px 18px rgba(2, 6, 23, .2);
-      z-index: 10;
-      pointer-events: none;
-    }
-
-    footer .card {
-      background: #fff;
-      border: 1px solid var(--outline);
-      border-radius: var(--radius);
-      padding: 16px;
-      box-shadow: var(--shadow);
-      color: var(--muted);
-    }
-
-    .hide {
-      display: none;
-    }
-
-    /* ====== Inside Track / Power BI section ====== */
-
-    #pbiSection {
-      margin-top: 28px;
-    }
-
-    /* Card header with actions (Expand) */
-    .pbi-card .card-head {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin: 4px 0 12px;
-    }
-
-    .pbi-card .card-head h3 {
-      margin: 0;
-      font-size: 18px;
-      font-weight: 800;
-      letter-spacing: .2px;
-    }
-
-    .pbi-card .actions {
-      margin-left: auto;
-      display: flex;
-      gap: 8px;
-    }
-
-    .btn-ghost {
-      appearance: none;
-      border: 1px solid var(--outline);
-      background: #fff;
-      border-radius: 999px;
-      padding: 8px 12px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-
-    .btn-ghost:hover {
-      background: #f2f6ff;
-      border-color: #dce6ff;
-    }
-
-    #reportContainer {
-      width: 100%;
-      height: auto;
-      /* let aspect-ratio drive height */
-      aspect-ratio: 16 / 9;
-      /* matches most Power BI pages */
-      min-height: 640px;
-      /* reasonable floor on laptops */
-      background: #fff;
-    }
-
-    /* Make the injected iframe fill the host */
-    #reportContainer iframe,
-    #reportContainer .powerbi-frame {
-      width: 100% !important;
-      height: 100% !important;
-      display: block;
-      border: 0;
-    }
-
-    /* Header row */
-    .pbi-card .card-head {
-      display: flex;
-      align-items: flex-start;
-      /* aligns with multi-line title+lead */
-      gap: 12px;
-      margin: 0 0 12px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid rgba(30, 64, 175, .10);
-    }
-
-    /* Match the Welcome h2 */
-    .pbi-card .card-title {
-      margin: 0;
-      font-size: clamp(18px, 2.6vw, 24px);
-      font-weight: 550;
-      letter-spacing: .2px;
-    }
-
-    /* Match the Welcome paragraph style */
-    .pbi-card .card-lead {
-      margin: 6px 0 0;
-      /* Welcome uses ~6–8px top margin */
-      color: var(--muted);
-      max-width: 72ch;
-    }
-
-    /* Keep actions on the right */
-    .pbi-card .actions {
-      margin-left: auto;
-      display: flex;
-      gap: 8px;
-    }
-
-    /* Optional fullscreen mode (toggled via class on #pbiSection) */
-    .pbi-fullscreen {
-      position: fixed;
-      inset: 0;
-      z-index: 1000;
-      background: var(--bg);
-      padding: 24px;
-      display: flex;
-      overflow: hidden;
-    }
-
-    .pbi-card .card-head {
-      border-bottom: 1px solid rgba(30, 64, 175, .10);
-      padding-bottom: 8px;
-    }
-
-    .pbi-fullscreen .pbi-card {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-    }
-
-    .pbi-fullscreen #reportContainer {
-      flex: 1;
-      height: 100%;
-      min-height: 0;
-      aspect-ratio: auto;
-    }
-
-    @media (max-width:900px) {
-      #reportContainer {
-        min-height: 560px;
-      }
-    }
-
-    @media (max-width:600px) {
-      #reportContainer {
-        min-height: 460px;
-      }
-    }
+    /* Responsive floors */
+    @media (max-width:900px){ #reportContainer{min-height:560px} }
+    @media (max-width:600px){ #reportContainer{min-height:460px} }
   </style>
 </head>
-
 <body>
   <header class="nav" aria-label="Global">
     <a href="/" class="brand" aria-current="page">
-      <!-- Prefer external SVG; falls back to inline mark if missing -->
-      <img class="logo" src="./assets/larato-logo.svg" alt="Larato" style="height:100px;width:auto;display:block">
+      <img class="logo" src="/assets/larato-logo.svg" alt="Larato" style="height:100px;width:auto;display:block">
       <div class="title-wrap">
         <h1>Inside Track Business Growth Tools</h1>
-        <!--<div class="subtag">Larato best practice</div>-->
       </div>
     </a>
-    <div id="authButtons">
-      <button class="btn" id="btnSignIn">Sign in</button>
+    <div class="header-actions">
+      <button id="themeToggle" class="btn-ghost" title="Toggle dark mode" aria-pressed="false">🌙</button>
+      <div id="authButtons">
+        <button class="btn" id="btnSignIn">Sign in</button>
+      </div>
     </div>
   </header>
 
   <main class="hero" aria-labelledby="welcome-heading">
-    <!-- Public welcome -->
     <section id="welcome" class="welcome" aria-live="polite">
       <h2 id="welcome-heading" style="margin:0 0 6px 0">Welcome</h2>
-      <p>These tools will save you time and assure that you deliver the best sales and marketing experience to your
-        prospects. Please sign in to get started.</p>
+      <p>These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects. Please sign in to get started.</p>
       <div style="margin-top:10px">
-        <button class="btn btn-primary" id="btnSignInPrimary" aria-label="Sign in with Microsoft">Sign in with
-          Microsoft</button>
+        <button class="btn btn-primary" id="btnSignInPrimary" aria-label="Sign in with Microsoft">Sign in with Microsoft</button>
       </div>
     </section>
 
-    <!-- Signed-in dashboard -->
     <section id="dashboard" class="hide" aria-live="polite">
       <h2 style="margin:0 0 6px 0">Welcome<span id="userName"></span></h2>
       <p class="welcome-text" style="color:var(--muted); max-width:72ch; margin:8px 0 0 0">
-        These tools will save you time and assure that you deliver the best sales and marketing experience to your
-        prospects.
+        These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects.
       </p>
 
-      <!-- ===== Sales tools ===== -->
       <h3 class="section-heading">Tools for sales</h3>
       <div class="grid">
-        <!-- 1) Accessible now -->
         <a class="tool" href="/first-call-script-v2.html">
           Call scripts and emails
           <small>Craft confident, on-brand outreach in seconds.</small>
           <span class="pill">Available</span>
         </a>
 
-        <!-- 2) Lead Qualification (disabled, to the right of script) -->
-        <a class="tool" href="./lead-qualification.html">
+        <a class="tool" href="/lead-qualification.html">
           Lead qualification
           <small>Qualify your leads in seconds</small>
           <span class="pill">Available</span>
         </a>
 
-        <!-- 3) Competitive Positioning (disabled, to the right) -->
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-          title="Coming soon (October 2025). This will help you to differentiate against your competition"
-          data-tip="Coming soon (October 2025). This will help you to differentiate against your competition">
+           title="Coming soon (October 2025). This will help you to differentiate against your competition"
+           data-tip="Coming soon (October 2025). This will help you to differentiate against your competition">
           Beat your competitors
           <small>Position your value clearly against alternatives.</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
         </a>
       </div>
 
-      <!-- ===== Marketing tools ===== -->
       <h3 class="section-heading" style="margin-top:28px">Tools for marketing</h3>
       <div class="grid">
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-          title="Coming soon. Specify campaigns that target your best prospects"
-          data-tip="Coming soon. Specify campaigns that target your best prospects">
+           title="Coming soon. Specify campaigns that target your best prospects"
+           data-tip="Coming soon. Specify campaigns that target your best prospects">
           Campaign specification
           <small>Pinpoint your best prospects</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
         </a>
 
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-          title="Coming soon. Prove why your offer is better" data-tip="Coming soon. Prove why your offer is better">
+           title="Coming soon. Prove why your offer is better"
+           data-tip="Coming soon. Prove why your offer is better">
           Differentiation
           <small>Evidence why your offer is better</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
         </a>
 
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-          title="Coming soon. Create data-backed, personalised messaging"
-          data-tip="Coming soon. Create data-backed, personalised messaging">
+           title="Coming soon. Create data-backed, personalised messaging"
+           data-tip="Coming soon. Create data-backed, personalised messaging">
           Market beating messaging
           <small>Data-backed, personalised, messaging</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
@@ -565,7 +314,6 @@
     </section>
   </main>
 
-  <!-- Inside Track interface in its own area.-->
   <section id="pbiSection" class="container hide">
     <div class="pbi-card">
       <div class="card-head">
@@ -580,9 +328,34 @@
       <div id="reportContainer" aria-label="Power BI report host"></div>
     </div>
   </section>
+
   <footer>
     <div class="card">© Larato Limited. Company Registration Number 5451360. Registered in the UK.</div>
   </footer>
-</body>
 
+  <!-- Tiny theme toggle (manual override: light ↔ dark ↔ follow OS) -->
+  <script>
+    (function(){
+      const root=document.documentElement;
+      const btn=document.getElementById('themeToggle');
+      if(!btn) return;
+
+      const apply=(mode)=>{
+        if(mode) root.setAttribute('data-theme',mode);
+        else root.removeAttribute('data-theme'); // follow OS
+        const dark = mode ? mode==='dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+        btn.setAttribute('aria-pressed', dark ? 'true':'false');
+        btn.textContent = dark ? '☀️' : '🌙';
+      };
+      apply(localStorage.getItem('theme'));
+
+      btn.addEventListener('click',()=>{
+        const current=root.getAttribute('data-theme');   // 'dark'|'light'|null
+        const next=current==='dark' ? 'light' : current==='light' ? null : 'dark';
+        if(next) localStorage.setItem('theme',next); else localStorage.removeItem('theme');
+        apply(next);
+      });
+    })();
+  </script>
+</body>
 </html>
