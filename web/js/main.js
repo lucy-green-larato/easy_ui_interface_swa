@@ -11,57 +11,75 @@ document.addEventListener("click", (e) => {
   if (e.target.closest(".tool.disabled")) e.preventDefault();
 });
 
-// Wire up sign-in buttons
+// Wire up sign-in buttons (header + hero)
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btnSignIn")?.addEventListener("click", login);
   document.getElementById("btnSignInPrimary")?.addEventListener("click", login);
 });
 
-// ===== Theme toggle (persisted, overrides OS) =====
-(() => {
-  const KEY = "theme"; // 'light' | 'dark' | 'auto'
-  const btn = document.getElementById("themeToggle") || document.getElementById("btnThemeToggle");
+// ===== Theme toggle (persisted; respects system when unset) =====
+(function themeToggle() {
+  const root = document.documentElement;
+  const storageKey = "theme"; // 'light' | 'dark'
+  const mq = window.matchMedia("(prefers-color-scheme: dark)");
+  const meta = document.querySelector('meta[name="color-scheme"]');
 
-  const prefersDark = () =>
-    window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-
-  function applyTheme(mode) {
-    const root = document.documentElement;
-    if (mode === "light" || mode === "dark") {
-      root.setAttribute("data-theme", mode);
-    } else {
-      root.removeAttribute("data-theme"); // 'auto' => follow OS
-    }
-    updateToggleUI(mode);
+  function explicitTheme() {
+    // returns 'light' | 'dark' | null (system)
+    return root.getAttribute("data-theme") || localStorage.getItem(storageKey) || null;
   }
-
-  function updateToggleUI(mode) {
+  function isDarkNow() {
+    const exp = explicitTheme();
+    return exp ? exp === "dark" : mq.matches;
+  }
+  function updateButton() {
+    const btn = document.getElementById("themeToggle");
     if (!btn) return;
-    const isDark = mode === "dark" || (mode === "auto" && prefersDark());
-    btn.setAttribute("aria-pressed", isDark ? "true" : "false");
-    btn.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
-    btn.title = btn.getAttribute("aria-label");
-    // show the opposite action as the icon
-    btn.textContent = isDark ? "☀️" : "🌙";
+    const dark = isDarkNow();
+    btn.setAttribute("aria-pressed", dark ? "true" : "false");
+    btn.textContent = dark ? "☀️" : "🌙";
+    btn.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+  }
+  function apply(theme /* 'light' | 'dark' | null */) {
+    if (theme === "light" || theme === "dark") {
+      root.setAttribute("data-theme", theme);
+      localStorage.setItem(storageKey, theme);
+    } else {
+      root.removeAttribute("data-theme");
+      localStorage.removeItem(storageKey);
+    }
+    if (meta) meta.setAttribute("content", "light dark");
+    updateButton();
+    // Nudge PBI to recalc layout if scrollbars/theme change
+    setTimeout(() => window.dispatchEvent(new Event("resize")), 60);
   }
 
-  const getTheme = () => localStorage.getItem(KEY) || "auto";
-  const setTheme = (mode) => { localStorage.setItem(KEY, mode); applyTheme(mode); };
+  // init from storage or system
+  const saved = localStorage.getItem(storageKey);
+  if (saved === "light" || saved === "dark") {
+    root.setAttribute("data-theme", saved);
+  } else {
+    root.removeAttribute("data-theme"); // system
+  }
+  if (meta) meta.setAttribute("content", "light dark");
+  updateButton();
 
-  // init
-  applyTheme(getTheme());
-
-  // react to OS changes only when user is on 'auto'
-  const mql = window.matchMedia("(prefers-color-scheme: dark)");
-  mql.addEventListener?.("change", () => { if (getTheme() === "auto") applyTheme("auto"); });
-
-  // click: toggle light <-> dark (first click from 'auto' chooses the opposite of OS)
-  btn?.addEventListener("click", () => {
-    const cur = getTheme();
-    if (cur === "dark") setTheme("light");
-    else if (cur === "light") setTheme("dark");
-    else setTheme(prefersDark() ? "light" : "dark");
+  // click toggle (two-state: light <-> dark)
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("#themeToggle");
+    if (!btn) return;
+    const exp = explicitTheme();
+    apply(exp === "dark" ? "light" : "dark");
   });
+
+  // reflect system changes only when using system (no explicit theme)
+  const onSystemChange = () => {
+    if (!localStorage.getItem(storageKey) && !root.getAttribute("data-theme")) {
+      updateButton();
+    }
+  };
+  if (mq.addEventListener) mq.addEventListener("change", onSystemChange);
+  else if (mq.addListener) mq.addListener(onSystemChange);
 })();
 
 // ===== Power BI embed =====
@@ -91,7 +109,7 @@ async function renderReport() {
     if (!pbiGlobal || !window.powerbi) throw new Error("Power BI client not loaded.");
     const models = pbiGlobal.models || window.powerbi.models;
 
-    const container = document.getElementById("reportContainer"); // <-- matches your HTML
+    const container = document.getElementById("reportContainer");
     if (!container) return;
 
     // reset if re-rendering
@@ -108,26 +126,26 @@ async function renderReport() {
       tokenType: models.TokenType.Embed,
       permissions: models.Permissions.Read,
       viewMode: models.ViewMode.View,
-      // inside renderReport() -> window.powerbi.embed(...settings...)
       settings: {
         layoutType: models.LayoutType.FitToWidth,
         panes: {
           filters: { visible: false, expanded: false },
-          pageNavigation: { visible: true }         // was true – hide bottom tab bar
+          pageNavigation: { visible: true } // show bottom tab bar
         },
         navContentPaneEnabled: false,
         background: models.BackgroundType.Transparent
       }
-
     });
 
     pbiReport.on("loaded", async () => {
-      // Re-assert settings in case tenant defaults override
       try {
         await pbiReport.updateSettings({
           settings: {
             layoutType: models.LayoutType.FitToWidth,
-            panes: { filters: { visible: false, expanded: false }, pageNavigation: { visible: true } },
+            panes: {
+              filters: { visible: false, expanded: false },
+              pageNavigation: { visible: true }
+            },
             navContentPaneEnabled: false,
             background: models.BackgroundType.Transparent
           }
@@ -146,13 +164,75 @@ async function renderReport() {
 
 // Fallback if a browser ignores CSS aspect-ratio (rare, but safe)
 (function ensureAspectRatio() {
-  const host = document.getElementById('reportContainer');
+  const host = document.getElementById("reportContainer");
   if (!host) return;
-  if (host.style.height || (window.CSS && CSS.supports && CSS.supports('aspect-ratio: 16 / 9'))) return;
-  const resize = () => { host.style.height = Math.round(host.clientWidth * 9 / 16) + 'px'; };
+  if (host.style.height || (window.CSS && CSS.supports && CSS.supports("aspect-ratio: 16 / 9"))) return;
+  const resize = () => { host.style.height = Math.round(host.clientWidth * 9 / 16) + "px"; };
   resize();
-  window.addEventListener('resize', resize);
+  window.addEventListener("resize", resize);
   new ResizeObserver(resize).observe(host.parentElement || document.body);
+})();
+
+// Fullscreen / Expand for PBI section
+(function setupPBIExpand() {
+  const btn = document.getElementById("btnExpandPBI");
+  const section = document.getElementById("pbiSection");
+  if (!btn || !section) return;
+
+  const hasNativeFs = !!section.requestFullscreen;
+
+  const enter = async () => {
+    section.classList.add("pbi-fullscreen");
+    document.body.classList.add("fs-lock");
+    try {
+      if (hasNativeFs) await section.requestFullscreen();
+    } catch (e) {
+      console.warn("Fullscreen request blocked; using CSS fallback.", e);
+    }
+    btn.textContent = "Close";
+    btn.setAttribute("aria-pressed", "true");
+    btn.setAttribute("aria-label", "Exit fullscreen");
+    setTimeout(() => window.dispatchEvent(new Event("resize")), 60);
+  };
+
+  const exit = async () => {
+    section.classList.remove("pbi-fullscreen");
+    document.body.classList.remove("fs-lock");
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        await document.exitFullscreen();
+      }
+    } catch (e) {
+      console.warn("Exit fullscreen error (safe to ignore):", e);
+    }
+    btn.textContent = "Expand";
+    btn.setAttribute("aria-pressed", "false");
+    btn.setAttribute("aria-label", "Enter fullscreen");
+    setTimeout(() => window.dispatchEvent(new Event("resize")), 60);
+  };
+
+  btn.addEventListener("click", () => {
+    const cssOn = section.classList.contains("pbi-fullscreen");
+    const realFsOn = !!document.fullscreenElement;
+    (cssOn || realFsOn) ? exit() : enter();
+  });
+
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && section.classList.contains("pbi-fullscreen")) {
+      section.classList.remove("pbi-fullscreen");
+      document.body.classList.remove("fs-lock");
+      btn.textContent = "Expand";
+      btn.setAttribute("aria-pressed", "false");
+      btn.setAttribute("aria-label", "Enter fullscreen");
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 60);
+    }
+  });
+
+  window.addEventListener("orientationchange", () => {
+    if (section.classList.contains("pbi-fullscreen")) {
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 250);
+    }
+  });
 })();
 
 // ===== Init: toggle signed-in/out UI and render report =====
@@ -207,60 +287,4 @@ async function renderReport() {
     console.warn("Auth check failed; showing signed-out view.", e);
     showSignIn();
   }
-
-  // ===== Light/Dark theme toggle (persists, respects system when unset) =====
-  (function themeToggle() {
-    const root = document.documentElement;
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-
-    function currentIsDark() {
-      const explicit = root.getAttribute('data-theme');
-      if (explicit === 'dark') return true;
-      if (explicit === 'light') return false;
-      return mq.matches;
-    }
-
-    function updateButton() {
-      const btn = document.getElementById('themeToggle');
-      if (!btn) return;
-      const dark = currentIsDark();
-      btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
-      btn.textContent = dark ? '☀️' : '🌙';
-      btn.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
-      document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', 'light dark');
-    }
-
-    function setTheme(value) { // 'light' | 'dark' | '' (system)
-      if (value === 'light' || value === 'dark') {
-        root.setAttribute('data-theme', value);
-        localStorage.setItem('theme', value);
-      } else {
-        root.removeAttribute('data-theme');
-        localStorage.removeItem('theme');
-      }
-      updateButton();
-    }
-    // Always wire the Expand button (both paths)
-    const expandBtn = document.getElementById("btnExpandPBI");
-    expandBtn?.addEventListener("click", () => {
-      const root = document.getElementById("pbiSection");
-      const on = root.classList.toggle("pbi-fullscreen");
-      expandBtn.setAttribute("aria-pressed", on ? "true" : "false");
-      expandBtn.textContent = on ? "Close" : "Expand";
-      setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
-    });
-  })();
-
-  document.addEventListener('DOMContentLoaded', () => {
-    const saved = localStorage.getItem('theme'); // 'light' | 'dark' | null
-    setTheme(saved || ''); // '' => follow system
-    document.getElementById('themeToggle')?.addEventListener('click', () => {
-      const now = root.getAttribute('data-theme');
-      setTheme(now === 'dark' ? 'light' : 'dark');
-    });
-  });
-
-  mq.addEventListener?.('change', () => {
-    if (!localStorage.getItem('theme')) updateButton();
-  });
 })();
