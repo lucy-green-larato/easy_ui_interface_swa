@@ -1198,36 +1198,22 @@ select:not([multiple]) {
   outline-offset: 1px;
 }
 
-/* Card shell around the report (optional style) */
-.pbi-card{
-  margin-top: 16px;
-  background:#fff;
-  border:1px solid #e5e7eb;
-  border-radius:12px;
-  box-shadow:0 8px 24px rgba(2,6,23,.06);
-  overflow:hidden;
-}
-
-/* Host for the PBI iframe: 16:9, tall enough on desktop */
-#reportContainer{
-  width:100%;
-  aspect-ratio:16/9;
-  height:auto;
-  min-height:720px;       /* bump to 820/900 if you want it bigger */
-  max-height:1200px;      /* optional ceiling */
+/* Give the PBI host real height without changing width */
+#pbiSection #reportContainer{
+  width: 100%;
+  height: clamp(900px, 80vh, 1200px); /* more vertical room */
 }
 
 /* Make the injected iframe fill the host */
-#reportContainer iframe,
-#reportContainer .powerbi-frame{
-  width:100% !important;
-  height:100% !important;
-  display:block;
-  border:0;
+#pbiSection #reportContainer iframe,
+#pbiSection #reportContainer .powerbi-frame{
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  border: 0;
 }
 
-/* Smaller screens: lower the floor so it fits */
-@media (max-width: 900px){ #reportContainer{ min-height:560px; } }
-@media (max-width: 600px){ #reportContainer{ min-height:460px; } }
-
+/* Smaller screens: reduce height so it fits */
+@media (max-width: 900px){ #pbiSection #reportContainer{ height: 560px; } }
+@media (max-width: 600px){ #pbiSection #reportContainer{ height: 460px; } }
 
