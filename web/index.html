@@ -354,6 +354,79 @@
       gap: 8px;
     }
 
+    /* ===== Fullscreen PBI ===== */
+    .pbi-fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: var(--bg);
+      padding: 0;
+      /* remove page padding */
+      display: flex;
+      overflow: hidden;
+      /* hide page scrollbars in fallback */
+    }
+
+    .pbi-fullscreen .pbi-card {
+      max-width: none;
+      height: 100vh;
+      border-radius: 0;
+      border: 0;
+      box-shadow: none;
+      padding: 0;
+      /* edge-to-edge */
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Put actions (Close) in the top-right, overlaying the report */
+    .pbi-fullscreen .card-head {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      left: 12px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      pointer-events: none;
+      /* let clicks go through except on buttons */
+    }
+
+    .pbi-fullscreen .card-head .actions {
+      pointer-events: all;
+    }
+
+    /* Report fills the entire viewport in fullscreen */
+    .pbi-fullscreen #reportContainer {
+      flex: 1;
+      width: 100%;
+      height: 100vh;
+      /* full viewport height */
+      min-height: 0;
+      aspect-ratio: auto;
+      /* let height rule, not AR */
+    }
+
+    /* Let the PBI section truly fill the viewport when fullscreen */
+    #pbiSection.pbi-fullscreen,
+    #pbiSection.pbi-fullscreen.container {
+      max-width: none !important;
+      /* beat the header/main/footer,.container cap */
+      width: 100vw;
+      height: 100vh;
+      margin: 0;
+      padding: 24px;
+      /* optional breathing room */
+    }
+
+    /* Lock body scroll in CSS-fallback mode */
+    body.fs-lock {
+      overflow: hidden;
+    }
+
     #reportContainer {
       width: 100%;
       aspect-ratio: 16 / 9;
