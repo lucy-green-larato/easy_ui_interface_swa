@@ -61,19 +61,17 @@ async function renderReport() {
       tokenType: models.TokenType.Embed,
       permissions: models.Permissions.Read,
       viewMode: models.ViewMode.View,
+      // inside renderReport() -> window.powerbi.embed(...settings...)
       settings: {
-        // Choose ONE layout:
-        // 1) Fit to width (bigger visual, may need taller container)
         layoutType: models.LayoutType.FitToWidth,
-        // 2) Or Fit to page (always whole page, smaller visual)
-        // layoutType: models.LayoutType.FitToPage,
-
         panes: {
-          filters: { visible: false, expanded: false },  // hide Filters pane
-          pageNavigation: { visible: true }              // keep tabs (Direct / Channel)
+          filters: { visible: false, expanded: false },
+          pageNavigation: { visible: false }         // was true – hide bottom tab bar
         },
-        navContentPaneEnabled: false                      // hide the left nav content pane
+        navContentPaneEnabled: false,
+        background: models.BackgroundType.Transparent
       }
+
     });
 
     pbiReport.on("loaded", async () => {
@@ -83,7 +81,9 @@ async function renderReport() {
           settings: {
             layoutType: models.LayoutType.FitToWidth,
             panes: { filters: { visible: false, expanded: false }, pageNavigation: { visible: true } },
-            navContentPaneEnabled: false
+            panes: { filters: { visible: false, expanded: false }, pageNavigation: { visible: false } },
+            navContentPaneEnabled: false,
+            background: models.BackgroundType.Transparent
           }
         });
       } catch { /* no-op */ }
@@ -102,10 +102,7 @@ async function renderReport() {
 (function ensureAspectRatio() {
   const host = document.getElementById('reportContainer');
   if (!host) return;
-
-  // Respect explicit sizing/modern browsers
   if (host.style.height || (window.CSS && CSS.supports && CSS.supports('aspect-ratio: 16 / 9'))) return;
-
   const resize = () => { host.style.height = Math.round(host.clientWidth * 9 / 16) + 'px'; };
   resize();
   window.addEventListener('resize', resize);
@@ -160,6 +157,17 @@ async function renderReport() {
     welcome?.classList.remove("hide");
     dash?.classList.add("hide");
     pbiSection?.classList.add("hide");
+
+    const expandBtn = document.getElementById('btnExpandPBI');
+    expandBtn?.addEventListener('click', () => {
+      const root = document.getElementById('pbiSection');
+      const on = root.classList.toggle('pbi-fullscreen');
+      expandBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      expandBtn.textContent = on ? 'Close' : 'Expand';
+      // Nudge Power BI to recalc layout after container size change
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+    });
+
 
     if (authButtons && !authButtons.children.length) {
       const inBtn = document.createElement("button");
