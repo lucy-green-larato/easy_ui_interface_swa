@@ -1,10 +1,12 @@
 <!doctype html>
 <html lang="en" data-theme="">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Larato | Inside Track Business Growth Tools</title>
-  <meta name="description" content="Inside Track Business Growth Tools by Larato — fast, consistent sales and marketing workflows." />
+  <meta name="description"
+    content="Inside Track Business Growth Tools by Larato — fast, consistent sales and marketing workflows." />
   <meta name="color-scheme" content="light dark">
 
   <!-- Shared app styles (multi-tool, includes dark-mode tokens) -->
@@ -17,8 +19,10 @@
   <style>
     /* ============ Page tokens (this page only) ============ */
     :root {
-      --stage: 1240px;          /* one rail width for the whole page */
-      --rail-gutter: 24px;      /* outer side padding */
+      --stage: 1240px;
+      /* one rail width for the whole page */
+      --rail-gutter: 24px;
+      /* outer side padding */
       --bg: #f6f8fb;
       --surface: #ffffff;
       --text: #0f172a;
@@ -30,8 +34,14 @@
       --shadow: 0 8px 24px rgba(2, 6, 23, .08);
     }
 
-    * { box-sizing: border-box; }
-    html, body { height: 100%; }
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
 
     body {
       margin: 0;
@@ -45,16 +55,24 @@
       background-color: var(--bg);
       background-image:
         radial-gradient(1200px 700px at -200px -200px,
-          rgba(14,165,233,.18) 0%, rgba(14,165,233,.08) 40%, rgba(14,165,233,0) 75%),
+          rgba(14, 165, 233, .18) 0%, rgba(14, 165, 233, .08) 40%, rgba(14, 165, 233, 0) 75%),
         radial-gradient(1000px 600px at calc(100% + 200px) -200px,
-          rgba(30,64,175,.16) 0%, rgba(30,64,175,.06) 42%, rgba(30,64,175,0) 72%);
+          rgba(30, 64, 175, .16) 0%, rgba(30, 64, 175, .06) 42%, rgba(30, 64, 175, 0) 72%);
       background-repeat: no-repeat, no-repeat;
       background-position: -200px -200px, calc(100% + 200px) -200px;
       background-size: 1200px 700px, 1000px 600px;
     }
 
-    a { color: inherit; text-decoration: none; }
-    img { display:block; max-width:100%; height:auto; }
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    img {
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
 
     /* ===== Unified page rail (fixes alignment perfectly) ===== */
     header,
@@ -64,111 +82,341 @@
       /* identical outer width & centering for all major sections */
       width: min(100% - 48px, var(--stage));
       margin-inline: auto;
-      padding-block: 24px;   /* vertical rhythm only; side padding comes from width calc */
+      padding-block: 24px;
+      /* vertical rhythm only; side padding comes from width calc */
     }
-    header { padding-top: 28px; }
+
+    header {
+      padding-top: 28px;
+    }
 
     /* ===== Top bar ===== */
-    .nav { display:flex; align-items:center; justify-content:space-between; gap:16px; }
-    .brand { display:flex; align-items:center; gap:14px; }
-    .logo { width:40px; height:40px; }
-    .title-wrap { display:flex; flex-direction:column; }
-    .title-wrap h1 { margin:0; font-size:clamp(18px,2.6vw,24px); font-weight:700; letter-spacing:.2px; }
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo {
+      width: 40px;
+      height: 40px;
+    }
+
+    .title-wrap {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .title-wrap h1 {
+      margin: 0;
+      font-size: clamp(18px, 2.6vw, 24px);
+      font-weight: 700;
+      letter-spacing: .2px;
+    }
 
     /* ===== Card shells (Hero + PBI) ===== */
     .hero,
     .pbi-card {
       position: relative;
-      background:#fff;
-      border:1px solid var(--outline);
-      border-radius:var(--radius);
-      box-shadow:var(--shadow);
-      padding:28px;
-      overflow:hidden;
-      background-clip:padding-box;
+      background: #fff;
+      border: 1px solid var(--outline);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 28px;
+      overflow: hidden;
+      background-clip: padding-box;
     }
+
     .hero::before,
-    .pbi-card::before{
-      content:"";
-      position:absolute; inset:0;
-      border-radius:inherit; pointer-events:none;
-      background:linear-gradient(135deg,#ffffff 0%,#fbfdff 35%,rgba(14,165,233,.06) 100%);
+    .pbi-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      background: linear-gradient(135deg, #ffffff 0%, #fbfdff 35%, rgba(14, 165, 233, .06) 100%);
     }
-    .hero > *, .pbi-card > * { position:relative; z-index:1; }
 
-    .hero h2, .pbi-card h2 { margin:0 0 8px; }
-    .welcome p { margin:8px 0 0; color:var(--muted); max-width:72ch; }
+    .hero>*,
+    .pbi-card>* {
+      position: relative;
+      z-index: 1;
+    }
 
-    .section-heading { margin:24px 0 8px; font-size:18px; font-weight:700; letter-spacing:.2px; }
+    .hero h2,
+    .pbi-card h2 {
+      margin: 0 0 8px;
+    }
+
+    .welcome p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      max-width: 72ch;
+    }
+
+    .section-heading {
+      margin: 24px 0 8px;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: .2px;
+    }
 
     .grid {
-      display:grid;
-      gap:14px;
+      display: grid;
+      gap: 14px;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      margin-top:12px;
+      margin-top: 12px;
     }
 
     .tool {
-      display:block; position:relative; background:#fff;
-      border:1px solid var(--outline); border-radius:14px;
-      padding:16px 16px 18px; box-shadow:var(--shadow);
+      display: block;
+      position: relative;
+      background: #fff;
+      border: 1px solid var(--outline);
+      border-radius: 14px;
+      padding: 16px 16px 18px;
+      box-shadow: var(--shadow);
       transition: transform .06s ease, box-shadow .15s ease, background .15s ease;
-      font-weight:700;
+      font-weight: 700;
     }
-    .tool small { display:block; font-weight:500; color:var(--muted); margin-top:6px; }
-    .tool:hover { background:#f9fbff; transform:translateY(-1px); }
-    .tool:focus-visible { outline:3px solid var(--focus); outline-offset:2px; }
-    .pill { display:inline-block; font-size:12px; line-height:1; padding:6px 8px; border-radius:999px;
-            background:rgba(14,165,233,.1); color:#0369a1; border:1px solid rgba(14,165,233,.25); margin-top:10px; }
-    .tool.disabled { cursor:not-allowed; color:#475569; background:linear-gradient(180deg,#fff,#fafafa); opacity:.72; box-shadow:none; }
-    .tool.disabled:hover { transform:none; background:linear-gradient(180deg,#fff,#f6f6f6); }
-    .tool.disabled:focus { outline:none; }
 
-    .btn { appearance:none; padding:10px 14px; border-radius:12px; border:1px solid var(--outline); background:#fff; cursor:pointer;
-           transition: transform .04s ease, background .15s ease, filter .15s ease, box-shadow .15s ease; font-weight:600; }
-    .btn:hover { background:#f8fafc; color:#173991; }
-    .btn:active { transform:translateY(1px); }
-    .btn:focus-visible { outline:3px solid var(--focus); outline-offset:2px; }
-    .btn-primary{ background:linear-gradient(180deg,var(--brand),#173991); color:#fff; border-color:transparent; box-shadow:0 6px 14px rgba(30,64,175,.25); }
-    .btn-primary:hover{ filter:brightness(1.03); }
-    .btn-ghost{ appearance:none; border:1px solid var(--outline); background:#fff; border-radius:999px; padding:8px 12px; font-weight:600; cursor:pointer; }
-    .btn-ghost:hover{ background:#f2f6ff; border-color:#dce6ff; }
+    .tool small {
+      display: block;
+      font-weight: 500;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    .tool:hover {
+      background: #f9fbff;
+      transform: translateY(-1px);
+    }
+
+    .tool:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .pill {
+      display: inline-block;
+      font-size: 12px;
+      line-height: 1;
+      padding: 6px 8px;
+      border-radius: 999px;
+      background: rgba(14, 165, 233, .1);
+      color: #0369a1;
+      border: 1px solid rgba(14, 165, 233, .25);
+      margin-top: 10px;
+    }
+
+    .tool.disabled {
+      cursor: not-allowed;
+      color: #475569;
+      background: linear-gradient(180deg, #fff, #fafafa);
+      opacity: .72;
+      box-shadow: none;
+    }
+
+    .tool.disabled:hover {
+      transform: none;
+      background: linear-gradient(180deg, #fff, #f6f6f6);
+    }
+
+    .tool.disabled:focus {
+      outline: none;
+    }
+
+    :root {
+      /* override the earlier outline so it follows shared tokens */
+      --outline: var(--border);
+    }
+
+    .hero,
+    .pbi-card,
+    footer .card,
+    .tool {
+      /* pick up light/dark tokens from styles.css */
+      background: var(--card-bg);
+      border-color: var(--border);
+    }
+
+    /* text colors that adapt to tokens */
+    body {
+      color: var(--text-1);
+    }
+
+    .welcome p,
+    .pbi-card .card-lead {
+      color: var(--text-2);
+    }
+
+    /* compact icon button for the header toggle */
+    .btn-ghost.theme-btn {
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      line-height: 1;
+    }
+
+    .btn {
+      appearance: none;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--outline);
+      background: #fff;
+      cursor: pointer;
+      transition: transform .04s ease, background .15s ease, filter .15s ease, box-shadow .15s ease;
+      font-weight: 600;
+    }
+
+    .btn:hover {
+      background: #f8fafc;
+      color: #173991;
+    }
+
+    .btn:active {
+      transform: translateY(1px);
+    }
+
+    .btn:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(180deg, var(--brand), #173991);
+      color: #fff;
+      border-color: transparent;
+      box-shadow: 0 6px 14px rgba(30, 64, 175, .25);
+    }
+
+    .btn-primary:hover {
+      filter: brightness(1.03);
+    }
+
+    .btn-ghost {
+      appearance: none;
+      border: 1px solid var(--outline);
+      background: #fff;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-ghost:hover {
+      background: #f2f6ff;
+      border-color: #dce6ff;
+    }
 
     /* ===== Inside Track / Power BI ===== */
-    #pbiSection { margin-top: 8px; } /* small separation below hero */
-
-    .pbi-card .card-head{
-      display:flex; align-items:flex-start; gap:12px;
-      margin:0 0 12px; padding-bottom:8px;
-      border-bottom:1px solid rgba(30,64,175,.10);
+    #pbiSection {
+      margin-top: 8px;
     }
-    .pbi-card .card-title{ margin:0; font-size:clamp(18px,2.6vw,24px); font-weight:700; letter-spacing:.2px; }
-    .pbi-card .card-lead{ margin:6px 0 0; color:var(--muted); max-width:72ch; }
-    .pbi-card .actions{ margin-left:auto; display:flex; gap:8px; }
 
-    #reportContainer{
-      width:100%;
-      aspect-ratio:16 / 9;
-      min-height:640px;
-      background:#fff;
+    /* small separation below hero */
+
+    .pbi-card .card-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin: 0 0 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(30, 64, 175, .10);
     }
+
+    .pbi-card .card-title {
+      margin: 0;
+      font-size: clamp(18px, 2.6vw, 24px);
+      font-weight: 700;
+      letter-spacing: .2px;
+    }
+
+    .pbi-card .card-lead {
+      margin: 6px 0 0;
+      color: var(--muted);
+      max-width: 72ch;
+    }
+
+    .pbi-card .actions {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+    }
+
+    #reportContainer {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      min-height: 640px;
+      background: #fff;
+    }
+
     #reportContainer iframe,
-    #reportContainer .powerbi-frame{ width:100% !important; height:100% !important; display:block; border:0; }
+    #reportContainer .powerbi-frame {
+      width: 100% !important;
+      height: 100% !important;
+      display: block;
+      border: 0;
+    }
 
     /* Optional fullscreen mode (toggled via class on #pbiSection) */
-    .pbi-fullscreen{ position:fixed; inset:0; z-index:1000; background:var(--bg); padding:24px; display:flex; overflow:hidden; }
-    .pbi-fullscreen .pbi-card{ flex:1; display:flex; flex-direction:column; height:100%; }
-    .pbi-fullscreen #reportContainer{ flex:1; min-height:0; aspect-ratio:auto; }
-
-    footer .card{
-      background:#fff; border:1px solid var(--outline); border-radius:var(--radius);
-      padding:16px; box-shadow:var(--shadow); color:var(--muted);
+    .pbi-fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: var(--bg);
+      padding: 24px;
+      display: flex;
+      overflow: hidden;
     }
 
-    .hide{ display:none; }
+    .pbi-fullscreen .pbi-card {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
 
-    @media (max-width:900px){ #reportContainer{ min-height:560px; } }
-    @media (max-width:600px){ #reportContainer{ min-height:460px; } }
+    .pbi-fullscreen #reportContainer {
+      flex: 1;
+      min-height: 0;
+      aspect-ratio: auto;
+    }
+
+    footer .card {
+      background: #fff;
+      border: 1px solid var(--outline);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow);
+      color: var(--muted);
+    }
+
+    .hide {
+      display: none;
+    }
+
+    @media (max-width:900px) {
+      #reportContainer {
+        min-height: 560px;
+      }
+    }
+
+    @media (max-width:600px) {
+      #reportContainer {
+        min-height: 460px;
+      }
+    }
   </style>
 </head>
 
@@ -180,6 +428,8 @@
         <h1>Inside Track Business Growth Tools</h1>
       </div>
     </a>
+    <button id="themeToggle" class="btn-ghost theme-btn" aria-pressed="false"
+      aria-label="Switch to dark mode">🌙</button>
     <div id="authButtons">
       <button class="btn" id="btnSignIn">Sign in</button>
     </div>
@@ -191,14 +441,16 @@
       <p>These tools will save you time and assure that you deliver the best sales and marketing experience to your
         prospects. Please sign in to get started.</p>
       <div style="margin-top:10px">
-        <button class="btn btn-primary" id="btnSignInPrimary" aria-label="Sign in with Microsoft">Sign in with Microsoft</button>
+        <button class="btn btn-primary" id="btnSignInPrimary" aria-label="Sign in with Microsoft">Sign in with
+          Microsoft</button>
       </div>
     </section>
 
     <section id="dashboard" class="hide" aria-live="polite">
       <h2 style="margin:0 0 6px 0">Welcome<span id="userName"></span></h2>
       <p class="welcome-text" style="color:var(--muted); max-width:72ch; margin:8px 0 0 0">
-        These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects.
+        These tools will save you time and assure that you deliver the best sales and marketing experience to your
+        prospects.
       </p>
 
       <h3 class="section-heading">Tools for sales</h3>
@@ -216,8 +468,8 @@
         </a>
 
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-           title="Coming soon (October 2025). This will help you to differentiate against your competition"
-           data-tip="Coming soon (October 2025). This will help you to differentiate against your competition">
+          title="Coming soon (October 2025). This will help you to differentiate against your competition"
+          data-tip="Coming soon (October 2025). This will help you to differentiate against your competition">
           Beat your competitors
           <small>Position your value clearly against alternatives.</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
@@ -227,24 +479,23 @@
       <h3 class="section-heading" style="margin-top:28px">Tools for marketing</h3>
       <div class="grid">
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-           title="Coming soon. Specify campaigns that target your best prospects"
-           data-tip="Coming soon. Specify campaigns that target your best prospects">
+          title="Coming soon. Specify campaigns that target your best prospects"
+          data-tip="Coming soon. Specify campaigns that target your best prospects">
           Campaign specification
           <small>Pinpoint your best prospects</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
         </a>
 
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-           title="Coming soon. Prove why your offer is better"
-           data-tip="Coming soon. Prove why your offer is better">
+          title="Coming soon. Prove why your offer is better" data-tip="Coming soon. Prove why your offer is better">
           Differentiation
           <small>Evidence why your offer is better</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
         </a>
 
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-           title="Coming soon. Create data-backed, personalised messaging"
-           data-tip="Coming soon. Create data-backed, personalised messaging">
+          title="Coming soon. Create data-backed, personalised messaging"
+          data-tip="Coming soon. Create data-backed, personalised messaging">
           Market beating messaging
           <small>Data-backed, personalised, messaging</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
@@ -272,4 +523,5 @@
     <div class="card">© Larato Limited. Company Registration Number 5451360. Registered in the UK.</div>
   </footer>
 </body>
+
 </html>
