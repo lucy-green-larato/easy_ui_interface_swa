@@ -3,7 +3,7 @@ function buildReturnTarget() {
   const target = window.location.pathname + window.location.search + window.location.hash;
   return encodeURIComponent(target || "/");
 }
-function login() { location.href = "/.auth/login/aad?post_login_redirect_uri=" + buildReturnTarget(); }
+function login()  { location.href = "/.auth/login/aad?post_login_redirect_uri=" + buildReturnTarget(); }
 function logout() { location.href = "/.auth/logout"; }
 
 // Prevent navigation from disabled tiles
@@ -28,69 +28,74 @@ function scheduleTokenRefresh(report) {
       const { token } = await r.json();
       await report.setAccessToken(token);
       scheduleTokenRefresh(report);
-    } catch (err) {
-      console.error("Token refresh failed:", err);
+    } catch (e) {
+      console.error("Token refresh failed:", e);
     }
   }, 55 * 60 * 1000);
 }
 
 async function renderReport() {
-  const res = await fetch("/api/pbi-token", { credentials: "include" });
-  if (!res.ok) throw new Error(await res.text());
-  const { embedUrl, reportId, token } = await res.json();
-
-  const pbiGlobal = window["powerbi-client"] || window.powerbi;
-  if (!pbiGlobal || !window.powerbi) throw new Error("Power BI client not loaded.");
-  const models = pbiGlobal.models || window.powerbi.models;
-
-  const container = document.getElementById("reportContainer");
-  if (!container) return;
-
-  // reset if re-rendering
   try {
-    const existing = window.powerbi.get(container);
-    if (existing) window.powerbi.reset(container);
-  } catch {}
+    const res = await fetch("/api/pbi-token", { credentials: "include" });
+    if (!res.ok) throw new Error(await res.text());
+    const { embedUrl, reportId, token } = await res.json();
 
-  pbiReport = window.powerbi.embed(container, {
-    type: "report",
-    id: reportId,
-    embedUrl,
-    accessToken: token,
-    tokenType: models.TokenType.Embed,
-    permissions: models.Permissions.All,
-    settings: {
-      panes: {
-        filters: { visible: false, expanded: false }     // HIDE Filters pane
-      },
-      pageNavigationPosition: models.PageNavigationPosition.Bottom, // keep Direct/Channel tabs
-      navContentPaneEnabled: false,                      // no left nav
-      layoutType: models.LayoutType.Custom               // we'll force fit-to-width below
-    }
-  });
+    const pbiGlobal = window["powerbi-client"] || window.powerbi;
+    if (!pbiGlobal || !window.powerbi) throw new Error("Power BI client not loaded.");
+    const models = pbiGlobal.models || window.powerbi.models;
 
-  pbiReport.on("loaded", async () => {
-    // Force **Fit to width** so the page fills the box (no tiny canvas)
+    const container = document.getElementById("reportContainer"); // <-- matches your HTML
+    if (!container) return;
+
+    // reset if re-rendering
     try {
-      await pbiReport.updateSettings({
-        layoutType: models.LayoutType.Custom,
-        customLayout: { displayOption: models.DisplayOption.FitToWidth }
-      });
-    } catch (e) {
-      console.warn("Could not set FitToWidth:", e);
-    }
-    console.log("Report loaded");
-  });
+      const existing = window.powerbi.get(container);
+      if (existing) window.powerbi.reset(container);
+    } catch {}
 
-  pbiReport.on("error", (evt) => console.error("PowerBI embed error:", evt?.detail || evt));
-  scheduleTokenRefresh(pbiReport);
+    pbiReport = window.powerbi.embed(container, {
+      type: "report",
+      id: reportId,
+      embedUrl,
+      accessToken: token,
+      tokenType: models.TokenType.Embed,
+      permissions: models.Permissions.Read,
+      viewMode: models.ViewMode.View,
+      settings: {
+        // Choose ONE layout:
+        // 1) Fit to width (bigger visual, may need taller container)
+        layoutType: models.LayoutType.FitToWidth,
+        // 2) Or Fit to page (always whole page, smaller visual)
+        // layoutType: models.LayoutType.FitToPage,
 
-  // Nudge layout after window resizes
-  let t;
-  window.addEventListener("resize", () => {
-    clearTimeout(t);
-    t = setTimeout(() => { pbiReport?.refresh().catch(()=>{}); }, 120);
-  });
+        panes: {
+          filters: { visible: false, expanded: false },  // hide Filters pane
+          pageNavigation: { visible: true }              // keep tabs (Direct / Channel)
+        },
+        navContentPaneEnabled: false                      // hide the left nav content pane
+      }
+    });
+
+    pbiReport.on("loaded", async () => {
+      // Re-assert settings in case tenant defaults override
+      try {
+        await pbiReport.updateSettings({
+          settings: {
+            layoutType: models.LayoutType.FitToWidth,
+            panes: { filters: { visible: false, expanded: false }, pageNavigation: { visible: true } },
+            navContentPaneEnabled: false
+          }
+        });
+      } catch {}
+      console.log("Report loaded");
+    });
+
+    pbiReport.on("error", (evt) => console.error("PowerBI embed error:", evt?.detail || evt));
+    scheduleTokenRefresh(pbiReport);
+  } catch (err) {
+    console.error("Embed failed:", err);
+    throw err;
+  }
 }
 
 // ===== Init: toggle signed-in/out UI and render report =====
