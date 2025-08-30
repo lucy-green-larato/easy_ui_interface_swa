@@ -1198,9 +1198,9 @@ select:not([multiple]) {
   outline-offset: 1px;
 }
 
-/* Card shell (keep if you like the styling) */
+/* Card shell around the report (optional style) */
 .pbi-card{
-  margin-top: 12px;
+  margin-top: 16px;
   background:#fff;
   border:1px solid #e5e7eb;
   border-radius:12px;
@@ -1208,24 +1208,24 @@ select:not([multiple]) {
   overflow:hidden;
 }
 
-/* Responsive 16:9 host so the report isn’t tiny */
+/* Host for the PBI iframe: 16:9, tall enough on desktop */
 #reportContainer{
   width:100%;
-  aspect-ratio: 16 / 9;   /* auto height from width */
+  aspect-ratio:16/9;
   height:auto;
-  min-height: 700px;      /* desktop usability floor */
-  max-height: 1200px;     /* optional ceiling */
+  min-height:720px;       /* bump to 820/900 if you want it bigger */
+  max-height:1200px;      /* optional ceiling */
 }
 
-/* Make the injected iframe fill the host fully */
+/* Make the injected iframe fill the host */
 #reportContainer iframe,
 #reportContainer .powerbi-frame{
   width:100% !important;
   height:100% !important;
-  border:0;
   display:block;
+  border:0;
 }
 
 /* Smaller screens: lower the floor so it fits */
-@media (max-width: 900px){ #reportContainer{ min-height: 560px; } }
-@media (max-width: 600px){ #reportContainer{ min-height: 460px; } }
+@media (max-width: 900px){ #reportContainer{ min-height:560px; } }
+@media (max-width: 600px){ #reportContainer{ min-height:460px; } }
