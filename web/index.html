@@ -585,7 +585,7 @@
         <small>Create evidence-first B2B campaigns</small>
         <span class="pill pill--new" aria-hidden="true">New</span>
       </a>
-      
+
       <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
         title="Coming soon. Prove why your offer is better" data-tip="Coming soon. Prove why your offer is better">
         Differentiation
@@ -622,6 +622,99 @@
   <footer>
     <div class="card">© Larato Limited. Company Registration Number 5451360. Registered in the UK.</div>
   </footer>
+  <script>
+    // Minimal status poller that plugs into CampaignPage & CampaignUI.
+    // Call startCampaignStatusPoll(runId) whenever you have a runId.
+
+    (function () {
+      let activeController = null;
+      const rendered = new Set();
+
+      function sleep(ms) {
+        return new Promise(r => setTimeout(r, ms));
+      }
+
+      async function pollOnce(runId, signal) {
+        const res = await fetch(`/api/campaign/status?runId=${encodeURIComponent(runId)}`, { signal });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const status = await res.json();
+
+        // Update the stage UI and run badge
+        if (window.CampaignPage) {
+          window.CampaignPage.setRunId(runId);
+          window.CampaignPage.updateStage(status.state);
+        }
+
+        // When Completed, render campaign content exactly once per runId
+        if (status.state === "Completed" && !rendered.has(runId) && window.CampaignUI) {
+          rendered.add(runId);
+          await window.CampaignUI.handleCompleted(runId);
+        }
+
+        return status.state;
+      }
+
+      async function loop(runId, controller) {
+        // Poll fast initially, then back off slightly
+        let delay = 1200;
+        for (; ;) {
+          if (controller.signal.aborted) return;
+          try {
+            const state = await pollOnce(runId, controller.signal);
+            // Stop polling on terminal states
+            if (state === "Completed" || state === "Failed") return;
+            await sleep(delay);
+            if (delay < 2000) delay += 200; // gentle backoff up to 2s
+          } catch (err) {
+            if (controller.signal.aborted) return;
+            console.warn("status poll error:", err);
+            await sleep(2500); // retry slower on errors
+          }
+        }
+      }
+
+      // Public API you can call from your existing shell code:
+      window.startCampaignStatusPoll = function startCampaignStatusPoll(runId) {
+        // Cancel any previous poll
+        if (activeController) activeController.abort();
+        const controller = new AbortController();
+        activeController = controller;
+
+        // Show the run id immediately
+        if (window.CampaignPage) window.CampaignPage.setRunId(runId);
+
+        // kick off loop
+        loop(runId, controller);
+
+        // Return a stop handle if you need to cancel later
+        return () => controller.abort();
+      };
+
+      // Helper: start a new run and begin polling (optional convenience)
+      window.startNewCampaignRun = async function startNewCampaignRun(body = {}) {
+        const res = await fetch("/api/campaign/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const json = await res.json();
+        const runId = json.runId;
+        if (!runId) throw new Error("No runId returned from /api/campaign/start");
+        // Begin polling this run
+        window.startCampaignStatusPoll(runId);
+        return runId;
+      };
+
+      // Example button wiring (use if you like):
+      const newRunBtn = document.getElementById("newRunBtn");
+      if (newRunBtn) {
+        newRunBtn.addEventListener("click", async () => {
+          // Customize the body as needed; keep it minimal here
+          await window.startNewCampaignRun({ page: "leadgen", rowCount: 0 });
+        });
+      }
+    })();
+  </script>
 </body>
 
 </html>
