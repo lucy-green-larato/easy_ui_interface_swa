@@ -1,50 +1,75 @@
-<!-- File: /api/runs/index.py -->
+# /api/runs/index.py
 # Azure Functions — Python v2 (HTTP GET)
-# Lists recent Power BI runs by reading Blob Index Tags.
+# Lists recent Power BI runs by reading Blob Index Tags in CAMPAIGN_SEGMENTS_CONTAINER.
+# Uses UPLOADS_SAS_URL for authenticated access.
 
+import os
+import json
+from urllib.parse import urlsplit
 
-import os, json
 import azure.functions as func
 from azure.storage.blob import BlobServiceClient
-
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
 
+def _blob_service_client():
+    """
+    Build a BlobServiceClient from UPLOADS_SAS_URL.
+    UPLOADS_SAS_URL must be a full account URL with SAS, e.g.:
+      https://<account>.blob.core.windows.net/?sv=...&ss=b&...
+    """
+    sas_url = os.environ["UPLOADS_SAS_URL"].strip()
+    parts = urlsplit(sas_url)
+    account_base = f"{parts.scheme}://{parts.netloc}"
+    sas_token = parts.query.lstrip("?")
+    bsc = BlobServiceClient(account_url=account_base, credential=sas_token)
+    return bsc, account_base
+
+
 @app.route(route="runs", methods=["GET"])
 def runs(req: func.HttpRequest) -> func.HttpResponse:
-try:
-account_url = os.environ.get("BLOB_ACCOUNT_URL") # e.g. https://<account>.blob.core.windows.net
-credential = os.environ.get("BLOB_SAS" ) or os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
-container = os.environ.get("SEGMENTS_CONTAINER", "segments")
-if not account_url:
-return func.HttpResponse("Missing BLOB_ACCOUNT_URL", status_code=500)
-if credential and "DefaultEndpointsProtocol" in credential:
-bsc = BlobServiceClient.from_connection_string(credential)
-else:
-bsc = BlobServiceClient(account_url=account_url, credential=credential)
+    try:
+        container = os.environ["CAMPAIGN_SEGMENTS_CONTAINER"]
 
+        bsc, account_base = _blob_service_client()
 
-# Query blobs that have our required tags; limit to latest 50
-# Note: find_blobs_by_tags is account-scope; filter by container in query
-query = f"@container='{container}' AND request_id LIKE '%'"
-items = []
-for blob in bsc.find_blobs_by_tags(query):
-if not blob.name.endswith('.csv'): # CSVs only
-continue
-# Pull key tags (may be None if not present)
-tags = blob.tags or {}
-items.append({
-"runId": tags.get("request_id") or tags.get("runId") or "",
-"page": tags.get("pbi_page") or tags.get("segment") or "",
-"rowCount": int(tags.get("row_count") or 0),
-"timestamp": blob.tag_value.get("timestamp") if hasattr(blob, 'tag_value') else None,
-"path": f"https://{bsc.account_name}.blob.core.windows.net/{blob.container}/{blob.name}"
-})
-if len(items) >= 50:
-break
-# Sort newest first if timestamps absent -> leave as-found
-body = {"items": items}
-return func.HttpResponse(json.dumps(body), status_code=200, mimetype="application/json")
-except Exception as e:
-return func.HttpResponse(str(e), status_code=500)
+        # Account-scope tag query restricted to the target container.
+        query = f"@container='{container}' AND request_id LIKE '%'"
+        items = []
+
+        for blob in bsc.find_blobs_by_tags(query):
+            name = str(blob.name)
+            if not name.lower().endswith(".csv"):
+                continue
+
+            tags = getattr(blob, "tags", None) or {}
+
+            rc = tags.get("row_count")
+            try:
+                row_count = int(rc) if rc is not None else 0
+            except Exception:
+                row_count = 0
+
+            container_name = getattr(blob, "container_name", container)
+            path = f"{account_base}/{container_name}/{name}"
+
+            items.append(
+                {
+                    "runId": tags.get("request_id", ""),
+                    "page": tags.get("pbi_page", ""),
+                    "rowCount": row_count,
+                    "timestamp": tags.get("timestamp"),
+                    "path": path,
+                }
+            )
+
+            if len(items) >= 50:
+                break
+
+        return func.HttpResponse(json.dumps({"items": items}), mimetype="application/json", status_code=200)
+
+    except KeyError as ke:
+        return func.HttpResponse(f"Missing environment variable: {ke}", status_code=500)
+    except Exception as e:
+        return func.HttpResponse(str(e), status_code=500)
