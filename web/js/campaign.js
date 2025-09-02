@@ -2,8 +2,14 @@
    Campaign Builder UI — COMPLETE.
    - Renders campaign.json when a run completes
    - Provides a status poller and "New run" wiring
-   - Exposes window.CampaignUI.handleCompleted(runId)
-   - Exposes window.Campaign.startStatusPoll(runId) and window.Campaign.startNewRun(body)
+   - Handles CSV upload: computes rowCount + sha256 and starts a run
+   - Exposes:
+       window.CampaignUI.handleCompleted(runId)
+       window.Campaign.startStatusPoll(runId)
+       window.Campaign.startNewRun(body)
+       window.Campaign.setRunId(runId)
+       window.Campaign.updateStage(state)
+       window.Campaign.setActiveTab(id)
 */
 
 (() => {
@@ -364,11 +370,9 @@
     if (!res.ok) throw new Error(`status ${res.status}`);
     const status = await res.json();
 
-    // Update UI
     setRunIdBadge(runId);
     updateStageBar(status.state);
 
-    // Render once on Completed
     if (status.state === "Completed" && !_rendered.has(runId)) {
       _rendered.add(runId);
       await handleCompleted(runId);
@@ -403,10 +407,14 @@
   }
 
   async function startNewRun(body = {}) {
-    // Collect a page value if present in UI (optional)
     const pageSel = $("#runSelect");
     const page = body.page || (pageSel && pageSel.value) || "leadgen";
-    const payload = { page, rowCount: body.rowCount ?? 0, csv_sha256: body.csv_sha256 || "test" };
+    const payload = {
+      page,
+      rowCount: body.rowCount ?? 0,
+      csv_sha256: body.csv_sha256 || "test",
+      filters: body.filters,
+    };
 
     const res = await fetch("/api/campaign/start", {
       method: "POST",
@@ -424,9 +432,34 @@
   }
 
   // -----------------------------
-  // Optional auto-wiring of "New run" button (id=newRunBtn)
+  // CSV helpers (integrated)
+  // -----------------------------
+  async function sha256HexFromFile(file) {
+    const buf = await file.arrayBuffer();
+    const hash = await crypto.subtle.digest("SHA-256", buf);
+    return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function countCsvRows(text) {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    return Math.max(0, lines.length - 1);
+  }
+
+  async function startFromCsv(file) {
+    // read text + hash concurrently
+    const [text, shaHex] = await Promise.all([file.text(), sha256HexFromFile(file)]);
+    const rowCount = countCsvRows(text);
+    const pageSel = $("#runSelect");
+    const page = (pageSel && pageSel.value) || "leadgen";
+    await startNewRun({ page, rowCount, csv_sha256: shaHex });
+    updateStageBar("ValidatingInput");
+  }
+
+  // -----------------------------
+  // DOM wiring (runs once)
   // -----------------------------
   document.addEventListener("DOMContentLoaded", () => {
+    // New run button
     const btn = $("#newRunBtn");
     if (btn && !btn.dataset.wired) {
       btn.dataset.wired = "1";
@@ -440,13 +473,32 @@
       });
     }
 
-    // Tab click wiring (id/class structure from index.html). Guard against double-binding.
+    // Tabs
     const tabButtons = $$(".tab");
     tabButtons.forEach((b) => {
       if (b.dataset.wired) return;
       b.dataset.wired = "1";
       b.addEventListener("click", () => setActiveTab(b.dataset.tabTarget));
     });
+
+    // CSV upload → start run
+    const csv = $("#csvUpload");
+    if (csv && !csv.dataset.wired) {
+      csv.dataset.wired = "1";
+      csv.addEventListener("change", async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        try {
+          await startFromCsv(file);
+        } catch (err) {
+          console.error("CSV start failed:", err);
+          toast("CSV start failed");
+        }
+      });
+    }
+
+    // Default tab
+    setActiveTab("tab-overview");
   });
 
   // -----------------------------
