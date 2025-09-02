@@ -1,306 +1,222 @@
-<!-- File: /web/campaign/index.html -->
 <!doctype html>
 <html lang="en">
-
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Inside Track Tools · Campaign Builder</title>
-    <link rel="icon" href="/assets/larato-logo.svg" />
-    <style>
-        :root {
-            --bg: #f6f7fb;
-            --card: #fff;
-            --ink: #1c1e21;
-            --muted: #6b7280;
-            --border: #e5e7eb;
-            --brand: #111827;
-            --accent: #2563eb;
-        }
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Inside Track Tools · Campaign Builder</title>
+  <link rel="icon" href="/assets/larato-logo.svg"/>
 
-        * {
-            box-sizing: border-box;
-        }
-
-        body {
-            margin: 0;
-            font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-            color: var(--ink);
-            background: var(--bg);
-        }
-
-        header {
-            position: sticky;
-            top: 0;
-            z-index: 30;
-            background: var(--card);
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 16px;
-        }
-
-        .brand {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-weight: 600;
-        }
-
-        .chip {
-            background: #eef2ff;
-            color: #3730a3;
-            font-size: 12px;
-            padding: 4px 8px;
-            border-radius: 999px;
-        }
-
-        main {
-            max-width: 1400px;
-            margin: 16px auto;
-            padding: 0 16px;
-            display: grid;
-            grid-template-columns: 300px 1fr 290px;
-            gap: 16px;
-        }
-
-        @media (max-width: 1100px) {
-            main {
-                grid-template-columns: 1fr;
-            }
-
-            .assist {
-                display: none;
-            }
-        }
-
-        .card {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            box-shadow: 0 1px 0 rgba(0, 0, 0, .02);
-        }
-
-        .rail {
-            position: sticky;
-            top: 64px;
-            align-self: start;
-            max-height: calc(100vh - 80px);
-            overflow: auto;
-            padding: 12px;
-        }
-
-        .rail h3 {
-            margin: 8px 8px 4px;
-            font-size: 13px;
-            color: var(--muted);
-            text-transform: uppercase;
-            letter-spacing: .04em;
-        }
-
-        .group {
-            padding: 8px;
-            border-bottom: 1px dashed var(--border);
-        }
-
-        .group:last-child {
-            border-bottom: 0;
-        }
-
-        label {
-            display: block;
-            font-size: 12px;
-            color: var(--muted);
-            margin-bottom: 6px;
-        }
-
-        input[type="text"],
-        input[type="url"],
-        select,
-        .textarea {
-            width: 100%;
-            padding: 10px 12px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            background: #fff;
-        }
-
-        input[type="file"] {
-            width: 100%;
-        }
-
-        .muted {
-            color: var(--muted);
-            font-size: 12px;
-        }
-
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 14px;
-            border-radius: 10px;
-            border: 1px solid var(--border);
-            background: #111827;
-            color: #fff;
-            cursor: pointer;
-        }
-
-        .btn.secondary {
-            background: #fff;
-            color: #111827;
-        }
-
-        .btn:disabled {
-            opacity: .6;
-            cursor: not-allowed;
-        }
-
-        .workspace {
-            padding: 12px;
-        }
-
-        .stage {
-            display: flex;
-            gap: 10px;
-            margin: 4px 0 12px;
-        }
-
-        .stage .step {
-            flex: 1;
-            padding: 8px;
-            background: #f3f4f6;
-            border-radius: 10px;
-            text-align: center;
-            font-size: 12px;
-            color: #6b7280;
-            border: 1px solid #e5e7eb;
-        }
-
-        .stage .step.active {
-            background: #eef2ff;
-            color: #3730a3;
-            border-color: #c7d2fe;
-        }
-
-        .stage .step.done {
-            background: #ecfdf5;
-            color: #047857;
-            border-color: #a7f3d0;
-        }
-
-        .tabs {
-            display: flex;
-            gap: 8px;
-            border-bottom: 1px solid var(--border);
-            margin-bottom: 8px;
-        }
-
-        .tab {
-            padding: 10px 12px;
-            border: 1px solid var(--border);
-            border-bottom: none;
-            border-radius: 10px 10px 0 0;
-            background: #f9fafb;
-            cursor: pointer;
-        }
-
-        .tab.active {
-            background: #fff;
-            font-weight: 600;
-        }
-
-        .panel {
-            padding: 8px 4px 16px;
-        }
-
-        .assist {
-            padding: 12px;
-        }
-
-        .assist .section {
-            padding: 10px;
-            border-bottom: 1px dashed var(--border);
-        }
-
-        .assist .section:last-child {
-            border-bottom: 0;
-        }
-
-        .list {
-            margin: 6px 0 0;
-            padding-left: 16px;
-        }
-
-        .toast {
-            position: fixed;
-            right: 16px;
-            bottom: 16px;
-            background: #111827;
-            color: #fff;
-            padding: 10px 12px;
-            border-radius: 10px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, .2);
-            display: none;
-        }
-    </style>
+  <!-- Minimal CSS (consolidated; avoids duplicate .toast) -->
+  <style>
+    :root{
+      --bg:#f6f7fb;--card:#fff;--ink:#1c1e21;--muted:#6b7280;--border:#e5e7eb;--brand:#111827;--accent:#2563eb;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--ink);background:var(--bg)}
+    header{position:sticky;top:0;z-index:30;background:var(--card);border-bottom:1px solid var(--border);
+      display:flex;align-items:center;justify-content:space-between;padding:10px 16px}
+    .brand{display:flex;align-items:center;gap:10px;font-weight:600}
+    .chip{background:#eef2ff;color:#3730a3;font-size:12px;padding:4px 8px;border-radius:999px}
+    main{max-width:1400px;margin:16px auto;padding:0 16px;display:grid;grid-template-columns:300px 1fr 290px;gap:16px}
+    @media (max-width:1100px){main{grid-template-columns:1fr}.assist{display:none}}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 1px 0 rgba(0,0,0,.02)}
+    .rail{position:sticky;top:64px;align-self:start;max-height:calc(100vh - 80px);overflow:auto;padding:12px}
+    .rail h3{margin:8px 8px 4px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+    .group{padding:8px;border-bottom:1px dashed var(--border)}
+    .group:last-child{border-bottom:0}
+    label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+    input[type="text"],input[type="url"],select,.textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:#fff}
+    input[type="file"]{width:100%}
+    .muted{color:var(--muted)}
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:#111827;color:#fff;cursor:pointer}
+    .btn.secondary{background:#fff;color:#111827}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .btn-copy{margin-left:.5rem}
+    .btn-primary{border-color:#0078d4}
+    .workspace{padding:12px}
+    .stage{display:flex;gap:10px;margin:4px 0 12px}
+    .stage .step{flex:1;padding:8px;background:#f3f4f6;border-radius:10px;text-align:center;font-size:12px;color:#6b7280;border:1px solid #e5e7eb}
+    .stage .step.active{background:#eef2ff;color:#3730a3;border-color:#c7d2fe}
+    .stage .step.done{background:#ecfdf5;color:#047857;border-color:#a7f3d0}
+    .tabs{display:flex;gap:8px;border-bottom:1px solid var(--border);margin-bottom:8px;align-items:center;justify-content:space-between}
+    .tabs-left{display:flex;gap:8px}
+    .tab{padding:10px 12px;border:1px solid var(--border);border-bottom:none;border-radius:10px 10px 0 0;background:#f9fafb;cursor:pointer}
+    .tab.active{background:#fff;font-weight:600}
+    .panel{padding:8px 4px 16px}
+    .assist{padding:12px}
+    .assist .section{padding:10px;border-bottom:1px dashed var(--border)}
+    .assist .section:last-child{border-bottom:0}
+    .list{margin:6px 0 0;padding-left:16px}
+    .pre{white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;font-size:.95rem}
+    .email-card .email-head{display:flex;justify-content:space-between;align-items:center}
+    .email-subject{font-weight:700}
+    .email-preview{margin:.5rem 0}
+    .table{width:100%;border-collapse:collapse}
+    .table th,.table td{text-align:left;border-bottom:1px solid #eee;padding:.5rem;vertical-align:top}
+    .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 12px;border-radius:6px;opacity:0;transition:opacity .2s;pointer-events:none}
+    .toast.show{opacity:.9}
+  </style>
 </head>
-
 <body>
-    <header>
-        <div class="brand">
-            <img src="/assets/larato-logo.svg" alt="Inside Track" class="logo" style="height:24px" />
-            <span>Inside Track Tools · <strong>Campaign Builder</strong></span>
-            <span class="chip" id="envChip">Prod</span>
+  <header>
+    <div class="brand">
+      <img src="/assets/larato-logo.svg" alt="Inside Track" class="logo" style="height:24px"/>
+      <span>Inside Track Tools · <strong>Campaign Builder</strong></span>
+      <span class="chip" id="envChip">Prod</span>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center">
+      <button class="btn secondary" id="newRunBtn">New run</button>
+      <button class="btn secondary" id="loadRecentBtn">Load recent</button>
+      <div id="download-docx-mount"></div>
+      <a href="#" class="muted">Help</a>
+    </div>
+  </header>
+
+  <main>
+    <!-- Left rail: inputs -->
+    <aside class="card rail" id="inputs">
+      <div class="group">
+        <h3>Data source</h3>
+        <label for="runSelect">Pick a recent Power BI run</label>
+        <select id="runSelect"><option value="">Loading…</option></select>
+        <div class="muted" style="margin-top:6px">or</div>
+        <label for="csvUpload" style="margin-top:6px">Upload CSV (testing only)</label>
+        <input id="csvUpload" type="file" accept=".csv"/>
+      </div>
+
+      <div class="group">
+        <h3>Company</h3>
+        <label>Company name</label>
+        <input id="companyName" type="text" placeholder="Comms 365"/>
+        <label style="margin-top:8px">Website</label>
+        <input id="companyWebsite" type="url" placeholder="https://www.example.com"/>
+        <label style="margin-top:8px">LinkedIn</label>
+        <input id="companyLinkedIn" type="url" placeholder="https://www.linkedin.com/company/..."/>
+        <label style="margin-top:8px">USPs / differentiators</label>
+        <textarea id="companyUsps" class="textarea" rows="3" placeholder="Resilient connectivity; Millisecond failover"></textarea>
+      </div>
+
+      <div class="group">
+        <h3>Options</h3>
+        <label>Tone</label>
+        <select id="tone">
+          <option value="match">Match company website (recommended)</option>
+          <option value="professional">Professional</option>
+          <option value="warm">Warm</option>
+        </select>
+        <label style="margin-top:8px">Evidence window (months)</label>
+        <select id="evidenceWindow">
+          <option>6</option><option>9</option><option>12</option>
+        </select>
+        <!-- Completed checkbox label that was truncated in your paste -->
+        <label style="display:flex; align-items:center; gap:8px; margin-top:8px">
+          <input id="includeCompliance" type="checkbox" checked/>
+          Include compliance footer
+        </label>
+      </div>
+    </aside>
+
+    <!-- Center: workspace -->
+    <section class="card workspace">
+      <!-- Stage / status -->
+      <div class="stage" id="stageBar">
+        <div class="step" id="step-ValidatingInput">Validate</div>
+        <div class="step" id="step-EvidenceBuilder">Evidence</div>
+        <div class="step" id="step-DraftCampaign">Draft</div>
+        <div class="step" id="step-QualityGate">Quality</div>
+        <div class="step" id="step-Completed">Done</div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <div class="tabs-left">
+          <button class="tab active" data-tab-target="tab-overview">Overview</button>
+          <button class="tab" data-tab-target="tab-landing">Landing page</button>
+          <button class="tab" data-tab-target="tab-emails">Emails</button>
+          <button class="tab" data-tab-target="tab-evidence">Evidence</button>
+          <button class="tab" data-tab-target="tab-sales">Sales</button>
         </div>
-        <div style="display:flex; gap:8px; align-items:center">
-            <button class="btn secondary" id="newRunBtn">New run</button>
-            <button class="btn secondary" id="loadRecentBtn">Load recent</button>
-            <a href="#" class="muted">Help</a>
+        <div id="runBadge" class="muted">Run: <span id="currentRunId">–</span></div>
+      </div>
+
+      <!-- Panels (CampaignUI will render into these IDs) -->
+      <div id="campaign-content" class="panel">
+        <div id="tab-overview" class="card">
+          <div class="muted">When a run completes, the executive summary and meta will render here.</div>
         </div>
-    </header>
+        <div id="tab-landing" class="card" style="display:none">
+          <div class="muted">Landing page assets will render here.</div>
+        </div>
+        <div id="tab-emails" class="card" style="display:none">
+          <div class="muted">Emails will render here.</div>
+        </div>
+        <div id="tab-evidence" class="card" style="display:none">
+          <div class="muted">Evidence log will render here.</div>
+        </div>
+        <div id="tab-sales" class="card" style="display:none">
+          <div class="muted">Sales enablement content will render here.</div>
+        </div>
+      </div>
+    </section>
 
+    <!-- Right rail: assist / tips -->
+    <aside class="card assist">
+      <div class="section">
+        <strong>Tips</strong>
+        <ul class="list">
+          <li>Pick a recent Power BI run or upload a CSV for testing.</li>
+          <li>When status reaches <em>Completed</em>, the tabs will populate automatically.</li>
+          <li>Use the “Download .docx” button in the header to export.</li>
+        </ul>
+      </div>
+      <div class="section">
+        <strong>Status</strong>
+        <div id="statusText" class="muted">Waiting…</div>
+      </div>
+    </aside>
+  </main>
 
-    <main>
-        <!-- Left rail: inputs -->
-        <aside class="card rail" id="inputs">
-            <div class="group">
-                <h3>Data source</h3>
-                <label for="runSelect">Pick a recent Power BI run</label>
-                <select id="runSelect">
-                    <option value="">Loading…</option>
-                </select>
-                <div class="muted" style="margin-top:6px">or</div>
-                <label for="csvUpload" style="margin-top:6px">Upload CSV (testing only)</label>
-                <input id="csvUpload" type="file" accept=".csv" />
-            </div>
-            <div class="group">
-                <h3>Company</h3>
-                <label>Company name</label>
-                <input id="companyName" type="text" placeholder="Comms 365" />
-                <label style="margin-top:8px">Website</label>
-                <input id="companyWebsite" type="url" placeholder="https://www.example.com" />
-                <label style="margin-top:8px">LinkedIn</label>
-                <input id="companyLinkedIn" type="url" placeholder="https://www.linkedin.com/company/..." />
-                <label style="margin-top:8px">USPs / differentiators</label>
-                <textarea id="companyUsps" class="textarea" rows="3"
-                    placeholder="Resilient connectivity; Millisecond failover"></textarea>
-            </div>
-            <div class="group">
-                <h3>Options</h3>
-                <label>Tone</label>
-                <select id="tone">
-                    <option value="match">Match company website (recommended)</option>
-                    <option value="professional">Professional</option>
-                    <option value="warm">Warm</option>
-                </select>
-                <label style="margin-top:8px">Evidence window (months)</label>
-                <select id="evidenceWindow">
-                    <option>6</option>
-                    <option>9</option>
-                    <option>12</option>
-                </select>
-                <label style="display:flex; align-items:center; gap:8px; margin-top:8px">
+  <div id="campaign-toast" class="toast"></div>
 
+  <!-- Load the Campaign UI logic -->
+  <script src="/js/campaign.js"></script>
+
+  <!-- Small inline helpers: tab switching + stage updates; non-invasive to your shell -->
+  <script>
+    (function(){
+      const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+      const $  = (sel, root=document) => root.querySelector(sel);
+
+      function setActiveTab(id){
+        $$(".tab").forEach(t => t.classList.toggle("active", t.dataset.tabTarget === id));
+        $$("#campaign-content > div").forEach(p => p.style.display = (p.id === id ? "" : "none"));
+      }
+      $$(".tab").forEach(btn => btn.addEventListener("click", () => setActiveTab(btn.dataset.tabTarget)));
+
+      function updateStage(state){
+        const order = ["ValidatingInput","EvidenceBuilder","DraftCampaign","QualityGate","Completed"];
+        order.forEach(s => {
+          const el = $("#step-" + s);
+          if (!el) return;
+          el.classList.remove("active","done");
+          if (state === s) el.classList.add("active");
+          if (order.indexOf(s) < order.indexOf(state)) el.classList.add("done");
+        });
+        const statusText = $("#statusText");
+        if (statusText) statusText.textContent = state;
+      }
+
+      function setRunId(runId){
+        const n = $("#currentRunId");
+        if (n) n.textContent = runId || "–";
+      }
+
+      // Expose to your existing shell/poller so you can update UI without touching DOM here
+      window.CampaignPage = { setActiveTab, updateStage, setRunId };
+
+      // Optional: default active tab
+      setActiveTab("tab-overview");
+    })();
+  </script>
+</body>
 </html>
