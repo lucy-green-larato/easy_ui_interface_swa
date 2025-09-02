@@ -1,0 +1,306 @@
+<!-- File: /web/campaign/index.html -->
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inside Track Tools · Campaign Builder</title>
+    <link rel="icon" href="/assets/larato-logo.svg" />
+    <style>
+        :root {
+            --bg: #f6f7fb;
+            --card: #fff;
+            --ink: #1c1e21;
+            --muted: #6b7280;
+            --border: #e5e7eb;
+            --brand: #111827;
+            --accent: #2563eb;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+            color: var(--ink);
+            background: var(--bg);
+        }
+
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 30;
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+        }
+
+        .chip {
+            background: #eef2ff;
+            color: #3730a3;
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 999px;
+        }
+
+        main {
+            max-width: 1400px;
+            margin: 16px auto;
+            padding: 0 16px;
+            display: grid;
+            grid-template-columns: 300px 1fr 290px;
+            gap: 16px;
+        }
+
+        @media (max-width: 1100px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+
+            .assist {
+                display: none;
+            }
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 1px 0 rgba(0, 0, 0, .02);
+        }
+
+        .rail {
+            position: sticky;
+            top: 64px;
+            align-self: start;
+            max-height: calc(100vh - 80px);
+            overflow: auto;
+            padding: 12px;
+        }
+
+        .rail h3 {
+            margin: 8px 8px 4px;
+            font-size: 13px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: .04em;
+        }
+
+        .group {
+            padding: 8px;
+            border-bottom: 1px dashed var(--border);
+        }
+
+        .group:last-child {
+            border-bottom: 0;
+        }
+
+        label {
+            display: block;
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+
+        input[type="text"],
+        input[type="url"],
+        select,
+        .textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        input[type="file"] {
+            width: 100%;
+        }
+
+        .muted {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: #111827;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        .btn.secondary {
+            background: #fff;
+            color: #111827;
+        }
+
+        .btn:disabled {
+            opacity: .6;
+            cursor: not-allowed;
+        }
+
+        .workspace {
+            padding: 12px;
+        }
+
+        .stage {
+            display: flex;
+            gap: 10px;
+            margin: 4px 0 12px;
+        }
+
+        .stage .step {
+            flex: 1;
+            padding: 8px;
+            background: #f3f4f6;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 12px;
+            color: #6b7280;
+            border: 1px solid #e5e7eb;
+        }
+
+        .stage .step.active {
+            background: #eef2ff;
+            color: #3730a3;
+            border-color: #c7d2fe;
+        }
+
+        .stage .step.done {
+            background: #ecfdf5;
+            color: #047857;
+            border-color: #a7f3d0;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 8px;
+        }
+
+        .tab {
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-bottom: none;
+            border-radius: 10px 10px 0 0;
+            background: #f9fafb;
+            cursor: pointer;
+        }
+
+        .tab.active {
+            background: #fff;
+            font-weight: 600;
+        }
+
+        .panel {
+            padding: 8px 4px 16px;
+        }
+
+        .assist {
+            padding: 12px;
+        }
+
+        .assist .section {
+            padding: 10px;
+            border-bottom: 1px dashed var(--border);
+        }
+
+        .assist .section:last-child {
+            border-bottom: 0;
+        }
+
+        .list {
+            margin: 6px 0 0;
+            padding-left: 16px;
+        }
+
+        .toast {
+            position: fixed;
+            right: 16px;
+            bottom: 16px;
+            background: #111827;
+            color: #fff;
+            padding: 10px 12px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, .2);
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <div class="brand">
+            <img src="/assets/larato-logo.svg" alt="Inside Track" class="logo" style="height:24px" />
+            <span>Inside Track Tools · <strong>Campaign Builder</strong></span>
+            <span class="chip" id="envChip">Prod</span>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center">
+            <button class="btn secondary" id="newRunBtn">New run</button>
+            <button class="btn secondary" id="loadRecentBtn">Load recent</button>
+            <a href="#" class="muted">Help</a>
+        </div>
+    </header>
+
+
+    <main>
+        <!-- Left rail: inputs -->
+        <aside class="card rail" id="inputs">
+            <div class="group">
+                <h3>Data source</h3>
+                <label for="runSelect">Pick a recent Power BI run</label>
+                <select id="runSelect">
+                    <option value="">Loading…</option>
+                </select>
+                <div class="muted" style="margin-top:6px">or</div>
+                <label for="csvUpload" style="margin-top:6px">Upload CSV (testing only)</label>
+                <input id="csvUpload" type="file" accept=".csv" />
+            </div>
+            <div class="group">
+                <h3>Company</h3>
+                <label>Company name</label>
+                <input id="companyName" type="text" placeholder="Comms 365" />
+                <label style="margin-top:8px">Website</label>
+                <input id="companyWebsite" type="url" placeholder="https://www.example.com" />
+                <label style="margin-top:8px">LinkedIn</label>
+                <input id="companyLinkedIn" type="url" placeholder="https://www.linkedin.com/company/..." />
+                <label style="margin-top:8px">USPs / differentiators</label>
+                <textarea id="companyUsps" class="textarea" rows="3"
+                    placeholder="Resilient connectivity; Millisecond failover"></textarea>
+            </div>
+            <div class="group">
+                <h3>Options</h3>
+                <label>Tone</label>
+                <select id="tone">
+                    <option value="match">Match company website (recommended)</option>
+                    <option value="professional">Professional</option>
+                    <option value="warm">Warm</option>
+                </select>
+                <label style="margin-top:8px">Evidence window (months)</label>
+                <select id="evidenceWindow">
+                    <option>6</option>
+                    <option>9</option>
+                    <option>12</option>
+                </select>
+                <label style="display:flex; align-items:center; gap:8px; margin-top:8px">
+
+</html>
