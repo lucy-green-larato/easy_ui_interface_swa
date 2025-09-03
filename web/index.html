@@ -14,7 +14,7 @@
 
   <!-- Power BI -->
   <script src="/vendor/powerbi.min.js"></script>
-  <script defer src="/js/main.js?v=2025-08-30-2"></script>
+  <script type="module" defer src="/src/js/main.js?v=2025-08-30-2"></script>
 
   <style>
     /* ============ Page tokens (this page only) ============ */
@@ -369,7 +369,7 @@
 
     .pbi-fullscreen .pbi-card {
       max-width: none;
-      height: 100vh;
+      height: 100%;
       border-radius: 0;
       border: 0;
       box-shadow: none;
@@ -526,7 +526,7 @@
 <body>
   <header class="nav" aria-label="Global">
     <a href="/" class="brand" aria-current="page">
-      <img class="logo" src="./assets/larato-logo.svg" alt="Larato" style="height:100px;width:auto;display:block">
+      <img class="logo" src="/assets/larato-logo.svg" alt="Larato" style="height:100px;width:auto;display:block">
       <div class="title-wrap">
         <h1>Inside Track Business Growth Tools</h1>
       </div>
@@ -558,13 +558,13 @@
 
       <h3 class="section-heading">Tools for sales</h3>
       <div class="grid">
-        <a class="tool" href="/engagement/index.html">
+        <a class="tool" href="/engagement/">
           Call scripts and emails
           <small>Craft confident, on-brand outreach in seconds.</small>
           <span class="pill">Available</span>
         </a>
 
-        <a class="tool" href="/qualification/index.html">
+        <a class="tool" href="/qualification/">
           Lead qualification
           <small>Qualify your leads in seconds</small>
           <span class="pill">Available</span>
@@ -600,7 +600,6 @@
         <small>Data-backed, personalised, messaging</small>
         <span class="pill" aria-hidden="true">Coming soon</span>
       </a>
-      </div>
     </section>
   </main>
 
