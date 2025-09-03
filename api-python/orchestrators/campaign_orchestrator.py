@@ -1,13 +1,13 @@
-# /api/orchestrators/campaign_orchestrator.py
+# /api-python/orchestrators/campaign_orchestrator.py
 # DFApp-based Durable orchestration + activities for Campaign Builder.
 
 import os, json
 from datetime import datetime, timezone
-import azure.functions as func
+from urllib.parse import urlsplit
 import azure.durable_functions as df
 from azure.storage.blob import BlobServiceClient, ContentSettings
 
-from function_app import dfapp  # <-- shared DF app
+from function_app import dfapp  # shared DF app
 
 IGNORED_COLUMNS = ["AdopterProfile", "TopConnectivity"]  # per spec
 
@@ -26,7 +26,8 @@ def _get_container_client():
 
     parts = urlsplit(sas_url)
     account_url = f"{parts.scheme}://{parts.netloc}"
-    sas_token = parts.query  # token without leading "?"
+    sas_token = parts.query.lstrip("?")  # ensure no leading '?'
+
     container_name = os.environ.get("CAMPAIGN_RESULTS_CONTAINER")
     if not container_name:
         raise RuntimeError("CAMPAIGN_RESULTS_CONTAINER is not set")
@@ -62,10 +63,7 @@ def _write_status(prefix: str, run_id: str, state: str, page: str, row_count: in
     status = {
         "runId": run_id,
         "state": state,
-        "input": {
-            "rowCount": int(row_count or 0),
-            "page": page or "",
-        },
+        "input": {"rowCount": int(row_count or 0), "page": page or ""},
     }
     _upload_json(container, _status_blob_path(prefix), status)
 
@@ -73,7 +71,7 @@ def _write_status(prefix: str, run_id: str, state: str, page: str, row_count: in
 # -----------------------------
 # Orchestrator
 # -----------------------------
-@app.orchestration_trigger(context_name="context")
+@dfapp.orchestration_trigger(context_name="context")
 def CampaignOrchestration(context: df.DurableOrchestrationContext):
     """
     DFApp-compatible orchestrator.
@@ -85,7 +83,7 @@ def CampaignOrchestration(context: df.DurableOrchestrationContext):
     run_id = context.instance_id
 
     page = input_data.get("page") or "default"
-    row_count = int(input_data.get("rowCount", 0))
+    row_count = int(input_data.get("rowCount") or 0)
     filters = input_data.get("filters")
     csv_sha256 = input_data.get("csv_sha256")
     company = input_data.get("company")  # optional pass-through
@@ -98,7 +96,7 @@ def CampaignOrchestration(context: df.DurableOrchestrationContext):
     prefix = f"results/campaign/{page}/{yyyy}/{mm}/{dd}/{run_id}/"
 
     # 1) validate input
-    _ = yield context.call_activity("validate_input_activity", {
+    yield context.call_activity("validate_input_activity", {
         "prefix": prefix,
         "run_id": run_id,
         "page": page,
@@ -109,16 +107,16 @@ def CampaignOrchestration(context: df.DurableOrchestrationContext):
     })
 
     # 2) build evidence
-    evidence = yield context.call_activity("evidence_builder_activity", {
+    evidence = (yield context.call_activity("evidence_builder_activity", {
         "prefix": prefix,
         "run_id": run_id,
         "page": page,
         "row_count": row_count,
         "company": company,
-    }) or {}
+    })) or {}
 
     # 3) draft campaign (include evidence)
-    _ = yield context.call_activity("campaign_draft_activity", {
+    yield context.call_activity("campaign_draft_activity", {
         "prefix": prefix,
         "run_id": run_id,
         "page": page,
@@ -146,7 +144,7 @@ def CampaignOrchestration(context: df.DurableOrchestrationContext):
 # -----------------------------
 # Activities
 # -----------------------------
-@app.activity_trigger(input_name="input")
+@dfapp.activity_trigger(input_name="input")
 def validate_input_activity(input: dict):
     """
     Stub: write status ValidatingInput; return input_proof-like summary (not persisted here).
@@ -160,7 +158,6 @@ def validate_input_activity(input: dict):
 
     _write_status(prefix, run_id, "ValidatingInput", page, row_count)
 
-    # No heavy validation in skeleton; just echo proof
     return {
         "ok": True,
         "input_proof": {
@@ -173,7 +170,7 @@ def validate_input_activity(input: dict):
     }
 
 
-@app.activity_trigger(input_name="input")
+@dfapp.activity_trigger(input_name="input")
 def evidence_builder_activity(input: dict):
     """
     Stub: write status EvidenceBuilder; save a minimal evidence_log.json.
@@ -209,7 +206,7 @@ def evidence_builder_activity(input: dict):
     return {"evidence_log": evidence_log}
 
 
-@app.activity_trigger(input_name="input")
+@dfapp.activity_trigger(input_name="input")
 def campaign_draft_activity(input: dict):
     """
     Stub: write status DraftCampaign; save campaign.json with required contract.
@@ -239,13 +236,11 @@ def campaign_draft_activity(input: dict):
         },
         "emails": [
             {
-                "id": 1,
                 "subject": "How UK tech sellers are winning share from the big telcos",
                 "preview": "Quick intro to a data-backed approach to outreach.",
                 "body": "Hi {{FirstName}},\n\nWe help UK tech providers win market share using evidence-led outreach..."
             },
             {
-                "id": 2,
                 "subject": "A 6-month plan to increase response rates",
                 "preview": "What changes when you use Inside Track evidence.",
                 "body": "Hi {{FirstName}},\n\nHere’s a simple plan to double-down on the segments most likely to engage..."
@@ -267,7 +262,7 @@ def campaign_draft_activity(input: dict):
             "tone_profile": "professional",
             "persona_focus": "UK tech decision-maker",
             "evidence_window_months": 6,
-            "compliance_footer": "This content is a draft. Validate before external use."
+            "compliance_footer": True
         }
     }
 
@@ -275,7 +270,7 @@ def campaign_draft_activity(input: dict):
     return {"ok": True}
 
 
-@app.activity_trigger(input_name="input")
+@dfapp.activity_trigger(input_name="input")
 def validator_activity(input: dict):
     """
     Stub: write status QualityGate then Completed.
