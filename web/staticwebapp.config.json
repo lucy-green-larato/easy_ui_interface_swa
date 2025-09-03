@@ -20,17 +20,24 @@
     { "route": "/campaign", "rewrite": "/campaign/index.html" },
     { "route": "/campaign/*", "rewrite": "/campaign/index.html" },
 
-    { "route": "/.auth/*",        "rewrite": "http://localhost:7072/api/.auth/{*}",         "allowedRoles": ["anonymous"] },
+    /* API routing:
+       - Python DF API is on 7071 for /api/campaign/* and /api/runs
+       - Node API stays on 7072 for /api/generate/* and any remaining /api/* */
+    { "route": "/api/campaign/*", "rewrite": "http://localhost:7071/api/campaign/{*}", "allowedRoles": ["anonymous"] },
+    { "route": "/api/runs",        "rewrite": "http://localhost:7071/api/runs",         "allowedRoles": ["anonymous"] },
 
-    { "route": "/api/campaign/*", "rewrite": "http://localhost:7071/api/campaign/{*}",      "allowedRoles": ["anonymous"] },
-    { "route": "/api/runs",       "rewrite": "http://localhost:7071/api/runs",              "allowedRoles": ["anonymous"] },
+    { "route": "/api/generate/*",  "rewrite": "http://localhost:7072/api/generate/{*}", "allowedRoles": ["anonymous"] },
+    { "route": "/api/*",           "rewrite": "http://localhost:7072/api/{*}",          "allowedRoles": ["anonymous"] },
 
-    { "route": "/api/generate/*", "rewrite": "http://localhost:7072/api/generate/{*}",      "allowedRoles": ["anonymous"] },
-    { "route": "/api/*",          "rewrite": "http://localhost:7072/api/{*}",               "allowedRoles": ["anonymous"] },
+    /* Static allowances */
+    {
+      "route": "/content/call-library/*",
+      "allowedRoles": ["anonymous", "authenticated"],
+      "headers": { "cache-control": "no-store" }
+    },
+    { "route": "/src/*", "allowedRoles": ["anonymous", "authenticated"] },
 
-    { "route": "/content/call-library/*", "allowedRoles": ["anonymous", "authenticated"], "headers": { "cache-control": "no-store" } },
-    { "route": "/src/*",                 "allowedRoles": ["anonymous", "authenticated"] },
-
+    /* Caching */
     { "route": "/*.html", "headers": { "cache-control": "no-cache" } },
     { "route": "/*.css",  "headers": { "cache-control": "public, max-age=31536000, immutable" } },
     { "route": "/*.js",   "headers": { "cache-control": "public, max-age=31536000, immutable" } },
@@ -45,27 +52,13 @@
       "/api/*",
       "/content/*",
       "/src/*",
-      "/reports",
-      "/reports/*",
-      "/engagement",
-      "/engagement/*",
-      "/qualification",
-      "/qualification/*",
-      "/campaign",
-      "/campaign/*",
-      "/first-call-script-v2",
-      "/first-call-script-v2/*",
-      "/lead-qualification",
-      "/lead-qualification/*",
-      "/*.css",
-      "/*.js",
-      "/*.mjs",
-      "/*.json",
-      "/*.png",
-      "/*.jpg",
-      "/*.gif",
-      "/*.svg",
-      "/*.ico"
+      "/reports", "/reports/*",
+      "/engagement", "/engagement/*",
+      "/qualification", "/qualification/*",
+      "/campaign", "/campaign/*",
+      "/first-call-script-v2", "/first-call-script-v2/*",
+      "/lead-qualification", "/lead-qualification/*",
+      "/*.css", "/*.js", "/*.mjs", "/*.json", "/*.png", "/*.jpg", "/*.gif", "/*.svg", "/*.ico"
     ]
   },
 
