@@ -9,8 +9,7 @@ from urllib.parse import urlsplit
 
 import azure.functions as func
 from azure.storage.blob import BlobServiceClient
-
-app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+from function_app import app
 
 
 def _blob_service_client():
@@ -23,9 +22,7 @@ def _blob_service_client():
     parts = urlsplit(sas_url)
     account_base = f"{parts.scheme}://{parts.netloc}"
     sas_token = parts.query.lstrip("?")
-    bsc = BlobServiceClient(account_url=account_base, credential=sas_token)
-    return bsc, account_base
-
+    return BlobServiceClient(account_url=account_base, credential=sas_token), account_base
 
 @app.route(route="runs", methods=["GET"])
 def runs(req: func.HttpRequest) -> func.HttpResponse:
