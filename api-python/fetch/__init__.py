@@ -10,6 +10,7 @@ import json
 from urllib.parse import urlsplit
 
 import azure.functions as func
+import azure.durable_functions as df
 from azure.storage.blob import BlobServiceClient
 
 from function_app import app
