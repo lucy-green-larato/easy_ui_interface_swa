@@ -17,6 +17,9 @@
     { "route": "/lead-qualification", "redirect": "/qualification", "statusCode": 301 },
     { "route": "/lead-qualification/*", "redirect": "/qualification", "statusCode": 301 },
 
+    { "route": "/campaign", "rewrite": "/campaign/index.html" },
+    { "route": "/campaign/*", "rewrite": "/campaign/index.html" },
+
     { "route": "/api/*", "allowedRoles": ["anonymous"] },
 
     {
@@ -45,6 +48,8 @@
       "/engagement/*",
       "/qualification",
       "/qualification/*",
+      "/campaign",
+      "/campaign/*",
       "/first-call-script-v2",
       "/first-call-script-v2/*",
       "/lead-qualification",
