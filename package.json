@@ -7,7 +7,11 @@
     "dev:api-python": "cd api-python && func start --port 7071 --cors http://localhost:4280 --cors https://*.app.github.dev --cors-credentials",
     "dev:api-node": "cd api && func start --port 7072",
     "dev:swa": "swa start ./web --port 4280 --host 0.0.0.0 --verbose",
-    "dev:up": "concurrently -k -n azurite,py,node,swa \"npm:dev:azurite\" \"npm:dev:api-python\" \"npm:dev:api-node\" \"npm:dev:swa\""
+
+    "dev:ports": "gh codespace ports visibility 4280:public,7071:public,7072:public,10000:private,10001:private,10002:private -c ${CODESPACE_NAME}",
+    "dev:ports:wait": "bash -lc 'sleep 8; npm run dev:ports || npm run dev:ports'",
+
+    "dev:up": "concurrently -k -n azurite,py,node,swa,ports \"npm:dev:azurite\" \"npm:dev:api-python\" \"npm:dev:api-node\" \"npm:dev:swa\" \"npm:dev:ports:wait\""
   },
   "devDependencies": {
     "@azure/static-web-apps-cli": "^2.0.6",
