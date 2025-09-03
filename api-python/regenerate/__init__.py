@@ -13,7 +13,7 @@ from urllib.parse import parse_qs
 import azure.functions as func
 import azure.durable_functions as df
 
-app = df.DFApp(http_auth_level=func.AuthLevel.FUNCTION)
+from function_app import app
 
 
 def _get_body(req: func.HttpRequest) -> dict:

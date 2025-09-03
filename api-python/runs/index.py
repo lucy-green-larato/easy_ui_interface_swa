@@ -3,21 +3,13 @@
 # Lists recent Power BI runs by reading Blob Index Tags in CAMPAIGN_SEGMENTS_CONTAINER.
 # Uses UPLOADS_SAS_URL for authenticated access.
 
-import os
-import json
+import os, json
 from urllib.parse import urlsplit
-
 import azure.functions as func
 from azure.storage.blob import BlobServiceClient
-from function_app import app
-
+from function_app import app   # ← shared FunctionApp
 
 def _blob_service_client():
-    """
-    Build a BlobServiceClient from UPLOADS_SAS_URL.
-    UPLOADS_SAS_URL must be a full account URL with SAS, e.g.:
-      https://<account>.blob.core.windows.net/?sv=...&ss=b&...
-    """
     sas_url = os.environ["UPLOADS_SAS_URL"].strip()
     parts = urlsplit(sas_url)
     account_base = f"{parts.scheme}://{parts.netloc}"

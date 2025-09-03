@@ -17,7 +17,7 @@ from docx import Document
 from docx.shared import Pt, Inches
 
 
-app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+from function_app import app
 
 
 def _blob_service() -> BlobServiceClient:
