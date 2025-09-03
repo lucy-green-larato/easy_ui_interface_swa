@@ -20,15 +20,11 @@
     { "route": "/campaign", "rewrite": "/campaign/index.html" },
     { "route": "/campaign/*", "rewrite": "/campaign/index.html" },
 
-    /* Python Functions (Durable) backend */
     { "route": "/api/campaign/*", "rewrite": "http://localhost:7071/api/campaign/{*}", "allowedRoles": ["anonymous"] },
     { "route": "/api/runs",       "rewrite": "http://localhost:7071/api/runs",         "allowedRoles": ["anonymous"] },
 
-    /* Node Functions backend — specific routes (keep if you like) */
     { "route": "/api/generate/*", "rewrite": "http://localhost:7072/api/generate/{*}", "allowedRoles": ["anonymous"] },
-
-    /* Node Functions backend — catch-all for everything else under /api */
-    { "route": "/api/*", "rewrite": "http://localhost:7072/api/{*}", "allowedRoles": ["anonymous"] },
+    { "route": "/api/*",          "rewrite": "http://localhost:7072/api/{*}",          "allowedRoles": ["anonymous"] },
 
     {
       "route": "/content/call-library/*",
