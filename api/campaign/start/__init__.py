@@ -5,24 +5,23 @@ import json
 import logging
 import azure.functions as func
 import azure.durable_functions as df
+from function_app import app 
 
-app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
-@df.DurableClientInput(client_name="client")
 @app.route(route="campaign/start", methods=["POST"])
+@app.durable_client_input(client_name="client")  # <-- v2 decorator on the shared app
 async def campaign_start(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
     try:
         body = req.get_json()
     except ValueError:
         body = {}
 
-    page = (body.get("page") or "default")
-    row_count = int(body.get("rowCount", 0))
+    page = body.get("page") or "default"
+    row_count = int(body.get("rowCount") or 0)
     filters = body.get("filters")
     csv_sha256 = body.get("csv_sha256")
-    requested_run_id = body.get("runId")  # let Durable pick if not provided
+    requested_run_id = body.get("runId")
 
-    # Start orchestration with instance_id = runId (if given)
     instance_id = await client.start_new(
         orchestration_function_name="CampaignOrchestration",
         instance_id=requested_run_id,
