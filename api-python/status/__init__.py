@@ -11,7 +11,7 @@ import azure.durable_functions as df
 from azure.storage.blob import BlobServiceClient
 
 
-app = df.DFApp(http_auth_level=func.AuthLevel.FUNCTION)
+from function_app import app
 
 
 def _blob_client():

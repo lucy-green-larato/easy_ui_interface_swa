@@ -1,15 +1,13 @@
 # /api/campaign/start/__init__.py
-# Wires POST /api/campaign/start to Durable (CampaignOrchestration) using the provided runId (if any).
-
+# /api-python/campaign/start/__init__.py
 import json
 import logging
 import azure.functions as func
 import azure.durable_functions as df
-from function_app import app 
-
+from function_app import app  # ← use the shared FunctionApp
 
 @app.route(route="campaign/start", methods=["POST"])
-@app.durable_client_input(client_name="client")  # <-- v2 decorator on the shared app
+@app.durable_client_input(client_name="client")
 async def campaign_start(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
     try:
         body = req.get_json()
@@ -24,7 +22,7 @@ async def campaign_start(req: func.HttpRequest, client: df.DurableOrchestrationC
 
     instance_id = await client.start_new(
         orchestration_function_name="CampaignOrchestration",
-        instance_id=requested_run_id,
+        instance_id=requested_run_id,  # None lets Durable assign one
         client_input={
             "page": page,
             "rowCount": row_count,
