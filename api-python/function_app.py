@@ -1,15 +1,10 @@
 # /api-python/function_app.py
-# One shared entrypoint for ALL Python v2 HTTP functions and Durable functions.
-
 import azure.functions as func
 import azure.durable_functions as df
 
-# Shared apps that the host will load
-app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
-dfapp = df.DFApp(http_auth_level=func.AuthLevel.FUNCTION)
+# ✅ Single app instance (DFApp can host HTTP routes + Durable)
+app = df.DFApp(http_auth_level=func.AuthLevel.FUNCTION)
 
-# Import your modules so their decorators register on the shared apps.
-# If a module is temporarily missing, we don't crash startup.
 def _safe_import(name: str):
     try:
         __import__(name)
@@ -25,5 +20,5 @@ _safe_import("campaign.regenerate.__init__")
 _safe_import("campaign.download.__init__")
 _safe_import("runs.index")
 
-# Durable orchestrator + activities
+# Durable (orchestrator + activities)
 _safe_import("orchestrators.campaign_orchestrator")
