@@ -1,0 +1,17 @@
+{
+  "name": "inside-track-tools-dev",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev:azurite": "azurite --location ./.azurite --blobPort 10000 --queuePort 10001 --tablePort 10002 --silent",
+    "dev:api-python": "cd api-python && func start --port 7071 --cors http://localhost:4280 --cors https://*.app.github.dev --cors-credentials",
+    "dev:api-node": "cd api && func start --port 7072",
+    "dev:swa": "swa start ./web --port 4280 --host 0.0.0.0 --verbose",
+    "dev:up": "concurrently -k -n azurite,py,node,swa \"npm:dev:azurite\" \"npm:dev:api-python\" \"npm:dev:api-node\" \"npm:dev:swa\""
+  },
+  "devDependencies": {
+    "@azure/static-web-apps-cli": "^2.0.6",
+    "azurite": "^3.30.0",
+    "concurrently": "^9.0.0"
+  }
+}
