@@ -31,6 +31,7 @@
       "allowedRoles": ["anonymous", "authenticated"],
       "headers": { "cache-control": "no-store" }
     },
+    { "route": "/.auth/*", "rewrite": "http://localhost:7072/api/.auth/{*}", "allowedRoles": ["anonymous"] },
     { "route": "/src/*", "allowedRoles": ["anonymous", "authenticated"] },
 
     { "route": "/*.html", "headers": { "cache-control": "no-cache" } },
