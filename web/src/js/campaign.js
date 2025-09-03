@@ -1,515 +1,356 @@
-/* /web/js/campaign.js
-   Campaign Builder UI — COMPLETE.
-   - Renders campaign.json when a run completes
-   - Provides a status poller and "New run" wiring
-   - Handles CSV upload: computes rowCount + sha256 and starts a run
-   - Exposes:
-       window.CampaignUI.handleCompleted(runId)
-       window.Campaign.startStatusPoll(runId)
-       window.Campaign.startNewRun(body)
-       window.Campaign.setRunId(runId)
-       window.Campaign.updateStage(state)
-       window.Campaign.setActiveTab(id)
-*/
+/* /src/js/campaign.js — full file (featureful, still minimal deps) */
 
-(() => {
-  const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const $ = (sel, el = document) => el.querySelector(sel);
+const $$ = (sel, el = document) => Array.from(el.querySelectorAll(sel));
+const h = (tag, attrs = {}, ...children) => {
+  const el = document.createElement(tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => {
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) el.setAttribute(k, v);
+  });
+  for (const c of children.flat()) if (c != null) el.append(typeof c === "string" ? document.createTextNode(c) : c);
+  return el;
+};
 
-  // -----------------------------
-  // Minimal DOM helpers
-  // -----------------------------
-  function el(tag, attrs = {}, ...children) {
-    const node = document.createElement(tag);
-    for (const [k, v] of Object.entries(attrs || {})) {
-      if (k === "class") node.className = v;
-      else if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.substring(2), v);
-      else if (v !== undefined && v !== null) node.setAttribute(k, v);
-    }
-    for (const child of children) {
-      if (child == null) continue;
-      if (Array.isArray(child)) node.append(...child);
-      else if (child instanceof Node) node.append(child);
-      else node.append(document.createTextNode(String(child)));
-    }
-    return node;
-  }
+function toast(msg) {
+  const t = $("#campaign-toast");
+  if (!t) return console.log(msg);
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 1800);
+}
 
-  function toast(msg) {
-    let t = $("#campaign-toast");
-    if (!t) {
-      t = el("div", { id: "campaign-toast", class: "toast" });
-      document.body.appendChild(t);
-    }
-    t.textContent = msg;
-    t.classList.add("show");
-    setTimeout(() => t.classList.remove("show"), 1400);
-  }
-
-  function copyButton(getText) {
-    return el(
-      "button",
-      {
-        class: "btn btn-copy",
-        type: "button",
-        onclick: async () => {
-          try {
-            await navigator.clipboard.writeText(getText());
-            toast("Copied!");
-          } catch (e) {
-            console.error(e);
-            toast("Copy failed");
-          }
-        },
-      },
-      "Copy",
-    );
-  }
-
-  function downloadDocxButton(runId) {
-    return el(
-      "button",
-      {
-        class: "btn btn-primary",
-        type: "button",
-        onclick: () => {
-          const url = `/api/campaign/download?runId=${encodeURIComponent(runId)}`;
-          window.location.href = url;
-        },
-      },
-      "Download .docx",
-    );
-  }
-
-  // -----------------------------
-  // Renderers
-  // -----------------------------
-  function renderOverview(container, campaign) {
-    container.innerHTML = "";
-    const meta = campaign.meta || {};
-    const proof = campaign.input_proof || {};
-
-    const header = el(
-      "div",
-      { class: "section" },
-      el("h3", {}, "Executive Summary"),
-      el(
-        "div",
-        { class: "card" },
-        el("pre", { class: "pre" }, campaign.executive_summary || "(none)"),
-        copyButton(() => campaign.executive_summary || ""),
-      ),
-    );
-
-    const metaGrid = el(
-      "div",
-      { class: "grid meta-grid" },
-      metaItem("Tone profile", meta.tone_profile),
-      metaItem("Persona focus", meta.persona_focus),
-      metaItem("Evidence window (months)", meta.evidence_window_months),
-      metaItem("Run ID", proof.run_id),
-      metaItem("Row count", String(proof.row_count ?? "")),
-      metaItem("CSV sha256", proof.csv_sha256),
-      metaItem(
-        "Ignored columns",
-        Array.isArray(proof.ignored_columns_confirmed)
-          ? proof.ignored_columns_confirmed.join(", ")
-          : String(proof.ignored_columns_confirmed || ""),
-      ),
-      metaItem("Filters", typeof proof.filters === "object" ? JSON.stringify(proof.filters) : (proof.filters || "")),
-    );
-
-    container.append(header, el("h4", {}, "Meta"), metaGrid);
-  }
-
-  function metaItem(label, value) {
-    return el(
-      "div",
-      { class: "card meta" },
-      el("div", { class: "meta-label" }, label || ""),
-      el("div", { class: "meta-value" }, value == null ? "" : String(value)),
-    );
-  }
-
-  function renderLanding(container, campaign) {
-    container.innerHTML = "";
-    const lp = campaign.landing_page;
-
-    if (lp == null) {
-      container.append(el("div", { class: "muted" }, "No landing page content."));
-      return;
-    }
-
-    if (typeof lp === "string") {
-      container.append(el("div", { class: "card" }, el("pre", { class: "pre" }, lp), copyButton(() => lp)));
-      return;
-    }
-
-    if (lp.headline) {
-      container.append(
-        el(
-          "div",
-          { class: "card" },
-          el("h3", {}, lp.headline),
-          lp.subheadline ? el("p", { class: "muted" }, lp.subheadline) : null,
-          copyButton(() => [lp.headline, lp.subheadline].filter(Boolean).join("\n")),
-        ),
-      );
-    }
-
-    if (Array.isArray(lp.sections)) {
-      lp.sections.forEach((s) => {
-        const content = Array.isArray(s.bullets)
-          ? el(
-              "ul",
-              {},
-              ...s.bullets.map((b) => el("li", {}, b)),
-            )
-          : el("pre", { class: "pre" }, s.content || "");
-        container.append(
-          el(
-            "div",
-            { class: "card" },
-            el("h4", {}, s.title || "Section"),
-            content,
-            copyButton(() => {
-              const text = Array.isArray(s.bullets) ? s.bullets.join("\n") : s.content || "";
-              return `${s.title || "Section"}\n\n${text}`;
-            }),
-          ),
-        );
-      });
-    }
-
-    if (lp.cta) {
-      container.append(
-        el(
-          "div",
-          { class: "card" },
-          el("strong", {}, "CTA"),
-          el("p", {}, lp.cta),
-          copyButton(() => lp.cta),
-        ),
-      );
-    }
-  }
-
-  function renderEmails(container, campaign) {
-    container.innerHTML = "";
-    const emails = Array.isArray(campaign.emails) ? campaign.emails : [];
-    if (emails.length === 0) {
-      container.append(el("div", { class: "muted" }, "No emails generated."));
-      return;
-    }
-    emails.forEach((m, i) => {
-      const subject = m.subject || `Email ${i + 1}`;
-      const preview = m.preview || "";
-      const body = m.body || "";
-      container.append(
-        el(
-          "div",
-          { class: "card email-card" },
-          el(
-            "div",
-            { class: "email-head" },
-            el("div", { class: "email-subject" }, subject),
-            copyButton(() => subject + "\n\n" + body),
-          ),
-          preview ? el("div", { class: "email-preview muted" }, preview) : null,
-          el("pre", { class: "pre" }, body),
-        ),
-      );
-    });
-  }
-
-  function renderEvidence(container, campaign) {
-    container.innerHTML = "";
-    const items = Array.isArray(campaign.evidence_log) ? campaign.evidence_log : [];
-    if (items.length === 0) {
-      container.append(el("div", { class: "muted" }, "No evidence logged."));
-      return;
-    }
-
-    const table = el("table", { class: "table" });
-    const thead = el(
-      "thead",
-      {},
-      el(
-        "tr",
-        {},
-        el("th", {}, "Publisher"),
-        el("th", {}, "Title"),
-        el("th", {}, "Date"),
-        el("th", {}, "URL"),
-        el("th", {}, "Excerpt"),
-      ),
-    );
-    const tbody = el("tbody", {});
-    items.forEach((r) => {
-      tbody.append(
-        el(
-          "tr",
-          {},
-          el("td", {}, r.publisher || ""),
-          el("td", {}, r.title || ""),
-          el("td", {}, r.date || ""),
-          el("td", {}, r.url ? el("a", { href: r.url, target: "_blank", rel: "noopener noreferrer" }, "Open") : ""),
-          el("td", {}, r.excerpt || ""),
-        ),
-      );
-    });
-    table.append(thead, tbody);
-    container.append(table);
-  }
-
-  function renderSales(container, campaign) {
-    container.innerHTML = "";
-    const se = campaign.sales_enablement || {};
-    const blocks = [];
-    if (se.call_script) blocks.push(["Call Script", se.call_script]);
-    if (se.one_pager) blocks.push(["One-Pager", se.one_pager]);
-    if (blocks.length === 0) {
-      container.append(el("div", { class: "muted" }, "No sales enablement content."));
-      return;
-    }
-    blocks.forEach(([title, text]) => {
-      container.append(
-        el(
-          "div",
-          { class: "card" },
-          el("h4", {}, title),
-          el("pre", { class: "pre" }, text || ""),
-          copyButton(() => text || ""),
-        ),
-      );
-    });
-  }
-
-  // -----------------------------
-  // Tab mounts
-  // -----------------------------
-  function ensure(id) {
-    let n = document.getElementById(id);
-    if (!n) {
-      const parent = $("#campaign-content") || document.body;
-      n = el("div", { id, class: "tab-section card" });
-      parent.append(n);
-    }
-    return n;
-  }
-
-  function setActiveTab(id) {
-    const tabs = $$(".tab");
-    const panels = $$("#campaign-content > div");
-    if (tabs.length === 0 || panels.length === 0) return;
-    tabs.forEach((t) => t.classList.toggle("active", t.dataset.tabTarget === id));
-    panels.forEach((p) => (p.style.display = p.id === id ? "" : "none"));
-  }
-
-  // -----------------------------
-  // Stage / Run badge helpers
-  // -----------------------------
-  function setRunIdBadge(runId) {
-    const n = $("#currentRunId");
-    if (n) n.textContent = runId || "–";
-  }
-
-  function updateStageBar(state) {
-    const order = ["ValidatingInput", "EvidenceBuilder", "DraftCampaign", "QualityGate", "Completed"];
-    order.forEach((s) => {
-      const elStep = document.getElementById("step-" + s);
-      if (!elStep) return;
-      elStep.classList.remove("active", "done");
-      if (state === s) elStep.classList.add("active");
-      if (order.indexOf(s) < order.indexOf(state)) elStep.classList.add("done");
-    });
-    const statusText = $("#statusText");
-    if (statusText) statusText.textContent = state || "Waiting…";
-  }
-
-  // -----------------------------
-  // Completed hook
-  // -----------------------------
-  async function handleCompleted(runId) {
-    try {
-      const res = await fetch(`/api/campaign/fetch?runId=${encodeURIComponent(runId)}&file=campaign`);
-      if (!res.ok) throw new Error(`fetch campaign.json failed: ${res.status}`);
-      const campaign = await res.json();
-
-      const dlMount = $("#download-docx-mount");
-      if (dlMount) {
-        dlMount.innerHTML = "";
-        dlMount.append(downloadDocxButton(runId));
-      }
-
-      renderOverview(ensure("tab-overview"), campaign);
-      renderLanding(ensure("tab-landing"), campaign);
-      renderEmails(ensure("tab-emails"), campaign);
-      renderEvidence(ensure("tab-evidence"), campaign);
-      renderSales(ensure("tab-sales"), campaign);
-
-      setActiveTab("tab-overview");
-    } catch (e) {
-      console.error(e);
-      toast("Failed to load campaign");
-    }
-  }
-
-  // -----------------------------
-  // Status poller + Start helpers
-  // -----------------------------
-  let _activeController = null;
-  const _rendered = new Set();
-
-  function sleep(ms) {
-    return new Promise((r) => setTimeout(r, ms));
-  }
-
-  async function pollOnce(runId, signal) {
-    const res = await fetch(`/api/campaign/status?runId=${encodeURIComponent(runId)}`, { signal });
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    const status = await res.json();
-
-    setRunIdBadge(runId);
-    updateStageBar(status.state);
-
-    if (status.state === "Completed" && !_rendered.has(runId)) {
-      _rendered.add(runId);
-      await handleCompleted(runId);
-    }
-    return status.state;
-  }
-
-  async function pollLoop(runId, controller) {
-    let delay = 1200;
-    for (;;) {
-      if (controller.signal.aborted) return;
-      try {
-        const state = await pollOnce(runId, controller.signal);
-        if (state === "Completed" || state === "Failed") return;
-        await sleep(delay);
-        if (delay < 2000) delay += 200;
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        console.warn("status poll error:", err);
-        await sleep(2500);
-      }
-    }
-  }
-
-  function startStatusPoll(runId) {
-    if (_activeController) _activeController.abort();
-    const controller = new AbortController();
-    _activeController = controller;
-    setRunIdBadge(runId);
-    pollLoop(runId, controller);
-    return () => controller.abort();
-  }
-
-  async function startNewRun(body = {}) {
-    const pageSel = $("#runSelect");
-    const page = body.page || (pageSel && pageSel.value) || "leadgen";
-    const payload = {
-      page,
-      rowCount: body.rowCount ?? 0,
-      csv_sha256: body.csv_sha256 || "test",
-      filters: body.filters,
-    };
-
+const api = {
+  start: async (payload) => {
     const res = await fetch("/api/campaign/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload || {})
     });
-    if (!res.ok) throw new Error(`start failed: ${res.status}`);
-    const json = await res.json();
-    const runId = json.runId;
-    if (!runId) throw new Error("No runId returned from /api/campaign/start");
-
-    setRunIdBadge(runId);
-    startStatusPoll(runId);
-    return runId;
-  }
-
-  // -----------------------------
-  // CSV helpers (integrated)
-  // -----------------------------
-  async function sha256HexFromFile(file) {
-    const buf = await file.arrayBuffer();
-    const hash = await crypto.subtle.digest("SHA-256", buf);
-    return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
-  }
-
-  function countCsvRows(text) {
-    const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    return Math.max(0, lines.length - 1);
-  }
-
-  async function startFromCsv(file) {
-    // read text + hash concurrently
-    const [text, shaHex] = await Promise.all([file.text(), sha256HexFromFile(file)]);
-    const rowCount = countCsvRows(text);
-    const pageSel = $("#runSelect");
-    const page = (pageSel && pageSel.value) || "leadgen";
-    await startNewRun({ page, rowCount, csv_sha256: shaHex });
-    updateStageBar("ValidatingInput");
-  }
-
-  // -----------------------------
-  // DOM wiring (runs once)
-  // -----------------------------
-  document.addEventListener("DOMContentLoaded", () => {
-    // New run button
-    const btn = $("#newRunBtn");
-    if (btn && !btn.dataset.wired) {
-      btn.dataset.wired = "1";
-      btn.addEventListener("click", async () => {
-        try {
-          await startNewRun({});
-        } catch (e) {
-          console.error(e);
-          toast("Start failed");
-        }
-      });
-    }
-
-    // Tabs
-    const tabButtons = $$(".tab");
-    tabButtons.forEach((b) => {
-      if (b.dataset.wired) return;
-      b.dataset.wired = "1";
-      b.addEventListener("click", () => setActiveTab(b.dataset.tabTarget));
+    if (!res.ok) throw new Error(`start ${res.status}`);
+    return res.json(); // { runId }
+  },
+  status: async (runId) => {
+    const res = await fetch(`/api/campaign/status?runId=${encodeURIComponent(runId)}`);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    return res.json(); // { state, ... }
+  },
+  fetchCampaign: async (runId) => {
+    const res = await fetch(`/api/campaign/fetch?runId=${encodeURIComponent(runId)}&file=campaign`);
+    if (!res.ok) throw new Error(`fetch campaign ${res.status}`);
+    return res.json();
+  },
+  fetchEvidence: async (runId) => {
+    const res = await fetch(`/api/campaign/fetch?runId=${encodeURIComponent(runId)}&file=evidence`);
+    if (!res.ok) return [];
+    return res.json();
+  },
+  regenerate: async (runId, section) => {
+    const res = await fetch(`/api/campaign/regenerate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId, section })
     });
+    if (!res.ok) throw new Error(`regenerate ${res.status}`);
+    return res.json();
+  },
+  runs: async () => {
+    const res = await fetch(`/api/runs`);
+    if (!res.ok) throw new Error(`runs ${res.status}`);
+    return res.json(); // flexible shape (array)
+  },
+  downloadDocx: (runId) => {
+    window.location.href = `/api/campaign/download?runId=${encodeURIComponent(runId)}`;
+  }
+};
 
-    // CSV upload → start run
-    const csv = $("#csvUpload");
-    if (csv && !csv.dataset.wired) {
-      csv.dataset.wired = "1";
-      csv.addEventListener("change", async (e) => {
-        const file = e.target.files && e.target.files[0];
-        if (!file) return;
-        try {
-          await startFromCsv(file);
-        } catch (err) {
-          console.error("CSV start failed:", err);
-          toast("CSV start failed");
-        }
-      });
-    }
-
-    // Default tab
-    setActiveTab("tab-overview");
+function setRunId(runId) {
+  $("#currentRunId") && ($("#currentRunId").textContent = runId || "–");
+  try { localStorage.setItem("campaign:lastRunId", runId || ""); } catch {}
+  if (window.CampaignPage?.setRunId) window.CampaignPage.setRunId(runId);
+}
+function updateStage(state) {
+  if (window.CampaignPage?.updateStage) return window.CampaignPage.updateStage(state);
+  const order = ["ValidatingInput","EvidenceBuilder","DraftCampaign","QualityGate","Completed"];
+  order.forEach(s => {
+    const el = $("#step-"+s);
+    if (!el) return;
+    el.classList.remove("active","done");
+    if (s === state) el.classList.add("active");
+    if (order.indexOf(s) < order.indexOf(state)) el.classList.add("done");
   });
+  $("#statusText") && ($("#statusText").textContent = state || "Waiting…");
+}
+const copyBtn = (getText, label="Copy") =>
+  h("button", { class:"btn btn-copy", onclick: async () => {
+      try { await navigator.clipboard.writeText(getText()); toast("Copied"); } catch (e) { console.log(e); }
+  } }, label);
+const fmtDate = (d) => { try { return new Date(d).toISOString().slice(0,10); } catch { return d; } };
 
-  // -----------------------------
-  // Public API
-  // -----------------------------
-  window.CampaignUI = { handleCompleted };
-  window.Campaign = {
-    startStatusPoll,
-    startNewRun,
-    setRunId: setRunIdBadge,
-    updateStage: updateStageBar,
-    setActiveTab,
+let CURRENT_RUN_ID = null;
+
+/* ---------- Rendering ---------- */
+function renderOverview(data) {
+  const node = $("#tab-overview"); if (!node) return; node.innerHTML = "";
+  const meta = JSON.stringify(data.meta||{}, null, 2);
+  const proof = JSON.stringify(data.input_proof||{}, null, 2);
+  node.append(
+    h("div", { class:"workspace" },
+      h("h3", {}, "Executive summary"),
+      h("p", {}, data.executive_summary || "(empty)"),
+      h("div", { class:"btn-row" },
+        copyBtn(() => data.executive_summary || "", "Copy summary"),
+        h("button", { class:"btn secondary", onclick: () => doRegenerate("executive_summary") }, "Regenerate summary")
+      ),
+      h("h3", { style:"margin-top:10px" }, "Meta"),
+      h("pre", { class:"pre" }, meta),
+      h("div", { class:"btn-row" }, copyBtn(() => meta, "Copy meta")),
+      h("h3", { style:"margin-top:10px" }, "Input proof"),
+      h("pre", { class:"pre" }, proof),
+      h("div", { class:"btn-row" }, copyBtn(() => proof, "Copy input_proof"))
+    )
+  );
+}
+function renderLanding(data) {
+  const node = $("#tab-landing"); if (!node) return; node.innerHTML = "";
+  const lp = data.landing_page || {};
+  const sections = (lp.sections||[]).map(s =>
+    h("div", { class:"card", style:"margin:.5rem 0;padding:.75rem" },
+      h("div", { style:"font-weight:600;margin-bottom:.25rem" }, s.title || "(untitled)"),
+      s.content ? h("p", {}, s.content) :
+      Array.isArray(s.bullets) ? h("ul", {}, ...s.bullets.map(b => h("li", {}, b))) :
+      h("p", { class:"muted" }, "(empty)")
+    )
+  );
+  const allText = () => {
+    const parts = [
+      `Headline: ${lp.headline || ""}`,
+      `Subheadline: ${lp.subheadline || ""}`,
+      "",
+      ...(lp.sections||[]).map(s => s.content ? `${s.title}\n${s.content}` :
+        Array.isArray(s.bullets) ? `${s.title}\n- ${s.bullets.join("\n- ")}` : (s.title||"")),
+      "",
+      `CTA: ${lp.cta || ""}`
+    ];
+    return parts.join("\n");
   };
-})();
+  node.append(
+    h("div", { class:"workspace" },
+      h("div", {}, h("strong", {}, lp.headline || "(headline)")),
+      h("div", { class:"muted", style:"margin:.25rem 0 .5rem" }, lp.subheadline || ""),
+      ...sections,
+      h("div", { style:"margin-top:.5rem;font-weight:600" }, lp.cta || ""),
+      h("div", { class:"btn-row", style:"margin-top:.5rem" },
+        copyBtn(allText, "Copy landing page"),
+        h("button", { class:"btn secondary", onclick: () => doRegenerate("landing_page") }, "Regenerate landing")
+      )
+    )
+  );
+}
+function renderEmails(data) {
+  const node = $("#tab-emails"); if (!node) return; node.innerHTML = "";
+  const emails = data.emails || [];
+  const wrap = h("div", { class:"workspace" },
+    h("div", { class:"muted", style:"margin-bottom:.5rem" }, `Emails (${emails.length})`),
+    h("div", { class:"btn-row", style:"margin-bottom:.5rem" },
+      h("button", { class:"btn secondary", onclick: () => doRegenerate("emails") }, "Regenerate emails")
+    )
+  );
+  emails.forEach((em, i) => {
+    const text = `Subject: ${em.subject}\nPreview: ${em.preview}\n\n${em.body}`;
+    wrap.append(
+      h("div", { class:"card email-card", style:"margin:.5rem 0; padding:.75rem" },
+        h("div", { class:"email-head" },
+          h("div", { class:"email-subject" }, `Email ${i+1}: ${em.subject || ""}`),
+          copyBtn(() => text, "Copy email")
+        ),
+        h("div", { class:"email-preview" }, em.preview || ""),
+        h("pre", { class:"pre" }, em.body || "")
+      )
+    );
+  });
+  if (!emails.length) wrap.append(h("div", { class:"muted" }, "(no emails)"));
+  node.append(wrap);
+}
+function renderEvidence(data) {
+  const node = $("#tab-evidence"); if (!node) return; node.innerHTML = "";
+  const ev = data.evidence_log || [];
+  const table = h("table", { class:"table" },
+    h("thead", {}, h("tr", {},
+      h("th", {}, "Publisher"), h("th", {}, "Title"), h("th", {}, "Date"),
+      h("th", {}, "URL"), h("th", {}, "Excerpt"), h("th", {}, "")
+    )),
+    h("tbody", {})
+  );
+  const tbody = $("tbody", table);
+  ev.forEach(item => {
+    const line = `${item.publisher} – ${item.title} (${fmtDate(item.date)})\n${item.url}\n\n${item.excerpt}`;
+    tbody.append(
+      h("tr", {},
+        h("td", {}, item.publisher || ""),
+        h("td", {}, item.title || ""),
+        h("td", {}, fmtDate(item.date || "")),
+        h("td", {}, item.url ? h("a", { href:item.url, target:"_blank", rel:"noopener" }, item.url) : ""),
+        h("td", {}, item.excerpt || ""),
+        h("td", {}, copyBtn(() => line, "Copy"))
+      )
+    );
+  });
+  node.append(
+    h("div", { class:"workspace" },
+      h("div", { class:"muted", style:"margin-bottom:.5rem" }, `Evidence (${ev.length})`),
+      table
+    )
+  );
+}
+function renderSales(data) {
+  const node = $("#tab-sales"); if (!node) return; node.innerHTML = "";
+  const se = data.sales_enablement || {};
+  node.append(
+    h("div", { class:"workspace" },
+      h("h4", {}, "Call script"),
+      h("pre", { class:"pre" }, se.call_script || ""),
+      h("div", { style:"margin:.25rem 0 .75rem" }, copyBtn(() => se.call_script || "", "Copy call script")),
+      h("h4", {}, "One-pager"),
+      h("pre", { class:"pre" }, se.one_pager || ""),
+      h("div", { class:"btn-row" },
+        copyBtn(() => se.one_pager || "", "Copy one-pager"),
+        h("button", { class:"btn secondary", onclick: () => doRegenerate("sales_enablement") }, "Regenerate sales")
+      )
+    )
+  );
+}
+function renderAllTabs(campaign, runId) {
+  renderOverview(campaign);
+  renderLanding(campaign);
+  renderEmails(campaign);
+  renderEvidence(campaign);
+  renderSales(campaign);
+  const mount = $("#download-docx-mount");
+  if (mount) {
+    mount.innerHTML = "";
+    mount.append(h("button", { class:"btn", onclick: () => api.downloadDocx(runId) }, "Download .docx"));
+  }
+}
+
+/* ---------- Polling with capped backoff ---------- */
+let pollTimer = null;
+async function pollUntilDone(runId) {
+  CURRENT_RUN_ID = runId;
+  setRunId(runId);
+  updateStage("ValidatingInput");
+
+  let delay = 1200, maxDelay = 4500;
+  clearTimeout(pollTimer);
+
+  const tick = async () => {
+    try {
+      const s = await api.status(runId);
+      if (s?.state) updateStage(s.state);
+
+      if (s?.state === "Completed") {
+        const data = await api.fetchCampaign(runId);
+        renderAllTabs(data, runId);
+        toast("Campaign ready");
+        return; // stop polling
+      }
+      if (s?.state === "Failed") {
+        toast("Run failed – check logs / blob error.json if present");
+        return; // stop
+      }
+    } catch (e) {
+      console.warn("status poll error", e);
+    }
+    delay = Math.min(maxDelay, Math.floor(delay * 1.4));
+    pollTimer = setTimeout(tick, delay);
+  };
+
+  await tick();
+}
+
+/* ---------- Regenerate ---------- */
+async function doRegenerate(sectionKey) {
+  if (!CURRENT_RUN_ID) return toast("No active run");
+  try {
+    await api.regenerate(CURRENT_RUN_ID, sectionKey);
+    toast(`Requested regeneration: ${sectionKey}`);
+    // Keep polling; server should update campaign.json when ready
+  } catch (e) {
+    console.error(e);
+    toast("Regenerate failed");
+  }
+}
+
+/* ---------- Runs list ---------- */
+async function loadRuns() {
+  const select = $("#runSelect"); if (!select) return;
+  try {
+    select.innerHTML = "<option value=''>Loading…</option>";
+    const data = await api.runs();
+    const items = Array.isArray(data) ? data : (data?.items || []);
+    select.innerHTML = "<option value='leadgen'>(Select page / optional)</option>";
+    // Try to populate options with most recent run IDs for convenience
+    const runs = items.map(x => ({
+      id: x.runId || x.id || x.instanceId || "",
+      state: x.state || x.runtimeStatus || "",
+      when: x.createdAt || x.created || x.timeCreated || x.timestamp || ""
+    })).filter(r => r.id);
+
+    // Add a sub-optgroup style label
+    const optHeader = h("option", { value:"", disabled:true }, "— Recent runs —");
+    select.append(optHeader);
+    runs.slice(0, 30).forEach(r => {
+      const label = `${r.id.slice(0,8)}…  ${r.state || ""}  ${r.when ? `@ ${r.when}` : ""}`;
+      select.append(h("option", { value:r.id }, label));
+    });
+
+    $("#loadRecentBtn")?.addEventListener("click", () => {
+      const latest = runs.find(r => r.state === "Completed") || runs[0];
+      if (!latest) return toast("No runs found");
+      resumeRun(latest.id);
+    });
+  } catch (e) {
+    console.warn("runs error", e);
+    select.innerHTML = "<option value='leadgen'>(leadgen)</option>";
+  }
+}
+
+/* ---------- Start / Resume ---------- */
+async function startNewRun(payload) {
+  const body = { page: "leadgen", ...(payload || {}) };
+  const { runId } = await api.start(body);
+  await resumeRun(runId);
+}
+async function resumeRun(runId) {
+  CURRENT_RUN_ID = runId;
+  setRunId(runId);
+  pollUntilDone(runId);
+}
+
+/* ---------- Restore on load ---------- */
+function restoreOnLoad() {
+  const u = new URL(window.location.href);
+  const qRun = u.searchParams.get("runId");
+  if (qRun) return resumeRun(qRun);
+
+  try {
+    const last = localStorage.getItem("campaign:lastRunId");
+    if (last) return resumeRun(last);
+  } catch {}
+}
+
+/* ---------- Expose globals expected by your HTML ---------- */
+window.Campaign = { startNewRun, setRunId, updateStage, resumeRun };
+
+/* ---------- Init ---------- */
+document.addEventListener("DOMContentLoaded", () => {
+  loadRuns();
+  restoreOnLoad();
+
+  // ensure header "New run" works if no inline onclick is present
+  const newBtn = $("#newRunBtn");
+  if (newBtn && !newBtn.getAttribute("onclick")) {
+    newBtn.addEventListener("click", () => startNewRun({}));
+  }
+});
