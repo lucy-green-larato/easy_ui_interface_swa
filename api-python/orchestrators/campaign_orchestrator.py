@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 import azure.durable_functions as df
 from azure.storage.blob import BlobServiceClient, ContentSettings
 
-from function_app import dfapp  # shared DF app
+from function_app import app  # single shared DFApp instance
 
 IGNORED_COLUMNS = ["AdopterProfile", "TopConnectivity"]  # per spec
 
@@ -26,7 +26,7 @@ def _get_container_client():
 
     parts = urlsplit(sas_url)
     account_url = f"{parts.scheme}://{parts.netloc}"
-    sas_token = parts.query.lstrip("?")  # ensure no leading '?'
+    sas_token = parts.query.lstrip("?")
 
     container_name = os.environ.get("CAMPAIGN_RESULTS_CONTAINER")
     if not container_name:
@@ -71,7 +71,7 @@ def _write_status(prefix: str, run_id: str, state: str, page: str, row_count: in
 # -----------------------------
 # Orchestrator
 # -----------------------------
-@dfapp.orchestration_trigger(context_name="context")
+@app.orchestration_trigger(context_name="context")
 def CampaignOrchestration(context: df.DurableOrchestrationContext):
     """
     DFApp-compatible orchestrator.
@@ -144,7 +144,7 @@ def CampaignOrchestration(context: df.DurableOrchestrationContext):
 # -----------------------------
 # Activities
 # -----------------------------
-@dfapp.activity_trigger(input_name="input")
+@app.activity_trigger(input_name="input")
 def validate_input_activity(input: dict):
     """
     Stub: write status ValidatingInput; return input_proof-like summary (not persisted here).
@@ -170,7 +170,7 @@ def validate_input_activity(input: dict):
     }
 
 
-@dfapp.activity_trigger(input_name="input")
+@app.activity_trigger(input_name="input")
 def evidence_builder_activity(input: dict):
     """
     Stub: write status EvidenceBuilder; save a minimal evidence_log.json.
@@ -206,7 +206,7 @@ def evidence_builder_activity(input: dict):
     return {"evidence_log": evidence_log}
 
 
-@dfapp.activity_trigger(input_name="input")
+@app.activity_trigger(input_name="input")
 def campaign_draft_activity(input: dict):
     """
     Stub: write status DraftCampaign; save campaign.json with required contract.
@@ -252,7 +252,7 @@ def campaign_draft_activity(input: dict):
         },
         "evidence_log": evidence_log,
         "input_proof": {
-            "run_id": run_id,                   # must match Durable instance id
+            "run_id": run_id,
             "csv_sha256": csv_sha256,
             "row_count": row_count,
             "filters": filters,
@@ -270,7 +270,7 @@ def campaign_draft_activity(input: dict):
     return {"ok": True}
 
 
-@dfapp.activity_trigger(input_name="input")
+@app.activity_trigger(input_name="input")
 def validator_activity(input: dict):
     """
     Stub: write status QualityGate then Completed.
