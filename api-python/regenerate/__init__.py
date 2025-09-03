@@ -1,4 +1,4 @@
-# /api/campaign/regenerate/__init__.py
+# /api-python/campaign/regenerate/__init__.py
 # POST section-only regeneration (starts a separate Durable orchestration)
 # Usage:
 #   POST /api/campaign/regenerate
@@ -13,7 +13,7 @@ from urllib.parse import parse_qs
 import azure.functions as func
 import azure.durable_functions as df
 
-from function_app import app
+from function_app import app  # shared HTTP FunctionApp
 
 
 def _get_body(req: func.HttpRequest) -> dict:
@@ -47,14 +47,14 @@ async def regenerate(req: func.HttpRequest, client: df.DurableOrchestrationClien
             status_code=400,
         )
 
+    # Choose a deterministic regen instance id per (runId, section) so repeat calls replace the same instance.
     regen_id = f"{run_id}-regen-{section}"
     payload = {"runId": run_id, "section": section, "toneOverride": tone}
 
-    instance_id = await client.start_new("RegenerateSectionOrchestration", instance_id=regen_id, client_input=payload)
-    mgmt = client.create_http_management_payload(instance_id)
-
-    return func.HttpResponse(
-        json.dumps({"runId": run_id, "regenId": instance_id, "managementUrls": mgmt}),
-        mimetype="application/json",
-        status_code=202,
+    instance_id = await client.start_new(
+        "RegenerateSectionOrchestration",
+        instance_id=regen_id,
+        client_input=payload
     )
+
+    mgmt = cli

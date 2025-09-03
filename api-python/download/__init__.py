@@ -1,9 +1,9 @@
-# /api/campaign/download/__init__.py
+# /api-python/campaign/download/__init__.py
 # GET .docx export built from campaign.json + evidence_log.json
 # Usage:
 #   GET /api/campaign/download?runId=<id>
 #
-# Requires dependency in /api/requirements.txt:
+# Requires in /api-python/requirements.txt:
 #   python-docx>=0.8.11
 
 import os
@@ -12,18 +12,15 @@ import json
 from urllib.parse import urlsplit
 
 import azure.functions as func
-import azure.durable_functions as df
 from azure.storage.blob import BlobServiceClient
 from docx import Document
-from docx.shared import Pt, Inches
 
 
-from function_app import app
+from function_app import app  # shared HTTP FunctionApp
 
 
 def _blob_service() -> BlobServiceClient:
-    # Build a BlobServiceClient from UPLOADS_SAS_URL:
-    # https://<account>.blob.core.windows.net/?sv=...&ss=b&...
+    """Build BlobServiceClient from account SAS URL in UPLOADS_SAS_URL."""
     sas_url = os.environ["UPLOADS_SAS_URL"].strip()
     parts = urlsplit(sas_url)
     account_base = f"{parts.scheme}://{parts.netloc}"
@@ -36,6 +33,10 @@ def _results_container_name() -> str:
 
 
 def _find_blob_path(cc, run_id: str, filename: str) -> str:
+    """
+    Search results/campaign/*/*/*/*/<runId>/<filename>.
+    We don't know page/date here, so scan under the fixed prefix.
+    """
     prefix = "results/campaign/"
     for b in cc.list_blobs(name_starts_with=prefix):
         if b.name.endswith(f"/{run_id}/{filename}"):
@@ -43,21 +44,15 @@ def _find_blob_path(cc, run_id: str, filename: str) -> str:
     return ""
 
 
-def _add_heading(doc: Document, text: str, level: int = 1):
-    h = doc.add_heading(text, level=level)
-    return h
-
-
 def _add_para(doc: Document, text: str):
-    doc.add_paragraph(text if text else "")
+    doc.add_paragraph(text or "")
 
 
-def _add_table_from_evidence(doc: Document, evidence: list):
+def _add_evidence_table(doc: Document, evidence: list):
     if not evidence:
         return
     headers = ["ID", "Publisher", "Title", "Date", "URL"]
     table = doc.add_table(rows=1, cols=len(headers))
-    table.style = "Light List"
     hdr_cells = table.rows[0].cells
     for i, h in enumerate(headers):
         hdr_cells[i].text = h
@@ -81,93 +76,111 @@ def download(req: func.HttpRequest) -> func.HttpResponse:
         container = _results_container_name()
         cc = bsc.get_container_client(container)
 
-        # Load campaign.json
+        # Load campaign.json (required)
         path_campaign = _find_blob_path(cc, run_id, "campaign.json")
         if not path_campaign:
             return func.HttpResponse("campaign.json not found", status_code=404)
-        campaign = json.loads(cc.get_blob_client(path_campaign).download_blob().readall())
+        campaign_bytes = cc.get_blob_client(path_campaign).download_blob().readall()
+        campaign = json.loads(campaign_bytes)
 
-        # Load evidence (optional)
+        # Load evidence_log.json (optional)
         evidence = []
         path_evidence = _find_blob_path(cc, run_id, "evidence_log.json")
         if path_evidence:
-            evidence = json.loads(cc.get_blob_client(path_evidence).download_blob().readall())
+            evidence_bytes = cc.get_blob_client(path_evidence).download_blob().readall()
+            evidence = json.loads(evidence_bytes)
 
-        # Build .docx
+        # Build .docx according to the fixed contract
         doc = Document()
         doc.core_properties.title = f"Campaign {run_id}"
 
-        _add_heading(doc, "Evidence-first Campaign Pack", level=0)
+        doc.add_heading("Evidence-first Campaign Pack", level=0)
         _add_para(doc, f"Run ID: {run_id}")
 
-        exec_sum = campaign.get("executive_summary") or campaign.get("overview") or ""
+        # Executive summary
+        exec_sum = campaign.get("executive_summary") or ""
         if exec_sum:
-            _add_heading(doc, "Executive summary", level=1)
+            doc.add_heading("Executive summary", level=1)
             _add_para(doc, exec_sum)
 
+        # Landing page
         lp = campaign.get("landing_page") or {}
         if lp:
-            _add_heading(doc, "Landing page", level=1)
-            for key in ["hero", "why_it_matters", "what_you_get", "how_it_works", "outcomes", "customer_proof"]:
-                val = lp.get(key)
-                if val:
-                    _add_heading(doc, key.replace("_", " ").capitalize(), level=2)
-                    _add_para(doc, val)
-            ctas = lp.get("ctas") or []
-            if ctas:
-                _add_heading(doc, "Calls to action", level=2)
-                for c in ctas:
-                    _add_para(doc, f"• {c}")
+            doc.add_heading("Landing page", level=1)
+            headline = lp.get("headline")
+            subheadline = lp.get("subheadline")
+            if headline:
+                doc.add_heading("Headline", level=2)
+                _add_para(doc, headline)
+            if subheadline:
+                doc.add_heading("Subheadline", level=2)
+                _add_para(doc, subheadline)
+            sections = lp.get("sections") or []
+            if sections:
+                doc.add_heading("Sections", level=2)
+                for s in sections:
+                    title = s.get("title", "")
+                    doc.add_heading(title or "Section", level=3)
+                    if "content" in s:
+                        _add_para(doc, s.get("content") or "")
+                    elif "bullets" in s:
+                        for b in (s.get("bullets") or []):
+                            _add_para(doc, f"• {b}")
+            cta = lp.get("cta")
+            if cta:
+                doc.add_heading("Call to action", level=2)
+                _add_para(doc, cta)
 
+        # Emails
         emails = campaign.get("emails") or []
         if emails:
-            _add_heading(doc, "Email sequence", level=1)
+            doc.add_heading("Emails", level=1)
             for i, em in enumerate(emails, 1):
-                _add_heading(doc, f"Email {i}: {em.get('subject','')}", level=2)
-                body = em.get("body") or ""
-                _add_para(doc, body)
+                subj = em.get("subject", "")
+                doc.add_heading(f"Email {i}: {subj}", level=2)
+                preview = em.get("preview")
+                if preview:
+                    _add_para(doc, f"Preview: {preview}")
+                _add_para(doc, em.get("body", ""))
 
+        # Sales enablement
         se = campaign.get("sales_enablement") or {}
         if se:
-            _add_heading(doc, "Sales enablement", level=1)
-            dqs = se.get("discovery_questions") or []
-            if dqs:
-                _add_heading(doc, "Discovery questions", level=2)
-                for q in dqs:
-                    _add_para(doc, f"• {q}")
-            objs = se.get("objection_cards") or []
-            if objs:
-                _add_heading(doc, "Objection handling", level=2)
-                for oc in objs:
-                    _add_para(doc, f"- {oc.get('blocker','')}")
-                    _add_para(doc, f"  Reframe: {oc.get('reframe','')}")
-                    claim_ids = oc.get("claim_ids") or []
-                    if claim_ids:
-                        _add_para(doc, f"  Claims: {', '.join(claim_ids)}")
+            doc.add_heading("Sales enablement", level=1)
+            call_script = se.get("call_script")
+            one_pager = se.get("one_pager")
+            if call_script:
+                doc.add_heading("Call script", level=2)
+                _add_para(doc, call_script)
+            if one_pager:
+                doc.add_heading("One-pager", level=2)
+                _add_para(doc, one_pager)
 
+        # Evidence log
         if evidence:
-            _add_heading(doc, "Evidence log", level=1)
-            _add_table_from_evidence(doc, evidence)
+            doc.add_heading("Evidence log", level=1)
+            _add_evidence_table(doc, evidence)
 
+        # Input proof
         input_proof = campaign.get("input_proof") or {}
         if input_proof:
-            _add_heading(doc, "Input proof", level=1)
+            doc.add_heading("Input proof", level=1)
             for k, v in input_proof.items():
                 _add_para(doc, f"{k}: {v}")
 
         buf = io.BytesIO()
         doc.save(buf)
         buf.seek(0)
-        headers = {
-            "Content-Disposition": f'attachment; filename="campaign-{run_id}.docx"'
-        }
+
         return func.HttpResponse(
             body=buf.getvalue(),
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers=headers,
+            headers={"Content-Disposition": f'attachment; filename="campaign-{run_id}.docx"'},
             status_code=200,
         )
+
     except KeyError as ke:
         return func.HttpResponse(f"Missing environment variable: {ke}", status_code=500)
     except Exception as e:
+        # Hide internal details in production if desired
         return func.HttpResponse(str(e), status_code=500)

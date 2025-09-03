@@ -1,35 +1,33 @@
-# /api/campaign/status/__init__.py
+# /api-python/campaign/status/__init__.py
 # Returns current status for a given runId.
-# - First, attempts to read Durable Functions runtime + custom status (fast).
-# - Then, tries to load your persisted results status.json (authoritative when present).
+# - First, reads Durable Functions runtime/custom status (fast).
+# - Then, loads persisted results status.json (authoritative when present).
 # - Responds with a merged JSON (preferring the blob file if found).
 
 import os
 import json
+from urllib.parse import urlsplit
+
 import azure.functions as func
 import azure.durable_functions as df
 from azure.storage.blob import BlobServiceClient
 
+from function_app import app  # shared HTTP FunctionApp
 
-from function_app import app
 
-
-def _blob_client():
-    account_url = os.environ.get("BLOB_ACCOUNT_URL")
-    credential = os.environ.get("BLOB_SAS") or os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
-    if not account_url and credential and "DefaultEndpointsProtocol" in credential:
-        # connection string path
-        bsc = BlobServiceClient.from_connection_string(credential)
-    else:
-        if not account_url:
-            raise RuntimeError("Missing BLOB_ACCOUNT_URL or connection string")
-        bsc = BlobServiceClient(account_url=account_url, credential=credential)
-    return bsc
+def _blob_service() -> BlobServiceClient:
+    """Build BlobServiceClient from UPLOADS_SAS_URL (account SAS)."""
+    sas_url = os.environ["UPLOADS_SAS_URL"].strip()
+    parts = urlsplit(sas_url)
+    account_base = f"{parts.scheme}://{parts.netloc}"
+    sas_token = parts.query.lstrip("?")
+    return BlobServiceClient(account_url=account_base, credential=sas_token)
 
 
 def _map_runtime_to_state(runtime_status: str) -> str:
     """
-    Map Durable runtime states to UI stages when no custom status is available.
+    Map Durable runtime statuses to UI stages when no custom status is available.
+    Contract states: ValidatingInput|EvidenceBuilder|DraftCampaign|QualityGate|Completed|Failed
     """
     if not runtime_status:
         return "ValidatingInput"
@@ -37,7 +35,7 @@ def _map_runtime_to_state(runtime_status: str) -> str:
     if rs in ("Pending",):
         return "ValidatingInput"
     if rs in ("Running",):
-        return "DraftCampaign"  # generic in-flight label; custom_status may be more specific
+        return "DraftCampaign"  # generic in-flight; blob status.json is authoritative
     if rs in ("Completed",):
         return "Completed"
     if rs in ("Failed", "Terminated"):
@@ -52,58 +50,56 @@ async def status(req: func.HttpRequest, client: df.DurableOrchestrationClient) -
     if not run_id:
         return func.HttpResponse("Missing runId", status_code=400)
 
-    results_container = os.environ.get("RESULTS_CONTAINER", "results")
-    bsc = None
-
-    # ---------- 1) Durable runtime status (quick) ----------
-    durable = None
+    # ---------- 1) Durable runtime status ----------
+    runtime_status = None
+    custom_status = None
+    created_time = None
+    last_updated_time = None
     try:
         durable = await client.get_status(run_id)
+        runtime_status = getattr(durable, "runtime_status", None)
+        custom_status = getattr(durable, "custom_status", None)
+        created_time = getattr(durable, "created_time", None)
+        last_updated_time = getattr(durable, "last_updated_time", None)
     except Exception:
-        durable = None  # ignore; may not exist yet or hub mismatch
+        durable = None  # ignore errors; we can still fall back to blob
 
-    runtime_status = getattr(durable, "runtime_status", None)
-    custom_status = getattr(durable, "custom_status", None)
-    state_from_runtime = None
-
-    if isinstance(custom_status, dict) and "state" in custom_status:
-        state_from_runtime = str(custom_status.get("state"))
-    else:
-        state_from_runtime = _map_runtime_to_state(runtime_status)
+    state_from_runtime = (
+        str(custom_status.get("state"))
+        if isinstance(custom_status, dict) and "state" in custom_status
+        else _map_runtime_to_state(runtime_status)
+    )
 
     resp = {
         "runId": run_id,
         "state": state_from_runtime,
         "runtime": {
-            "runtimeStatus": str(runtime_status) if runtime_status else None,
+            "runtimeStatus": str(runtime_status) if runtime_status is not None else None,
             "customStatus": custom_status if isinstance(custom_status, (dict, list)) else None,
-            "createdTime": str(getattr(durable, "created_time", "")) if durable else None,
-            "lastUpdatedTime": str(getattr(durable, "last_updated_time", "")) if durable else None,
+            "createdTime": str(created_time) if created_time else None,
+            "lastUpdatedTime": str(last_updated_time) if last_updated_time else None,
         },
     }
 
     # ---------- 2) Blob status.json (authoritative when present) ----------
     try:
-        bsc = _blob_client()
-        container_client = bsc.get_container_client(results_container)
-        # We don't know the exact page/date path here, so search for the canonical suffix:
-        # results/campaign/.../{runId}/status.json
+        cc = _blob_service().get_container_client(os.environ["CAMPAIGN_RESULTS_CONTAINER"])
+        # We don't know page/date here, so search for canonical suffix:
+        # results/campaign/**/<runId>/status.json
         prefix = "results/campaign/"
         chosen = None
-        for b in container_client.list_blobs(name_starts_with=prefix):
+        for b in cc.list_blobs(name_starts_with=prefix):
             if b.name.endswith(f"/{run_id}/status.json"):
                 chosen = b.name
                 break
 
         if chosen:
-            blob = container_client.get_blob_client(chosen)
-            data = json.loads(blob.download_blob().readall())
-            # Ensure runId present
-            data.setdefault("runId", run_id)
-            # Prefer blob state over runtime mapping
+            data = json.loads(cc.get_blob_client(chosen).download_blob().readall())
+            data.setdefault("runId", run_id)  # enforce presence
+            # Prefer blob file content over runtime mapping
             resp.update(data)
     except Exception:
         # Blob not found or storage issue; keep runtime-only response
         pass
 
-    return func.HttpResponse(json.dumps(resp), mimetype="application/json")
+    return func.HttpResponse(json.dumps(resp), mimetype="application/json", status_code=200)
