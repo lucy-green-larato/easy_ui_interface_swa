@@ -1,0 +1,12 @@
+{
+  "name": "Inside Track Tools",
+  "forwardPorts": [4280, 7071, 7072, 10000, 10001, 10002],
+  "portsAttributes": {
+    "4280":  { "label": "SWA",          "protocol": "http", "onAutoForward": "openBrowser", "visibility": "public"  },
+    "7071":  { "label": "API Python",   "protocol": "http", "visibility": "public"  },
+    "7072":  { "label": "API Node",     "protocol": "http", "visibility": "public"  },
+    "10000": { "label": "Azurite Blob", "protocol": "http", "visibility": "private" },
+    "10001": { "label": "Azurite Queue","protocol": "http", "visibility": "private" },
+    "10002": { "label": "Azurite Table","protocol": "http", "visibility": "private" }
+  }
+}
