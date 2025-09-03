@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 import azure.functions as func
 from azure.storage.blob import BlobServiceClient
 
-app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+from function_app import app
 
 
 def _blob_service() -> BlobServiceClient:

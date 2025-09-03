@@ -8,7 +8,6 @@ import azure.durable_functions as df
 from azure.storage.blob import BlobServiceClient, ContentSettings
 
 from function_app import dfapp  # <-- shared DF app
-app = dfapp   
 
 IGNORED_COLUMNS = ["AdopterProfile", "TopConnectivity"]  # per spec
 

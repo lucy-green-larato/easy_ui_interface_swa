@@ -20,6 +20,11 @@
     { "route": "/campaign", "rewrite": "/campaign/index.html" },
     { "route": "/campaign/*", "rewrite": "/campaign/index.html" },
 
+    { "route": "/api/campaign/*", "rewrite": "http://localhost:7071/api/campaign/{*}", "allowedRoles": ["anonymous"] },
+    { "route": "/api/runs",       "rewrite": "http://localhost:7071/api/runs",         "allowedRoles": ["anonymous"] },
+
+    { "route": "/api/generate/*", "rewrite": "http://localhost:7072/api/generate/{*}", "allowedRoles": ["anonymous"] },
+
     { "route": "/api/*", "allowedRoles": ["anonymous"] },
 
     {
