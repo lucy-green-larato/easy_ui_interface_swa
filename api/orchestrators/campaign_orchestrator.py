@@ -1,16 +1,14 @@
 # /api/orchestrators/campaign_orchestrator.py
 # DFApp-based Durable orchestration + activities for Campaign Builder.
 
-import os
-import json
-from datetime import datetime
-from urllib.parse import urlsplit
-
+import os, json
+from datetime import datetime, timezone
 import azure.functions as func
 import azure.durable_functions as df
 from azure.storage.blob import BlobServiceClient, ContentSettings
 
-app = df.DFApp(http_auth_level=func.AuthLevel.FUNCTION)
+from function_app import dfapp  # <-- shared DF app
+app = dfapp   
 
 IGNORED_COLUMNS = ["AdopterProfile", "TopConnectivity"]  # per spec
 
