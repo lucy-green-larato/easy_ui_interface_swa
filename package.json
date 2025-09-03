@@ -4,18 +4,17 @@
   "version": "0.0.0",
   "scripts": {
     "dev:azurite": "azurite --location ./.azurite --blobPort 10000 --queuePort 10001 --tablePort 10002 --silent",
-    "dev:api-python": "cd api-python && func start --port 7071 --cors http://localhost:4280 --cors https://*.app.github.dev --cors-credentials",
-    "dev:api-node": "cd api && func start --port 7072",
+    "dev:api-python": "bash -lc 'cd api-python && pip install -r requirements.txt && npx func start --port 7071 --cors http://localhost:4280 --cors https://*.app.github.dev --cors-credentials'",
+    "dev:api-node": "bash -lc 'cd api && (npm ci --omit=dev --no-fund --silent || npm i --omit=dev --no-fund --silent) && npx func start --port 7072'",
     "dev:swa": "swa start ./web --port 4280 --host 0.0.0.0 --verbose",
-
     "dev:ports": "gh codespace ports visibility 4280:public,7071:public,7072:public,10000:private,10001:private,10002:private -c ${CODESPACE_NAME}",
-    "dev:ports:wait": "bash -lc 'sleep 8; npm run dev:ports || npm run dev:ports'",
-
-    "dev:up": "concurrently -k -n azurite,py,node,swa,ports \"npm:dev:azurite\" \"npm:dev:api-python\" \"npm:dev:api-node\" \"npm:dev:swa\" \"npm:dev:ports:wait\""
+    "dev:ports:wait": "bash -lc 'sleep 10; npm run dev:ports || npm run dev:ports'",
+    "dev:up": "concurrently -k -n azurite,py,node,swa,ports --raw \"npm:dev:azurite\" \"npm:dev:api-python\" \"npm:dev:api-node\" \"npm:dev:swa\" \"npm:dev:ports:wait\""
   },
   "devDependencies": {
     "@azure/static-web-apps-cli": "^2.0.6",
     "azurite": "^3.30.0",
-    "concurrently": "^9.0.0"
+    "concurrently": "^9.0.0",
+    "azure-functions-core-tools": "^4"
   }
 }
