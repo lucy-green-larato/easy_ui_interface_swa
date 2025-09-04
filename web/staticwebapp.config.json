@@ -15,43 +15,15 @@
     { "route": "/lead-qualification", "redirect": "/qualification", "statusCode": 301 },
     { "route": "/lead-qualification/*", "redirect": "/qualification", "statusCode": 301 },
 
-
     {
       "route": "/content/call-library/*",
-      "allowedRoles": ["anonymous", "authenticated"],
       "headers": { "cache-control": "no-store" }
     }
   ],
-
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": [
-     "/content/*",
-      "/src/*",
-      "/reports",
-      "/reports/*",
-      "/engagement",
-      "/engagement/*",
-      "/qualification",
-      "/qualification/*",
-      "/campaign",
-      "/campaign/*",
-      "/first-call-script-v2",
-      "/first-call-script-v2/*",
-      "/lead-qualification",
-      "/lead-qualification/*",
-      "/*.css",
-      "/*.js",
-      "/*.mjs",
-      "/*.json",
-      "/*.png",
-      "/*.jpg",
-      "/*.gif",
-      "/*.svg",
-      "/*.ico"
-    ]
+    "exclude": ["/api/*", "/.auth/*", "/content/*"]
   },
-
   "globalHeaders": {
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Content-Type-Options": "nosniff"
