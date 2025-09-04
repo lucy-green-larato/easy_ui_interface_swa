@@ -18,7 +18,7 @@ async function loadProductIndex(mode, basePrefix) {
   } catch { }
 
   // Fallback: fetch index.json directly from the content folder
-  const url = `${basePrefix || ''}/content/call-library/v1/${m}/index.json`;
+  const url = `content/call-library/v1/${m}/index.json`;
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
   return await res.json();
@@ -799,7 +799,7 @@ form && form.addEventListener("submit", async (e) => {
   if (diag) diag.open = false; if (diagJson) diagJson.textContent = "";
 
   try {
-    const mdUrl = `${basePrefix}/content/call-library/v1/${mode}/${productId}/${buyerId}.md`;
+    const mdUrl = `/content/call-library/v1/${mode}/${productId}/${buyerId}.md`;
     let templateText = "";
     try { const res = await fetch(mdUrl, { cache: "no-store" }); if (res.ok) templateText = await res.text(); } catch { }
     const body = {
