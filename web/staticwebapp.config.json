@@ -56,11 +56,6 @@
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Content-Type-Options": "nosniff"
   },
-
-  "responseOverrides": {
-    "404": { "rewrite": "/index.html" }
-  },
-
   "mimeTypes": {
     ".md":  "text/markdown; charset=utf-8",
     ".mdx": "text/markdown; charset=utf-8",
