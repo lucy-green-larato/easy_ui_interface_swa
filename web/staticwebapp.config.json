@@ -1,7 +1,5 @@
 {
   "routes": [
-    { "route": "/", "rewrite": "/index.html" },
-
     { "route": "/reports", "rewrite": "/reports.html" },
     { "route": "/reports/*", "rewrite": "/reports.html" },
 
@@ -22,8 +20,7 @@
       "route": "/content/call-library/*",
       "allowedRoles": ["anonymous", "authenticated"],
       "headers": { "cache-control": "no-store" }
-    },
-    { "route": "/src/*", "allowedRoles": ["anonymous", "authenticated"] }
+    }
   ],
 
   "navigationFallback": {
