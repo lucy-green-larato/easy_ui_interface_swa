@@ -18,7 +18,7 @@ async function loadProductIndex(mode, basePrefix) {
   } catch { }
 
   // Fallback: fetch index.json directly from the content folder
-  const url = `content/call-library/v1/${m}/index.json`;
+  const url = `/content/call-library/v1/${m}/index.json`;
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
   return await res.json();
