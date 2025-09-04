@@ -17,30 +17,19 @@
     { "route": "/lead-qualification", "redirect": "/qualification", "statusCode": 301 },
     { "route": "/lead-qualification/*", "redirect": "/qualification", "statusCode": 301 },
 
-    { "route": "/campaign", "rewrite": "/campaign/index.html" },
-    { "route": "/campaign/*", "rewrite": "/campaign/index.html" },
-
 
     {
       "route": "/content/call-library/*",
       "allowedRoles": ["anonymous", "authenticated"],
       "headers": { "cache-control": "no-store" }
     },
-    { "route": "/src/*", "allowedRoles": ["anonymous", "authenticated"] },
-
-    
-    { "route": "/*.html", "headers": { "cache-control": "no-cache" } },
-    { "route": "/*.css",  "headers": { "cache-control": "public, max-age=31536000, immutable" } },
-    { "route": "/*.js",   "headers": { "cache-control": "public, max-age=31536000, immutable" } },
-    { "route": "/*.mjs",  "headers": { "cache-control": "public, max-age=31536000, immutable" } },
-    { "route": "/assets/*", "headers": { "cache-control": "public, max-age=31536000, immutable" } }
+    { "route": "/src/*", "allowedRoles": ["anonymous", "authenticated"] }
   ],
 
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": [
-      "/api/*",
-      "/content/*",
+     "/content/*",
       "/src/*",
       "/reports",
       "/reports/*",
