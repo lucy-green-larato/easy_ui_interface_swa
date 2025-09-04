@@ -14,7 +14,17 @@
     { "route": "/campaign",        "rewrite": "/campaign/index.html" },
     { "route": "/campaign/*",      "rewrite": "/campaign/index.html" },
 
-    { "route": "/api/*",           "allowedRoles": ["anonymous"] },
+  
+    { "route": "/.auth/*",         "rewrite": "http://localhost:7072/api/.auth/{*}", "allowedRoles": ["anonymous"] },
+
+   
+    { "route": "/api/campaign/*",  "rewrite": "http://localhost:7071/api/campaign/{*}", "allowedRoles": ["anonymous"] },
+    { "route": "/api/runs",        "rewrite": "http://localhost:7071/api/runs",         "allowedRoles": ["anonymous"] },
+
+   
+    { "route": "/api/pbi-token",   "rewrite": "http://localhost:7072/api/pbi-token",     "allowedRoles": ["anonymous"] },
+    { "route": "/api/generate/*",  "rewrite": "http://localhost:7072/api/generate/{*}",  "allowedRoles": ["anonymous"] },
+    { "route": "/api/*",           "rewrite": "http://localhost:7072/api/{*}",           "allowedRoles": ["anonymous"] },
 
     { "route": "/content/call-library/*", "allowedRoles": ["anonymous","authenticated"], "headers": { "cache-control": "no-store" } },
     { "route": "/src/*",                 "allowedRoles": ["anonymous","authenticated"] },
@@ -42,15 +52,5 @@
   "globalHeaders": {
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Content-Type-Options": "nosniff"
-  },
-  "responseOverrides": {
-    "404": { "rewrite": "/index.html" }
-  },
-  "mimeTypes": {
-    ".md": "text/markdown; charset=utf-8",
-    ".mdx": "text/markdown; charset=utf-8",
-    ".js": "application/javascript; charset=utf-8",
-    ".mjs": "application/javascript; charset=utf-8",
-    ".json": "application/json; charset=utf-8"
   }
 }
