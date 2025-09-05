@@ -1,6 +1,11 @@
-node_modules/
-api-python/local.settings.json
+# Node
+**/node_modules/
+
+# Local settings (keep untracked)
 api/local.settings.json
+api-python/local.settings.json
+web/staticwebapp.config.local.json
+
 # Azurite (local storage emulator)
 .azurite/
 _azurite/
@@ -9,13 +14,14 @@ _azurite/
 *.log
 **/debug.log
 
-# Python bytecode
-__pycache__/
+# Python bytecode & venvs
+**/__pycache__/
 *.py[cod]
 *.pyo
+.venv/
+venv/
+env/
 
-# Azure Functions local settings
-api-python/local.settings.json
-
-# SWA local-only config
-web/staticwebapp.config.local.json
+# OS/editor
+.DS_Store
+*.swp
