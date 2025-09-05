@@ -12,10 +12,14 @@ def _safe_import(name: str):
     except Exception as e:
         print(f"[function_app] skipped {name}: {e}")
 
-# ---- HTTP routes (match your actual folders) ----
-_safe_import("status.__init__")   # /api-python/status/__init__.py -> /api/campaign/status
-_safe_import("fetch.__init__")    # /api-python/fetch/__init__.py  -> /api/campaign/fetch
-_safe_import("runs.index")        # /api-python/runs/index.py      -> /api/runs
+# ---- HTTP routes (DFApp-decorated, top-level) ----
+_safe_import("status.__init__")       # /api-python/status/__init__.py
+_safe_import("fetch.__init__")        # /api-python/fetch/__init__.py
+_safe_import("download.__init__")     # optional
+_safe_import("regenerate.__init__")   # optional
+_safe_import("runs.index")            # /api-python/runs/index.py
 
-# ---- Orchestrator + activities ----
+# ---- Durable orchestrator + activities ----
 _safe_import("orchestrators.campaign_orchestrator")
+
+# NOTE: do NOT import start.__init__ while using the classic HttpStart in CampaignOrchestration_HttpStart/
