@@ -1,5 +1,21 @@
 node_modules/
 api-python/local.settings.json
 api/local.settings.json
- .azurite/__blobstorage__/01f95cd9-2cf8-4bdf-8594-90fa96d2372b
-        _azurite/
+# Azurite (local storage emulator)
+.azurite/
+_azurite/
+
+# Logs
+*.log
+**/debug.log
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Azure Functions local settings
+api-python/local.settings.json
+
+# SWA local-only config
+web/staticwebapp.config.local.json
