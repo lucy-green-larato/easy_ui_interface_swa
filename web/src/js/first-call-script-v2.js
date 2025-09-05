@@ -1,27 +1,34 @@
 // first-call-script-v2.js
 import { getIndex, loadTemplate, canonical } from "../lib/callLibrary.js?v=fix6";
 
-// FIX: robust product index loader (works with old/new getIndex and direct fetch)
-async function loadProductIndex(mode, basePrefix) {
+// deterministic, absolute-only, works with split or unified indexes
+async function loadProductIndex(mode) {
   const m = String(mode || '').toLowerCase() === 'partner' ? 'partner' : 'direct';
 
-  // Try old signature: getIndex(mode, basePrefix)
+  // 1) Try legacy mode-specific index (back-compat)
   try {
-    const r1 = await getIndex(m, basePrefix);
-    if (r1) return r1;
-  } catch { }
+    const r = await fetch(`/content/call-library/v1/${m}/index.json`, { cache: 'no-store' });
+    if (r.ok) { console.info('[Product] using mode index:', m); return await r.json(); }
+  } catch (_) { }
 
-  // Try new signature: getIndex({ mode, basePrefix })
-  try {
-    const r2 = await getIndex({ mode: m, basePrefix });
-    if (r2) return r2;
-  } catch { }
+  // 2) Fallback: unified index, filter by "path" when possible
+  const u = await fetch(`/content/call-library/v1/index.json`, { cache: 'no-store' });
+  if (!u.ok) throw new Error(`HTTP ${u.status} for /content/call-library/v1/index.json`);
 
-  // Fallback: fetch index.json directly from the content folder
-  const url = `/content/call-library/v1/${m}/index.json`;
-  const res = await fetch(url, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-  return await res.json();
+  const data = await u.json();
+  const arr = Array.isArray(data?.products) ? data.products
+    : Array.isArray(data?.items) ? data.items
+      : Array.isArray(data) ? data
+        : [];
+
+  const tag = `/${m}/`;
+  const byPath = arr.filter(p => typeof p?.path === 'string' && p.path.includes(tag));
+
+  // KEY: only filter if we actually have matches; otherwise return everything
+  const out = byPath.length ? byPath : arr;
+
+  console.info(`[Product] mode=${m} total=${arr.length} filtered=${byPath.length} using=${out.length}`);
+  return { products: out };
 }
 
 /* basePrefix for subpath hosting */
@@ -738,7 +745,7 @@ async function populateProductsForMode(mode) {
   if (!sel) return;
   sel.innerHTML = `<option value="">Loading…</option>`;
   try {
-    const idx = await loadProductIndex(mode, basePrefix);
+    const idx = await loadProductIndex(mode);
     const items = Array.isArray(idx?.products) ? idx.products : Array.isArray(idx?.items) ? idx.items : Array.isArray(idx) ? idx : [];
     if (!items.length) { sel.innerHTML = `<option value="">No products found</option>`; console.warn('[Product] index.json loaded but empty', idx); return; }
     const saved = (form?.elements?.product?.value || '').trim().toLowerCase();
