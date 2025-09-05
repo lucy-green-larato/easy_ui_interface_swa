@@ -1,35 +1,80 @@
 // first-call-script-v2.js
 import { getIndex, loadTemplate, canonical } from "../lib/callLibrary.js?v=fix6";
 
-// deterministic, absolute-only, works with split or unified indexes
+// Shape-agnostic, absolute-only, works with split or unified indexes.
 async function loadProductIndex(mode) {
   const m = String(mode || '').toLowerCase() === 'partner' ? 'partner' : 'direct';
 
-  // 1) Try legacy mode-specific index (back-compat)
+  // 1) Try legacy mode-specific index (fine if 404)
   try {
     const r = await fetch(`/content/call-library/v1/${m}/index.json`, { cache: 'no-store' });
-    if (r.ok) { console.info('[Product] using mode index:', m); return await r.json(); }
+    if (r.ok) {
+      console.info('[Product] using mode index:', m);
+      return await r.json(); // may be array or {products:[...]}
+    }
   } catch (_) { }
 
-  // 2) Fallback: unified index, filter by "path" when possible
+  // 2) Fallback: unified v1 index
   const u = await fetch(`/content/call-library/v1/index.json`, { cache: 'no-store' });
   if (!u.ok) throw new Error(`HTTP ${u.status} for /content/call-library/v1/index.json`);
-
   const data = await u.json();
-  const arr = Array.isArray(data?.products) ? data.products
-    : Array.isArray(data?.items) ? data.items
-      : Array.isArray(data) ? data
-        : [];
 
-  const tag = `/${m}/`;
-  const byPath = arr.filter(p => typeof p?.path === 'string' && p.path.includes(tag));
+  // ---- normalize any shape to a flat array of product-like objects ----
+  const arr = extractProducts(data);
 
-  // KEY: only filter if we actually have matches; otherwise return everything
-  const out = byPath.length ? byPath : arr;
+  // Filter by mode using "path" when available; otherwise leave as-is
+  const byMode = arr.filter(it => {
+    const p = String(it?.path || '').toLowerCase();
+    if (p.includes('/partner/')) return m === 'partner';
+    if (p.includes('/direct/')) return m === 'direct';
+    return true; // no path: include in both
+  });
 
-  console.info(`[Product] mode=${m} total=${arr.length} filtered=${byPath.length} using=${out.length}`);
+  // If filtering removed everything (e.g., only partner paths in file and we asked for direct), fall back to "all"
+  const out = byMode.length ? byMode : arr;
+
+  console.info(`[Product] mode=${m} total=${arr.length} filtered=${byMode.length} using=${out.length}`);
   return { products: out };
 }
+
+// Heuristic extractor: handles array root, {products:[...]}, {items:[...]},
+// {products:{direct:[...], partner:[...]}} and other nested arrays with product-like items.
+function extractProducts(data) {
+  if (!data) return [];
+
+  if (Array.isArray(data)) return data;
+
+  if (Array.isArray(data.products)) return data.products;
+  if (Array.isArray(data.items)) return data.items;
+
+  // products is an object keyed by mode (e.g., { direct:[...], partner:[...] })
+  if (data.products && typeof data.products === 'object' && !Array.isArray(data.products)) {
+    const flat = Object.values(data.products).flatMap(v => Array.isArray(v) ? v : []);
+    if (flat.length) return flat;
+  }
+
+  // last resort: deep-scan for arrays of objects that look like products
+  const out = [];
+  const stack = [data];
+  const seen = new Set();
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || typeof node !== 'object' || seen.has(node)) continue;
+    seen.add(node);
+
+    if (Array.isArray(node)) {
+      if (node.length && typeof node[0] === 'object') {
+        const candidates = node.filter(o => o && typeof o === 'object' && ('id' in o || 'label' in o || 'name' in o));
+        if (candidates.length) out.push(...candidates);
+      }
+      for (const v of node) if (v && typeof v === 'object') stack.push(v);
+    } else {
+      for (const v of Object.values(node)) if (v && typeof v === 'object') stack.push(v);
+    }
+  }
+  return out;
+}
+
 
 /* basePrefix for subpath hosting */
 const basePrefix = (() => {
