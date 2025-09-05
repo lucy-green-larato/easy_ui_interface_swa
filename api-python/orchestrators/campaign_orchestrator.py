@@ -71,6 +71,7 @@ def _write_status(prefix: str, run_id: str, state: str, page: str, row_count: in
 # -----------------------------
 # Orchestrator
 # -----------------------------
+@app.function_name(name="CampaignOrchestration")
 @app.orchestration_trigger(context_name="context")
 def CampaignOrchestration(context: df.DurableOrchestrationContext):
     """
@@ -144,6 +145,7 @@ def CampaignOrchestration(context: df.DurableOrchestrationContext):
 # -----------------------------
 # Activities
 # -----------------------------
+@app.function_name(name="validate_input_activity")
 @app.activity_trigger(input_name="input")
 def validate_input_activity(input: dict):
     """
@@ -170,6 +172,7 @@ def validate_input_activity(input: dict):
     }
 
 
+@app.function_name(name="evidence_builder_activity")
 @app.activity_trigger(input_name="input")
 def evidence_builder_activity(input: dict):
     """
@@ -206,6 +209,7 @@ def evidence_builder_activity(input: dict):
     return {"evidence_log": evidence_log}
 
 
+@app.function_name(name="campaign_draft_activity")
 @app.activity_trigger(input_name="input")
 def campaign_draft_activity(input: dict):
     """
@@ -270,6 +274,7 @@ def campaign_draft_activity(input: dict):
     return {"ok": True}
 
 
+@app.function_name(name="validator_activity")
 @app.activity_trigger(input_name="input")
 def validator_activity(input: dict):
     """
