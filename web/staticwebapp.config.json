@@ -15,15 +15,8 @@
     { "route": "/lead-qualification", "redirect": "/qualification", "statusCode": 301 },
     { "route": "/lead-qualification/*", "redirect": "/qualification", "statusCode": 301 },
 
-    {
-      "route": "/content/call-library/*",
-      "headers": { "cache-control": "no-store" }
-    }
+    { "route": "/content/call-library/*", "headers": { "cache-control": "no-store" } }
   ],
-  "navigationFallback": {
-    "rewrite": "/index.html",
-    "exclude": ["/api/*", "/.auth/*", "/content/*"]
-  },
   "globalHeaders": {
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Content-Type-Options": "nosniff"
