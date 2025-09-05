@@ -1,35 +1,35 @@
 # /api-python/function_app.py
-import logging
+import logging, json
 import azure.functions as func
 import azure.durable_functions as df
 
-# One DFApp for the v2 model. Default HTTP auth is FUNCTION, but we override per-route.
+# One DFApp for v2 Durable. Default auth is FUNCTION; we override per-route below.
 app = df.DFApp(http_auth_level=func.AuthLevel.FUNCTION)
 
-# -------------------------------------------------------------------
-# HTTP STARTER for Durable (diagnostic-friendly)
+# -------------------------------
+# HTTP starter (local-friendly)
 # POST /api/orchestrators/CampaignOrchestration
-# -------------------------------------------------------------------
+# Returns: 202 + {"runId": "<instanceId>"}
+# -------------------------------
 @app.function_name(name="CampaignOrchestration_HttpStart")
 @app.route(
     route="orchestrators/CampaignOrchestration",
     methods=["POST"],
-    auth_level=func.AuthLevel.ANONYMOUS  # allow curl locally with no keys
+    auth_level=func.AuthLevel.ANONYMOUS
 )
 @app.durable_client_input(client_name="client")
-def CampaignOrchestration_HttpStart(
+async def CampaignOrchestration_HttpStart(
     req: func.HttpRequest,
     client: df.DurableOrchestrationClient
-):
-    """
-    Starts the orchestrator named EXACTLY 'CampaignOrchestration'.
-    If anything fails, return HTTP 500 with the exception message so we can see the real cause.
-    """
+) -> func.HttpResponse:
     try:
         instance_id = client.start_new("CampaignOrchestration", None, None)
-        return client.create_check_status_response(req, instance_id)
+        return func.HttpResponse(
+            json.dumps({"runId": instance_id}),
+            status_code=202,
+            mimetype="application/json"
+        )
     except Exception as e:
-        # Log full details and return the message in-body for quick diagnosis
         logging.exception("Failed to start orchestrator")
         return func.HttpResponse(
             f"Failed to start 'CampaignOrchestration': {e}",
@@ -37,9 +37,10 @@ def CampaignOrchestration_HttpStart(
             mimetype="text/plain"
         )
 
-# -------------------------------------------------------------------
-# Helper to import modules so their decorators register on THIS app
-# -------------------------------------------------------------------
+# --------------------------------
+# Helper: import modules so their
+# decorators register on *this* app
+# --------------------------------
 def _safe_import(module: str):
     try:
         __import__(module)
@@ -47,7 +48,7 @@ def _safe_import(module: str):
     except Exception as exc:
         logging.warning("[function_app] skipped %s: %s", module, exc)
 
-# HTTP endpoints (Node-compatible helpers etc.)
+# HTTP endpoints
 _safe_import("campaign.start.__init__")
 _safe_import("campaign.status.__init__")
 _safe_import("campaign.fetch.__init__")
@@ -55,7 +56,5 @@ _safe_import("campaign.regenerate.__init__")
 _safe_import("campaign.download.__init__")
 _safe_import("runs.index")
 
-# Durable: orchestrator + activities
-# IMPORTANT: The orchestrator function inside this module MUST be named exactly "CampaignOrchestration"
-# and decorated on THIS 'app' with the v2 decorators shown below (example).
+# Durable (orchestrator + activities)
 _safe_import("orchestrators.campaign_orchestrator")
