@@ -23,7 +23,8 @@ async def CampaignOrchestration_HttpStart(
     client: df.DurableOrchestrationClient
 ) -> func.HttpResponse:
     try:
-        instance_id = client.start_new("CampaignOrchestration", None, None)
+        # FIX: await start_new — it returns a coroutine in this worker/runtime
+        instance_id = await client.start_new("CampaignOrchestration", None, None)
         return func.HttpResponse(
             json.dumps({"runId": instance_id}),
             status_code=202,
