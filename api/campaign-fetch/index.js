@@ -1,3 +1,7 @@
+const fetchFn = (typeof fetch !== "undefined")
+  ? fetch
+  : (...args) => import("node-fetch").then(m => m.default(...args));
+
 module.exports = async function (context, req) {
   const file = (req.query && req.query.file) || "campaign";
   const runId = (req.query && req.query.runId) || "";
@@ -8,11 +12,15 @@ module.exports = async function (context, req) {
   const url = `${base}/api/campaign/fetch?${qs.toString()}`;
 
   try {
-    const resp = await fetch(url);
+    const resp = await fetchFn(url);
     const text = await resp.text();
     const ct = resp.headers.get("content-type") || "application/json";
-    return { status: resp.status, body: /json/.test(ct) ? JSON.parse(text || "{}") : text, headers: { "Content-Type": ct } };
+    const body = /json/.test(ct) ? (text ? JSON.parse(text) : {}) : text;
+    return { status: resp.status, headers: { "Content-Type": ct }, body };
   } catch (e) {
-    return { status: 500, body: `fetch error: ${e.message}` };
+    return {
+      status: 500, headers: { "Content-Type": "application/json" },
+      body: { error: "fetch error", detail: e.message }
+    };
   }
 };
