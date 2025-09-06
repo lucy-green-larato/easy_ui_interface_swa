@@ -34,3 +34,6 @@ _safe_import("fetch_v2")
 
 # Do NOT import classic function.json apps (they're ignored by v2 anyway).
 # Do NOT import a non-existent 'start' package.
+@app.route(route="ping", methods=["GET"])
+async def _ping(req: func.HttpRequest):
+    return func.HttpResponse("ok")
