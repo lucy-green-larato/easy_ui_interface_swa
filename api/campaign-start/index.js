@@ -1,4 +1,4 @@
-// Polyfill fetch for Node 16; Node 18+ has global fetch
+// Proxy to Python Durable starter
 const fetchFn = (typeof fetch !== "undefined")
   ? fetch
   : (...args) => import("node-fetch").then(m => m.default(...args));
@@ -6,8 +6,8 @@ const fetchFn = (typeof fetch !== "undefined")
 module.exports = async function (context, req) {
   try {
     const base = (process.env.PY_API_BASE || "http://127.0.0.1:7071").replace(/\/+$/, "");
-    const url = `${base}/api/orchestrators/CampaignOrchestration`;
-    const payload = req.body && typeof req.body === "object" ? req.body : {};
+    const url  = `${base}/api/orchestrators/CampaignOrchestration`;
+    const payload = (req.body && typeof req.body === "object") ? req.body : {};
 
     const r = await fetchFn(url, {
       method: "POST",
@@ -16,24 +16,13 @@ module.exports = async function (context, req) {
     });
 
     const text = await r.text();
-    let data = {}; try { data = JSON.parse(text); } catch {}
-
-    if (!r.ok) {
-      context.log.warn("Upstream start failed", r.status, text);
-      context.res = { status: r.status, jsonBody: { error: "upstream start failed", detail: data || text || null } };
-      return;
-    }
-
-    const runId = data?.id || extractIdFromStatusUrl(data?.statusQueryGetUri) || null;
-    context.res = { status: 200, jsonBody: { ok: true, runId, raw: data } };
-  } catch (err) {
-    context.log.error("campaign-start error", err);
-    context.res = { status: 500, jsonBody: { error: "start proxy exception", detail: String(err) } };
+    context.res = {
+      status: r.status,
+      headers: { "Content-Type": r.headers.get("content-type") || "application/json" },
+      body: text
+    };
+  } catch (e) {
+    context.log.error("campaign-start error", e);
+    context.res = { status: 502, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "upstream_unreachable", detail: String(e && e.message || e) }) };
   }
 };
-
-function extractIdFromStatusUrl(u) {
-  if (!u || typeof u !== "string") return null;
-  const m = u.match(/instances\/([^?\/]+)/i);
-  return (m && m[1]) || null;
-}
