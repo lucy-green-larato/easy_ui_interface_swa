@@ -1,11 +1,6 @@
 # api-python/function_app.py
-# Single shared entry-point for Python v2 Durable (decorator-based).
-
-import sys
-import importlib
-import importlib.util
+import sys, importlib, importlib.util
 from pathlib import Path
-
 import azure.functions as func
 import azure.durable_functions as df
 
@@ -13,10 +8,10 @@ APP_ROOT = Path(__file__).parent.resolve()
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
+# One DFApp for Durable + HTTP routes
 app = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 def _safe_import(name: str):
-    """Import a module by name; if it's a package under APP_ROOT, execute its __init__.py."""
     try:
         return importlib.import_module(name)
     except ModuleNotFoundError:
@@ -31,9 +26,11 @@ def _safe_import(name: str):
             return mod
         raise
 
-# Import ONLY decorator-based modules that actually exist in your tree:
+# Decorator-based modules to load (no 'runs' if you don't want it)
 _safe_import("orchestrators.campaign_orchestrator")
-_safe_import("runs.index")
+_safe_import("http_start")
+_safe_import("status_v2")
+_safe_import("fetch_v2")
 
-# Do NOT import classic function.json apps (CampaignStatus, CampaignFetch).
-# Do NOT import 'start' — no such package in this repo snapshot.
+# Do NOT import classic function.json apps (they're ignored by v2 anyway).
+# Do NOT import a non-existent 'start' package.
