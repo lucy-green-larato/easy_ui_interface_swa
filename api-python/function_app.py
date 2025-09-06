@@ -34,6 +34,9 @@ _safe_import("fetch_v2")
 
 # Do NOT import classic function.json apps (they're ignored by v2 anyway).
 # Do NOT import a non-existent 'start' package.
+from azure.functions import HttpRequest, HttpResponse
+
+@app.function_name("ping")
 @app.route(route="ping", methods=["GET"])
-async def _ping(req: func.HttpRequest):
-    return func.HttpResponse("ok")
+def ping(req: HttpRequest) -> HttpResponse:
+    return HttpResponse("ok", status_code=200)
