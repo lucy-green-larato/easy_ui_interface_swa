@@ -1,4 +1,4 @@
-{"scriptFile": "index.js",
+{
   "bindings": [
     {
       "authLevel": "anonymous",
@@ -8,6 +8,11 @@
       "methods": ["get"],
       "route": "campaign/fetch"
     },
-    { "type": "http", "direction": "out", "name": "$return" }
-  ]
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "$return"
+    }
+  ],
+  "scriptFile": "index.js"
 }
