@@ -37,4 +37,3 @@ function extractIdFromStatusUrl(u) {
   const m = u.match(/instances\/([^?\/]+)/i);
   return (m && m[1]) || null;
 }
-
