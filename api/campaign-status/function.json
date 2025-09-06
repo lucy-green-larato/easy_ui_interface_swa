@@ -1,4 +1,5 @@
 {
+  "scriptFile": "__init__.py",
   "bindings": [
     {
       "authLevel": "anonymous",
@@ -8,6 +9,15 @@
       "methods": ["get"],
       "route": "campaign/status"
     },
-    { "type": "http", "direction": "out", "name": "$return" }
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "$return"
+    },
+    {
+      "type": "orchestrationClient",
+      "direction": "in",
+      "name": "starter"
+    }
   ]
 }
