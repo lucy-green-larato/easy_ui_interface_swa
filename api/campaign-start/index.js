@@ -1,60 +1,43 @@
+// Use fetch if available, otherwise lazy-load node-fetch (Node 16/18 in Functions)
 const fetchFn = (typeof fetch !== "undefined")
   ? fetch
   : (...args) => import("node-fetch").then(m => m.default(...args));
 
 module.exports = async function (context, req) {
-  const base = process.env.PY_API_BASE || "http://127.0.0.1:7071";
-  const url = `${base}/api/orchestrators/CampaignOrchestration`;
-  context.log(`[campaign-start] POST ${url}`);
-
   try {
-    const resp = await fetchFn(url, {
+    const base = (process.env.PY_API_BASE || "http://127.0.0.1:7071").replace(/\/+$/, "");
+    const url = `${base}/api/orchestrators/CampaignOrchestration`; // NOTE: includes /api
+    const payload = req.body && typeof req.body === "object" ? req.body : {};
+
+    const r = await fetchFn(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body || {})
+      body: JSON.stringify(payload)
     });
 
-    const text = await resp.text();
-    let runId = "";
+    const text = await r.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch {} // tolerate non-JSON (unlikely)
 
-    // Try to extract a runId from any payload shape
-    try {
-      const js = text ? JSON.parse(text) : {};
-      runId = js.runId || js.id || "";
-      if (!runId && js.statusQueryGetUri) {
-        const m = String(js.statusQueryGetUri).match(/instances\/([^\/\?]+)/);
-        if (m) runId = m[1];
-      }
-    } catch (_) {
-      // non-JSON upstream; keep text for error detail
-    }
-
-    if (!resp.ok && !runId) {
-      return {
-        status: resp.status,
-        headers: { "Content-Type": "application/json" },
-        body: { error: "upstream start failed", detail: text || null }
+    if (!r.ok) {
+      context.log.warn("Upstream start failed", r.status, text);
+      context.res = {
+        status: r.status,
+        jsonBody: { error: "upstream start failed", detail: data || text || null }
       };
+      return;
     }
 
-    if (!runId) {
-      return {
-        status: 502,
-        headers: { "Content-Type": "application/json" },
-        body: { error: "no runId in starter response", detail: text || null }
-      };
-    }
-
-    return {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-      body: { runId }
-    };
-  } catch (e) {
-    return {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-      body: { error: "start error", detail: e.message }
-    };
+    const runId = data?.id || extractIdFromStatusUrl(data?.statusQueryGetUri) || null;
+    context.res = { status: 200, jsonBody: { ok: true, runId, raw: data } };
+  } catch (err) {
+    context.log.error("campaign-start error", err);
+    context.res = { status: 500, jsonBody: { error: "start proxy exception", detail: String(err) } };
   }
 };
+
+function extractIdFromStatusUrl(u) {
+  if (!u || typeof u !== "string") return null;
+  const m = u.match(/instances\/([^?\/]+)/i);
+  return (m && m[1]) || null;
+}
