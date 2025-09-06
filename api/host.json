@@ -1,10 +1,5 @@
 {
   "version": "2.0",
-   "functions": [
-    "campaign-start",
-    "campaign-status",
-    "campaign-fetch"
-  ],
   "extensionBundle": {
     "id": "Microsoft.Azure.Functions.ExtensionBundle",
     "version": "[3.*, 4.0.0)"
@@ -14,11 +9,10 @@
       "hubName": "CampaignHub"
     }
   },
-   "logging": {
+  "logging": {
     "logLevel": {
       "Function": "Information",
       "Host.Results": "Information"
     }
   }
 }
-
