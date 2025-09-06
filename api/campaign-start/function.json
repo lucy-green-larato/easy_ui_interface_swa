@@ -1,5 +1,4 @@
 {
-  "scriptFile": "index.js",
   "bindings": [
     {
       "authLevel": "anonymous",
@@ -14,5 +13,6 @@
       "direction": "out",
       "name": "res"
     }
-  ]
+  ],
+  "scriptFile": "index.js"
 }
