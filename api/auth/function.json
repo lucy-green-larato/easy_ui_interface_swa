@@ -14,5 +14,5 @@
       "name": "$return"
     }
   ],
-  "scriptFile": "index.js"
+  "scriptFile": "./handler.cjs"
 }
