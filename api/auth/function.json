@@ -1,18 +1,8 @@
 {
   "bindings": [
-    {
-      "type": "httpTrigger",
-      "direction": "in",
-      "authLevel": "anonymous",
-      "name": "req",
-      "methods": ["get", "post"],
-      "route": ".auth/{*path}"
-    },
-    {
-      "type": "http",
-      "direction": "out",
-      "name": "$return"
-    }
+    { "type": "httpTrigger", "direction": "in", "authLevel": "anonymous",
+      "name": "req", "methods": ["get", "post"], "route": ".auth/{*path}" },
+    { "type": "http", "direction": "out", "name": "$return" }
   ],
-  "scriptFile": "./handler.cjs"
+  "scriptFile": "index.js"
 }
