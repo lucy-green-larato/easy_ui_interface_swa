@@ -1,8 +1,14 @@
 {
+  "scriptFile": "index.js",
   "bindings": [
-    { "type": "httpTrigger", "direction": "in", "authLevel": "anonymous",
-      "name": "req", "methods": ["get", "post"], "route": ".auth/{*path}" },
-    { "type": "http", "direction": "out", "name": "$return" }
-  ],
-  "scriptFile": "index.js"
+    {
+      "authLevel": "anonymous",
+      "type": "httpTrigger",
+      "direction": "in",
+      "name": "req",
+      "methods": ["get"],
+      "route": ".auth/{*path}"
+    },
+    { "type": "http", "direction": "out", "name": "res" }
+  ]
 }
