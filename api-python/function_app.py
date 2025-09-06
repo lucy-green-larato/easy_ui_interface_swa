@@ -1,9 +1,13 @@
-# function_app.py
-import os, sys, importlib, importlib.util, pathlib, logging
+# api-python/function_app.py
+import os
+import sys
+import importlib
+import importlib.util
+import pathlib
 import azure.functions as func
 import azure.durable_functions as df
 
-# Ensure the function app root is on sys.path no matter where func is started
+# Ensure the function app root is importable regardless of where 'func start' is invoked
 APP_ROOT = pathlib.Path(__file__).parent.resolve()
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
@@ -12,8 +16,9 @@ app = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 def _safe_import(name: str):
     """
-    Try a normal import, then fall back to loading a package from APP_ROOT/<name>/__init__.py.
-    This avoids 'No module named start' when the worker's sys.path misses the app root.
+    Import a module by name. If the module is a package folder under APP_ROOT
+    (e.g. 'start') but isn't on sys.path, fall back to loading its __init__.py
+    directly so its decorators run.
     """
     try:
         return importlib.import_module(name)
@@ -25,14 +30,15 @@ def _safe_import(name: str):
             mod = importlib.util.module_from_spec(spec)
             sys.modules[name] = mod
             assert spec and spec.loader
-            spec.loader.exec_module(mod)  # executes decorators in start/__init__.py
+            spec.loader.exec_module(mod)
             return mod
         raise
 
-# Register decorated DFApp functions
+# Register DFApp-decorated functions
 _safe_import("orchestrators.campaign_orchestrator")
 _safe_import("runs.index")
-_safe_import("start")   # ← keep as 'start'; this executes start/__init__.py
-# leave other optional modules commented unless they exist
-# _safe_import("download")
-# _safe_import("regenerate")
+_safe_import("start")            # ← THIS registers POST /api/campaign/start
+
+# Do NOT import classic function.json apps here (discovered by host automatically):
+# _safe_import("download")       # Only if file/folder exists
+# _safe_import("regenerate")     # Only if file/folder exists
