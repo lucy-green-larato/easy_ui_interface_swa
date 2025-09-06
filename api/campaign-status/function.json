@@ -1,5 +1,4 @@
 {
-  "scriptFile": "index.js",
   "bindings": [
     {
       "authLevel": "anonymous",
@@ -10,5 +9,6 @@
       "route": "campaign/status"
     },
     { "type": "http", "direction": "out", "name": "res" }
-  ]
+  ],
+  "scriptFile": "index.js"
 }
