@@ -1,5 +1,5 @@
 {
-  "scriptFile": "__init__.py",
+  "scriptFile": "index.js",
   "bindings": [
     {
       "authLevel": "anonymous",
@@ -9,15 +9,6 @@
       "methods": ["get"],
       "route": "campaign/status"
     },
-    {
-      "type": "http",
-      "direction": "out",
-      "name": "$return"
-    },
-    {
-      "type": "orchestrationClient",
-      "direction": "in",
-      "name": "starter"
-    }
+    { "type": "http", "direction": "out", "name": "res" }
   ]
 }
