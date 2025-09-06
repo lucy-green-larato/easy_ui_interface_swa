@@ -6,7 +6,7 @@ const fetchFn = (typeof fetch !== "undefined")
 module.exports = async function (context, req) {
   try {
     const base = (process.env.PY_API_BASE || "http://127.0.0.1:7071").replace(/\/+$/, "");
-    const url = `${base}/api/campaign/start`;
+    const url = `${base}/api/orchestrators/CampaignOrchestration`;
     const payload = req.body && typeof req.body === "object" ? req.body : {};
 
     const r = await fetchFn(url, {
