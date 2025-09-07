@@ -14,5 +14,15 @@
       "Function": "Information",
       "Host.Results": "Information"
     }
-  }
+  },
+  "functions": [
+    "auth",
+    "generate",
+    "campaign-start",
+    "campaign-status",
+    "campaign-fetch",
+    "campaign-regenerate",
+    "runs",
+    "pbi_token"
+  ]
 }
