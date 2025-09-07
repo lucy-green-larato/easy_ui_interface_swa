@@ -1,5 +1,5 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-09-07-4 json compatibility
+// Version: v3-markdown-first-2025-09-07-5 json compatibility
 
 const VERSION = "DEV-verify-2025-09-07-1"; // <-- bump this every edit
 try {
@@ -1917,70 +1917,6 @@ module.exports = async function (context, req) {
         (missingUspBlock || "(USPs provided; skip competitor set)")
       ].filter(Boolean).join("\n");
 
-      // 2b) publisher quality gate for 'Why now:' bullets  (RUNS AFTER campaign is initialised)
-      {
-        function idsFromExecSummary(s) {
-          return Array.from(String(s || "").matchAll(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/g)).map(m => m[1]);
-        }
-
-        const idsInES = idsFromExecSummary(campaign.executive_summary);
-        const idMap = new Map();
-        (campaign.evidence_log || []).forEach(it => {
-          idMap.set(String(it.claim_id || "").trim(), it);
-        });
-
-        let invalidWhyNow = false;
-        if (!idsInES.length || idsInES.length < 3) {
-          invalidWhyNow = true;
-        } else {
-          for (const id of idsInES) {
-            const row = idMap.get(id);
-            if (!row || !isAllowedPublisher(row.url || "", row.publisher || "")) { invalidWhyNow = true; break; }
-          }
-        }
-
-        if (invalidWhyNow) {
-          const fixInstrWN = [
-            "FIX: Rebuild ONLY the Executive Summary to comply with publisher rules.",
-            "- ≤180 words.",
-            "- Include 'Why now:' with 3–5 bullets.",
-            "- Each bullet must include a ClaimID that maps to an Evidence Log item with an allowed publisher domain (ofcom.org.uk, gov.uk incl. ONS/NCSC, ons.gov.uk, citb.co.uk).",
-            "- Do NOT cite the company itself. If you cannot support a bullet with an allowed publisher, write 'No public evidence found' for that bullet.",
-            "- Keep product nouns aligned to the website text."
-          ].join("\n");
-
-          const redoPromptWN = [prompt, "", "PREVIOUS JSON:", JSON.stringify(campaign), "", fixInstrWN].join("\n");
-          try {
-            const redoWN = await callModel({
-              system: SYSTEM,
-              prompt: redoPromptWN,
-              temperature: 0.2,
-              response_format: { type: "json_object" },
-              max_tokens: 4000
-            });
-            const rrWN = extractText(redoWN) || "{}";
-            const jWN = JSON.parse(rrWN);
-
-            if (jWN && typeof jWN === "object" && typeof jWN.executive_summary === "string") {
-              const idsNew = idsFromExecSummary(jWN.executive_summary);
-              const okNew = idsNew.length >= 3 && idsNew.every(id => {
-                const row = (jWN.evidence_log || []).find(r => String(r.claim_id || "").trim() === id) || idMap.get(id);
-                return row && isAllowedPublisher(row.url || "", row.publisher || "");
-              });
-
-              if (okNew && wordCount(jWN.executive_summary) <= 180) {
-                campaign.executive_summary = jWN.executive_summary;
-                if (Array.isArray(jWN.evidence_log) && jWN.evidence_log.length >= (campaign.evidence_log || []).length) {
-                  campaign.evidence_log = jWN.evidence_log;
-                }
-              }
-            }
-          } catch {
-            /* keep original if fix fails */
-          }
-        }
-      }
-
       /* ---------- model call ---------- */
       let llmRes, raw;
       try {
@@ -2142,6 +2078,70 @@ module.exports = async function (context, req) {
             const z3 = CampaignSchema.safeParse(jj);
             if (z3.success) campaign = jj; // adopt
           } catch { /* non-fatal: continue with original */ }
+        }
+      }
+
+      // 2b) publisher quality gate for 'Why now:' bullets  (RUNS AFTER campaign is initialised)
+      {
+        function idsFromExecSummary(s) {
+          return Array.from(String(s || "").matchAll(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/g)).map(m => m[1]);
+        }
+
+        const idsInES = idsFromExecSummary(campaign.executive_summary);
+        const idMap = new Map();
+        (campaign.evidence_log || []).forEach(it => {
+          idMap.set(String(it.claim_id || "").trim(), it);
+        });
+
+        let invalidWhyNow = false;
+        if (!idsInES.length || idsInES.length < 3) {
+          invalidWhyNow = true;
+        } else {
+          for (const id of idsInES) {
+            const row = idMap.get(id);
+            if (!row || !isAllowedPublisher(row.url || "", row.publisher || "")) { invalidWhyNow = true; break; }
+          }
+        }
+
+        if (invalidWhyNow) {
+          const fixInstrWN = [
+            "FIX: Rebuild ONLY the Executive Summary to comply with publisher rules.",
+            "- ≤180 words.",
+            "- Include 'Why now:' with 3–5 bullets.",
+            "- Each bullet must include a ClaimID that maps to an Evidence Log item with an allowed publisher domain (ofcom.org.uk, gov.uk incl. ONS/NCSC, ons.gov.uk, citb.co.uk).",
+            "- Do NOT cite the company itself. If you cannot support a bullet with an allowed publisher, write 'No public evidence found' for that bullet.",
+            "- Keep product nouns aligned to the website text."
+          ].join("\n");
+
+          const redoPromptWN = [prompt, "", "PREVIOUS JSON:", JSON.stringify(campaign), "", fixInstrWN].join("\n");
+          try {
+            const redoWN = await callModel({
+              system: SYSTEM,
+              prompt: redoPromptWN,
+              temperature: 0.2,
+              response_format: { type: "json_object" },
+              max_tokens: 4000
+            });
+            const rrWN = extractText(redoWN) || "{}";
+            const jWN = JSON.parse(rrWN);
+
+            if (jWN && typeof jWN === "object" && typeof jWN.executive_summary === "string") {
+              const idsNew = idsFromExecSummary(jWN.executive_summary);
+              const okNew = idsNew.length >= 3 && idsNew.every(id => {
+                const row = (jWN.evidence_log || []).find(r => String(r.claim_id || "").trim() === id) || idMap.get(id);
+                return row && isAllowedPublisher(row.url || "", row.publisher || "");
+              });
+
+              if (okNew && wordCount(jWN.executive_summary) <= 180) {
+                campaign.executive_summary = jWN.executive_summary;
+                if (Array.isArray(jWN.evidence_log) && jWN.evidence_log.length >= (campaign.evidence_log || []).length) {
+                  campaign.evidence_log = jWN.evidence_log;
+                }
+              }
+            }
+          } catch {
+            /* keep original if fix fails */
+          }
         }
       }
 
