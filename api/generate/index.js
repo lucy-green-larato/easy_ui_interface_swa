@@ -1666,11 +1666,35 @@ module.exports = async function (context, req) {
       /* ---------- website crawl for offer nouns ---------- */
       let websiteText = "";
       let websiteCites = [];
+
       if (company.website) {
         const site = await crawlSite(company.website, { limit: 6 }, context); // helper exists above
         websiteText = site.text || "";
-        websiteCites = (site.pages || []).map(p => ({ label: `Website: ${p.label}`, url: p.url }));
+        websiteCites = (site.pages || [])
+          .map(p => ({ label: `Website: ${p.label}`, url: p.url }));
       }
+
+      // ---- Mine product nouns from website text (used to force specificity) ----
+      function _mineProductHints(txt) {
+        const t = String(txt || "");
+        const hits = [];
+        const push = (label, rx) => { if (rx.test(t)) hits.push(label); };
+        // Common patterns you want the model to use verbatim when present:
+        push("Bonded Internet", /\bBonded\s+Internet\b/i);
+        push("SD-One", /\bSD[-\s]?One\b/i);
+        push("Continuum", /\bContinuum\b/i);
+        push("Continuum Constellation", /\bContinuum\s+Constellation\b/i);
+        push("Starlink", /\bStarlink\b/i);
+        push("fixed public IPs", /\bfixed\s+public\s+IPs?\b/i);
+        push("millisecond failover", /\bmillisecond\s+failover\b/i);
+        push("bonding", /\bbond(?:ing|ed)\b/i);
+        // de-dup
+        const seen = new Set(); const out = [];
+        for (const s of hits) { const k = s.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(s); } }
+        return out;
+      }
+      const productHints = _mineProductHints(websiteText);
+      const siteHasCyber = /\bcyber\s*security|cybersecurity\b/i.test(websiteText);
 
       // ---- Public evidence seed: fetch a few reputable UK pages for the model to quote ----
       // These are broad, evergreen pages; the model must still quote with year and keep to the recency window.
@@ -1864,7 +1888,7 @@ module.exports = async function (context, req) {
         "- Extract 3–5 outcome-oriented differentiators to use across the campaign (these populate positioning_and_differentiation.differentiators)."
       ].join("\n");
 
-      const prompt = [
+      let prompt = [
         "INPUTS",
         `Company: ${company.name || "(n/a)"} ${company.website ? "(" + company.website + ")" : ""} ${company.linkedin ? "| " + company.linkedin : ""}`,
         `USPs: ${company.usps || "(n/a)"} | Tone: ${tone} | Evidence window (months): ${windowMonths}`,
@@ -1916,6 +1940,15 @@ module.exports = async function (context, req) {
         "- MINIMUM COUNTS: messaging_matrix.nonnegotiables ≥ 3; messaging_matrix.matrix ≥ 3; channel_plan.emails ≥ 3; sales_enablement.discovery_questions ≥ 5; sales_enablement.objection_cards ≥ 3.",
         (missingUspBlock || "(USPs provided; skip competitor set)")
       ].filter(Boolean).join("\n");
+      // Enforce product nouns + security scope (appended to the prompt)
+      prompt += "\nPRODUCT HINTS (from website; use verbatim if present): " +
+        (productHints.length ? productHints.join(", ") : "(none)") + "\n" +
+        "CONSTRAINTS:\n" +
+        "- If product nouns are provided above, you MUST use those exact nouns verbatim in the Executive summary and Positioning sections (do not paraphrase or invent new brands).\n" +
+        (siteHasCyber
+          ? "- Security: keep claims aligned with the website content; you may mention VPN/fixed public IPs/remote management if present."
+          : "- Do NOT pitch cybersecurity products/services; only refer to connectivity security controls (e.g., fixed public IPs, VPN) if evidenced on the website.") + "\n";
+
 
       /* ---------- model call ---------- */
       let llmRes, raw;
@@ -2026,32 +2059,50 @@ module.exports = async function (context, req) {
         }
       }
 
-      // 2) exec summary format
+      // 2) exec summary format + product nouns enforcement
       const es = String(campaign.executive_summary || "");
       const esWords = wordCount(es);
-      if (esWords > 180 || !containsWhyNowBullets(es)) {
-        // One, strict rewrite to enforce ≤180 words and "Why now:"
-        const addendum = [
+
+      function _escapeRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+      function _missingProductHints(text) {
+        const t = String(text || "");
+        const missing = [];
+        for (const h of (productHints || [])) {
+          const rx = new RegExp("\\b" + _escapeRe(h) + "\\b", "i");
+          if (!rx.test(t)) missing.push(h);
+        }
+        return missing;
+      }
+
+      let needsRewrite = esWords > 180 || !containsWhyNowBullets(es);
+      const missingHints = _missingProductHints(es);
+      if (!needsRewrite && missingHints.length) needsRewrite = true;
+
+      if (needsRewrite) {
+        const fixLines = [
           "FIX: Rewrite Executive Summary ONLY.",
           "- ≤180 words.",
           "- Must include 'Why now:' followed by 3–5 bullets, each tied to a ClaimID in the Evidence Log.",
           "- Remove generic wording; be specific with offer nouns from website text."
-        ].join("\n");
+        ];
+        if (missingHints.length) {
+          fixLines.push("- Insert these exact product nouns verbatim where relevant: " + missingHints.join(", ") + ".");
+        }
+        const addendum = fixLines.join("\n");
         const redoPrompt = prompt + "\n\n" + addendum;
+
         try {
           const redo = await callModel({
             system: SYSTEM,
             prompt: redoPrompt,
             temperature: 0.2,
             response_format: { type: "json_object" },
-            max_tokens: 4000
+            max_tokens: 8000
           });
-          const rraw = extractText(redo) || "{}";
-          const rjson = JSON.parse(rraw);
-          if (rjson && typeof rjson === "object" && typeof rjson.executive_summary === "string" &&
-            wordCount(rjson.executive_summary) <= 180 && containsWhyNowBullets(rjson.executive_summary)) {
-            campaign.executive_summary = rjson.executive_summary;
-          }
+          const raw2 = extractText(redo) || "{}";
+          const back = JSON.parse(raw2);
+          const z2 = CampaignSchema.safeParse(back);
+          if (z2.success) campaign = back; // adopt rewrite
         } catch (e) { /* keep original if rewrite fails */ }
       }
 
