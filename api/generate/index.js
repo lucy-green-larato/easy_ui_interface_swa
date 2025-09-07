@@ -1,5 +1,5 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-09-07-2 json compatibility
+// Version: v3-markdown-first-2025-09-07-3 json compatibility
 
 const VERSION = "DEV-verify-2025-09-07-1"; // <-- bump this every edit
 try {
@@ -1617,6 +1617,7 @@ module.exports = async function (context, req) {
       };
       const tone = String(body.tone || "professional");
       const windowMonths = Math.max(1, Number(body.evidenceWindowMonths || 6));
+      const uspsProvided = Boolean(company.usps && company.usps.trim().length >= 3);
 
       /* ---------- CSV parsing (quoted) ---------- */
       function parseCsv(text) {
@@ -1701,8 +1702,14 @@ module.exports = async function (context, req) {
             opportunities: z.array(z.string()),
             threats: z.array(z.string())
           }),
-          differentiators: z.array(z.string()).min(3)
+          differentiators: z.array(z.string()).min(3),
+          competitor_set: z.array(z.object({
+            vendor: z.string(),
+            reason_in_set: z.string(),
+            url: z.string().optional().nullable()
+          })).min(5).max(7).optional()
         }),
+
         messaging_matrix: z.object({
           nonnegotiables: z.array(z.string()).min(3),
           matrix: z.array(z.object({
@@ -1805,6 +1812,7 @@ module.exports = async function (context, req) {
         "positioned to leverage", "cutting-edge", "best-in-class", "holistic",
         "client-centric", "industry-leading", "robust posture", "market differentiation"
       ];
+
       const SYSTEM = [
         "You are an expert UK B2B technology marketer.",
         "Return VALID JSON ONLY (no markdown/prose outside JSON). British English. Concise.",
@@ -1814,6 +1822,13 @@ module.exports = async function (context, req) {
         "Use CSV fields only: CompanyName, CompanyNumber, SimplifiedIndustry, ITSpendPct, TopPurchases, TopBlockers, TopNeedsSupplier.",
         "Map objections from TopBlockers. Align offers to TopPurchases & TopNeedsSupplier.",
         "Ignore AdopterProfile and Connectivity needs for now."
+      ].join("\n");
+
+      const missingUspBlock = uspsProvided ? "" : [
+        "MISSING USP PATH:",
+        "- Build a competitor set (5–7 vendors) active in the same solution space. Use reputable, recent sources.",
+        "- Create a SWOT for the company vs. competitors, mapped to buyer-visible outcomes. Cite every point.",
+        "- Extract 3–5 outcome-oriented differentiators to use across the campaign (these populate positioning_and_differentiation.differentiators)."
       ].join("\n");
 
       const prompt = [
@@ -1836,7 +1851,11 @@ module.exports = async function (context, req) {
           executive_summary: "",
           evidence_log: [{ claim_id: "", claim: "", publisher: "", title: "", date: "YYYY-MM-DD", url: "", relevance: "", excerpt: "" }],
           case_studies: [{ customer: "", industry: "", problem: "", solution: "", outcomes: "", link: "", source: "" }],
-          positioning_and_differentiation: { value_prop: "", swot: { strengths: [""], weaknesses: [""], opportunities: [""], threats: [""] }, differentiators: [""] },
+          positioning_and_differentiation: {
+            value_prop: "", swot: { strengths: [""], weaknesses: [""], opportunities: [""], threats: [""] },
+            differentiators: [""],
+            competitor_set: [{ vendor: "", reason_in_set: "", url: "" }]
+          },
           messaging_matrix: { nonnegotiables: [""], matrix: [{ persona: "", pain: "", value_statement: "", proof: "", cta: "" }] },
           offer_strategy: { landing_page: { headline: "", subheadline: "", sections: [{ title: "", content: "", bullets: [""] }], cta: "" }, assets_checklist: [""] },
           channel_plan: { emails: [{ subject: "", preview: "", body: "" }], linkedin: { connect_note: "", insight_post: "", dm: "", comment_strategy: "" }, paid: [{ variant: "", proof: "", cta: "" }], event: { concept: "", agenda: "", speakers: "", cta: "" } },
@@ -1847,19 +1866,19 @@ module.exports = async function (context, req) {
           one_pager_summary: "",
           meta: { icp_from_csv: icpFromCsv, it_spend_buckets: [] },
           input_proof: {
-            fields_validated: true,
-            csv_fields_found: fieldsFound,
-            simplified_industry_values: industries,
+            fields_validated: true, csv_fields_found: fieldsFound, simplified_industry_values: industries,
             top_terms: { purchases: topPurchases, blockers: topBlockers, needs: topNeeds }
           }
         }, null, 2),
         "",
         "RULES",
         "- Executive Summary must open with a concrete, outcome-led statement for the ICP.",
-        "- Include 'Why now:' with 3–5 bullets, each tied to a ClaimID (e.g., '(Ofcom — ClaimID: OFC-2024-Coverage)')",
+        "- Include 'Why now:' with 3–5 bullets, each tied to a ClaimID (e.g., '(Ofcom — ClaimID: OFC-2024-Coverage)').",
         "- Use company website nouns (offers, features) exactly where relevant.",
-        "- Every objection_card.reframe_with_claimid must reference an Evidence Log claim_id."
-      ].join("\n");
+        "- Every objection_cards[*].reframe_with_claimid must reference an Evidence Log claim_id.",
+        "- MINIMUM COUNTS: messaging_matrix.nonnegotiables ≥ 3; messaging_matrix.matrix ≥ 3; channel_plan.emails ≥ 3; sales_enablement.discovery_questions ≥ 5; sales_enablement.objection_cards ≥ 3.",
+        (missingUspBlock || "(USPs provided; skip competitor set)")
+      ].filter(Boolean).join("\n");
 
       /* ---------- model call ---------- */
       let llmRes, raw;
@@ -1888,12 +1907,86 @@ module.exports = async function (context, req) {
       // 1) zod schema
       const zres = CampaignSchema.safeParse(campaign);
       if (!zres.success) {
-        context.res = {
-          status: 502,
-          headers: cors,
-          body: { error: "Campaign JSON failed schema", issues: zres.error.issues, version: VERSION }
-        };
-        return;
+        const issues = zres.error.issues || [];
+        const allowedPaths = new Set([
+          "messaging_matrix.nonnegotiables",
+          "messaging_matrix.matrix",
+          "channel_plan.emails",
+          "sales_enablement.discovery_questions",
+          "sales_enablement.objection_cards"
+        ]);
+        const onlyTooSmallOnAllowed =
+          issues.length > 0 &&
+          issues.every(it => it.code === "too_small" && Array.isArray(it.path) &&
+            allowedPaths.has(it.path.join(".")));
+
+        if (onlyTooSmallOnAllowed) {
+          // Calculate deficits for a precise FIX prompt
+          function need(arr, min) { return Math.max(0, min - (Array.isArray(arr) ? arr.length : 0)); }
+          const deficits = {
+            nonnegotiables: need(campaign?.messaging_matrix?.nonnegotiables, 3),
+            matrix: need(campaign?.messaging_matrix?.matrix, 3),
+            emails: need(campaign?.channel_plan?.emails, 3), // ask for 3 even though schema min is 2
+            dq: need(campaign?.sales_enablement?.discovery_questions, 5),
+            obj: need(campaign?.sales_enablement?.objection_cards, 3)
+          };
+
+          const fixInstr = [
+            "FIX: Augment the PREVIOUS JSON to meet ALL minimum counts. Do NOT delete or rewrite existing content; only append.",
+            `- messaging_matrix.nonnegotiables: add ${deficits.nonnegotiables} (to reach ≥ 3)`,
+            `- messaging_matrix.matrix: add ${deficits.matrix} rows (persona,pain,value_statement,proof,cta) (to reach ≥ 3)`,
+            `- channel_plan.emails: add ${deficits.emails} (to reach ≥ 3)`,
+            `- sales_enablement.discovery_questions: add ${deficits.dq} (to reach ≥ 5)`,
+            `- sales_enablement.objection_cards: add ${deficits.obj} (to reach ≥ 3); each reframe_with_claimid must reference an existing or newly-added Evidence Log claim_id.`,
+            "Return the FULL JSON object again (valid JSON only)."
+          ].join("\n");
+
+          const fixPrompt = [
+            prompt,
+            "",
+            "PREVIOUS JSON:",
+            JSON.stringify(campaign),
+            "",
+            fixInstr
+          ].join("\n");
+
+          try {
+            const redo = await callModel({
+              system: SYSTEM,
+              prompt: fixPrompt,
+              temperature: 0.2,
+              response_format: { type: "json_object" },
+              max_tokens: 8000
+            });
+            const rraw = extractText(redo) || "{}";
+            const rjson = JSON.parse(rraw);
+            const z2 = CampaignSchema.safeParse(rjson);
+            if (z2.success) {
+              campaign = rjson; // adopt fixed version
+            } else {
+              context.res = {
+                status: 502,
+                headers: cors,
+                body: { error: "Campaign JSON failed schema (after fix attempt)", issues: z2.error.issues, version: VERSION }
+              };
+              return;
+            }
+          } catch (e) {
+            context.res = {
+              status: 502,
+              headers: cors,
+              body: { error: "Campaign JSON failed schema; fix attempt errored", detail: String(e && e.message || e), version: VERSION }
+            };
+            return;
+          }
+        } else {
+          context.res = {
+            status: 502,
+            headers: cors,
+            body: { error: "Campaign JSON failed schema", issues, version: VERSION }
+          };
+          return;
+        }
       }
 
       // 2) exec summary format
@@ -1923,6 +2016,32 @@ module.exports = async function (context, req) {
             campaign.executive_summary = rjson.executive_summary;
           }
         } catch (e) { /* keep original if rewrite fails */ }
+      }
+
+      // If USPs were not provided, require competitor_set 5–7; attempt one fix if missing/short
+      if (!uspsProvided) {
+        const cs = campaign?.positioning_and_differentiation?.competitor_set || [];
+        if (!Array.isArray(cs) || cs.length < 5 || cs.length > 7) {
+          const fixCSet = [
+            "FIX: USPs were not provided. Ensure positioning_and_differentiation.competitor_set contains 5–7 vendors with reason_in_set and url.",
+            "Re-check SWOT and differentiators reflect this set and remain outcome-oriented with citations.",
+            "Return FULL JSON only."
+          ].join("\n");
+          const fixPrompt2 = [prompt, "", "PREVIOUS JSON:", JSON.stringify(campaign), "", fixCSet].join("\n");
+          try {
+            const redo2 = await callModel({
+              system: SYSTEM,
+              prompt: fixPrompt2,
+              temperature: 0.2,
+              response_format: { type: "json_object" },
+              max_tokens: 8000
+            });
+            const rr = extractText(redo2) || "{}";
+            const jj = JSON.parse(rr);
+            const z3 = CampaignSchema.safeParse(jj);
+            if (z3.success) campaign = jj; // adopt
+          } catch { /* non-fatal: continue with original */ }
+        }
       }
 
       // 3) recency window flagging
