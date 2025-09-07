@@ -1,5 +1,5 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-08-26 json compatibility
+// Version: v3-markdown-first-2025-09-07-2 json compatibility
 
 const VERSION = "DEV-verify-2025-09-07-1"; // <-- bump this every edit
 try {
@@ -1594,16 +1594,31 @@ module.exports = async function (context, req) {
 
     // ======================= NEW: campaign =======================
     if (kind === "campaign") {
-      // Accepts: { csv_text, company:{name,website,linkedin,usps}, tone, evidenceWindowMonths }
-      // Returns: a JSON "campaign" object for the centre tabs.
+      // Exact compliance with the attached Campaign prompt:
+      // - CSV → ICP, TopPurchases, TopBlockers, TopNeedsSupplier
+      // - Executive Summary ≤180 words + "Why now:" bullets (3–5) with ClaimIDs
+      // - Evidence Log items carry publisher|title|date|url|excerpt
+      // - Strict JSON-only output (no markdown)
+      // - Recency window (months) enforced server-side (warn/flag if stale)
+      // - Objections map to TopBlockers; Offer aligns to TopPurchases/TopNeedsSupplier
+      // - Website crawl used for product/offer nouns (no external web search here)
 
+      /* ---------- inputs ---------- */
       const csvText = String(body.csv_text || "").trim();
       if (!csvText || csvText.length < 20) {
         context.res = { status: 400, headers: cors, body: { error: "csv_text required (string)", version: VERSION } };
         return;
       }
+      const company = {
+        name: String((body.company && body.company.name) || ""),
+        website: String((body.company && body.company.website) || ""),
+        linkedin: String((body.company && body.company.linkedin) || ""),
+        usps: String((body.company && body.company.usps) || "")
+      };
+      const tone = String(body.tone || "professional");
+      const windowMonths = Math.max(1, Number(body.evidenceWindowMonths || 6));
 
-      // --- light CSV parser (no external deps) ---
+      /* ---------- CSV parsing (quoted) ---------- */
       function parseCsv(text) {
         const rows = []; let i = 0, field = "", row = [], inQuotes = false;
         function pushField() { row.push(field); field = ""; }
@@ -1611,9 +1626,8 @@ module.exports = async function (context, req) {
         while (i < text.length) {
           const ch = text[i++];
           if (inQuotes) {
-            if (ch === '"') {
-              if (text[i] === '"') { field += '"'; i++; } else inQuotes = false;
-            } else field += ch;
+            if (ch === '"') { if (text[i] === '"') { field += '"'; i++; } else inQuotes = false; }
+            else field += ch;
           } else {
             if (ch === '"') inQuotes = true;
             else if (ch === ",") pushField();
@@ -1630,11 +1644,9 @@ module.exports = async function (context, req) {
           return obj;
         });
       }
-
       const rows = parseCsv(csvText);
       const get = (r, k) => String(r[k] || "").trim();
       const uniq = (a) => Array.from(new Set(a.filter(Boolean)));
-      const industries = uniq(rows.map(r => get(r, "SimplifiedIndustry")));
       const splitList = (s) => String(s || "").split(/[;,]/).map(x => x.trim()).filter(Boolean);
       function topTerms(col) {
         const m = new Map();
@@ -1643,66 +1655,221 @@ module.exports = async function (context, req) {
         }));
         return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([text, count]) => ({ text, count }));
       }
+      const fieldsFound = rows.length ? Object.keys(rows[0]) : [];
+      const industries = uniq(rows.map(r => get(r, "SimplifiedIndustry")));
       const topPurchases = topTerms("TopPurchases");
       const topBlockers = topTerms("TopBlockers");
       const topNeeds = topTerms("TopNeedsSupplier");
-      const fieldsFound = rows.length ? Object.keys(rows[0]) : [];
+      const icpFromCsv = industries[0] || "";
 
-      const company = {
-        name: String((body.company && body.company.name) || ""),
-        website: String((body.company && body.company.website) || ""),
-        linkedin: String((body.company && body.company.linkedin) || ""),
-        usps: String((body.company && body.company.usps) || "")
-      };
-      const tone = String(body.tone || "professional");
-      const windowMonths = Number(body.evidenceWindowMonths || 6);
+      /* ---------- website crawl for offer nouns ---------- */
+      let websiteText = "";
+      let websiteCites = [];
+      if (company.website) {
+        const site = await crawlSite(company.website, { limit: 6 }, context); // helper exists above
+        websiteText = site.text || "";
+        websiteCites = (site.pages || []).map(p => ({ label: `Website: ${p.label}`, url: p.url }));
+      }
 
-      const system = [
-        "You are an expert B2B technology marketer.",
-        "Return valid JSON only (no markdown). British English.",
-        "Base all claims on reputable sources; include ClaimIDs with publisher|title|date|url|≤2-line excerpt.",
+      /* ---------- strict schema (zod) ---------- */
+      const CampaignSchema = z.object({
+        executive_summary: z.string().min(50).max(1600),
+        evidence_log: z.array(z.object({
+          claim_id: z.string().min(1),
+          claim: z.string().min(15),
+          publisher: z.string().min(2),
+          title: z.string().min(2),
+          date: z.string().min(4),
+          url: z.string().min(4),
+          relevance: z.string().min(3),
+          excerpt: z.string().min(10)
+        })).min(3),
+        case_studies: z.array(z.object({
+          customer: z.string().min(1),
+          industry: z.string().min(1),
+          problem: z.string().min(1),
+          solution: z.string().min(1),
+          outcomes: z.string().min(1),
+          link: z.string().optional().nullable(),
+          source: z.string().optional().nullable()
+        })).optional(),
+        positioning_and_differentiation: z.object({
+          value_prop: z.string().min(20),
+          swot: z.object({
+            strengths: z.array(z.string()),
+            weaknesses: z.array(z.string()),
+            opportunities: z.array(z.string()),
+            threats: z.array(z.string())
+          }),
+          differentiators: z.array(z.string()).min(3)
+        }),
+        messaging_matrix: z.object({
+          nonnegotiables: z.array(z.string()).min(3),
+          matrix: z.array(z.object({
+            persona: z.string(),
+            pain: z.string(),
+            value_statement: z.string(),
+            proof: z.string(),
+            cta: z.string()
+          })).min(3)
+        }),
+        offer_strategy: z.object({
+          landing_page: z.object({
+            headline: z.string(),
+            subheadline: z.string(),
+            sections: z.array(z.object({
+              title: z.string(),
+              content: z.string().optional().nullable(),
+              bullets: z.array(z.string()).optional().nullable()
+            })),
+            cta: z.string()
+          }),
+          assets_checklist: z.array(z.string()).min(3)
+        }),
+        channel_plan: z.object({
+          emails: z.array(z.object({ subject: z.string(), preview: z.string(), body: z.string() })).min(2),
+          linkedin: z.object({ connect_note: z.string(), insight_post: z.string(), dm: z.string(), comment_strategy: z.string() }),
+          paid: z.array(z.object({ variant: z.string(), proof: z.string(), cta: z.string() })).optional(),
+          event: z.object({ concept: z.string(), agenda: z.string(), speakers: z.string(), cta: z.string() }).optional()
+        }),
+        sales_enablement: z.object({
+          discovery_questions: z.array(z.string()).min(5),
+          objection_cards: z.array(z.object({
+            blocker: z.string(),
+            reframe_with_claimid: z.string(),  // must reference a ClaimID
+            proof: z.string(),
+            risk_reversal: z.string()
+          })).min(3),
+          proof_pack_outline: z.array(z.string()).min(3),
+          handoff_rules: z.string().min(10)
+        }),
+        measurement_and_learning: z.object({
+          kpis: z.array(z.string()).min(3),
+          weekly_test_plan: z.string(),
+          utm_and_crm: z.string(),
+          evidence_freshness_rule: z.string()
+        }),
+        compliance_and_governance: z.object({
+          substantiation_file: z.string(),
+          gdpr_pecr_checklist: z.string(),
+          brand_accessibility_checks: z.string(),
+          approval_log_note: z.string()
+        }),
+        risks_and_contingencies: z.string().min(10),
+        one_pager_summary: z.string().min(40),
+        meta: z.object({
+          icp_from_csv: z.string(),
+          it_spend_buckets: z.array(z.string()).optional().nullable()
+        }),
+        input_proof: z.object({
+          fields_validated: z.boolean(),
+          csv_fields_found: z.array(z.string()),
+          simplified_industry_values: z.array(z.string()),
+          top_terms: z.object({
+            purchases: z.array(z.union([z.string(), z.object({ text: z.string(), count: z.number() })])),
+            blockers: z.array(z.union([z.string(), z.object({ text: z.string(), count: z.number() })])),
+            needs: z.array(z.union([z.string(), z.object({ text: z.string(), count: z.number() })]))
+          })
+        })
+      });
+
+      /* ---------- helpers for quality gate ---------- */
+      function wordCount(s) { return String(s || "").trim().split(/\s+/).filter(Boolean).length; }
+      function containsWhyNowBullets(s) {
+        const t = String(s || "");
+        const hasHead = /why\s+now\s*:/i.test(t);
+        const bullets = (t.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).length;
+        return hasHead && bullets >= 3 && bullets <= 7;
+      }
+      function extractClaimIds(arr) {
+        const ids = new Set();
+        (arr || []).forEach(x => { const m = String(x.relevance || "").match(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/); if (m) ids.add(m[1]); });
+        (arr || []).forEach(x => { const m2 = String(x.claim_id || "").trim(); if (m2) ids.add(m2); });
+        return ids;
+      }
+      function parseIsoDate(s) {
+        const m = String(s || "").trim();
+        // accept ISO, UK "2025-08-10" or "10 Mar 2025"
+        const d = new Date(m);
+        return isNaN(d.getTime()) ? null : d;
+      }
+      function isStale(dateStr, months) {
+        const d = parseIsoDate(dateStr); if (!d) return false;
+        const now = new Date();
+        const cutoff = new Date(now.getFullYear(), now.getMonth() - months, now.getDate());
+        return d < cutoff;
+      }
+
+      /* ---------- build strict prompt ---------- */
+      const banlist = [
+        "positioned to leverage", "cutting-edge", "best-in-class", "holistic",
+        "client-centric", "industry-leading", "robust posture", "market differentiation"
+      ];
+      const SYSTEM = [
+        "You are an expert UK B2B technology marketer.",
+        "Return VALID JSON ONLY (no markdown/prose outside JSON). British English. Concise.",
+        "Absolutely avoid: " + banlist.join(", ") + ".",
+        "No assumptions. Every market statement must have an Evidence Log row with: claim_id, claim, publisher, title, date (YYYY-MM-DD), url, ≤2-line excerpt, and a short relevance note.",
+        "Executive Summary must be ≤180 words and include a 'Why now:' list of 3–5 bullets with ClaimIDs.",
+        "Use CSV fields only: CompanyName, CompanyNumber, SimplifiedIndustry, ITSpendPct, TopPurchases, TopBlockers, TopNeedsSupplier.",
+        "Map objections from TopBlockers. Align offers to TopPurchases & TopNeedsSupplier.",
         "Ignore AdopterProfile and Connectivity needs for now."
       ].join("\n");
 
-      const user = [
+      const prompt = [
         "INPUTS",
         `Company: ${company.name || "(n/a)"} ${company.website ? "(" + company.website + ")" : ""} ${company.linkedin ? "| " + company.linkedin : ""}`,
-        `USPs: ${company.usps || "(n/a)"}`,
-        `Tone: ${tone} | Evidence window (months): ${windowMonths}`,
+        `USPs: ${company.usps || "(n/a)"} | Tone: ${tone} | Evidence window (months): ${windowMonths}`,
         "",
         "CSV SUMMARY",
         `Fields: ${fieldsFound.join(", ") || "(none)"}`,
         `SimplifiedIndustry values: ${industries.join(" | ") || "(none)"}`,
-        `TopPurchases: ${topPurchases.map(t => `${t.text}(${t.count})`).join(", ") || "(none)"}`,
-        `TopBlockers: ${topBlockers.map(t => `${t.text}(${t.count})`).join(", ") || "(none)"}`,
-        `TopNeedsSupplier: ${topNeeds.map(t => `${t.text}(${t.count})`).join(", ") || "(none)"}`,
+        `TopPurchases: ${(topPurchases || []).map(t => (t.text || t) + '').join(", ") || "(none)"}`,
+        `TopBlockers: ${(topBlockers || []).map(t => (t.text || t) + '').join(", ") || "(none)"}`,
+        `TopNeedsSupplier: ${(topNeeds || []).map(t => (t.text || t) + '').join(", ") || "(none)"}`,
         "",
-        "REQUIREMENT",
-        "Return ONE JSON object with keys:",
-        "- executive_summary",
-        "- evidence_log[] {claim_id,claim,publisher,title,date,url,relevance,excerpt}",
-        "- case_studies[] {customer,industry,problem,solution,outcomes,link,source}",
-        "- positioning_and_differentiation {value_prop, swot{strengths,weaknesses,opportunities,threats}, differentiators[]}",
-        "- messaging_matrix {nonnegotiables[], matrix[] {persona,pain,value_statement,proof,cta}}",
-        "- offer_strategy {landing_page{headline,subheadline,sections[{title,content|bullets[]}],cta}, assets_checklist[]}",
-        "- channel_plan {emails[{subject,preview,body}], linkedin{connect_note,insight_post,dm,comment_strategy}, paid[{variant,proof,cta}], event{concept,agenda,speakers,cta}}",
-        "- sales_enablement {discovery_questions[], objection_cards[{blocker,reframe_with_claimid,proof,risk_reversal}], proof_pack_outline[], handoff_rules}",
-        "- measurement_and_learning {kpis[], weekly_test_plan, utm_and_crm, evidence_freshness_rule}",
-        "- compliance_and_governance {substantiation_file, gdpr_pecr_checklist, brand_accessibility_checks, approval_log_note}",
-        "- risks_and_contingencies",
-        "- one_pager_summary",
-        "- meta { icp_from_csv, it_spend_buckets[] }",
-        "- input_proof { fields_validated, csv_fields_found[], simplified_industry_values[], top_terms{purchases[],blockers[],needs[]} }"
+        "WEBSITE TEXT (multiple pages; for product/offer nouns & proof):",
+        websiteText ? websiteText.slice(0, 120000) : "(none)",
+        "",
+        "OUTPUT — ONE JSON OBJECT with keys in this exact order:",
+        JSON.stringify({
+          executive_summary: "",
+          evidence_log: [{ claim_id: "", claim: "", publisher: "", title: "", date: "YYYY-MM-DD", url: "", relevance: "", excerpt: "" }],
+          case_studies: [{ customer: "", industry: "", problem: "", solution: "", outcomes: "", link: "", source: "" }],
+          positioning_and_differentiation: { value_prop: "", swot: { strengths: [""], weaknesses: [""], opportunities: [""], threats: [""] }, differentiators: [""] },
+          messaging_matrix: { nonnegotiables: [""], matrix: [{ persona: "", pain: "", value_statement: "", proof: "", cta: "" }] },
+          offer_strategy: { landing_page: { headline: "", subheadline: "", sections: [{ title: "", content: "", bullets: [""] }], cta: "" }, assets_checklist: [""] },
+          channel_plan: { emails: [{ subject: "", preview: "", body: "" }], linkedin: { connect_note: "", insight_post: "", dm: "", comment_strategy: "" }, paid: [{ variant: "", proof: "", cta: "" }], event: { concept: "", agenda: "", speakers: "", cta: "" } },
+          sales_enablement: { discovery_questions: [""], objection_cards: [{ blocker: "", reframe_with_claimid: "", proof: "", risk_reversal: "" }], proof_pack_outline: [""], handoff_rules: "" },
+          measurement_and_learning: { kpis: [""], weekly_test_plan: "", utm_and_crm: "", evidence_freshness_rule: "" },
+          compliance_and_governance: { substantiation_file: "", gdpr_pecr_checklist: "", brand_accessibility_checks: "", approval_log_note: "" },
+          risks_and_contingencies: "",
+          one_pager_summary: "",
+          meta: { icp_from_csv: icpFromCsv, it_spend_buckets: [] },
+          input_proof: {
+            fields_validated: true,
+            csv_fields_found: fieldsFound,
+            simplified_industry_values: industries,
+            top_terms: { purchases: topPurchases, blockers: topBlockers, needs: topNeeds }
+          }
+        }, null, 2),
+        "",
+        "RULES",
+        "- Executive Summary must open with a concrete, outcome-led statement for the ICP.",
+        "- Include 'Why now:' with 3–5 bullets, each tied to a ClaimID (e.g., '(Ofcom — ClaimID: OFC-2024-Coverage)')",
+        "- Use company website nouns (offers, features) exactly where relevant.",
+        "- Every objection_card.reframe_with_claimid must reference an Evidence Log claim_id."
       ].join("\n");
 
+      /* ---------- model call ---------- */
       let llmRes, raw;
       try {
         llmRes = await callModel({
-          system,
-          prompt: user,
+          system: SYSTEM,
+          prompt,
           temperature: 0.2,
           response_format: { type: "json_object" },
-          max_tokens: 6000
+          max_tokens: 8000
         });
         raw = extractText(llmRes) || "{}";
       } catch (e) {
@@ -1717,19 +1884,80 @@ module.exports = async function (context, req) {
         return;
       }
 
-      // Centre-pane friendly aliases
-      campaign.input_proof = campaign.input_proof || {
-        fields_validated: true,
-        csv_fields_found: fieldsFound,
-        simplified_industry_values: industries,
-        top_terms: { purchases: topPurchases, blockers: topBlockers, needs: topNeeds }
-      };
+      /* ---------- validation & quality gate ---------- */
+      // 1) zod schema
+      const zres = CampaignSchema.safeParse(campaign);
+      if (!zres.success) {
+        context.res = {
+          status: 502,
+          headers: cors,
+          body: { error: "Campaign JSON failed schema", issues: zres.error.issues, version: VERSION }
+        };
+        return;
+      }
+
+      // 2) exec summary format
+      const es = String(campaign.executive_summary || "");
+      const esWords = wordCount(es);
+      if (esWords > 180 || !containsWhyNowBullets(es)) {
+        // One, strict rewrite to enforce ≤180 words and "Why now:"
+        const addendum = [
+          "FIX: Rewrite Executive Summary ONLY.",
+          "- ≤180 words.",
+          "- Must include 'Why now:' followed by 3–5 bullets, each tied to a ClaimID in the Evidence Log.",
+          "- Remove generic wording; be specific with offer nouns from website text."
+        ].join("\n");
+        const redoPrompt = prompt + "\n\n" + addendum;
+        try {
+          const redo = await callModel({
+            system: SYSTEM,
+            prompt: redoPrompt,
+            temperature: 0.2,
+            response_format: { type: "json_object" },
+            max_tokens: 4000
+          });
+          const rraw = extractText(redo) || "{}";
+          const rjson = JSON.parse(rraw);
+          if (rjson && typeof rjson === "object" && typeof rjson.executive_summary === "string" &&
+            wordCount(rjson.executive_summary) <= 180 && containsWhyNowBullets(rjson.executive_summary)) {
+            campaign.executive_summary = rjson.executive_summary;
+          }
+        } catch (e) { /* keep original if rewrite fails */ }
+      }
+
+      // 3) recency window flagging
+      const staleClaims = [];
+      (campaign.evidence_log || []).forEach(it => {
+        if (isStale(it.date, windowMonths)) staleClaims.push(it.claim_id || (it.publisher + "|" + it.title));
+      });
+      campaign._recency = { window_months: windowMonths, stale_claim_ids: staleClaims };
+
+      // 4) objections map to TopBlockers (presence check)
+      const blockers = new Set((topBlockers || []).map(x => (x.text || x || "").toLowerCase()));
+      const hasMapped = (campaign.sales_enablement?.objection_cards || []).some(oc => {
+        const b = String(oc.blocker || "").toLowerCase();
+        for (const k of blockers) { if (b.includes(k)) return true; }
+        return false;
+      });
+      if (!hasMapped && (campaign.sales_enablement?.objection_cards || []).length) {
+        // mark unmapped to help UI
+        campaign._warnings = (campaign._warnings || []).concat(["No objection_cards mapped to CSV TopBlockers"]);
+      }
+
+      // 5) centre-pane aliases & citations
       if (!campaign.landing_page && campaign.offer_strategy && campaign.offer_strategy.landing_page) {
         campaign.landing_page = campaign.offer_strategy.landing_page;
       }
       campaign.emails = campaign.emails || (campaign.channel_plan && campaign.channel_plan.emails) || [];
       campaign.evidence_log = campaign.evidence_log || [];
       campaign.sales_enablement = campaign.sales_enablement || {};
+      campaign.input_proof = campaign.input_proof || {
+        fields_validated: true,
+        csv_fields_found: fieldsFound,
+        simplified_industry_values: industries,
+        top_terms: { purchases: topPurchases, blockers: topBlockers, needs: topNeeds }
+      };
+      campaign._website_citations = websiteCites;
 
       context.res = { status: 200, headers: cors, body: campaign };
       return;
