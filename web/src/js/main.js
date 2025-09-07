@@ -3,19 +3,13 @@ function buildReturnTarget() {
   const target = window.location.pathname + window.location.search + window.location.hash;
   return encodeURIComponent(target || "/");
 }
-function login() { location.href = "/.auth/login/aad?post_login_redirect_uri=" + buildReturnTarget(); }
-function logout() { location.href = "/.auth/logout"; }
 
 // Prevent navigation from disabled tiles
 document.addEventListener("click", (e) => {
   if (e.target.closest(".tool.disabled")) e.preventDefault();
 });
 
-// Wire up sign-in buttons (header + hero)
-document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("btnSignIn")?.addEventListener("click", login);
-  document.getElementById("btnSignInPrimary")?.addEventListener("click", login);
-});
+// (removed the old DOMContentLoaded wireup here; we'll wire after login() exists)
 
 // ===== Theme toggle (persisted; respects system when unset) =====
 (function themeToggle() {
@@ -82,7 +76,7 @@ document.addEventListener("DOMContentLoaded", () => {
   else if (mq.addListener) mq.addListener(onSystemChange);
 })();
 
-// ===== Power BI embed =====
+// ===== Power BI embed (tolerant to disabled/local) =====
 let pbiReport = null;
 
 function scheduleTokenRefresh(report) {
@@ -90,7 +84,9 @@ function scheduleTokenRefresh(report) {
     try {
       const r = await fetch("/api/pbi-token", { credentials: "include" });
       if (!r.ok) throw new Error(await r.text());
-      const { token } = await r.json();
+      const data = await r.json();
+      const token = data.token ?? data.embedToken?.token;
+      if (!token) throw new Error("No token in refresh response");
       await report.setAccessToken(token);
       scheduleTokenRefresh(report);
     } catch (e) {
@@ -99,11 +95,33 @@ function scheduleTokenRefresh(report) {
   }, 55 * 60 * 1000);
 }
 
+function showPbiDisabled(msg) {
+  const el = document.getElementById("pbi-status");
+  if (el) el.textContent = msg || "Power BI is disabled.";
+  const pbiSection = document.getElementById("pbiSection");
+  pbiSection?.classList.add("hide");
+}
+
 async function renderReport() {
   try {
     const res = await fetch("/api/pbi-token", { credentials: "include" });
     if (!res.ok) throw new Error(await res.text());
-    const { embedUrl, reportId, token } = await res.json();
+    const data = await res.json();
+
+    if (!data || data.disabled) {
+      showPbiDisabled("Power BI not configured for this environment.");
+      return;
+    }
+
+    const embedUrl = data.embedUrl;
+    const token = data.token ?? data.embedToken?.token;
+    // Prefer explicit reportId if API returns it; otherwise derive from embedUrl (?reportId=...)
+    const reportId = data.reportId ?? (embedUrl ? new URL(embedUrl).searchParams.get("reportId") : null);
+
+    if (!embedUrl || !token || !reportId) {
+      showPbiDisabled("Missing embed parameters (embedUrl/token/reportId).");
+      return;
+    }
 
     const pbiGlobal = window["powerbi-client"] || window.powerbi;
     if (!pbiGlobal || !window.powerbi) throw new Error("Power BI client not loaded.");
@@ -158,7 +176,7 @@ async function renderReport() {
     scheduleTokenRefresh(pbiReport);
   } catch (err) {
     console.error("Embed failed:", err);
-    throw err;
+    // Don't throw; keep the rest of the page alive
   }
 }
 
@@ -272,14 +290,43 @@ async function renderReport() {
     }
   }
 
-  try {
-    const res = await fetch("/.auth/me", { credentials: "include" });
-    if (!res.ok) throw new Error("auth check failed");
-    const { clientPrincipal: princ } = await res.json();
+  // --- Auth (works in dev + Azure) ---
+  const IS_LOCAL =
+    location.hostname === "127.0.0.1" ||
+    location.hostname === "localhost" ||
+    location.hostname.endsWith(".github.dev") ||
+    location.port === "4280";
 
+  async function getClientPrincipal() {
+    const res = await fetch("/api/.auth/me", { credentials: "include" });
+    if (!res.ok) return null;
+    try {
+      const { clientPrincipal } = await res.json();
+      return clientPrincipal || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function login() {
+    if (IS_LOCAL) { location.reload(); return; } // local dev uses stub principal
+    location.href = "/.auth/login/aad?post_login_redirect_uri=" + buildReturnTarget();
+  }
+
+  function logout() {
+    if (IS_LOCAL) { location.reload(); return; }
+    location.href = "/.auth/logout";
+  }
+
+  // Also wire header/hero buttons *after* login() exists
+  document.getElementById("btnSignIn")?.addEventListener("click", login);
+  document.getElementById("btnSignInPrimary")?.addEventListener("click", login);
+
+  try {
+    const princ = await getClientPrincipal();
     if (princ) {
       showSignedIn(princ.userDetails);
-      await renderReport(); // embed after host is visible
+      await (typeof renderReport === "function" ? renderReport() : Promise.resolve());
     } else {
       showSignIn();
     }
