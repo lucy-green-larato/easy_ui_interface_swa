@@ -79,12 +79,12 @@ def _load(primary, alt=None):
 
 # Decorator-based modules to load (ensure exactly one definition per endpoint)
 try:
-    _load("orchestrators.campaign_orchestrator")  # orchestrator & activities
-    _load("http_start", "http_start_v2")          # POST /api/orchestrators/CampaignOrchestration
-    _load("status", "status_v2")                  # GET  /api/campaign/status
-    _load("fetch", "fetch_v2")                    # GET  /api/campaign/fetch
-    _load("runs")                                 # GET  /api/runs
-    _load("regenerate")                           # POST /api/campaign/regenerate
+    _load("orchestrators.campaign_orchestrator")         # orchestrator & activities
+    _load("http_start", "CampaignOrchestration_HttpStart")  # POST /api/orchestrators/CampaignOrchestration
+    _load("status", "CampaignStatus")                    # GET  /api/campaign/status
+    _load("fetch", "CampaignFetch")                      # GET  /api/campaign/fetch
+    _load("runs")                                        # GET  /api/runs  (folder has index.py)
+    _load("regenerate")                                  # POST /api/campaign/regenerate
 except Exception:
     # Surface full traceback to host logs to diagnose "index_function_app" errors.
     traceback.print_exc()
