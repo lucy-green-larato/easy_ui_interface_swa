@@ -2,6 +2,7 @@
 import sys, importlib, importlib.util, importlib.machinery
 from pathlib import Path
 import traceback
+import json
 import azure.functions as func
 import azure.durable_functions as df
 
@@ -9,7 +10,7 @@ APP_ROOT = Path(__file__).parent.resolve()
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
-# One DFApp for Durable + HTTP routes
+# One DFApp for Durable + HTTP routes (single app instance)
 app = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 def _ensure_pkg_chain(parts):
@@ -17,7 +18,6 @@ def _ensure_pkg_chain(parts):
     Ensure parent packages exist in sys.modules so we can load a dotted module
     from a file path even if some __init__.py files are missing (namespace pkgs).
     """
-    cur_name = None
     for i in range(1, len(parts)):
         cur_name = ".".join(parts[:i])
         if cur_name in sys.modules:
@@ -41,7 +41,7 @@ def _safe_import(name: str):
     """
     Import a sibling package or module by name.
     Works with:
-      - plain modules: "status", "fetch", "runs", "regenerate"
+      - plain modules: "runs", "regenerate"
       - dotted modules: "orchestrators.campaign_orchestrator"
       - packages (folder with __init__.py) or single-file modules (*.py)
     """
@@ -68,31 +68,60 @@ def _safe_import(name: str):
                 return mod
         raise
 
-def _load(primary, alt=None):
-    """Try primary module; if missing and alt is provided, load alt."""
+def _load(primary, alt=None, *, optional=False):
+    """Try primary module; if missing and alt is provided, load alt. If optional, swallow missing."""
     try:
         return _safe_import(primary)
     except ModuleNotFoundError:
         if alt:
-            return _safe_import(alt)
+            try:
+                return _safe_import(alt)
+            except ModuleNotFoundError:
+                if optional:
+                    return None
+                raise
+        if optional:
+            return None
         raise
 
-# Decorator-based modules to load (ensure exactly one definition per endpoint)
+# Load modules that actually define orchestrator/activities and known HTTP endpoints.
+# Do NOT import legacy classic-function folders to avoid "mixed function app" issues.
 try:
-    _load("orchestrators.campaign_orchestrator")         # orchestrator & activities
-    _load("http_start", "CampaignOrchestration_HttpStart")  # POST /api/orchestrators/CampaignOrchestration
-    _load("status", "CampaignStatus")                    # GET  /api/campaign/status
-    _load("fetch", "CampaignFetch")                      # GET  /api/campaign/fetch
-    _load("runs")                                        # GET  /api/runs  (folder has index.py)
-    _load("regenerate")                                  # POST /api/campaign/regenerate
+    _load("orchestrators.campaign_orchestrator")                 # orchestrator & activities
+    _load("http_start", "CampaignOrchestration_HttpStartV2")     # POST /api/orchestrators/CampaignOrchestration
+    _load("runs", optional=True)                                  # GET /api/runs  (if present)
+    _load("regenerate", optional=True)                            # POST /api/campaign/regenerate (if present)
 except Exception:
-    # Surface full traceback to host logs to diagnose "index_function_app" errors.
     traceback.print_exc()
     raise
 
 from azure.functions import HttpRequest, HttpResponse
 
+# Health
 @app.function_name("ping")
 @app.route(route="ping", methods=["GET"])
 def ping(req: HttpRequest) -> HttpResponse:
     return HttpResponse("ok", status_code=200)
+
+# Durable status (v2 decorator; replaces any classic status function)
+@app.function_name("campaign_status")
+@app.route(route="campaign/status", methods=["GET"])
+@app.durable_client_input(client_name="client")
+async def campaign_status(req: HttpRequest, client: df.DurableOrchestrationClient) -> HttpResponse:
+    run_id = req.params.get("runId")
+    if not run_id:
+        return HttpResponse('{"error":"Missing runId"}', status_code=400, mimetype="application/json")
+
+    status = await client.get_status(run_id)
+    if status is None:
+        return HttpResponse('{"error":"NotFound"}', status_code=404, mimetype="application/json")
+
+    payload = {
+        "instanceId": status.instance_id,
+        "runtimeStatus": str(status.runtime_status),
+        "createdTime": status.created_time.isoformat() if status.created_time else None,
+        "lastUpdatedTime": status.last_updated_time.isoformat() if status.last_updated_time else None,
+        "customStatus": status.custom_status,
+        "output": status.output,
+    }
+    return HttpResponse(json.dumps(payload), mimetype="application/json")
