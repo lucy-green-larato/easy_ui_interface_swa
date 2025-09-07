@@ -1,30 +1,21 @@
-// /api/campaign-fetch/index.js — proxy GET /api/campaign/fetch to Python (7071)
-const fetchFn = (typeof fetch !== "undefined")
-  ? fetch
-  : (...args) => import("node-fetch").then(m => m.default(...args));
-
-module.exports = async function (_context, req) {
+// Proxy GET /api/campaign/fetch → Python 7071
+const fetchFn = (typeof fetch !== "undefined") ? fetch : (...a)=>import("node-fetch").then(m=>m.default(...a));
+module.exports = async function (_ctx, req) {
   try {
-    const file  = (req.query && req.query.file) || "campaign";
-    const runId = (req.query && req.query.runId) || "";
+    const file  = req.query?.file || "campaign";
+    const runId = req.query?.runId || "";
     const base  = (process.env.PY_API_BASE || "http://127.0.0.1:7071").replace(/\/+$/, "");
-
-    const qs = new URLSearchParams({ file });
+    const qs    = new URLSearchParams({ file });
     if (runId) qs.set("runId", runId);
 
-    const url = `${base}/api/campaign/fetch?${qs.toString()}`;
-    const r   = await fetchFn(url);
-    const body = await r.text();
-    const contentType = r.headers.get("content-type") || "application/json";
+    const r   = await fetchFn(`${base}/api/campaign/fetch?${qs.toString()}`);
+    const ct  = r.headers.get("content-type") || "application/json";
+    const bin = /^(application\/(octet-stream|vnd\.|pdf)|image\/|audio\/|video\/)/i.test(ct);
+    const body = bin ? Buffer.from(await r.arrayBuffer()) : await r.text();
 
-    // Return via $return binding
-    return { status: r.status, headers: { "Content-Type": contentType }, body };
+    return { status: r.status, headers: { "Content-Type": ct }, body };
   } catch (e) {
-    // Still never crash the host
-    return {
-      status: 502,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "fetch_proxy_exception", detail: String(e?.message || e) })
-    };
+    return { status:502, headers:{ "Content-Type":"application/json" },
+             body: JSON.stringify({ error:"fetch_proxy_exception", detail:String(e?.message||e) }) };
   }
 };
