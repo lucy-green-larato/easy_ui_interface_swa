@@ -527,15 +527,17 @@
 
         const csv_text = await selectedFile.text();
         const payload = {
-          kind: "campaign",
-          csv_text,
+          source: "upload",
+          page: "campaign",
+          rowCount,
+          csv_sha256: csvSha,
           company: {
             name: $("#companyName").value || undefined,
             website: $("#companyWebsite").value || undefined,
             linkedin: $("#companyLinkedIn").value || undefined,
             usps: $("#companyUsps").value || undefined
           },
-          tone: $("#tone").value || "professional",
+          tone: $("#tone").value || undefined,
           evidenceWindowMonths: parseInt($("#evidenceWindow").value || "6", 10),
           complianceFooter: $("#includeCompliance").checked
         };
