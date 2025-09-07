@@ -12,13 +12,21 @@ if str(APP_ROOT) not in sys.path:
 app = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 def _safe_import(name: str):
+    """
+    Import a sibling package or module by name.
+    Works with:
+      - packages (folder with __init__.py)
+      - single-module folders using index.py
+    """
     try:
         return importlib.import_module(name)
     except ModuleNotFoundError:
         pkg_dir = APP_ROOT / name
         init_file = pkg_dir / "__init__.py"
-        if init_file.exists():
-            spec = importlib.util.spec_from_file_location(name, init_file)
+        index_file = pkg_dir / "index.py"
+        target = init_file if init_file.exists() else (index_file if index_file.exists() else None)
+        if target:
+            spec = importlib.util.spec_from_file_location(name, target)
             mod = importlib.util.module_from_spec(spec)
             sys.modules[name] = mod
             assert spec and spec.loader
@@ -26,14 +34,14 @@ def _safe_import(name: str):
             return mod
         raise
 
-# Decorator-based modules to load (no 'runs' if you don't want it)
+# Decorator-based modules to load (ensure exactly one definition per endpoint)
 _safe_import("orchestrators.campaign_orchestrator")
-_safe_import("http_start")
-_safe_import("status_v2")
-_safe_import("fetch_v2")
+_safe_import("http_start")     # POST /api/orchestrators/CampaignOrchestration
+_safe_import("status")         # GET  /api/campaign/status
+_safe_import("fetch")          # GET  /api/campaign/fetch
+_safe_import("runs")           # GET  /api/runs
+_safe_import("regenerate")     # POST /api/campaign/regenerate
 
-# Do NOT import classic function.json apps (they're ignored by v2 anyway).
-# Do NOT import a non-existent 'start' package.
 from azure.functions import HttpRequest, HttpResponse
 
 @app.function_name("ping")
