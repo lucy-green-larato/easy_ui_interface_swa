@@ -1,5 +1,5 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-09-07-3 json compatibility
+// Version: v3-markdown-first-2025-09-07-4 json compatibility
 
 const VERSION = "DEV-verify-2025-09-07-1"; // <-- bump this every edit
 try {
@@ -1672,6 +1672,24 @@ module.exports = async function (context, req) {
         websiteCites = (site.pages || []).map(p => ({ label: `Website: ${p.label}`, url: p.url }));
       }
 
+      // ---- Public evidence seed: fetch a few reputable UK pages for the model to quote ----
+      // These are broad, evergreen pages; the model must still quote with year and keep to the recency window.
+      const seedUrls = [
+        "https://www.ofcom.org.uk/research-and-data/telecoms-research/mobile-coverage",
+        "https://www.gov.uk/government/collections/cyber-security-breaches-survey",
+        "https://www.ons.gov.uk/businessindustryandtrade/itandinternetindustry",
+        "https://www.citb.co.uk/industry-insights/uk-construction-skills-network-csn-forecast/"
+      ];
+      let seedsText = "";
+      try {
+        const seeds = [];
+        for (const u of seedUrls) {
+          const t = await fetchUrlText(u, context);
+          if (t) seeds.push(`=== SEED: ${u} ===\n${t}`);
+        }
+        seedsText = seeds.join("\n\n").slice(0, 150000);
+      } catch { seedsText = ""; }
+
       /* ---------- strict schema (zod) ---------- */
       const CampaignSchema = z.object({
         executive_summary: z.string().min(50).max(1600),
@@ -1807,6 +1825,19 @@ module.exports = async function (context, req) {
         return d < cutoff;
       }
 
+      function domainFromUrl(u) {
+        try { return new URL(u).host.replace(/^www\./, "").toLowerCase(); } catch { return ""; }
+      }
+      const companyHost = company.website ? domainFromUrl(company.website) : "";
+      const allowedPublisherRx = /(ofcom\.org\.uk|gov\.uk|ons\.gov\.uk|citb\.co\.uk)/i;
+      function isAllowedPublisher(url, publisher) {
+        const d = domainFromUrl(url);
+        if (!d) return false;
+        if (companyHost && d.includes(companyHost)) return false;      // block self-citations
+        if (publisher && company.name && publisher.toLowerCase().includes(company.name.toLowerCase())) return false;
+        return allowedPublisherRx.test(d);
+      }
+
       /* ---------- build strict prompt ---------- */
       const banlist = [
         "positioned to leverage", "cutting-edge", "best-in-class", "holistic",
@@ -1821,6 +1852,8 @@ module.exports = async function (context, req) {
         "Executive Summary must be ≤180 words and include a 'Why now:' list of 3–5 bullets with ClaimIDs.",
         "Use CSV fields only: CompanyName, CompanyNumber, SimplifiedIndustry, ITSpendPct, TopPurchases, TopBlockers, TopNeedsSupplier.",
         "Map objections from TopBlockers. Align offers to TopPurchases & TopNeedsSupplier.",
+        "Do NOT cite the company or its website as the publisher for 'Why now'. Prefer reputable UK sources: ofcom.org.uk, gov.uk (incl. ONS/NCSC), ons.gov.uk, citb.co.uk.",
+        "If you cannot support a bullet with an allowed publisher, write 'No public evidence found' for that bullet (still keep it under 'Why now:').",
         "Ignore AdopterProfile and Connectivity needs for now."
       ].join("\n");
 
@@ -1845,6 +1878,9 @@ module.exports = async function (context, req) {
         "",
         "WEBSITE TEXT (multiple pages; for product/offer nouns & proof):",
         websiteText ? websiteText.slice(0, 120000) : "(none)",
+        "",
+        "PUBLIC EVIDENCE SEED (authoritative UK pages; use for 'Why now:' bullets; do NOT invent beyond these and the company website):",
+        seedsText ? seedsText : "(none)",
         "",
         "OUTPUT — ONE JSON OBJECT with keys in this exact order:",
         JSON.stringify({
@@ -1873,12 +1909,73 @@ module.exports = async function (context, req) {
         "",
         "RULES",
         "- Executive Summary must open with a concrete, outcome-led statement for the ICP.",
-        "- Include 'Why now:' with 3–5 bullets, each tied to a ClaimID (e.g., '(Ofcom — ClaimID: OFC-2024-Coverage)').",
+        "- Include 'Why now:' with 3–5 bullets, each tied to a ClaimID that maps to an Evidence Log item whose publisher URL domain is in the allowed list (ofcom.org.uk, gov.uk incl. ONS/NCSC, ons.gov.uk, citb.co.uk).",
+        "- Never cite the company itself as publisher for 'Why now'. If no allowed evidence is available, write 'No public evidence found' in that bullet.",
         "- Use company website nouns (offers, features) exactly where relevant.",
         "- Every objection_cards[*].reframe_with_claimid must reference an Evidence Log claim_id.",
         "- MINIMUM COUNTS: messaging_matrix.nonnegotiables ≥ 3; messaging_matrix.matrix ≥ 3; channel_plan.emails ≥ 3; sales_enablement.discovery_questions ≥ 5; sales_enablement.objection_cards ≥ 3.",
         (missingUspBlock || "(USPs provided; skip competitor set)")
       ].filter(Boolean).join("\n");
+
+      // 2b) publisher quality gate for 'Why now:' bullets
+      function idsFromExecSummary(s) {
+        return Array.from(String(s || "").matchAll(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/g)).map(m => m[1]);
+      }
+      const idsInES = idsFromExecSummary(campaign.executive_summary);
+      const idMap = new Map();
+      (campaign.evidence_log || []).forEach(it => { idMap.set(String(it.claim_id || "").trim(), it); });
+
+      // Evaluate whether 'Why now' bullets reference allowed publishers
+      let invalidWhyNow = false;
+      if (!idsInES.length || idsInES.length < 3) {
+        invalidWhyNow = true;
+      } else {
+        for (const id of idsInES) {
+          const row = idMap.get(id);
+          if (!row || !isAllowedPublisher(row.url || "", row.publisher || "")) {
+            invalidWhyNow = true; break;
+          }
+        }
+      }
+
+      if (invalidWhyNow) {
+        const fixInstrWN = [
+          "FIX: Rebuild ONLY the Executive Summary to comply with publisher rules.",
+          "- ≤180 words.",
+          "- Include 'Why now:' with 3–5 bullets.",
+          "- Each bullet must include a ClaimID that maps to an Evidence Log item with an allowed publisher domain (ofcom.org.uk, gov.uk incl. ONS/NCSC, ons.gov.uk, citb.co.uk).",
+          "- Do NOT cite the company itself. If you cannot support a bullet with an allowed publisher, write 'No public evidence found' for that bullet.",
+          "- Keep product nouns aligned to the website text."
+        ].join("\n");
+
+        const redoPromptWN = [prompt, "", "PREVIOUS JSON:", JSON.stringify(campaign), "", fixInstrWN].join("\n");
+        try {
+          const redoWN = await callModel({
+            system: SYSTEM,
+            prompt: redoPromptWN,
+            temperature: 0.2,
+            response_format: { type: "json_object" },
+            max_tokens: 4000
+          });
+          const rrWN = extractText(redoWN) || "{}";
+          const jWN = JSON.parse(rrWN);
+          if (jWN && typeof jWN === "object" && typeof jWN.executive_summary === "string") {
+            const idsNew = idsFromExecSummary(jWN.executive_summary);
+            const okNew = idsNew.length >= 3 && idsNew.every(id => {
+              const row = (jWN.evidence_log || []).find(r => String(r.claim_id || "").trim() === id) ||
+                idMap.get(id); // allow map to old rows too
+              return row && isAllowedPublisher(row.url || "", row.publisher || "");
+            });
+            if (okNew && wordCount(jWN.executive_summary) <= 180) {
+              // adopt ES and Evidence Log if provided; otherwise keep old log
+              campaign.executive_summary = jWN.executive_summary;
+              if (Array.isArray(jWN.evidence_log) && jWN.evidence_log.length >= (campaign.evidence_log || []).length) {
+                campaign.evidence_log = jWN.evidence_log;
+              }
+            }
+          }
+        } catch { /* keep original if fix fails */ }
+      }
 
       /* ---------- model call ---------- */
       let llmRes, raw;
