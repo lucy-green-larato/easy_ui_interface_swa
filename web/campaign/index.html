@@ -437,6 +437,26 @@
     (function () {
       const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
       const $ = (sel, root = document) => root.querySelector(sel);
+      // === CSV loader for /api/generate(kind=campaign) ===
+      let __csv_text = "";
+      const __csv_input = $("#csvUpload");
+      const __goBtn = $("#goBtn");
+      const __csvBadge = $("#csvBadge");
+
+      __csv_input.addEventListener("change", async (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (!f) {
+          __csv_text = "";
+          __goBtn.disabled = true;
+          if (__csvBadge) __csvBadge.textContent = "(no file)";
+          return;
+        }
+        const text = await f.text();
+        __csv_text = text;
+        const rows = Math.max(0, (text.match(/\r?\n/g) || []).length - 1);
+        if (__csvBadge) __csvBadge.textContent = `${f.name} · ${rows} rows`;
+        __goBtn.disabled = false;
+      });
 
       function setActiveTab(id) {
         $$(".tab").forEach(t => t.classList.toggle("active", t.dataset.tabTarget === id));
