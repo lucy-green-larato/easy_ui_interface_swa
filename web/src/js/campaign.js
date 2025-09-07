@@ -67,60 +67,55 @@ const api = {
 
 function setRunId(runId) {
   $("#currentRunId") && ($("#currentRunId").textContent = runId || "–");
-  try { localStorage.setItem("campaign:lastRunId", runId || ""); } catch {}
+  try { localStorage.setItem("campaign:lastRunId", runId || ""); } catch { }
   if (window.CampaignPage?.setRunId) window.CampaignPage.setRunId(runId);
 }
 function updateStage(state) {
   if (window.CampaignPage?.updateStage) return window.CampaignPage.updateStage(state);
-  const order = ["ValidatingInput","EvidenceBuilder","DraftCampaign","QualityGate","Completed"];
+  const order = ["ValidatingInput", "EvidenceBuilder", "DraftCampaign", "QualityGate", "Completed"];
   order.forEach(s => {
-    const el = $("#step-"+s);
+    const el = $("#step-" + s);
     if (!el) return;
-    el.classList.remove("active","done");
+    el.classList.remove("active", "done");
     if (s === state) el.classList.add("active");
     if (order.indexOf(s) < order.indexOf(state)) el.classList.add("done");
   });
   $("#statusText") && ($("#statusText").textContent = state || "Waiting…");
 }
-const copyBtn = (getText, label="Copy") =>
-  h("button", { class:"btn btn-copy", onclick: async () => {
+const copyBtn = (getText, label = "Copy") =>
+  h("button", {
+    class: "btn btn-copy", onclick: async () => {
       try { await navigator.clipboard.writeText(getText()); toast("Copied"); } catch (e) { console.log(e); }
-  } }, label);
-const fmtDate = (d) => { try { return new Date(d).toISOString().slice(0,10); } catch { return d; } };
+    }
+  }, label);
+const fmtDate = (d) => { try { return new Date(d).toISOString().slice(0, 10); } catch { return d; } };
 
 let CURRENT_RUN_ID = null;
 
 /* ---------- Rendering ---------- */
 function renderOverview(data) {
   const node = $("#tab-overview"); if (!node) return; node.innerHTML = "";
-  const meta = JSON.stringify(data.meta||{}, null, 2);
-  const proof = JSON.stringify(data.input_proof||{}, null, 2);
   node.append(
-    h("div", { class:"workspace" },
+    h("div", { class: "workspace" },
       h("h3", {}, "Executive summary"),
       h("p", {}, data.executive_summary || "(empty)"),
-      h("div", { class:"btn-row" },
+      h("div", { class: "btn-row" },
         copyBtn(() => data.executive_summary || "", "Copy summary"),
-        h("button", { class:"btn secondary", onclick: () => doRegenerate("executive_summary") }, "Regenerate summary")
-      ),
-      h("h3", { style:"margin-top:10px" }, "Meta"),
-      h("pre", { class:"pre" }, meta),
-      h("div", { class:"btn-row" }, copyBtn(() => meta, "Copy meta")),
-      h("h3", { style:"margin-top:10px" }, "Input proof"),
-      h("pre", { class:"pre" }, proof),
-      h("div", { class:"btn-row" }, copyBtn(() => proof, "Copy input_proof"))
+        h("button", { class: "btn secondary", onclick: () => doRegenerate("executive_summary") }, "Regenerate summary")
+      )
     )
   );
 }
+
 function renderLanding(data) {
   const node = $("#tab-landing"); if (!node) return; node.innerHTML = "";
   const lp = data.landing_page || {};
-  const sections = (lp.sections||[]).map(s =>
-    h("div", { class:"card", style:"margin:.5rem 0;padding:.75rem" },
-      h("div", { style:"font-weight:600;margin-bottom:.25rem" }, s.title || "(untitled)"),
+  const sections = (lp.sections || []).map(s =>
+    h("div", { class: "card", style: "margin:.5rem 0;padding:.75rem" },
+      h("div", { style: "font-weight:600;margin-bottom:.25rem" }, s.title || "(untitled)"),
       s.content ? h("p", {}, s.content) :
-      Array.isArray(s.bullets) ? h("ul", {}, ...s.bullets.map(b => h("li", {}, b))) :
-      h("p", { class:"muted" }, "(empty)")
+        Array.isArray(s.bullets) ? h("ul", {}, ...s.bullets.map(b => h("li", {}, b))) :
+          h("p", { class: "muted" }, "(empty)")
     )
   );
   const allText = () => {
@@ -128,22 +123,22 @@ function renderLanding(data) {
       `Headline: ${lp.headline || ""}`,
       `Subheadline: ${lp.subheadline || ""}`,
       "",
-      ...(lp.sections||[]).map(s => s.content ? `${s.title}\n${s.content}` :
-        Array.isArray(s.bullets) ? `${s.title}\n- ${s.bullets.join("\n- ")}` : (s.title||"")),
+      ...(lp.sections || []).map(s => s.content ? `${s.title}\n${s.content}` :
+        Array.isArray(s.bullets) ? `${s.title}\n- ${s.bullets.join("\n- ")}` : (s.title || "")),
       "",
       `CTA: ${lp.cta || ""}`
     ];
     return parts.join("\n");
   };
   node.append(
-    h("div", { class:"workspace" },
+    h("div", { class: "workspace" },
       h("div", {}, h("strong", {}, lp.headline || "(headline)")),
-      h("div", { class:"muted", style:"margin:.25rem 0 .5rem" }, lp.subheadline || ""),
+      h("div", { class: "muted", style: "margin:.25rem 0 .5rem" }, lp.subheadline || ""),
       ...sections,
-      h("div", { style:"margin-top:.5rem;font-weight:600" }, lp.cta || ""),
-      h("div", { class:"btn-row", style:"margin-top:.5rem" },
+      h("div", { style: "margin-top:.5rem;font-weight:600" }, lp.cta || ""),
+      h("div", { class: "btn-row", style: "margin-top:.5rem" },
         copyBtn(allText, "Copy landing page"),
-        h("button", { class:"btn secondary", onclick: () => doRegenerate("landing_page") }, "Regenerate landing")
+        h("button", { class: "btn secondary", onclick: () => doRegenerate("landing_page") }, "Regenerate landing")
       )
     )
   );
@@ -151,32 +146,32 @@ function renderLanding(data) {
 function renderEmails(data) {
   const node = $("#tab-emails"); if (!node) return; node.innerHTML = "";
   const emails = data.emails || [];
-  const wrap = h("div", { class:"workspace" },
-    h("div", { class:"muted", style:"margin-bottom:.5rem" }, `Emails (${emails.length})`),
-    h("div", { class:"btn-row", style:"margin-bottom:.5rem" },
-      h("button", { class:"btn secondary", onclick: () => doRegenerate("emails") }, "Regenerate emails")
+  const wrap = h("div", { class: "workspace" },
+    h("div", { class: "muted", style: "margin-bottom:.5rem" }, `Emails (${emails.length})`),
+    h("div", { class: "btn-row", style: "margin-bottom:.5rem" },
+      h("button", { class: "btn secondary", onclick: () => doRegenerate("emails") }, "Regenerate emails")
     )
   );
   emails.forEach((em, i) => {
     const text = `Subject: ${em.subject}\nPreview: ${em.preview}\n\n${em.body}`;
     wrap.append(
-      h("div", { class:"card email-card", style:"margin:.5rem 0; padding:.75rem" },
-        h("div", { class:"email-head" },
-          h("div", { class:"email-subject" }, `Email ${i+1}: ${em.subject || ""}`),
+      h("div", { class: "card email-card", style: "margin:.5rem 0; padding:.75rem" },
+        h("div", { class: "email-head" },
+          h("div", { class: "email-subject" }, `Email ${i + 1}: ${em.subject || ""}`),
           copyBtn(() => text, "Copy email")
         ),
-        h("div", { class:"email-preview" }, em.preview || ""),
-        h("pre", { class:"pre" }, em.body || "")
+        h("div", { class: "email-preview" }, em.preview || ""),
+        h("pre", { class: "pre" }, em.body || "")
       )
     );
   });
-  if (!emails.length) wrap.append(h("div", { class:"muted" }, "(no emails)"));
+  if (!emails.length) wrap.append(h("div", { class: "muted" }, "(no emails)"));
   node.append(wrap);
 }
 function renderEvidence(data) {
   const node = $("#tab-evidence"); if (!node) return; node.innerHTML = "";
   const ev = data.evidence_log || [];
-  const table = h("table", { class:"table" },
+  const table = h("table", { class: "table" },
     h("thead", {}, h("tr", {},
       h("th", {}, "Publisher"), h("th", {}, "Title"), h("th", {}, "Date"),
       h("th", {}, "URL"), h("th", {}, "Excerpt"), h("th", {}, "")
@@ -191,15 +186,15 @@ function renderEvidence(data) {
         h("td", {}, item.publisher || ""),
         h("td", {}, item.title || ""),
         h("td", {}, fmtDate(item.date || "")),
-        h("td", {}, item.url ? h("a", { href:item.url, target:"_blank", rel:"noopener" }, item.url) : ""),
+        h("td", {}, item.url ? h("a", { href: item.url, target: "_blank", rel: "noopener" }, item.url) : ""),
         h("td", {}, item.excerpt || ""),
         h("td", {}, copyBtn(() => line, "Copy"))
       )
     );
   });
   node.append(
-    h("div", { class:"workspace" },
-      h("div", { class:"muted", style:"margin-bottom:.5rem" }, `Evidence (${ev.length})`),
+    h("div", { class: "workspace" },
+      h("div", { class: "muted", style: "margin-bottom:.5rem" }, `Evidence (${ev.length})`),
       table
     )
   );
@@ -208,15 +203,15 @@ function renderSales(data) {
   const node = $("#tab-sales"); if (!node) return; node.innerHTML = "";
   const se = data.sales_enablement || {};
   node.append(
-    h("div", { class:"workspace" },
+    h("div", { class: "workspace" },
       h("h4", {}, "Call script"),
-      h("pre", { class:"pre" }, se.call_script || ""),
-      h("div", { style:"margin:.25rem 0 .75rem" }, copyBtn(() => se.call_script || "", "Copy call script")),
+      h("pre", { class: "pre" }, se.call_script || ""),
+      h("div", { style: "margin:.25rem 0 .75rem" }, copyBtn(() => se.call_script || "", "Copy call script")),
       h("h4", {}, "One-pager"),
-      h("pre", { class:"pre" }, se.one_pager || ""),
-      h("div", { class:"btn-row" },
+      h("pre", { class: "pre" }, se.one_pager || ""),
+      h("div", { class: "btn-row" },
         copyBtn(() => se.one_pager || "", "Copy one-pager"),
-        h("button", { class:"btn secondary", onclick: () => doRegenerate("sales_enablement") }, "Regenerate sales")
+        h("button", { class: "btn secondary", onclick: () => doRegenerate("sales_enablement") }, "Regenerate sales")
       )
     )
   );
@@ -230,7 +225,7 @@ function renderAllTabs(campaign, runId) {
   const mount = $("#download-docx-mount");
   if (mount) {
     mount.innerHTML = "";
-    mount.append(h("button", { class:"btn", onclick: () => api.downloadDocx(runId) }, "Download .docx"));
+    mount.append(h("button", { class: "btn", onclick: () => api.downloadDocx(runId) }, "Download .docx"));
   }
 }
 
@@ -298,11 +293,11 @@ async function loadRuns() {
     })).filter(r => r.id);
 
     // Add a sub-optgroup style label
-    const optHeader = h("option", { value:"", disabled:true }, "— Recent runs —");
+    const optHeader = h("option", { value: "", disabled: true }, "— Recent runs —");
     select.append(optHeader);
     runs.slice(0, 30).forEach(r => {
-      const label = `${r.id.slice(0,8)}…  ${r.state || ""}  ${r.when ? `@ ${r.when}` : ""}`;
-      select.append(h("option", { value:r.id }, label));
+      const label = `${r.id.slice(0, 8)}…  ${r.state || ""}  ${r.when ? `@ ${r.when}` : ""}`;
+      select.append(h("option", { value: r.id }, label));
     });
 
     $("#loadRecentBtn")?.addEventListener("click", () => {
@@ -337,7 +332,7 @@ function restoreOnLoad() {
   try {
     const last = localStorage.getItem("campaign:lastRunId");
     if (last) return resumeRun(last);
-  } catch {}
+  } catch { }
 }
 
 /* ---------- Expose globals expected by your HTML ---------- */
