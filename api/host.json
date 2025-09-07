@@ -20,7 +20,7 @@
     "generate",
     "campaign-start",
     "campaign-status",
-    "campaign-fetch",
+    "campaignFetch",
     "campaign-regenerate",
     "runs",
     "pbi_token"
