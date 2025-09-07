@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -7,51 +8,295 @@
   <link rel="icon" href="/assets/larato-logo.svg" />
   <style>
     :root {
-      --bg: #f6f7fb; --card: #fff; --ink: #1c1e21; --muted: #6b7280; --border: #e5e7eb;
-      --brand: #111827; --accent: #2563eb; --ok:#047857; --warn:#b45309; --err:#b91c1c;
+      --bg: #f6f7fb;
+      --card: #fff;
+      --ink: #1c1e21;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --brand: #111827;
+      --accent: #2563eb;
+      --ok: #047857;
+      --warn: #b45309;
+      --err: #b91c1c;
     }
-    * { box-sizing: border-box }
-    body { margin:0; font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:var(--ink); background:var(--bg) }
-    header { position:sticky; top:0; z-index:30; background:var(--card); border-bottom:1px solid var(--border);
-      display:flex; align-items:center; justify-content:space-between; padding:10px 16px }
-    .brand { display:flex; align-items:center; gap:10px; font-weight:600 }
-    .chip { background:#eef2ff; color:#3730a3; font-size:12px; padding:4px 8px; border-radius:999px }
-    main { max-width:1400px; margin:16px auto; padding:0 16px; display:grid; grid-template-columns:300px 1fr 290px; gap:16px }
-    @media (max-width:1100px){ main{ grid-template-columns:1fr } .assist{ display:none } }
-    .card{ background:var(--card); border:1px solid var(--border); border-radius:12px; box-shadow:0 1px 0 rgba(0,0,0,.02) }
-    .rail{ position:sticky; top:64px; align-self:start; max-height:calc(100vh - 80px); overflow:auto; padding:12px }
-    .rail h3{ margin:8px 8px 4px; font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em }
-    .group{ padding:8px; border-bottom:1px dashed var(--border) }
-    .group:last-child{ border-bottom:0 }
-    label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px }
-    input[type="text"], input[type="url"], select, .textarea{ width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:#fff }
-    input[type="file"]{ width:100% }
-    .muted{ color:var(--muted) }
-    .btn{ display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:10px; border:1px solid var(--border); background:#111827; color:#fff; cursor:pointer }
-    .btn.secondary{ background:#fff; color:#111827 }
-    .btn:disabled{ opacity:.6; cursor:not-allowed }
-    .workspace{ padding:12px }
-    .stage{ display:flex; gap:10px; margin:4px 0 12px }
-    .stage .step{ flex:1; padding:8px; background:#f3f4f6; border-radius:10px; text-align:center; font-size:12px; color:#6b7280; border:1px solid #e5e7eb }
-    .stage .step.active{ background:#eef2ff; color:#3730a3; border-color:#c7d2fe }
-    .stage .step.done{ background:#ecfdf5; color:#047857; border-color:#a7f3d0 }
-    .tabs{ display:flex; gap:8px; border-bottom:1px solid var(--border); margin-bottom:8px; align-items:center; justify-content:space-between }
-    .tabs-left{ display:flex; gap:8px }
-    .tab{ padding:10px 12px; border:1px solid var(--border); border-bottom:none; border-radius:10px 10px 0 0; background:#f9fafb; cursor:pointer }
-    .tab.active{ background:#fff; font-weight:600 }
-    .panel{ padding:8px 4px 16px }
-    .assist{ padding:12px }
-    .assist .section{ padding:10px; border-bottom:1px dashed var(--border) }
-    .assist .section:last-child{ border-bottom:0 }
-    .list{ margin:6px 0 0; padding-left:16px }
-    .pre{ white-space:pre-wrap; font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace; font-size:.95rem }
-    .table{ width:100%; border-collapse:collapse } .table th, .table td{ text-align:left; border-bottom:1px solid #eee; padding:.5rem; vertical-align:top }
-    .toast{ position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#111; color:#fff; padding:8px 12px; border-radius:6px; opacity:0; transition:opacity .2s; pointer-events:none }
-    .toast.show{ opacity:.9 }
-    .status-dot{ display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--warn); margin-right:8px }
-    .status-dot.ok{ background:var(--ok) } .status-dot.err{ background:var(--err) }
+
+    * {
+      box-sizing: border-box
+    }
+
+    body {
+      margin: 0;
+      font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color: var(--ink);
+      background: var(--bg)
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600
+    }
+
+    .chip {
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 999px
+    }
+
+    main {
+      max-width: 1400px;
+      margin: 16px auto;
+      padding: 0 16px;
+      display: grid;
+      grid-template-columns: 300px 1fr 290px;
+      gap: 16px
+    }
+
+    @media (max-width:1100px) {
+      main {
+        grid-template-columns: 1fr
+      }
+
+      .assist {
+        display: none
+      }
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 1px 0 rgba(0, 0, 0, .02)
+    }
+
+    .rail {
+      position: sticky;
+      top: 64px;
+      align-self: start;
+      max-height: calc(100vh - 80px);
+      overflow: auto;
+      padding: 12px
+    }
+
+    .rail h3 {
+      margin: 8px 8px 4px;
+      font-size: 13px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .04em
+    }
+
+    .group {
+      padding: 8px;
+      border-bottom: 1px dashed var(--border)
+    }
+
+    .group:last-child {
+      border-bottom: 0
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px
+    }
+
+    input[type="text"],
+    input[type="url"],
+    select,
+    .textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff
+    }
+
+    input[type="file"] {
+      width: 100%
+    }
+
+    .muted {
+      color: var(--muted)
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #111827;
+      color: #fff;
+      cursor: pointer
+    }
+
+    .btn.secondary {
+      background: #fff;
+      color: #111827
+    }
+
+    .btn:disabled {
+      opacity: .6;
+      cursor: not-allowed
+    }
+
+    .workspace {
+      padding: 12px
+    }
+
+    .stage {
+      display: flex;
+      gap: 10px;
+      margin: 4px 0 12px
+    }
+
+    .stage .step {
+      flex: 1;
+      padding: 8px;
+      background: #f3f4f6;
+      border-radius: 10px;
+      text-align: center;
+      font-size: 12px;
+      color: #6b7280;
+      border: 1px solid #e5e7eb
+    }
+
+    .stage .step.active {
+      background: #eef2ff;
+      color: #3730a3;
+      border-color: #c7d2fe
+    }
+
+    .stage .step.done {
+      background: #ecfdf5;
+      color: #047857;
+      border-color: #a7f3d0
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 8px;
+      align-items: center;
+      justify-content: space-between
+    }
+
+    .tabs-left {
+      display: flex;
+      gap: 8px
+    }
+
+    .tab {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: 10px 10px 0 0;
+      background: #f9fafb;
+      cursor: pointer
+    }
+
+    .tab.active {
+      background: #fff;
+      font-weight: 600
+    }
+
+    .panel {
+      padding: 8px 4px 16px
+    }
+
+    .assist {
+      padding: 12px
+    }
+
+    .assist .section {
+      padding: 10px;
+      border-bottom: 1px dashed var(--border)
+    }
+
+    .assist .section:last-child {
+      border-bottom: 0
+    }
+
+    .list {
+      margin: 6px 0 0;
+      padding-left: 16px
+    }
+
+    .pre {
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: .95rem
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse
+    }
+
+    .table th,
+    .table td {
+      text-align: left;
+      border-bottom: 1px solid #eee;
+      padding: .5rem;
+      vertical-align: top
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #111;
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      opacity: 0;
+      transition: opacity .2s;
+      pointer-events: none
+    }
+
+    .toast.show {
+      opacity: .9
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--warn);
+      margin-right: 8px
+    }
+
+    .status-dot.ok {
+      background: var(--ok)
+    }
+
+    .status-dot.err {
+      background: var(--err)
+    }
   </style>
 </head>
+
 <body>
   <header>
     <div class="brand">
@@ -94,7 +339,8 @@
         <label style="margin-top:8px">LinkedIn</label>
         <input id="companyLinkedIn" type="url" placeholder="https://www.linkedin.com/company/..." />
         <label style="margin-top:8px">USPs / differentiators</label>
-        <textarea id="companyUsps" class="textarea" rows="3" placeholder="Resilient connectivity; Millisecond failover"></textarea>
+        <textarea id="companyUsps" class="textarea" rows="3"
+          placeholder="Resilient connectivity; Millisecond failover"></textarea>
       </div>
 
       <div class="group">
@@ -109,7 +355,9 @@
         </select>
         <label style="margin-top:8px">Evidence window (months)</label>
         <select id="evidenceWindow">
-          <option>6</option><option>9</option><option>12</option>
+          <option>6</option>
+          <option>9</option>
+          <option>12</option>
         </select>
         <label style="display:flex; align-items:center; gap:8px; margin-top:8px">
           <input id="includeCompliance" type="checkbox" checked /> Include compliance footer
@@ -148,11 +396,21 @@
 
       <!-- Panels -->
       <div id="campaign-content" class="panel">
-        <div id="tab-overview" class="card"><div class="muted">When a run completes, the executive summary and meta will render here.</div></div>
-        <div id="tab-landing" class="card" style="display:none"><div class="muted">Landing page assets will render here.</div></div>
-        <div id="tab-emails" class="card" style="display:none"><div class="muted">Emails will render here.</div></div>
-        <div id="tab-evidence" class="card" style="display:none"><div class="muted">Evidence log will render here.</div></div>
-        <div id="tab-sales" class="card" style="display:none"><div class="muted">Sales enablement content will render here.</div></div>
+        <div id="tab-overview" class="card">
+          <div class="muted">When a run completes, the executive summary and meta will render here.</div>
+        </div>
+        <div id="tab-landing" class="card" style="display:none">
+          <div class="muted">Landing page assets will render here.</div>
+        </div>
+        <div id="tab-emails" class="card" style="display:none">
+          <div class="muted">Emails will render here.</div>
+        </div>
+        <div id="tab-evidence" class="card" style="display:none">
+          <div class="muted">Evidence log will render here.</div>
+        </div>
+        <div id="tab-sales" class="card" style="display:none">
+          <div class="muted">Sales enablement content will render here.</div>
+        </div>
       </div>
     </section>
 
@@ -210,7 +468,7 @@
   <!-- Main logic: upload → Go → start → poll → fetch → render -->
   <script>
     (function () {
-      const $ = (sel, root=document) => root.querySelector(sel);
+      const $ = (sel, root = document) => root.querySelector(sel);
       const debug = $("#debugLog");
       const toastEl = $("#campaign-toast");
       const setStatus = (txt, mode) => {
@@ -220,8 +478,8 @@
         if (mode === "ok") dot.classList.add("ok");
         if (mode === "err") dot.classList.add("err");
       };
-      const log = (m) => { const t = new Date().toISOString().replace('T',' ').replace('Z',''); debug.textContent += `[${t}] ${m}\n`; debug.scrollTop = debug.scrollHeight; };
-      const toast = (m) => { toastEl.textContent = m; toastEl.classList.add("show"); setTimeout(()=>toastEl.classList.remove("show"), 1600); };
+      const log = (m) => { const t = new Date().toISOString().replace('T', ' ').replace('Z', ''); debug.textContent += `[${t}] ${m}\n`; debug.scrollTop = debug.scrollHeight; };
+      const toast = (m) => { toastEl.textContent = m; toastEl.classList.add("show"); setTimeout(() => toastEl.classList.remove("show"), 1600); };
 
       let selectedFile = null;
       let csvSha = ""; let rowCount = 0; let currentRunId = "";
@@ -252,7 +510,7 @@
         const [text, buf] = await Promise.all([f.text(), f.arrayBuffer()]);
         rowCount = countCsvRows(text);
         csvSha = await sha256Hex(buf);
-        $("#csvBadge").textContent = `${f.name} · ${rowCount} rows · sha256=${csvSha.slice(0,12)}…`;
+        $("#csvBadge").textContent = `${f.name} · ${rowCount} rows · sha256=${csvSha.slice(0, 12)}…`;
         $("#goBtn").disabled = false;
         setStatus("Ready", "ok");
         log(`CSV ready: rows=${rowCount}, sha256=${csvSha}`);
@@ -263,64 +521,62 @@
       $("#goBtn").addEventListener("click", async () => {
         if (!selectedFile) { toast("Choose a CSV first"); return; }
         $("#goBtn").disabled = true;
-        setStatus("Starting…");
-        log("Starting orchestrator via /api/campaign/start");
+        setStatus("Generating…");
+        log("Submitting to /api/generate (kind=campaign)");
+        window.CampaignPage.updateStage("ValidatingInput");
 
-        const page = $("#pageKey").value || "Direct";
+        const csv_text = await selectedFile.text();
         const payload = {
-          source: "upload",
-          page,
-          rowCount,
-          csv_sha256: csvSha,
+          kind: "campaign",
+          csv_text,
           company: {
             name: $("#companyName").value || undefined,
             website: $("#companyWebsite").value || undefined,
             linkedin: $("#companyLinkedIn").value || undefined,
             usps: $("#companyUsps").value || undefined
           },
-          tone: $("#tone").value || undefined,
+          tone: $("#tone").value || "professional",
           evidenceWindowMonths: parseInt($("#evidenceWindow").value || "6", 10),
           complianceFooter: $("#includeCompliance").checked
         };
 
         try {
-          const res = await fetch("/api/campaign/start", {
+          const res = await fetch("/api/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
           });
-          const data = await res.json().catch(()=> ({}));
+          const data = await res.json().catch(() => ({}));
           if (!res.ok) {
-            log(`start failed ${res.status}: ${JSON.stringify(data)}`);
-            setStatus("Start failed", "err"); $("#goBtn").disabled = false; return;
+            log(`generate failed ${res.status}: ${JSON.stringify(data)}`);
+            setStatus("Failed", "err");
+            $("#goBtn").disabled = false;
+            return;
           }
-          const runId = parseRunIdFromAny(data);
-          if (!runId) { log(`no runId in response: ${JSON.stringify(data)}`); setStatus("No runId", "err"); $("#goBtn").disabled = false; return; }
-
-          currentRunId = runId;
-          window.CampaignPage.setRunId(runId);
-          $("#goBtn").disabled = true;
-          setStatus("Running…");
-          window.CampaignPage.updateStage("ValidatingInput");
-          pollStatus(runId);
+          window.CampaignPage.updateStage("DraftCampaign");
+          window.CampaignPage.updateStage("QualityGate");
+          window.CampaignPage.updateStage("Completed");
+          renderCampaign(data);
+          setStatus("Completed", "ok");
+          $("#goBtn").disabled = false;
         } catch (e) {
-          log(`start error: ${e}`);
-          setStatus("Start error", "err");
+          log(`generate error: ${e && e.message ? e.message : e}`);
+          setStatus("Error", "err");
           $("#goBtn").disabled = false;
         }
       });
 
       async function pollStatus(runId) {
-        for (let i=0; i<90; i++) {
+        for (let i = 0; i < 90; i++) {
           try {
             const url = `/api/campaign/status?runId=${encodeURIComponent(runId)}`;
-            const res = await fetch(url, { method:"GET" });
-            if (!res.ok) { log(`status ${res.status}`); await new Promise(r=>setTimeout(r,1500)); continue; }
-            const js = await res.json().catch(()=> ({}));
+            const res = await fetch(url, { method: "GET" });
+            if (!res.ok) { log(`status ${res.status}`); await new Promise(r => setTimeout(r, 1500)); continue; }
+            const js = await res.json().catch(() => ({}));
             const s = String(js.state || js.runtimeStatus || "").toLowerCase();
 
             // map to visual stages when possible
-            const stageMap = { validatinginput:"ValidatingInput", evidencebuilder:"EvidenceBuilder", draftcampaign:"DraftCampaign", qualitygate:"QualityGate", completed:"Completed" };
+            const stageMap = { validatinginput: "ValidatingInput", evidencebuilder: "EvidenceBuilder", draftcampaign: "DraftCampaign", qualitygate: "QualityGate", completed: "Completed" };
             Object.keys(stageMap).forEach(k => { if (s.includes(k)) window.CampaignPage.updateStage(stageMap[k]); });
 
             if (s.includes("completed")) {
@@ -336,7 +592,7 @@
           } catch (e) {
             log(`poll error: ${e}`);
           }
-          await new Promise(r=>setTimeout(r,1500));
+          await new Promise(r => setTimeout(r, 1500));
         }
         setStatus("Timeout", "err");
       }
@@ -350,7 +606,7 @@
           try {
             const res = await fetch(u);
             if (!res.ok) { log(`fetch ${u} -> ${res.status}`); continue; }
-            const js = await res.json().catch(()=> ({}));
+            const js = await res.json().catch(() => ({}));
             renderCampaign(js);
             setStatus("Done", "ok");
             return;
@@ -364,10 +620,10 @@
           // Overview
           const ov = document.getElementById("tab-overview");
           ov.innerHTML = "";
-          const ex = document.createElement("div"); ex.className="pre";
+          const ex = document.createElement("div"); ex.className = "pre";
           ex.textContent = (c.executive_summary || "(no executive summary)");
-          const meta = document.createElement("pre"); meta.className="pre";
-          meta.textContent = JSON.stringify({ input_proof:c.input_proof, meta:c.meta }, null, 2);
+          const meta = document.createElement("pre"); meta.className = "pre";
+          meta.textContent = JSON.stringify({ input_proof: c.input_proof, meta: c.meta }, null, 2);
           ov.appendChild(ex); ov.appendChild(meta);
 
           // Landing page
@@ -376,16 +632,16 @@
           lpel.style.display = ""; lpel.innerHTML = `
             <h3>${lp.headline || ""}</h3>
             <p>${lp.subheadline || ""}</p>
-            <ul>${(lp.sections||[]).map(s=>`<li><strong>${s.title||""}</strong>: ${s.content||""}</li>`).join("")}</ul>
+            <ul>${(lp.sections || []).map(s => `<li><strong>${s.title || ""}</strong>: ${s.content || ""}</li>`).join("")}</ul>
             <p><strong>CTA:</strong> ${lp.cta || ""}</p>`;
 
           // Emails
           const emel = document.getElementById("tab-emails");
-          emel.style.display = ""; emel.innerHTML = (c.emails||[]).map((e,i)=>`
+          emel.style.display = ""; emel.innerHTML = (c.emails || []).map((e, i) => `
             <div class="card" style="padding:10px; margin:8px 0">
-              <div class="email-head"><span class="email-subject">${e.subject||""}</span><span class="muted">#${i+1}</span></div>
-              <div class="email-preview muted">${e.preview||""}</div>
-              <pre class="pre">${e.body||""}</pre>
+              <div class="email-head"><span class="email-subject">${e.subject || ""}</span><span class="muted">#${i + 1}</span></div>
+              <div class="email-preview muted">${e.preview || ""}</div>
+              <pre class="pre">${e.body || ""}</pre>
             </div>`).join("") || '<div class="muted">No emails.</div>';
 
           // Evidence
@@ -393,17 +649,17 @@
           ev.style.display = ""; ev.innerHTML = `
             <table class="table">
               <thead><tr><th>Publisher</th><th>Title</th><th>Date</th><th>URL</th><th>Excerpt</th></tr></thead>
-              <tbody>${(c.evidence_log||[]).map(x=>`
-                <tr><td>${x.publisher||""}</td><td>${x.title||""}</td><td>${x.date||""}</td>
-                <td><a href="${x.url||"#"}" target="_blank">${x.url||""}</a></td><td>${x.excerpt||""}</td></tr>`).join("")}
+              <tbody>${(c.evidence_log || []).map(x => `
+                <tr><td>${x.publisher || ""}</td><td>${x.title || ""}</td><td>${x.date || ""}</td>
+                <td><a href="${x.url || "#"}" target="_blank">${x.url || ""}</a></td><td>${x.excerpt || ""}</td></tr>`).join("")}
               </tbody>
             </table>`;
 
           // Sales enablement
           const sel = document.getElementById("tab-sales");
           sel.style.display = ""; sel.innerHTML = `
-            <h4>Call script</h4><pre class="pre">${(c.sales_enablement&&c.sales_enablement.call_script)||""}</pre>
-            <h4>One pager</h4><pre class="pre">${(c.sales_enablement&&c.sales_enablement.one_pager)||""}</pre>
+            <h4>Call script</h4><pre class="pre">${(c.sales_enablement && c.sales_enablement.call_script) || ""}</pre>
+            <h4>One pager</h4><pre class="pre">${(c.sales_enablement && c.sales_enablement.one_pager) || ""}</pre>
           `;
         } catch (e) {
           log(`render error: ${e}`);
@@ -412,7 +668,7 @@
 
       // expose minimal API if other modules expect it
       window.Campaign = {
-        startNewRun: async (opts={}) => {
+        startNewRun: async (opts = {}) => {
           // if someone clicks header "New run", we just prompt for CSV
           document.getElementById("csvUpload").click();
         },
@@ -421,4 +677,5 @@
     })();
   </script>
 </body>
+
 </html>
