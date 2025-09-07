@@ -1,5 +1,7 @@
 {
   "routes": [
+    { "route": "/.auth/me", "rewrite": "/api/.auth/me" },
+
     { "route": "/reports", "rewrite": "/reports.html" },
     { "route": "/reports/*", "rewrite": "/reports.html" },
 
