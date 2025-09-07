@@ -1,6 +1,9 @@
 {
   "navigationFallback": { "rewrite": "/index.html" },
+
   "routes": [
+    { "route": "/.auth/me", "rewrite": "/api/.auth/me" },
+    { "route": "/api/.auth/me", "allowedRoles": ["anonymous"] },
     { "route": "/api/pbi-token", "allowedRoles": ["anonymous"] },
     { "route": "/api/*", "allowedRoles": ["authenticated"] }
   ]
