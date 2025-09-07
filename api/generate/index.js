@@ -1,5 +1,5 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-09-07-5 json compatibility
+// Version: v3-markdown-first-2025-09-07-7 json compatibility
 
 const VERSION = "DEV-verify-2025-09-07-1"; // <-- bump this every edit
 try {
@@ -7,6 +7,7 @@ try {
 } catch { }
 
 const { z } = require("zod");
+const DEBUG_PROMPT = process.env.DEBUG_PROMPT === "1";
 
 /* ========================= Helpers / Utilities ========================= */
 
@@ -400,6 +401,11 @@ function ensureHttpUrl(u) {
   return "";
 }
 
+function tagProvider(data, provider) {
+  try { data._provider = provider; return data; }
+  catch { return Object.assign({}, data, { _provider: provider }); }
+}
+
 async function callModel(opts) {
   // Accept either opts.max_tokens or opts.maxTokens
   const max_tokens =
@@ -496,26 +502,29 @@ async function callModel(opts) {
   // Routing
   if (forceOpenAI && oaKey) {
     console.warn("[callModel] FORCE_OPENAI=1 → using OpenAI");
-    return await callOpenAIOnce();
+    const data = await callOpenAIOnce();
+    return tagProvider(data, "openai");
   }
 
   if (azureConfigured) {
     try {
-      return await callAzureOnce();
+      const data = await callAzureOnce();
+      return tagProvider(data, "azure");
     } catch (e) {
       const canFallback = Boolean(oaKey);
       if ((e.__isAzure429 || e.__isTransient) && canFallback) {
         console.warn("[callModel] Azure rate-limited/unavailable → falling back to OpenAI");
-        return await callOpenAIOnce();
+        const data = await callOpenAIOnce();
+        return tagProvider(data, "openai_fallback");
       }
-      // No fallback available or non-retriable error
       throw new Error(`[callModel] ${e.message || e}`);
     }
   }
 
   if (oaKey) {
     console.warn("[callModel] Azure not configured → using OpenAI");
-    return await callOpenAIOnce();
+    const data = await callOpenAIOnce();
+    return tagProvider(data, "openai");
   }
 
   throw new Error("No model configured. Set AZURE_OPENAI_* or OPENAI_API_KEY.");
@@ -2266,6 +2275,7 @@ module.exports = async function (context, req) {
         prompt,
         temperature: 0.3
       });
+      const provider = String(llmRes?._provider || "unknown");
 
       let text = extractText(llmRes) || "";
       // Guarantee the Subject line is present and correct at the top
@@ -2273,8 +2283,16 @@ module.exports = async function (context, req) {
         text = `Subject: ${subject}\n\n` + text;
       }
 
-      context.res = { status: 200, headers: cors, body: { email: { subject, text }, version: VERSION } };
+      context.res = {
+        status: 200,
+        headers: { ...cors, "x-model-provider": provider },
+        body: {
+          ...campaign,
+          ...(DEBUG_PROMPT ? { debug: { provider, prompt } } : {})
+        }
+      };
       return;
+
     }
 
     // ======================= NEW: qualification-docx =======================
