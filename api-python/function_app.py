@@ -54,9 +54,9 @@ def _safe_import(name: str):
         # Candidate targets:
         pkg_dir = APP_ROOT.joinpath(*parts)
         candidates = [
-            pkg_dir / "__init__.py",                # package
-            (APP_ROOT.joinpath(*parts[:-1]) / f"{parts[-1]}.py"),  # module file
-            pkg_dir / "index.py"                    # single-module folder pattern
+            pkg_dir / "__init__.py",                                # package
+            (APP_ROOT.joinpath(*parts[:-1]) / f"{parts[-1]}.py"),   # module file
+            pkg_dir / "index.py"                                    # single-module folder pattern
         ]
         for target in candidates:
             if target and target.exists():
@@ -68,14 +68,23 @@ def _safe_import(name: str):
                 return mod
         raise
 
+def _load(primary, alt=None):
+    """Try primary module; if missing and alt is provided, load alt."""
+    try:
+        return _safe_import(primary)
+    except ModuleNotFoundError:
+        if alt:
+            return _safe_import(alt)
+        raise
+
 # Decorator-based modules to load (ensure exactly one definition per endpoint)
 try:
-    _safe_import("orchestrators.campaign_orchestrator")  # orchestrator & activities
-    _safe_import("http_start")     # POST /api/orchestrators/CampaignOrchestration
-    _safe_import("status")         # GET  /api/campaign/status
-    _safe_import("fetch")          # GET  /api/campaign/fetch
-    _safe_import("runs")           # GET  /api/runs
-    _safe_import("regenerate")     # POST /api/campaign/regenerate
+    _load("orchestrators.campaign_orchestrator")  # orchestrator & activities
+    _load("http_start", "http_start_v2")          # POST /api/orchestrators/CampaignOrchestration
+    _load("status", "status_v2")                  # GET  /api/campaign/status
+    _load("fetch", "fetch_v2")                    # GET  /api/campaign/fetch
+    _load("runs")                                 # GET  /api/runs
+    _load("regenerate")                           # POST /api/campaign/regenerate
 except Exception:
     # Surface full traceback to host logs to diagnose "index_function_app" errors.
     traceback.print_exc()
