@@ -1,7 +1,7 @@
 // index.js – Azure Function handler for /api/generate
 // Version: v3-markdown-first-2025-08-26 json compatibility
 
-const VERSION = "DEV-verify-2025-08-26-1"; // <-- bump this every edit
+const VERSION = "DEV-verify-2025-09-07-1"; // <-- bump this every edit
 try {
   console.log(`[${VERSION}] module loaded at ${new Date().toISOString()} cwd=${process.cwd()} dir=${__dirname}`);
 } catch { }
@@ -1589,6 +1589,149 @@ module.exports = async function (context, req) {
           note: redoNote || undefined
         }
       };
+      return;
+    }
+
+    // ======================= NEW: campaign =======================
+    if (kind === "campaign") {
+      // Accepts: { csv_text, company:{name,website,linkedin,usps}, tone, evidenceWindowMonths }
+      // Returns: a JSON "campaign" object for the centre tabs.
+
+      const csvText = String(body.csv_text || "").trim();
+      if (!csvText || csvText.length < 20) {
+        context.res = { status: 400, headers: cors, body: { error: "csv_text required (string)", version: VERSION } };
+        return;
+      }
+
+      // --- light CSV parser (no external deps) ---
+      function parseCsv(text) {
+        const rows = []; let i = 0, field = "", row = [], inQuotes = false;
+        function pushField() { row.push(field); field = ""; }
+        function pushRow() { rows.push(row); row = []; }
+        while (i < text.length) {
+          const ch = text[i++];
+          if (inQuotes) {
+            if (ch === '"') {
+              if (text[i] === '"') { field += '"'; i++; } else inQuotes = false;
+            } else field += ch;
+          } else {
+            if (ch === '"') inQuotes = true;
+            else if (ch === ",") pushField();
+            else if (ch === "\n") { pushField(); pushRow(); }
+            else if (ch === "\r") { /* ignore */ }
+            else field += ch;
+          }
+        }
+        if (field.length || row.length) { pushField(); pushRow(); }
+        if (!rows.length) return [];
+        const headers = rows[0].map(h => String(h || "").trim());
+        return rows.slice(1).map(r => {
+          const obj = {}; headers.forEach((h, idx) => { obj[h] = (r[idx] ?? "").trim(); });
+          return obj;
+        });
+      }
+
+      const rows = parseCsv(csvText);
+      const get = (r, k) => String(r[k] || "").trim();
+      const uniq = (a) => Array.from(new Set(a.filter(Boolean)));
+      const industries = uniq(rows.map(r => get(r, "SimplifiedIndustry")));
+      const splitList = (s) => String(s || "").split(/[;,]/).map(x => x.trim()).filter(Boolean);
+      function topTerms(col) {
+        const m = new Map();
+        rows.forEach(r => splitList(get(r, col)).forEach(t => {
+          const k = t.toLowerCase(); m.set(k, (m.get(k) || 0) + 1);
+        }));
+        return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([text, count]) => ({ text, count }));
+      }
+      const topPurchases = topTerms("TopPurchases");
+      const topBlockers = topTerms("TopBlockers");
+      const topNeeds = topTerms("TopNeedsSupplier");
+      const fieldsFound = rows.length ? Object.keys(rows[0]) : [];
+
+      const company = {
+        name: String((body.company && body.company.name) || ""),
+        website: String((body.company && body.company.website) || ""),
+        linkedin: String((body.company && body.company.linkedin) || ""),
+        usps: String((body.company && body.company.usps) || "")
+      };
+      const tone = String(body.tone || "professional");
+      const windowMonths = Number(body.evidenceWindowMonths || 6);
+
+      const system = [
+        "You are an expert B2B technology marketer.",
+        "Return valid JSON only (no markdown). British English.",
+        "Base all claims on reputable sources; include ClaimIDs with publisher|title|date|url|≤2-line excerpt.",
+        "Ignore AdopterProfile and Connectivity needs for now."
+      ].join("\n");
+
+      const user = [
+        "INPUTS",
+        `Company: ${company.name || "(n/a)"} ${company.website ? "(" + company.website + ")" : ""} ${company.linkedin ? "| " + company.linkedin : ""}`,
+        `USPs: ${company.usps || "(n/a)"}`,
+        `Tone: ${tone} | Evidence window (months): ${windowMonths}`,
+        "",
+        "CSV SUMMARY",
+        `Fields: ${fieldsFound.join(", ") || "(none)"}`,
+        `SimplifiedIndustry values: ${industries.join(" | ") || "(none)"}`,
+        `TopPurchases: ${topPurchases.map(t => `${t.text}(${t.count})`).join(", ") || "(none)"}`,
+        `TopBlockers: ${topBlockers.map(t => `${t.text}(${t.count})`).join(", ") || "(none)"}`,
+        `TopNeedsSupplier: ${topNeeds.map(t => `${t.text}(${t.count})`).join(", ") || "(none)"}`,
+        "",
+        "REQUIREMENT",
+        "Return ONE JSON object with keys:",
+        "- executive_summary",
+        "- evidence_log[] {claim_id,claim,publisher,title,date,url,relevance,excerpt}",
+        "- case_studies[] {customer,industry,problem,solution,outcomes,link,source}",
+        "- positioning_and_differentiation {value_prop, swot{strengths,weaknesses,opportunities,threats}, differentiators[]}",
+        "- messaging_matrix {nonnegotiables[], matrix[] {persona,pain,value_statement,proof,cta}}",
+        "- offer_strategy {landing_page{headline,subheadline,sections[{title,content|bullets[]}],cta}, assets_checklist[]}",
+        "- channel_plan {emails[{subject,preview,body}], linkedin{connect_note,insight_post,dm,comment_strategy}, paid[{variant,proof,cta}], event{concept,agenda,speakers,cta}}",
+        "- sales_enablement {discovery_questions[], objection_cards[{blocker,reframe_with_claimid,proof,risk_reversal}], proof_pack_outline[], handoff_rules}",
+        "- measurement_and_learning {kpis[], weekly_test_plan, utm_and_crm, evidence_freshness_rule}",
+        "- compliance_and_governance {substantiation_file, gdpr_pecr_checklist, brand_accessibility_checks, approval_log_note}",
+        "- risks_and_contingencies",
+        "- one_pager_summary",
+        "- meta { icp_from_csv, it_spend_buckets[] }",
+        "- input_proof { fields_validated, csv_fields_found[], simplified_industry_values[], top_terms{purchases[],blockers[],needs[]} }"
+      ].join("\n");
+
+      let llmRes, raw;
+      try {
+        llmRes = await callModel({
+          system,
+          prompt: user,
+          temperature: 0.2,
+          response_format: { type: "json_object" },
+          max_tokens: 6000
+        });
+        raw = extractText(llmRes) || "{}";
+      } catch (e) {
+        context.res = { status: 502, headers: cors, body: { error: "LLM call failed", detail: String(e && e.message || e), version: VERSION } };
+        return;
+      }
+
+      let campaign = null;
+      try { campaign = JSON.parse(raw); } catch { campaign = null; }
+      if (!campaign || typeof campaign !== "object") {
+        context.res = { status: 502, headers: cors, body: { error: "Model did not return valid JSON", version: VERSION, sample: String(raw).slice(0, 300) } };
+        return;
+      }
+
+      // Centre-pane friendly aliases
+      campaign.input_proof = campaign.input_proof || {
+        fields_validated: true,
+        csv_fields_found: fieldsFound,
+        simplified_industry_values: industries,
+        top_terms: { purchases: topPurchases, blockers: topBlockers, needs: topNeeds }
+      };
+      if (!campaign.landing_page && campaign.offer_strategy && campaign.offer_strategy.landing_page) {
+        campaign.landing_page = campaign.offer_strategy.landing_page;
+      }
+      campaign.emails = campaign.emails || (campaign.channel_plan && campaign.channel_plan.emails) || [];
+      campaign.evidence_log = campaign.evidence_log || [];
+      campaign.sales_enablement = campaign.sales_enablement || {};
+
+      context.res = { status: 200, headers: cors, body: campaign };
       return;
     }
 
