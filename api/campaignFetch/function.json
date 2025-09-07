@@ -4,5 +4,5 @@
       "name": "req", "methods": ["get"], "route": "campaign/fetch" },
     { "type": "http", "direction": "out", "name": "$return" }
   ],
-  "scriptFile": "index.js"
+  "scriptFile": "handler.js"
 }
