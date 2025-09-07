@@ -502,7 +502,7 @@
       const toast = (m) => { toastEl.textContent = m; toastEl.classList.add("show"); setTimeout(() => toastEl.classList.remove("show"), 1600); };
 
       let selectedFile = null;
-      let csvSha = ""; let rowCount = 0; let currentRunId = "";
+      let csvSha = ""; let rowCount = 0; let currentRunId = ""; let csvText = "";
 
       async function sha256Hex(buf) {
         const hash = await crypto.subtle.digest("SHA-256", buf);
@@ -529,6 +529,7 @@
         selectedFile = f;
         const [text, buf] = await Promise.all([f.text(), f.arrayBuffer()]);
         rowCount = countCsvRows(text);
+        csvText = text;
         csvSha = await sha256Hex(buf);
         $("#csvBadge").textContent = `${f.name} · ${rowCount} rows · sha256=${csvSha.slice(0, 12)}…`;
         $("#goBtn").disabled = false;
@@ -547,15 +548,13 @@
 
         const csv_text = await selectedFile.text();
         const payload = {
-          source: "upload",
-          page: "campaign",
-          rowCount,
-          csv_sha256: csvSha,
+          kind: "campaign",
+          csv_text: csvText || csv_text,  // prefer buffered CSV; fallback to freshly read
           company: {
-            name: $("#companyName").value || undefined,
-            website: $("#companyWebsite").value || undefined,
-            linkedin: $("#companyLinkedIn").value || undefined,
-            usps: $("#companyUsps").value || undefined
+            name: $("#companyName").value || "",
+            website: $("#companyWebsite").value || "",
+            linkedin: $("#companyLinkedIn").value || "",
+            usps: $("#companyUsps").value || ""
           },
           tone: $("#tone").value || undefined,
           evidenceWindowMonths: parseInt($("#evidenceWindow").value || "6", 10),
@@ -639,15 +638,12 @@
 
       function renderCampaign(c) {
         try {
-          // Overview
+          // Overview (summary only)
           const ov = document.getElementById("tab-overview");
           ov.innerHTML = "";
           const ex = document.createElement("div"); ex.className = "pre";
           ex.textContent = (c.executive_summary || "(no executive summary)");
-          const meta = document.createElement("pre"); meta.className = "pre";
-          meta.textContent = JSON.stringify({ input_proof: c.input_proof, meta: c.meta }, null, 2);
-          ov.appendChild(ex); ov.appendChild(meta);
-
+          ov.appendChild(ex);
           // Landing page
           const lp = c.landing_page || {};
           const lpel = document.getElementById("tab-landing");
