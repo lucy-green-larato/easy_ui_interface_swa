@@ -125,3 +125,35 @@ async def campaign_status(req: HttpRequest, client: df.DurableOrchestrationClien
         "output": status.output,
     }
     return HttpResponse(json.dumps(payload), mimetype="application/json")
+
+# --- FETCH BRIDGE (v2; no function.json) ---
+from azure.functions import HttpRequest, HttpResponse
+
+@app.function_name("campaign_fetch")
+@app.route(route="campaign/fetch", methods=["GET"])
+@app.durable_client_input(client_name="client")
+async def campaign_fetch(req: HttpRequest, client: df.DurableOrchestrationClient) -> HttpResponse:
+    run_id = req.params.get("runId")
+    # 'file' is optional; default 'campaign' for UI querystring compatibility
+    _file = req.params.get("file") or "campaign"
+
+    if not run_id:
+        return HttpResponse('{"error":"Missing runId"}', status_code=400, mimetype="application/json")
+
+    st = await client.get_status(run_id)
+    if st is None:
+        return HttpResponse('{"error":"NotFound"}', status_code=404, mimetype="application/json")
+
+    rs = str(st.runtime_status).lower()
+    if rs not in ("completed",):   # Still running
+        # Tell caller to retry shortly
+        return HttpResponse('{"status":"Running"}', status_code=202, mimetype="application/json", headers={"Retry-After": "2"})
+
+    # Completed: return the orchestrator output (whatever your orchestrator produced)
+    out = st.output
+    try:
+        body = json.dumps(out)
+        return HttpResponse(body, status_code=200, mimetype="application/json")
+    except Exception:
+        # If output isn't JSON-serializable, return as text
+        return HttpResponse(str(out), status_code=200, mimetype="text/plain")
