@@ -35,7 +35,6 @@
     "docx"
   ],
   "author": "",
-  "main": "index.js",
   "directories": {
     "lib": "lib"
   }
