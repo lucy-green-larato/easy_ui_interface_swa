@@ -502,11 +502,12 @@
       const toast = (m) => { toastEl.textContent = m; toastEl.classList.add("show"); setTimeout(() => toastEl.classList.remove("show"), 1600); };
 
       let selectedFile = null;
-      let csvSha = ""; let rowCount = 0; let currentRunId = ""; let csvText = "";
+      let csvText = "";
+      let csvSha = ""; let rowCount = 0; let currentRunId = "";
 
       async function sha256Hex(buf) {
         const hash = await crypto.subtle.digest("SHA-256", buf);
-        return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, "0")).join("");
+        return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
       }
       function countCsvRows(text) {
         const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
@@ -548,13 +549,17 @@
 
         const csv_text = await selectedFile.text();
         const payload = {
-          kind: "campaign",
-          csv_text: csvText || csv_text,  // prefer buffered CSV; fallback to freshly read
+          kind: "campaign",           // <-- REQUIRED by the API
+          csv_text,                   // <-- REQUIRED by the API
+          source: "upload",
+          page: "campaign",
+          rowCount,
+          csv_sha256: csvSha,
           company: {
-            name: $("#companyName").value || "",
-            website: $("#companyWebsite").value || "",
-            linkedin: $("#companyLinkedIn").value || "",
-            usps: $("#companyUsps").value || ""
+            name: $("#companyName").value || undefined,
+            website: $("#companyWebsite").value || undefined,
+            linkedin: $("#companyLinkedIn").value || undefined,
+            usps: $("#companyUsps").value || undefined
           },
           tone: $("#tone").value || undefined,
           evidenceWindowMonths: parseInt($("#evidenceWindow").value || "6", 10),
@@ -568,6 +573,7 @@
             body: JSON.stringify(payload)
           });
           const data = await res.json().catch(() => ({}));
+          log("---- PROMPT SENT TO LLM ----\n" + data._debug_prompt);
           if (!res.ok) {
             log(`generate failed ${res.status}: ${JSON.stringify(data)}`);
             setStatus("Failed", "err");
