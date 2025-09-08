@@ -1,705 +1,155 @@
 <!doctype html>
 <html lang="en">
-
 <head>
   <meta charset="utf-8" />
+  <title>Campaign Builder</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Inside Track Tools · Campaign Builder</title>
-  <link rel="icon" href="/assets/larato-logo.svg" />
   <style>
-    :root {
-      --bg: #f6f7fb;
-      --card: #fff;
-      --ink: #1c1e21;
-      --muted: #6b7280;
-      --border: #e5e7eb;
-      --brand: #111827;
-      --accent: #2563eb;
-      --ok: #047857;
-      --warn: #b45309;
-      --err: #b91c1c;
-    }
-
-    * {
-      box-sizing: border-box
-    }
-
-    body {
-      margin: 0;
-      font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      color: var(--ink);
-      background: var(--bg)
-    }
-
-    header {
-      position: sticky;
-      top: 0;
-      z-index: 30;
-      background: var(--card);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 16px
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-weight: 600
-    }
-
-    .chip {
-      background: #eef2ff;
-      color: #3730a3;
-      font-size: 12px;
-      padding: 4px 8px;
-      border-radius: 999px
-    }
-
-    main {
-      max-width: 1400px;
-      margin: 16px auto;
-      padding: 0 16px;
-      display: grid;
-      grid-template-columns: 300px 1fr 290px;
-      gap: 16px
-    }
-
-    @media (max-width:1100px) {
-      main {
-        grid-template-columns: 1fr
-      }
-
-      .assist {
-        display: none
-      }
-    }
-
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      box-shadow: 0 1px 0 rgba(0, 0, 0, .02)
-    }
-
-    .rail {
-      position: sticky;
-      top: 64px;
-      align-self: start;
-      max-height: calc(100vh - 80px);
-      overflow: auto;
-      padding: 12px
-    }
-
-    .rail h3 {
-      margin: 8px 8px 4px;
-      font-size: 13px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: .04em
-    }
-
-    .group {
-      padding: 8px;
-      border-bottom: 1px dashed var(--border)
-    }
-
-    .group:last-child {
-      border-bottom: 0
-    }
-
-    label {
-      display: block;
-      font-size: 12px;
-      color: var(--muted);
-      margin-bottom: 6px
-    }
-
-    input[type="text"],
-    input[type="url"],
-    select,
-    .textarea {
-      width: 100%;
-      padding: 10px 12px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: #fff
-    }
-
-    input[type="file"] {
-      width: 100%
-    }
-
-    .muted {
-      color: var(--muted)
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: #111827;
-      color: #fff;
-      cursor: pointer
-    }
-
-    .btn.secondary {
-      background: #fff;
-      color: #111827
-    }
-
-    .btn:disabled {
-      opacity: .6;
-      cursor: not-allowed
-    }
-
-    .workspace {
-      padding: 12px
-    }
-
-    .stage {
-      display: flex;
-      gap: 10px;
-      margin: 4px 0 12px
-    }
-
-    .stage .step {
-      flex: 1;
-      padding: 8px;
-      background: #f3f4f6;
-      border-radius: 10px;
-      text-align: center;
-      font-size: 12px;
-      color: #6b7280;
-      border: 1px solid #e5e7eb
-    }
-
-    .stage .step.active {
-      background: #eef2ff;
-      color: #3730a3;
-      border-color: #c7d2fe
-    }
-
-    .stage .step.done {
-      background: #ecfdf5;
-      color: #047857;
-      border-color: #a7f3d0
-    }
-
-    .tabs {
-      display: flex;
-      gap: 8px;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 8px;
-      align-items: center;
-      justify-content: space-between
-    }
-
-    .tabs-left {
-      display: flex;
-      gap: 8px
-    }
-
-    .tab {
-      padding: 10px 12px;
-      border: 1px solid var(--border);
-      border-bottom: none;
-      border-radius: 10px 10px 0 0;
-      background: #f9fafb;
-      cursor: pointer
-    }
-
-    .tab.active {
-      background: #fff;
-      font-weight: 600
-    }
-
-    .panel {
-      padding: 8px 4px 16px
-    }
-
-    .assist {
-      padding: 12px
-    }
-
-    .assist .section {
-      padding: 10px;
-      border-bottom: 1px dashed var(--border)
-    }
-
-    .assist .section:last-child {
-      border-bottom: 0
-    }
-
-    .list {
-      margin: 6px 0 0;
-      padding-left: 16px
-    }
-
-    .pre {
-      white-space: pre-wrap;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: .95rem
-    }
-
-    .table {
-      width: 100%;
-      border-collapse: collapse
-    }
-
-    .table th,
-    .table td {
-      text-align: left;
-      border-bottom: 1px solid #eee;
-      padding: .5rem;
-      vertical-align: top
-    }
-
-    .toast {
-      position: fixed;
-      bottom: 16px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #111;
-      color: #fff;
-      padding: 8px 12px;
-      border-radius: 6px;
-      opacity: 0;
-      transition: opacity .2s;
-      pointer-events: none
-    }
-
-    .toast.show {
-      opacity: .9
-    }
-
-    .status-dot {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--warn);
-      margin-right: 8px
-    }
-
-    .status-dot.ok {
-      background: var(--ok)
-    }
-
-    .status-dot.err {
-      background: var(--err)
-    }
+    :root { --bg:#0b0c10; --panel:#15171c; --muted:#9aa3af; --fg:#e5e7eb; --brand:#7c3aed; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444; }
+    html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial;}
+    .wrap{display:grid;grid-template-columns:320px 1fr;height:100vh;}
+    aside{background:var(--panel);border-right:1px solid #23262d;overflow:auto}
+    main{display:flex;flex-direction:column;overflow:hidden}
+    header{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #23262d;}
+    header h1{font-size:15px;margin:0;font-weight:600}
+    .dot{width:10px;height:10px;border-radius:50%;background:#475569}
+    .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.err{background:var(--err)}
+    .pane{padding:16px;border-bottom:1px solid #23262d}
+    label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+    input, select, textarea, button{width:100%;box-sizing:border-box}
+    input, select, textarea{background:#0f1115;border:1px solid #23262d;color:var(--fg);padding:10px;border-radius:8px}
+    textarea{min-height:84px;resize:vertical}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .btn{background:var(--brand);border:0;color:white;padding:11px 12px;border-radius:10px;font-weight:600;cursor:pointer}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .muted{color:var(--muted)}
+    .file{display:flex;align-items:center;gap:8px}
+    .tabs{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid #23262d;flex-wrap:wrap}
+    .tabs button{background:#0f1115;border:1px solid #23262d;color:var(--fg);padding:8px 10px;border-radius:8px;cursor:pointer}
+    .tabs button.active{border-color:var(--brand)}
+    .content{flex:1;overflow:auto;padding:14px}
+    .card{background:var(--panel);border:1px solid #23262d;border-radius:12px;margin:10px 0}
+    .card h3{margin:0;padding:12px 14px;border-bottom:1px solid #23262d;font-size:14px}
+    .card .body{padding:12px 14px}
+    pre{white-space:pre-wrap;word-break:break-word;background:#0f1115;border:1px solid #23262d;padding:12px;border-radius:8px;overflow:auto}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #23262d;padding:8px;vertical-align:top}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .right{margin-left:auto}
+    small{color:var(--muted)}
   </style>
 </head>
-
 <body>
-  <header>
-    <div class="brand">
-      <img src="/assets/larato-logo.svg" alt="Inside Track" class="logo" style="height:24px" />
-      <span>Inside Track Tools · <strong>Campaign Builder</strong></span>
-      <span class="chip" id="envChip">Dev</span>
+<div class="wrap">
+  <aside>
+    <header>
+      <div id="statusDot" class="dot" title="status"></div>
+      <h1>Campaign Builder</h1>
+      <span id="stage" class="muted right"></span>
+    </header>
+
+    <div class="pane">
+      <label>Upload CSV of targets</label>
+      <div class="file">
+        <input id="csvUpload" type="file" accept=".csv,text/csv" />
+      </div>
+      <small id="csvName" class="muted"></small>
     </div>
-    <div style="display:flex; gap:8px; align-items:center">
-      <button class="btn secondary" id="newRunBtn">New run</button>
-      <button class="btn secondary" id="loadRecentBtn">Load recent</button>
-      <div id="download-docx-mount"></div>
-      <a href="#" class="muted">Help</a>
+
+    <div class="pane">
+      <div class="row">
+        <div>
+          <label>Client</label>
+          <input id="client" placeholder="Acme Ltd" />
+        </div>
+        <div>
+          <label>Product/Service</label>
+          <input id="product" placeholder="Cloud Security Assessment" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div>
+          <label>Tone</label>
+          <select id="tone">
+            <option value="professional">Professional</option>
+            <option value="confident">Confident</option>
+            <option value="friendly">Friendly</option>
+            <option value="formal">Formal</option>
+          </select>
+        </div>
+        <div>
+          <label>Evidence window (months)</label>
+          <input id="windowMonths" type="number" min="1" max="24" value="6" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div>
+          <label>Number of emails</label>
+          <input id="numEmails" type="number" min="3" max="10" value="5" />
+        </div>
+        <div>
+          <label>Audience / Notes</label>
+          <input id="audience" placeholder="UK MSPs, 10–250 seats" />
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <label>Extra context (optional)</label>
+        <textarea id="notes" placeholder="Any constraints, must-use messages, etc."></textarea>
+      </div>
+      <div style="margin-top:14px" class="actions">
+        <button id="goBtn" class="btn">Generate campaign</button>
+        <small id="csvHash" class="muted"></small>
+      </div>
     </div>
-  </header>
+
+    <div class="pane">
+      <label>Debug log</label>
+      <pre id="debugLog" style="min-height:90px"></pre>
+    </div>
+  </aside>
 
   <main>
-    <!-- Left rail: inputs -->
-    <aside class="card rail" id="inputs">
-      <div class="group">
-        <h3>Data source</h3>
-        <label for="runSelect">Pick a recent Power BI run</label>
-        <select id="runSelect">
-          <option value="">(coming soon)</option>
-        </select>
-        <div class="muted" style="margin-top:6px">or</div>
-        <label for="csvUpload" style="margin-top:6px">Upload CSV (testing only)</label>
-        <input id="csvUpload" type="file" accept=".csv" />
-        <div style="display:flex; gap:8px; align-items:center; margin-top:8px">
-          <button id="goBtn" class="btn" disabled>Go</button>
-          <div class="muted"><span id="csvBadge">(no file)</span></div>
-        </div>
-      </div>
+    <div class="tabs">
+      <button class="tabbtn active" data-tab="landing">Landing</button>
+      <button class="tabbtn" data-tab="emails">Emails</button>
+      <button class="tabbtn" data-tab="matrix">Messaging matrix</button>
+      <button class="tabbtn" data-tab="evidence">Evidence</button>
+      <button class="tabbtn" data-tab="sales">Sales enablement</button>
+      <span class="right"></span>
+      <button id="copyVisible" class="tabbtn">Copy visible</button>
+      <button id="downloadAll" class="tabbtn">Download JSON</button>
+    </div>
 
-      <div class="group">
-        <h3>Company</h3>
-        <label>Company name</label>
-        <input id="companyName" type="text" placeholder="Comms 365" />
-        <label style="margin-top:8px">Website</label>
-        <input id="companyWebsite" type="url" placeholder="https://www.example.com" />
-        <label style="margin-top:8px">LinkedIn</label>
-        <input id="companyLinkedIn" type="url" placeholder="https://www.linkedin.com/company/..." />
-        <label style="margin-top:8px">USPs / differentiators</label>
-        <textarea id="companyUsps" class="textarea" rows="3"
-          placeholder="Resilient connectivity; Millisecond failover"></textarea>
-      </div>
+    <div class="content">
+      <section id="tab-landing" class="card">
+        <h3>Landing page</h3>
+        <div class="body" id="out-landing"><small class="muted">No content yet.</small></div>
+      </section>
 
-      <div class="group">
-        <h3>Options</h3>
-        <label>Page (folder key)</label>
-        <input id="pageKey" type="text" placeholder="Direct" value="Direct" />
-        <label style="margin-top:8px">Tone</label>
-        <select id="tone">
-          <option value="match">Match company website (recommended)</option>
-          <option value="professional" selected>Professional</option>
-          <option value="warm">Warm</option>
-        </select>
-        <label style="margin-top:8px">Evidence window (months)</label>
-        <select id="evidenceWindow">
-          <option>6</option>
-          <option>9</option>
-          <option>12</option>
-        </select>
-        <label style="display:flex; align-items:center; gap:8px; margin-top:8px">
-          <input id="includeCompliance" type="checkbox" checked /> Include compliance footer
-        </label>
-      </div>
+      <section id="tab-emails" class="card" style="display:none">
+        <h3>Emails</h3>
+        <div class="body" id="out-emails"><small class="muted">No content yet.</small></div>
+      </section>
 
-      <div class="group">
-        <h3>Status</h3>
-        <div><span id="statusDot" class="status-dot"></span><span id="statusText">Idle</span></div>
-        <div class="muted" style="margin-top:6px">Run: <span id="currentRunId">–</span></div>
-      </div>
-    </aside>
+      <section id="tab-matrix" class="card" style="display:none">
+        <h3>Messaging matrix</h3>
+        <div class="body" id="out-matrix"><small class="muted">No content yet.</small></div>
+      </section>
 
-    <!-- Center: workspace -->
-    <section class="card workspace">
-      <!-- Stage / status -->
-      <div class="stage" id="stageBar">
-        <div class="step" id="step-ValidatingInput">Validate</div>
-        <div class="step" id="step-EvidenceBuilder">Evidence</div>
-        <div class="step" id="step-DraftCampaign">Draft</div>
-        <div class="step" id="step-QualityGate">Quality</div>
-        <div class="step" id="step-Completed">Done</div>
-      </div>
+      <section id="tab-evidence" class="card" style="display:none">
+        <h3>Evidence</h3>
+        <div class="body" id="out-evidence"><small class="muted">No content yet.</small></div>
+      </section>
 
-      <!-- Tabs -->
-      <div class="tabs">
-        <div class="tabs-left">
-          <button class="tab active" data-tab-target="tab-overview">Overview</button>
-          <button class="tab" data-tab-target="tab-landing">Landing page</button>
-          <button class="tab" data-tab-target="tab-emails">Emails</button>
-          <button class="tab" data-tab-target="tab-evidence">Evidence</button>
-          <button class="tab" data-tab-target="tab-sales">Sales</button>
-        </div>
-        <div id="runBadge" class="muted">Run: <span id="runBadgeId">–</span></div>
-      </div>
-
-      <!-- Panels -->
-      <div id="campaign-content" class="panel">
-        <div id="tab-overview" class="card">
-          <div class="muted">When a run completes, the executive summary and meta will render here.</div>
-        </div>
-        <div id="tab-landing" class="card" style="display:none">
-          <div class="muted">Landing page assets will render here.</div>
-        </div>
-        <div id="tab-emails" class="card" style="display:none">
-          <div class="muted">Emails will render here.</div>
-        </div>
-        <div id="tab-evidence" class="card" style="display:none">
-          <div class="muted">Evidence log will render here.</div>
-        </div>
-        <div id="tab-sales" class="card" style="display:none">
-          <div class="muted">Sales enablement content will render here.</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Right rail: assist / tips -->
-    <aside class="card assist">
-      <div class="section">
-        <strong>Tips</strong>
-        <ul class="list">
-          <li>Upload a CSV, adjust options, then press <em>Go</em>.</li>
-          <li>When status reaches <em>Completed</em>, the tabs will populate automatically.</li>
-        </ul>
-      </div>
-      <div class="section">
-        <strong>Debug</strong>
-        <div class="pre" id="debugLog" style="max-height:42vh; overflow:auto;"></div>
-      </div>
-    </aside>
+      <section id="tab-sales" class="card" style="display:none">
+        <h3>Sales enablement</h3>
+        <div class="body" id="out-sales"><small class="muted">No content yet.</small></div>
+      </section>
+    </div>
   </main>
+</div>
 
-  <div id="campaign-toast" class="toast"></div>
-
-  <!-- Tab + stage helpers -->
-  <script>
-    (function () {
-      const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
-      const $ = (sel, root = document) => root.querySelector(sel);
-      // === CSV loader for /api/generate(kind=campaign) ===
-      let __csv_text = "";
-      const __csv_input = $("#csvUpload");
-      const __goBtn = $("#goBtn");
-      const __csvBadge = $("#csvBadge");
-
-      __csv_input.addEventListener("change", async (e) => {
-        const f = e.target.files && e.target.files[0];
-        if (!f) {
-          __csv_text = "";
-          __goBtn.disabled = true;
-          if (__csvBadge) __csvBadge.textContent = "(no file)";
-          return;
-        }
-        const text = await f.text();
-        __csv_text = text;
-        const rows = Math.max(0, (text.match(/\r?\n/g) || []).length - 1);
-        if (__csvBadge) __csvBadge.textContent = `${f.name} · ${rows} rows`;
-        __goBtn.disabled = false;
-      });
-
-      function setActiveTab(id) {
-        $$(".tab").forEach(t => t.classList.toggle("active", t.dataset.tabTarget === id));
-        $$("#campaign-content > div").forEach(p => p.style.display = (p.id === id ? "" : "none"));
-      }
-      $$(".tab").forEach(btn => btn.addEventListener("click", () => setActiveTab(btn.dataset.tabTarget)));
-
-      function updateStage(state) {
-        const order = ["ValidatingInput", "EvidenceBuilder", "DraftCampaign", "QualityGate", "Completed"];
-        order.forEach(s => {
-          const el = $("#step-" + s);
-          if (!el) return;
-          el.classList.remove("active", "done");
-          if (state === s) el.classList.add("active");
-          if (order.indexOf(s) < order.indexOf(state)) el.classList.add("done");
-        });
-      }
-
-      function setRunId(runId) {
-        $("#currentRunId").textContent = runId || "–";
-        $("#runBadgeId").textContent = runId || "–";
-      }
-
-      window.CampaignPage = { setActiveTab, updateStage, setRunId };
-      setActiveTab("tab-overview");
-    })();
-  </script>
-
-  <!-- Main logic: upload → Go → start → poll → fetch → render -->
-  <script>
-    (function () {
-      const $ = (sel, root = document) => root.querySelector(sel);
-      const debug = $("#debugLog");
-      const toastEl = $("#campaign-toast");
-      const setStatus = (txt, mode) => {
-        $("#statusText").textContent = txt;
-        const dot = $("#statusDot");
-        dot.className = "status-dot";
-        if (mode === "ok") dot.classList.add("ok");
-        if (mode === "err") dot.classList.add("err");
-      };
-      const log = (m) => { const t = new Date().toISOString().replace('T', ' ').replace('Z', ''); debug.textContent += `[${t}] ${m}\n`; debug.scrollTop = debug.scrollHeight; };
-      const toast = (m) => { toastEl.textContent = m; toastEl.classList.add("show"); setTimeout(() => toastEl.classList.remove("show"), 1600); };
-
-      let selectedFile = null;
-      let csvText = "";
-      let csvSha = ""; let rowCount = 0; let currentRunId = "";
-
-      async function sha256Hex(buf) {
-        const hash = await crypto.subtle.digest("SHA-256", buf);
-        return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
-      }
-      function countCsvRows(text) {
-        const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
-        return Math.max(0, lines.length - 1);
-      }
-      function parseRunIdFromAny(obj) {
-        if (!obj || typeof obj !== "object") return "";
-        if (obj.runId) return obj.runId;
-        if (obj.id) return obj.id;
-        if (obj.statusQueryGetUri) {
-          const m = String(obj.statusQueryGetUri).match(/instances\/([^\/\?]+)/);
-          if (m) return m[1];
-        }
-        return "";
-      }
-
-      $("#csvUpload").addEventListener("change", async (e) => {
-        const f = e.target.files && e.target.files[0];
-        if (!f) { selectedFile = null; $("#goBtn").disabled = true; $("#csvBadge").textContent = "(no file)"; return; }
-        selectedFile = f;
-        const [text, buf] = await Promise.all([f.text(), f.arrayBuffer()]);
-        rowCount = countCsvRows(text);
-        csvText = text;
-        csvSha = await sha256Hex(buf);
-        $("#csvBadge").textContent = `${f.name} · ${rowCount} rows · sha256=${csvSha.slice(0, 12)}…`;
-        $("#goBtn").disabled = false;
-        setStatus("Ready", "ok");
-        log(`CSV ready: rows=${rowCount}, sha256=${csvSha}`);
-      });
-
-      $("#newRunBtn").addEventListener("click", () => toast("Select a CSV, then click Go"));
-
-      $("#goBtn").addEventListener("click", async () => {
-        if (!selectedFile) { toast("Choose a CSV first"); return; }
-        $("#goBtn").disabled = true;
-        setStatus("Generating…");
-        log("Submitting to /api/generate (kind=campaign)");
-        window.CampaignPage.updateStage("ValidatingInput");
-
-        const csv_text = await selectedFile.text();
-        const payload = {
-          kind: "campaign",           // <-- REQUIRED by the API
-          csv_text,                   // <-- REQUIRED by the API
-          source: "upload",
-          page: "campaign",
-          rowCount,
-          csv_sha256: csvSha,
-          company: {
-            name: $("#companyName").value || undefined,
-            website: $("#companyWebsite").value || undefined,
-            linkedin: $("#companyLinkedIn").value || undefined,
-            usps: $("#companyUsps").value || undefined
-          },
-          tone: $("#tone").value || undefined,
-          evidenceWindowMonths: parseInt($("#evidenceWindow").value || "6", 10),
-          complianceFooter: $("#includeCompliance").checked
-        };
-
-        try {
-          const res = await fetch("/api/generate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-          });
-          const data = await res.json().catch(() => ({}));
-          log("---- PROMPT SENT TO LLM ----\n" + data._debug_prompt);
-          if (!res.ok) {
-            log(`generate failed ${res.status}: ${JSON.stringify(data)}`);
-            setStatus("Failed", "err");
-            $("#goBtn").disabled = false;
-            return;
-          }
-          window.CampaignPage.updateStage("DraftCampaign");
-          window.CampaignPage.updateStage("QualityGate");
-          window.CampaignPage.updateStage("Completed");
-          renderCampaign(data);
-          setStatus("Completed", "ok");
-          $("#goBtn").disabled = false;
-        } catch (e) {
-          log(`generate error: ${e && e.message ? e.message : e}`);
-          setStatus("Error", "err");
-          $("#goBtn").disabled = false;
-        }
-      });
-
-      async function pollStatus(runId) {
-        for (let i = 0; i < 90; i++) {
-          try {
-            const url = `/api/campaign/status?runId=${encodeURIComponent(runId)}`;
-            const res = await fetch(url, { method: "GET" });
-            if (!res.ok) { log(`status ${res.status}`); await new Promise(r => setTimeout(r, 1500)); continue; }
-            const js = await res.json().catch(() => ({}));
-            const s = String(js.state || js.runtimeStatus || "").toLowerCase();
-
-            // map to visual stages when possible
-            const stageMap = { validatinginput: "ValidatingInput", evidencebuilder: "EvidenceBuilder", draftcampaign: "DraftCampaign", qualitygate: "QualityGate", completed: "Completed" };
-            Object.keys(stageMap).forEach(k => { if (s.includes(k)) window.CampaignPage.updateStage(stageMap[k]); });
-
-            if (s.includes("completed")) {
-              setStatus("Completed", "ok");
-              await fetchResults(runId);
-              return;
-            }
-            if (s.includes("failed") || s.includes("terminated")) {
-              setStatus("Failed", "err");
-              log(`failed: ${JSON.stringify(js)}`);
-              return;
-            }
-          } catch (e) {
-            log(`poll error: ${e}`);
-          }
-          await new Promise(r => setTimeout(r, 1500));
-        }
-        setStatus("Timeout", "err");
-      }
-
-      async function fetchResults(runId) {
-        const urls = [
-          `/api/campaign/fetch?file=campaign&runId=${encodeURIComponent(runId)}`,
-          `/api/campaign/fetch?file=campaign`
-        ];
-        for (const u of urls) {
-          try {
-            const res = await fetch(u);
-            if (!res.ok) { log(`fetch ${u} -> ${res.status}`); continue; }
-            const js = await res.json().catch(() => ({}));
-            renderCampaign(js);
-            setStatus("Done", "ok");
-            return;
-          } catch (e) { log(`fetch error: ${e}`); }
-        }
-        setStatus("Fetch failed", "err");
-      }
-
-      function renderCampaign(c) {
-        try {
-          // Overview (summary only)
-          const ov = document.getElementById("tab-overview");
-          ov.innerHTML = "";
-          const ex = document.createElement("div"); ex.className = "pre";
-          ex.textContent = (c.executive_summary || "(no executive summary)");
-          ov.appendChild(ex);
-          // Landing page
-          const lp = c.landing_page || {};
-          const lpel = document.getElementById("tab-landing");
-          lpel.style.display = ""; lpel.innerHTML = `
-            <h3>${lp.headline || ""}</h3>
-            <p>${lp.subheadline || ""}</p>
-            <ul>${(lp.sections || []).map(s => `<li><strong>${s.title || ""}</strong>: ${s.content || ""}</li>`).join("")}</ul>
-            <p><strong>CTA:</strong> ${lp.cta || ""}</p>`;
-
-          // Emails
-          const emel = document.getElementById("tab-emails");
-          emel.style.display = ""; emel.innerHTML = (c.emails || []).map((e, i) => `
-            <div class="card" style="padding:10px; margin:8px 0">
-              <div class="email-head"><span class="email-subject">${e.subject || ""}</span><span class="muted">#${i + 1}</span></div>
-              <div class="email-preview muted">${e.preview || ""}</div>
-              <pre class="pre">${e.body || ""}</pre>
-            </div>`).join("") || '<div class="muted">No emails.</div>';
-
-          // Evidence
-          const ev = document.getElementById("tab-evidence");
-          ev.style.display = ""; ev.innerHTML = `
-            <table class="table">
-              <thead><tr><th>Publisher</th><th>Title</th><th>Date</th><th>URL</th><th>Excerpt</th></tr></thead>
-              <tbody>${(c.evidence_log || []).map(x => `
-                <tr><td>${x.publisher || ""}</td><td>${x.title || ""}</td><td>${x.date || ""}</td>
-                <td><a href="${x.url || "#"}" target="_blank">${x.url || ""}</a></td><td>${x.excerpt || ""}</td></tr>`).join("")}
-              </tbody>
-            </table>`;
-
-          // Sales enablement
-          const sel = document.getElementById("tab-sales");
-          sel.style.display = ""; sel.innerHTML = `
-            <h4>Call script</h4><pre class="pre">${(c.sales_enablement && c.sales_enablement.call_script) || ""}</pre>
-            <h4>One pager</h4><pre class="pre">${(c.sales_enablement && c.sales_enablement.one_pager) || ""}</pre>
-          `;
-        } catch (e) {
-          log(`render error: ${e}`);
-        }
-      }
-
-      // expose minimal API if other modules expect it
-      window.Campaign = {
-        startNewRun: async (opts = {}) => {
-          // if someone clicks header "New run", we just prompt for CSV
-          document.getElementById("csvUpload").click();
-        },
-        updateStage: window.CampaignPage.updateStage
-      };
-    })();
-  </script>
+<!-- Load the external client (no inline JS) -->
+<script defer src="campaign.js"></script>
 </body>
-
 </html>
