@@ -799,7 +799,7 @@ function parseMultipart(req, opts) {
         return reject(new Error("Not multipart/form-data"));
       }
 
-      var Busboy_ = Busboy || require("busboy");
+      const Busboy_ = (typeof Busboy !== "undefined") ? Busboy : require("busboy");
       var bb = Busboy_({ headers: req.headers || {} });
 
       var fields = {};
