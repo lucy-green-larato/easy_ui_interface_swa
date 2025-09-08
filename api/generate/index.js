@@ -1958,6 +1958,72 @@ module.exports = async function (context, req) {
           ? "- Security: keep claims aligned with the website content; you may mention VPN/fixed public IPs/remote management if present."
           : "- Do NOT pitch cybersecurity products/services; only refer to connectivity security controls (e.g., fixed public IPs, VPN) if evidenced on the website.") + "\n";
 
+      // === PASS 1: PROSE DRAFT (best-quality writing) ===
+      const proseRes = await callModel({
+        // keep system minimal so it doesn't override your crafted prompt
+        system: "UK business English. Follow the user’s instructions exactly.",
+        prompt,                  // <-- your composed Final Prompt (unchanged)
+        temperature: 0.25,       // consistent but not flat
+        max_tokens: 7000         // enough headroom for LP + 4 emails
+      });
+      const proseDraft = extractText(proseRes) || "";
+
+      // Early escape if the draft is unusable (so you can see what came back)
+      if (!proseDraft || proseDraft.length < 400) {
+        context.res = {
+          status: 200,
+          headers: cors,
+          body: {
+            mode: "prose-only",
+            text: proseDraft || "(empty response)",
+            ...(DEBUG_PROMPT ? { _debug_prompt: prompt } : {})
+          }
+        };
+        return;
+      }
+
+      // === PASS 2: EXTRACT INTO YOUR EXISTING JSON SHAPE ===
+      const extractorPrompt =
+        "You will be given a campaign draft (landing page + 4 emails) and must return a strict JSON object matching the app’s expected keys.\n" +
+        "Rules:\n" +
+        "- Copy the landing page and emails verbatim (light normalisation only: trim whitespace).\n" +
+        "- Preserve headings, bullet lists, and any inline citations.\n" +
+        "- Do not invent content; if a required field is truly missing, set it to an empty string.\n" +
+        "- Output VALID JSON ONLY, no markdown fences.\n\n" +
+        "Return JSON with these top-level keys ONLY:\n" +
+        // IMPORTANT: keep the keys your app already expects here — do not rename them.
+        // If your app’s schema object is named CampaignSchema, keep the same field names:
+        // executive_summary, landing_page_markdown, emails_markdown (array of 4 strings),
+        // evidence_log, positioning_and_differentiation, messaging_matrix, offer_strategy,
+        // channel_plan, sales_enablement, measurement, compliance, risks, one_pager, meta
+        "{\n" +
+        "  \"executive_summary\": string,\n" +
+        "  \"landing_page_markdown\": string,\n" +
+        "  \"emails_markdown\": [string, string, string, string],\n" +
+        "  \"evidence_log\": array,\n" +
+        "  \"positioning_and_differentiation\": object,\n" +
+        "  \"messaging_matrix\": object,\n" +
+        "  \"offer_strategy\": object,\n" +
+        "  \"channel_plan\": object,\n" +
+        "  \"sales_enablement\": object,\n" +
+        "  \"measurement\": object,\n" +
+        "  \"compliance\": object,\n" +
+        "  \"risks\": object,\n" +
+        "  \"one_pager\": string,\n" +
+        "  \"meta\": object\n" +
+        "}\n\n" +
+        "--- DRAFT TO EXTRACT FROM ---\n" + proseDraft;
+
+      const extractorRes = await callModel({
+        system: "Return valid JSON only. No commentary.",
+        prompt: extractorPrompt,
+        temperature: 0.0,
+        // If your provider supports json_schema you can set it here; otherwise parse/validate yourself
+        max_tokens: 4000
+      });
+
+      const rawExtract = extractText(extractorRes) || "";
+      const extracted = safeJson(stripJsonFences(rawExtract));
 
       /* ---------- model call ---------- */
       let llmRes, raw;
@@ -2533,6 +2599,45 @@ module.exports = async function (context, req) {
         } else if (suggestedNext && String(suggestedNext).trim()) {
           md = replaceSection(md, "Next Step", String(suggestedNext).trim());
         }
+
+        let packed = null, issues = null;
+
+        if (extracted) {
+          const r = CampaignSchema.safeParse(extracted);
+          if (r.success) {
+            packed = r.data;
+          } else {
+            issues = r.error.issues;
+          }
+        }
+
+        if (!packed) {
+          // Fallback: deliver the high-quality prose so the user still gets value
+          context.res = {
+            status: 200,
+            headers: cors,
+            body: {
+              mode: "prose-fallback",
+              text: proseDraft,
+              validation_issues: issues || undefined,
+              ...(DEBUG_PROMPT ? { _debug_prompt: prompt } : {})
+            }
+          };
+          return;
+        }
+
+        // If we’re here, we have validated JSON in `packed`.
+        // Keep your existing post-processing (quality gate, recency flags, etc.) here if you already have it.
+        // Then return the normal campaign body your UI expects:
+        context.res = {
+          status: 200,
+          headers: cors,
+          body: {
+            ...packed,
+            ...(DEBUG_PROMPT ? { _debug_prompt: prompt } : {})
+          }
+        };
+        return;
 
         // 4) Weave salesperson inputs as NATURAL sentences (no bullet dumping)
         if (valueProposition && String(valueProposition).trim()) {
