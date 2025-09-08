@@ -2354,7 +2354,7 @@ module.exports = async function (context, req) {
         headers: cors,
         body: {
           ...campaign,
-          ...(DEBUG_PROMPT ? { _debug_prompt: prompt } : {})
+          _debug_prompt: prompt
         }
       };
       return;
