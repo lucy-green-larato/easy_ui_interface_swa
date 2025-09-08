@@ -1992,7 +1992,9 @@ module.exports = async function (context, req) {
           body: {
             mode: "prose-only",
             text: proseDraft || "(empty response)",
-            ...(DEBUG_PROMPT ? { _debug_prompt: prompt } : {})
+            _debug_prompt: prosePrompt,
+            _debug_prompt_extractor: undefined,
+            _debug_prompt_schema: prompt
           }
         };
         return;
@@ -2334,7 +2336,16 @@ module.exports = async function (context, req) {
       };
       campaign._website_citations = websiteCites;
 
-      context.res = { status: 200, headers: cors, body: campaign };
+      context.res = {
+        status: 200,
+        headers: cors,
+        body: {
+          ...campaign,
+          _debug_prompt: prosePrompt,          // what the LLM saw first
+          _debug_prompt_extractor: extractorPrompt,
+          _debug_prompt_schema: prompt         // the schema prompt used only if we fell back
+        }
+      };
       return;
     }
 
