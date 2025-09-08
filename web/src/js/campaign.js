@@ -1,351 +1,272 @@
-/* /src/js/campaign.js — full file (featureful, still minimal deps) */
+/* campaign.js — single client for /api/generate (kind:"campaign") */
 
-const $ = (sel, el = document) => el.querySelector(sel);
-const $$ = (sel, el = document) => Array.from(el.querySelectorAll(sel));
-const h = (tag, attrs = {}, ...children) => {
-  const el = document.createElement(tag);
-  Object.entries(attrs || {}).forEach(([k, v]) => {
-    if (k === "class") el.className = v;
-    else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
-    else if (v !== undefined && v !== null) el.setAttribute(k, v);
-  });
-  for (const c of children.flat()) if (c != null) el.append(typeof c === "string" ? document.createTextNode(c) : c);
-  return el;
-};
+(() => {
+  // ---------- tiny DOM helpers ----------
+  const qs = (s, el = document) => el.querySelector(s);
+  const qsa = (s, el = document) => Array.from(el.querySelectorAll(s));
+  const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
 
-function toast(msg) {
-  const t = $("#campaign-toast");
-  if (!t) return console.log(msg);
-  t.textContent = msg;
-  t.classList.add("show");
-  setTimeout(() => t.classList.remove("show"), 1800);
-}
-
-const api = {
-  start: async (payload) => {
-    const res = await fetch("/api/campaign/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload || {})
-    });
-    if (!res.ok) throw new Error(`start ${res.status}`);
-    return res.json(); // { runId }
-  },
-  status: async (runId) => {
-    const res = await fetch(`/api/campaign/status?runId=${encodeURIComponent(runId)}`);
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    return res.json(); // { state, ... }
-  },
-  fetchCampaign: async (runId) => {
-    const res = await fetch(`/api/campaign/fetch?runId=${encodeURIComponent(runId)}&file=campaign`);
-    if (!res.ok) throw new Error(`fetch campaign ${res.status}`);
-    return res.json();
-  },
-  fetchEvidence: async (runId) => {
-    const res = await fetch(`/api/campaign/fetch?runId=${encodeURIComponent(runId)}&file=evidence`);
-    if (!res.ok) return [];
-    return res.json();
-  },
-  regenerate: async (runId, section) => {
-    const res = await fetch(`/api/campaign/regenerate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ runId, section })
-    });
-    if (!res.ok) throw new Error(`regenerate ${res.status}`);
-    return res.json();
-  },
-  runs: async () => {
-    const res = await fetch(`/api/runs`);
-    if (!res.ok) throw new Error(`runs ${res.status}`);
-    return res.json(); // flexible shape (array)
-  },
-  downloadDocx: (runId) => {
-    window.location.href = `/api/campaign/download?runId=${encodeURIComponent(runId)}`;
-  }
-};
-
-function setRunId(runId) {
-  $("#currentRunId") && ($("#currentRunId").textContent = runId || "–");
-  try { localStorage.setItem("campaign:lastRunId", runId || ""); } catch { }
-  if (window.CampaignPage?.setRunId) window.CampaignPage.setRunId(runId);
-}
-function updateStage(state) {
-  if (window.CampaignPage?.updateStage) return window.CampaignPage.updateStage(state);
-  const order = ["ValidatingInput", "EvidenceBuilder", "DraftCampaign", "QualityGate", "Completed"];
-  order.forEach(s => {
-    const el = $("#step-" + s);
-    if (!el) return;
-    el.classList.remove("active", "done");
-    if (s === state) el.classList.add("active");
-    if (order.indexOf(s) < order.indexOf(state)) el.classList.add("done");
-  });
-  $("#statusText") && ($("#statusText").textContent = state || "Waiting…");
-}
-const copyBtn = (getText, label = "Copy") =>
-  h("button", {
-    class: "btn btn-copy", onclick: async () => {
-      try { await navigator.clipboard.writeText(getText()); toast("Copied"); } catch (e) { console.log(e); }
-    }
-  }, label);
-const fmtDate = (d) => { try { return new Date(d).toISOString().slice(0, 10); } catch { return d; } };
-
-let CURRENT_RUN_ID = null;
-
-/* ---------- Rendering ---------- */
-function renderOverview(data) {
-  const node = $("#tab-overview"); if (!node) return; node.innerHTML = "";
-  node.append(
-    h("div", { class: "workspace" },
-      h("h3", {}, "Executive summary"),
-      h("p", {}, data.executive_summary || "(empty)"),
-      h("div", { class: "btn-row" },
-        copyBtn(() => data.executive_summary || "", "Copy summary"),
-        h("button", { class: "btn secondary", onclick: () => doRegenerate("executive_summary") }, "Regenerate summary")
-      )
-    )
-  );
-}
-
-function renderLanding(data) {
-  const node = $("#tab-landing"); if (!node) return; node.innerHTML = "";
-  const lp = data.landing_page || {};
-  const sections = (lp.sections || []).map(s =>
-    h("div", { class: "card", style: "margin:.5rem 0;padding:.75rem" },
-      h("div", { style: "font-weight:600;margin-bottom:.25rem" }, s.title || "(untitled)"),
-      s.content ? h("p", {}, s.content) :
-        Array.isArray(s.bullets) ? h("ul", {}, ...s.bullets.map(b => h("li", {}, b))) :
-          h("p", { class: "muted" }, "(empty)")
-    )
-  );
-  const allText = () => {
-    const parts = [
-      `Headline: ${lp.headline || ""}`,
-      `Subheadline: ${lp.subheadline || ""}`,
-      "",
-      ...(lp.sections || []).map(s => s.content ? `${s.title}\n${s.content}` :
-        Array.isArray(s.bullets) ? `${s.title}\n- ${s.bullets.join("\n- ")}` : (s.title || "")),
-      "",
-      `CTA: ${lp.cta || ""}`
-    ];
-    return parts.join("\n");
+  // ---------- elements ----------
+  const el = {
+    dot: qs('#statusDot'),
+    stage: qs('#stage'),
+    csvUpload: qs('#csvUpload'),
+    csvName: qs('#csvName'),
+    csvHash: qs('#csvHash'),
+    client: qs('#client'),
+    product: qs('#product'),
+    tone: qs('#tone'),
+    audience: qs('#audience'),
+    windowMonths: qs('#windowMonths'),
+    numEmails: qs('#numEmails'),
+    notes: qs('#notes'),
+    go: qs('#goBtn'),
+    debug: qs('#debugLog'),
+    tabs: qsa('.tabbtn'),
+    copyVisible: qs('#copyVisible'),
+    downloadAll: qs('#downloadAll'),
+    // outputs
+    tabLanding: qs('#tab-landing'),
+    tabEmails: qs('#tab-emails'),
+    tabMatrix: qs('#tab-matrix'),
+    tabEvidence: qs('#tab-evidence'),
+    tabSales: qs('#tab-sales'),
+    outLanding: qs('#out-landing'),
+    outEmails: qs('#out-emails'),
+    outMatrix: qs('#out-matrix'),
+    outEvidence: qs('#out-evidence'),
+    outSales: qs('#out-sales'),
   };
-  node.append(
-    h("div", { class: "workspace" },
-      h("div", {}, h("strong", {}, lp.headline || "(headline)")),
-      h("div", { class: "muted", style: "margin:.25rem 0 .5rem" }, lp.subheadline || ""),
-      ...sections,
-      h("div", { style: "margin-top:.5rem;font-weight:600" }, lp.cta || ""),
-      h("div", { class: "btn-row", style: "margin-top:.5rem" },
-        copyBtn(allText, "Copy landing page"),
-        h("button", { class: "btn secondary", onclick: () => doRegenerate("landing_page") }, "Regenerate landing")
-      )
-    )
-  );
-}
-function renderEmails(data) {
-  const node = $("#tab-emails"); if (!node) return; node.innerHTML = "";
-  const emails = data.emails || [];
-  const wrap = h("div", { class: "workspace" },
-    h("div", { class: "muted", style: "margin-bottom:.5rem" }, `Emails (${emails.length})`),
-    h("div", { class: "btn-row", style: "margin-bottom:.5rem" },
-      h("button", { class: "btn secondary", onclick: () => doRegenerate("emails") }, "Regenerate emails")
-    )
-  );
-  emails.forEach((em, i) => {
-    const text = `Subject: ${em.subject}\nPreview: ${em.preview}\n\n${em.body}`;
-    wrap.append(
-      h("div", { class: "card email-card", style: "margin:.5rem 0; padding:.75rem" },
-        h("div", { class: "email-head" },
-          h("div", { class: "email-subject" }, `Email ${i + 1}: ${em.subject || ""}`),
-          copyBtn(() => text, "Copy email")
-        ),
-        h("div", { class: "email-preview" }, em.preview || ""),
-        h("pre", { class: "pre" }, em.body || "")
-      )
-    );
-  });
-  if (!emails.length) wrap.append(h("div", { class: "muted" }, "(no emails)"));
-  node.append(wrap);
-}
-function renderEvidence(data) {
-  const node = $("#tab-evidence"); if (!node) return; node.innerHTML = "";
-  const ev = data.evidence_log || [];
-  const table = h("table", { class: "table" },
-    h("thead", {}, h("tr", {},
-      h("th", {}, "Publisher"), h("th", {}, "Title"), h("th", {}, "Date"),
-      h("th", {}, "URL"), h("th", {}, "Excerpt"), h("th", {}, "")
-    )),
-    h("tbody", {})
-  );
-  const tbody = $("tbody", table);
-  ev.forEach(item => {
-    const line = `${item.publisher} – ${item.title} (${fmtDate(item.date)})\n${item.url}\n\n${item.excerpt}`;
-    tbody.append(
-      h("tr", {},
-        h("td", {}, item.publisher || ""),
-        h("td", {}, item.title || ""),
-        h("td", {}, fmtDate(item.date || "")),
-        h("td", {}, item.url ? h("a", { href: item.url, target: "_blank", rel: "noopener" }, item.url) : ""),
-        h("td", {}, item.excerpt || ""),
-        h("td", {}, copyBtn(() => line, "Copy"))
-      )
-    );
-  });
-  node.append(
-    h("div", { class: "workspace" },
-      h("div", { class: "muted", style: "margin-bottom:.5rem" }, `Evidence (${ev.length})`),
-      table
-    )
-  );
-}
-function renderSales(data) {
-  const node = $("#tab-sales"); if (!node) return; node.innerHTML = "";
-  const se = data.sales_enablement || {};
-  node.append(
-    h("div", { class: "workspace" },
-      h("h4", {}, "Call script"),
-      h("pre", { class: "pre" }, se.call_script || ""),
-      h("div", { style: "margin:.25rem 0 .75rem" }, copyBtn(() => se.call_script || "", "Copy call script")),
-      h("h4", {}, "One-pager"),
-      h("pre", { class: "pre" }, se.one_pager || ""),
-      h("div", { class: "btn-row" },
-        copyBtn(() => se.one_pager || "", "Copy one-pager"),
-        h("button", { class: "btn secondary", onclick: () => doRegenerate("sales_enablement") }, "Regenerate sales")
-      )
-    )
-  );
-}
-function renderAllTabs(campaign, runId) {
-  renderOverview(campaign);
-  renderLanding(campaign);
-  renderEmails(campaign);
-  renderEvidence(campaign);
-  renderSales(campaign);
-  const mount = $("#download-docx-mount");
-  if (mount) {
-    mount.innerHTML = "";
-    mount.append(h("button", { class: "btn", onclick: () => api.downloadDocx(runId) }, "Download .docx"));
-  }
-}
 
-/* ---------- Polling with capped backoff ---------- */
-let pollTimer = null;
-async function pollUntilDone(runId) {
-  CURRENT_RUN_ID = runId;
-  setRunId(runId);
-  updateStage("ValidatingInput");
+  let csvText = '';
+  let lastResult = null;
 
-  let delay = 1200, maxDelay = 4500;
-  clearTimeout(pollTimer);
+  // ---------- utils ----------
+  const log = (...args) => {
+    const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a, null, 2)).join(' ');
+    el.debug.textContent += (el.debug.textContent ? '\n' : '') + line;
+    el.debug.scrollTop = el.debug.scrollHeight;
+  };
 
-  const tick = async () => {
+  const setDot = cls => {
+    el.dot.classList.remove('ok', 'warn', 'err');
+    if (cls) el.dot.classList.add(cls);
+  };
+
+  const setStage = s => { el.stage.textContent = s || ''; };
+
+  const hashText = async (text) => {
+    if (!window.crypto?.subtle) return '';
+    const enc = new TextEncoder().encode(text);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  };
+
+  const copyToClipboard = async (str) => {
     try {
-      const s = await api.status(runId);
-      if (s?.state) updateStage(s.state);
-
-      if (s?.state === "Completed") {
-        const data = await api.fetchCampaign(runId);
-        renderAllTabs(data, runId);
-        toast("Campaign ready");
-        return; // stop polling
-      }
-      if (s?.state === "Failed") {
-        toast("Run failed – check logs / blob error.json if present");
-        return; // stop
-      }
-    } catch (e) {
-      console.warn("status poll error", e);
+      await navigator.clipboard.writeText(str);
+      return true;
+    } catch {
+      // fallback
+      const ta = document.createElement('textarea');
+      ta.value = str; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); return true; } finally { ta.remove(); }
     }
-    delay = Math.min(maxDelay, Math.floor(delay * 1.4));
-    pollTimer = setTimeout(tick, delay);
   };
 
-  await tick();
-}
+  // ---------- CSV handling ----------
+  on(el.csvUpload, 'change', async () => {
+    const f = el.csvUpload.files?.[0];
+    if (!f) return;
+    const text = await f.text();
+    csvText = text;
+    el.csvName.textContent = `${f.name} • ${f.size.toLocaleString()} bytes`;
+    const h = await hashText(text);
+    el.csvHash.textContent = h ? `sha256:${h.slice(0,12)}…` : '';
+    log(`Loaded CSV: ${f.name} (${f.size} bytes)`);
+  });
 
-/* ---------- Regenerate ---------- */
-async function doRegenerate(sectionKey) {
-  if (!CURRENT_RUN_ID) return toast("No active run");
-  try {
-    await api.regenerate(CURRENT_RUN_ID, sectionKey);
-    toast(`Requested regeneration: ${sectionKey}`);
-    // Keep polling; server should update campaign.json when ready
-  } catch (e) {
-    console.error(e);
-    toast("Regenerate failed");
-  }
-}
-
-/* ---------- Runs list ---------- */
-async function loadRuns() {
-  const select = $("#runSelect"); if (!select) return;
-  try {
-    select.innerHTML = "<option value=''>Loading…</option>";
-    const data = await api.runs();
-    const items = Array.isArray(data) ? data : (data?.items || []);
-    select.innerHTML = "<option value='leadgen'>(Select page / optional)</option>";
-    // Try to populate options with most recent run IDs for convenience
-    const runs = items.map(x => ({
-      id: x.runId || x.id || x.instanceId || "",
-      state: x.state || x.runtimeStatus || "",
-      when: x.createdAt || x.created || x.timeCreated || x.timestamp || ""
-    })).filter(r => r.id);
-
-    // Add a sub-optgroup style label
-    const optHeader = h("option", { value: "", disabled: true }, "— Recent runs —");
-    select.append(optHeader);
-    runs.slice(0, 30).forEach(r => {
-      const label = `${r.id.slice(0, 8)}…  ${r.state || ""}  ${r.when ? `@ ${r.when}` : ""}`;
-      select.append(h("option", { value: r.id }, label));
+  // ---------- tabs ----------
+  const showTab = (name) => {
+    const ids = { landing: el.tabLanding, emails: el.tabEmails, matrix: el.tabMatrix, evidence: el.tabEvidence, sales: el.tabSales };
+    Object.entries(ids).forEach(([k, section]) => {
+      section.style.display = (k === name) ? '' : 'none';
     });
+    qsa('.tabbtn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  };
+  el.tabs.forEach(b => on(b, 'click', () => showTab(b.dataset.tab || 'landing')));
+  on(el.copyVisible, 'click', async () => {
+    const active = qsa('.tabbtn').find(b => b.classList.contains('active'))?.dataset.tab || 'landing';
+    const map = { landing: el.outLanding, emails: el.outEmails, matrix: el.outMatrix, evidence: el.outEvidence, sales: el.outSales };
+    const html = map[active]?.innerText || '';
+    const ok = await copyToClipboard(html);
+    log(ok ? `Copied ${active} to clipboard.` : `Copy failed for ${active}.`);
+  });
+  on(el.downloadAll, 'click', () => {
+    if (!lastResult) return;
+    const blob = new Blob([JSON.stringify(lastResult, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement('a'), { href: url, download: 'campaign_result.json' });
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  });
 
-    $("#loadRecentBtn")?.addEventListener("click", () => {
-      const latest = runs.find(r => r.state === "Completed") || runs[0];
-      if (!latest) return toast("No runs found");
-      resumeRun(latest.id);
+  // ---------- renderers ----------
+  const renderLanding = (data) => {
+    el.outLanding.innerHTML = '';
+    const html = data?.landing_page?.html;
+    const md = data?.landing_page?.markdown || data?.landing_page?.md;
+    if (html) {
+      const wrap = document.createElement('div'); wrap.innerHTML = html; el.outLanding.appendChild(wrap);
+    } else if (md) {
+      const pre = document.createElement('pre'); pre.textContent = md; el.outLanding.appendChild(pre);
+    } else {
+      el.outLanding.innerHTML = '<small class="muted">No landing page content returned.</small>';
+    }
+  };
+
+  const renderEmails = (data) => {
+    el.outEmails.innerHTML = '';
+    const emails = Array.isArray(data?.emails) ? data.emails : [];
+    if (!emails.length) { el.outEmails.innerHTML = '<small class="muted">No emails returned.</small>'; return; }
+    emails.forEach((e, i) => {
+      const card = document.createElement('div'); card.className = 'card';
+      const h = document.createElement('h3'); h.textContent = `Email ${i+1}: ${e.subject || '(no subject)'}`;
+      const b = document.createElement('div'); b.className = 'body';
+      const preview = e.preview || e.teaser || '';
+      const html = e.html || e.body_html;
+      const text = e.text || e.body || '';
+      const pre = document.createElement('pre'); pre.textContent = text || '';
+      if (html) {
+        const htmlBox = document.createElement('div'); htmlBox.innerHTML = html; b.appendChild(htmlBox);
+      }
+      if (!html && text) b.appendChild(pre);
+      if (preview) {
+        const small = document.createElement('small'); small.className='muted'; small.textContent = `Preview: ${preview}`;
+        b.appendChild(document.createElement('br')); b.appendChild(small);
+      }
+      card.appendChild(h); card.appendChild(b); el.outEmails.appendChild(card);
     });
-  } catch (e) {
-    console.warn("runs error", e);
-    select.innerHTML = "<option value='leadgen'>(leadgen)</option>";
-  }
-}
+  };
 
-/* ---------- Start / Resume ---------- */
-async function startNewRun(payload) {
-  const body = { page: "leadgen", ...(payload || {}) };
-  const { runId } = await api.start(body);
-  await resumeRun(runId);
-}
-async function resumeRun(runId) {
-  CURRENT_RUN_ID = runId;
-  setRunId(runId);
-  pollUntilDone(runId);
-}
+  const renderMatrix = (data) => {
+    el.outMatrix.innerHTML = '';
+    const matrix = data?.messaging_matrix || data?.matrix || [];
+    if (!Array.isArray(matrix) || !matrix.length) { el.outMatrix.innerHTML = '<small class="muted">No matrix returned.</small>'; return; }
+    const tbl = document.createElement('table');
+    const head = document.createElement('thead');
+    const cols = Object.keys(matrix[0]);
+    head.innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>`;
+    const body = document.createElement('tbody');
+    matrix.forEach(row => {
+      const tr = document.createElement('tr');
+      cols.forEach(c => {
+        const td = document.createElement('td');
+        const v = row[c];
+        td.innerHTML = (v ?? '') && typeof v === 'string' ? v : JSON.stringify(v ?? '');
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+    tbl.appendChild(head); tbl.appendChild(body);
+    el.outMatrix.appendChild(tbl);
+  };
 
-/* ---------- Restore on load ---------- */
-function restoreOnLoad() {
-  const u = new URL(window.location.href);
-  const qRun = u.searchParams.get("runId");
-  if (qRun) return resumeRun(qRun);
+  const renderEvidence = (data) => {
+    el.outEvidence.innerHTML = '';
+    const ev = data?.evidence || data?.proof_points || [];
+    if (!Array.isArray(ev) || !ev.length) { el.outEvidence.innerHTML = '<small class="muted">No evidence returned.</small>'; return; }
+    const ul = document.createElement('ul');
+    ev.forEach(x => {
+      const li = document.createElement('li'); li.textContent = typeof x === 'string' ? x : JSON.stringify(x);
+      ul.appendChild(li);
+    });
+    el.outEvidence.appendChild(ul);
+  };
 
-  try {
-    const last = localStorage.getItem("campaign:lastRunId");
-    if (last) return resumeRun(last);
-  } catch { }
-}
+  const renderSales = (data) => {
+    el.outSales.innerHTML = '';
+    const s = data?.sales_enablement || {};
+    if (!Object.keys(s).length) { el.outSales.innerHTML = '<small class="muted">No sales enablement content returned.</small>'; return; }
+    const blocks = [
+      ['Talk track', s.talk_track || s.talktrack || ''],
+      ['Objection handles', s.objection_handles || s.objections || []],
+      ['Discovery questions', s.discovery_questions || s.questions || []],
+      ['CTAs', s.ctas || s.calls_to_action || []],
+    ];
+    blocks.forEach(([title, payload]) => {
+      const card = document.createElement('div'); card.className='card';
+      const h = document.createElement('h3'); h.textContent = title;
+      const b = document.createElement('div'); b.className='body';
+      if (Array.isArray(payload)) {
+        const ul = document.createElement('ul');
+        payload.forEach(p => { const li = document.createElement('li'); li.textContent = p; ul.appendChild(li); });
+        b.appendChild(ul);
+      } else if (typeof payload === 'string') {
+        const pre = document.createElement('pre'); pre.textContent = payload; b.appendChild(pre);
+      } else {
+        const pre = document.createElement('pre'); pre.textContent = JSON.stringify(payload, null, 2); b.appendChild(pre);
+      }
+      card.appendChild(h); card.appendChild(b); el.outSales.appendChild(card);
+    });
+  };
 
-/* ---------- Expose globals expected by your HTML ---------- */
-window.Campaign = { startNewRun, setRunId, updateStage, resumeRun };
+  const renderAll = (data) => {
+    renderLanding(data);
+    renderEmails(data);
+    renderMatrix(data);
+    renderEvidence(data);
+    renderSales(data);
+  };
 
-/* ---------- Init ---------- */
-document.addEventListener("DOMContentLoaded", () => {
-  loadRuns();
-  restoreOnLoad();
+  // ---------- API ----------
+  const generate = async (payload) => {
+    const res = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(()=>String(res.status));
+      throw new Error(`Generate failed: ${res.status} ${txt}`);
+    }
+    return res.json();
+  };
 
-  // ensure header "New run" works if no inline onclick is present
-  const newBtn = $("#newRunBtn");
-  if (newBtn && !newBtn.getAttribute("onclick")) {
-    newBtn.addEventListener("click", () => startNewRun({}));
-  }
-});
+  // ---------- main action ----------
+  on(el.go, 'click', async () => {
+    try {
+      if (!csvText || !csvText.trim()) { alert('Please upload a CSV first.'); return; }
+      setDot('warn'); setStage('Preparing request…'); log('Preparing payload…');
+
+      const payload = {
+        kind: 'campaign',
+        csv_text: csvText,
+        client: (el.client.value || '').trim(),
+        product: (el.product.value || '').trim(),
+        tone: (el.tone.value || 'professional'),
+        audience: (el.audience.value || '').trim(),
+        evidenceWindowMonths: Number(el.windowMonths.value) || 6,
+        numEmails: Number(el.numEmails.value) || 5,
+        notes: (el.notes.value || '').trim(),
+      };
+
+      setStage('Generating…'); log('POST /api/generate', { ...payload, csv_text: `[${csvText.length} chars]` });
+      const t0 = Date.now();
+      const result = await generate(payload);
+      const ms = Date.now() - t0;
+      lastResult = result;
+
+      log(`Received result in ${ms}ms`);
+      setStage('Rendering…'); renderAll(result);
+      setStage('Completed'); setDot('ok'); showTab('landing');
+    } catch (err) {
+      console.error(err);
+      log(String(err));
+      setStage('Error'); setDot('err');
+      alert(`Error: ${err.message || err}`);
+    }
+  });
+
+  // default tab
+  showTab('landing');
+})();
