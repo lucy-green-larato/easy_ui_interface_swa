@@ -2285,14 +2285,13 @@ module.exports = async function (context, req) {
 
       context.res = {
         status: 200,
-        headers: { ...cors, "x-model-provider": provider },
+        headers: cors,
         body: {
           ...campaign,
-          ...(DEBUG_PROMPT ? { debug: { provider, prompt } } : {})
+          ...(DEBUG_PROMPT ? { _debug_prompt: prompt } : {})
         }
       };
       return;
-
     }
 
     // ======================= NEW: qualification-docx =======================
