@@ -1958,11 +1958,27 @@ module.exports = async function (context, req) {
           ? "- Security: keep claims aligned with the website content; you may mention VPN/fixed public IPs/remote management if present."
           : "- Do NOT pitch cybersecurity products/services; only refer to connectivity security controls (e.g., fixed public IPs, VPN) if evidenced on the website.") + "\n";
 
+      // Build a prose-specific prompt by reusing the inputs block and removing the JSON schema section.
+      const lead = prompt.split("OUTPUT — ONE JSON OBJECT")[0];
+      const prosePrompt = [
+        lead.trim(),
+        "",
+        "OUTPUT — Write a single markdown document:",
+        "## Landing page",
+        "- Headline (H1) and subheadline",
+        "- 3–5 short sections with bullets where useful",
+        "- Single CTA line",
+        "",
+        "## Emails",
+        "- Four separate cold emails (subject, 1–2 line preview, body). Plain text.",
+        "- British English. No fluff. Map objections to CSV TopBlockers where appropriate."
+      ].join("\n");
+
       // === PASS 1: PROSE DRAFT (best-quality writing) ===
       const proseRes = await callModel({
         // keep system minimal so it doesn't override your crafted prompt
         system: "UK business English. Follow the user’s instructions exactly.",
-        prompt,                  // <-- your composed Final Prompt (unchanged)
+        prompt: prosePrompt,
         temperature: 0.25,       // consistent but not flat
         max_tokens: 7000         // enough headroom for LP + 4 emails
       });
@@ -2025,27 +2041,40 @@ module.exports = async function (context, req) {
       const rawExtract = extractText(extractorRes) || "";
       const extracted = safeJson(stripJsonFences(rawExtract));
 
-      /* ---------- model call ---------- */
-      let llmRes, raw;
-      try {
-        llmRes = await callModel({
-          system: SYSTEM,
-          prompt,
-          temperature: 0.2,
-          response_format: { type: "json_object" },
-          max_tokens: 8000
-        });
-        raw = extractText(llmRes) || "{}";
-      } catch (e) {
-        context.res = { status: 502, headers: cors, body: { error: "LLM call failed", detail: String(e && e.message || e), version: VERSION } };
-        return;
+      /* ---------- adopt extracted JSON or fall back ---------- */
+      let campaign = null, issues = null;
+
+      if (extracted) {
+        const r = CampaignSchema.safeParse(extracted);
+        if (r.success) {
+          campaign = r.data;          // ✅ use the extractor result
+        } else {
+          issues = r.error.issues;    // keep for fallback reporting
+        }
       }
 
-      let campaign = null;
-      try { campaign = JSON.parse(raw); } catch { campaign = null; }
-      if (!campaign || typeof campaign !== "object") {
-        context.res = { status: 502, headers: cors, body: { error: "Model did not return valid JSON", version: VERSION, sample: String(raw).slice(0, 300) } };
-        return;
+      if (!campaign) {
+        // Fallback: run the original JSON-only call with the schema prompt
+        let llmRes, raw;
+        try {
+          llmRes = await callModel({
+            system: SYSTEM,
+            prompt,                    // <-- the original JSON prompt
+            temperature: 0.2,
+            response_format: { type: "json_object" },
+            max_tokens: 8000
+          });
+          raw = extractText(llmRes) || "{}";
+        } catch (e) {
+          context.res = { status: 502, headers: cors, body: { error: "LLM call failed", detail: String(e && e.message || e), version: VERSION } };
+          return;
+        }
+        try {
+          campaign = JSON.parse(raw);
+        } catch {
+          context.res = { status: 502, headers: cors, body: { error: "Model did not return valid JSON", version: VERSION, sample: String(raw).slice(0, 300), fallback_issues: issues || undefined } };
+          return;
+        }
       }
 
       /* ---------- validation & quality gate ---------- */
@@ -2352,10 +2381,7 @@ module.exports = async function (context, req) {
       context.res = {
         status: 200,
         headers: cors,
-        body: {
-          ...campaign,
-          _debug_prompt: prompt
-        }
+        body: { email: text, ...(DEBUG_PROMPT ? { _debug_prompt: prompt } : {}) }
       };
       return;
     }
