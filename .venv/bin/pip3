@@ -1,4 +1,4 @@
-#!/workspaces/easy_ui_interface_swa/.venv/bin/python3
+#!/workspaces/easy_ui_interface_swa/.venv/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys

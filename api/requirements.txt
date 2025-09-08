@@ -1,5 +1,5 @@
 azure-functions
 msal>=1.28.0
 requests
-azure-functions-durable>=1.2.4
+azure-functions-durable>=2.0.0
 azure-storage-blob>=12.19.0

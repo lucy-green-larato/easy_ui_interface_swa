@@ -1,0 +1,175 @@
+.
+├── .azurite
+│   ├── AzuriteConfig
+│   ├── __azurite_db_blob__.json
+│   ├── __azurite_db_blob_extent__.json
+│   ├── __azurite_db_queue__.json
+│   ├── __azurite_db_queue_extent__.json
+│   ├── __azurite_db_table__.json
+│   ├── __blobstorage__
+│   │   ├── 84d3d9d4-c51e-407a-ab03-5a08c82befe2
+│   │   └── 9a0f05ef-1a46-4993-8d1b-74ee28f8b752
+│   ├── __queuestorage__
+│   └── debug.log
+├── .devcontainer
+│   └── devcontainer.json
+├── .github
+│   └── workflows
+│       ├── azure-static-web-apps-lemon-moss-05d6e4c03.yml
+│       └── validate-calllib.yml
+├── .gitignore
+├── api
+│   ├── .gitignore
+│   ├── _backup_7072
+│   │   ├── .auth_080132
+│   │   │   ├── index.js
+│   │   │   └── me
+│   │   ├── auth_080132
+│   │   │   ├── function.json
+│   │   │   ├── handler.cjs
+│   │   │   └── index.js
+│   │   └── campaign-fetch_080132
+│   │       ├── function.json
+│   │       ├── handler.cjs
+│   │       └── index.js
+│   ├── auth
+│   │   ├── function.json
+│   │   └── index.js
+│   ├── campaign
+│   ├── campaign-regenerate
+│   │   ├── function.json
+│   │   └── index.js
+│   ├── campaign-start
+│   │   ├── function.json
+│   │   └── index.js
+│   ├── campaign-status
+│   │   ├── function.json
+│   │   └── index.js
+│   ├── campaignFetch
+│   │   ├── function.json
+│   │   ├── handler.js
+│   │   └── index.js
+│   ├── generate
+│   │   ├── function.json
+│   │   ├── generate-call-script.js
+│   │   └── index.js
+│   ├── host.json
+│   ├── ixbrl-financials
+│   │   ├── function.json
+│   │   └── index.js
+│   ├── lib
+│   │   ├── evidence
+│   │   │   ├── directories.js
+│   │   │   ├── index.js
+│   │   │   ├── pdf.js
+│   │   │   └── website.js
+│   │   └── prompt-harness.js
+│   ├── local.settings.json
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── packs.json
+│   ├── pbi_token
+│   │   ├── function.json
+│   │   └── index.js
+│   ├── requirements.txt
+│   ├── runs
+│   │   ├── function.json
+│   │   └── index.js
+│   ├── schemas
+│   │   └── qualification.v2.json
+│   └── shared
+│       ├── config.js
+│       ├── packloader.js
+│       └── packs.js
+├── api-python
+│   ├── .azurite
+│   │   ├── AzuriteConfig
+│   │   ├── __azurite_db_blob__.json
+│   │   ├── __azurite_db_blob_extent__.json
+│   │   ├── __azurite_db_queue__.json
+│   │   ├── __azurite_db_queue_extent__.json
+│   │   ├── __azurite_db_table__.json
+│   │   ├── __blobstorage__
+│   │   └── __queuestorage__
+│   ├── CampaignFetch
+│   │   └── __init__.py
+│   ├── CampaignOrchestration_HttpStart
+│   │   └── __init__.py
+│   ├── CampaignStatus
+│   │   └── __init__.py
+│   ├── download
+│   │   └── __init__.py
+│   ├── fetch
+│   │   └── index.py
+│   ├── function_app.py
+│   ├── host.json
+│   ├── http_start
+│   │   └── __init__.py
+│   ├── local.settings.json
+│   ├── orchestrators
+│   │   ├── __init__.py
+│   │   └── campaign_orchestrator.py
+│   ├── regenerate
+│   │   └── __init__.py
+│   ├── requirements.txt
+│   └── runs
+│       └── index.py
+├── api_and_python_20250907_070418.zip
+├── campaign-builder-review.zip
+├── diagnostics
+│   ├── TREE_ALL.txt
+│   ├── api-python.local.settings.json
+│   └── api.local.settings.json
+├── docs
+│   └── architecture.md
+├── package-lock.json
+├── package.json
+├── package.private.json
+├── script_doc_inputs
+│   └── connectivity-early-adopters.docx
+├── scripts
+│   └── convert_scripts.py
+└── web
+    ├── assets
+    │   ├── Larato-logo.svg
+    │   ├── call-opener-ideas.json
+    │   ├── favicon.ico
+    │   ├── larato-logo-bullet.svg
+    │   ├── larato-logo.svg
+    │   └── qualification-tips.json
+    ├── auth-shim.js
+    ├── campaign
+    │   └── index.html
+    ├── content
+    │   └── call-library
+    │       ├── schema
+    │       │   └── call-library.schema.json
+    │       └── v1
+    │           ├── direct
+    │           │   └── connectivity
+    │           │       ├── early-adopter.md
+    │           │       └── early-majority.md
+    │           └── index.json
+    ├── engagement
+    │   └── index.html
+    ├── index.html
+    ├── intel.json
+    ├── pbireports.html
+    ├── qualification
+    │   └── index.html
+    ├── src
+    │   ├── js
+    │   │   ├── campaign.js
+    │   │   ├── first-call-script-v2.js
+    │   │   ├── lead-qualification.js
+    │   │   └── main.js
+    │   └── lib
+    │       ├── callLibrary.js
+    │       ├── callPromptEngine.js
+    │       └── contentLoader.js
+    ├── staticwebapp.config.json
+    ├── styles.css
+    └── vendor
+        └── powerbi.min.js
+
+59 directories, 114 files

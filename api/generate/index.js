@@ -1912,8 +1912,10 @@ module.exports = async function (context, req) {
         "WEBSITE TEXT (multiple pages; for product/offer nouns & proof):",
         websiteText ? websiteText.slice(0, 120000) : "(none)",
         "",
-        "PUBLIC EVIDENCE SEED (authoritative UK pages; use for 'Why now:' bullets; do NOT invent beyond these and the company website):",
-        seedsText ? seedsText : "(none)",
+        "VALIDATION SOURCES (authoritative UK pages — use ONLY to corroborate or refute claims you already derived from CSV & the company website; do not originate new points from these):",
+        seedUrls.length
+          ? seedUrls.map(u => "- " + u).join("\n")
+          : "(none)",
         "",
         "OUTPUT — ONE JSON OBJECT with keys in this exact order:",
         JSON.stringify({
@@ -1960,19 +1962,88 @@ module.exports = async function (context, req) {
 
       // Build a prose-specific prompt by reusing the inputs block and removing the JSON schema section.
       const lead = prompt.split("OUTPUT — ONE JSON OBJECT")[0];
+
       const prosePrompt = [
         lead.trim(),
         "",
-        "OUTPUT — Write a single markdown document:",
-        "## Landing page",
-        "- Headline (H1) and subheadline",
-        "- 3–5 short sections with bullets where useful",
-        "- Single CTA line",
+        "OUTPUT — Write ONE campaign document in markdown with EXACTLY these sections and in THIS order:",
         "",
-        "## Emails",
-        "- Four separate cold emails (subject, 1–2 line preview, body). Plain text.",
-        "- British English. No fluff. Map objections to CSV TopBlockers where appropriate."
-      ].join("\n");
+        "1. Executive Summary (≤180 words)",
+        "- ICP (from SimplifiedIndustry), the pressing problem (use ClaimIDs), your quantified outcome promise, primary offer, and proof points.",
+        "- Include 'Why now:' 3–5 bullets. Each bullet MUST reference a ClaimID that maps to an Evidence Log row whose publisher domain is allowed (ofcom.org.uk, gov.uk incl. ONS/NCSC, ons.gov.uk, citb.co.uk).",
+        "",
+        "2. Evidence Log (table)",
+        "- Columns: ClaimID | Publisher | Title | Date (YYYY-MM-DD) | URL | 2-line excerpt | Relevance.",
+        "- Cite ONLY allowed domains or write 'No public evidence found'.",
+        "",
+        "3. Case Study Library (table)",
+        "- Columns: Customer | Industry | Problem | Solution | Outcomes | Link | Source.",
+        "",
+        "4. Positioning & Differentiation",
+        "- Value proposition that binds TopPurchases (outcomes) with TopNeedsSupplier (selection criteria) and case proof.",
+        "- SWOT and 3–5 differentiators (do this even if USPs were provided).",
+        "- Competitor set: 5–7 named vendors with reason_in_set and URL (allowed domains preferred).",
+        "",
+        "5. ICP & Messaging Matrix (table)",
+        "- ICP slices by SimplifiedIndustry and ITSpendPct ranges (low/med/high).",
+        "- Nonnegotiables (from TopNeedsSupplier).",
+        "- Matrix columns: Persona → Pain (from TopBlockers) → Value statement → Proof (Case IDs + ClaimIDs) → CTA.",
+        "",
+        "6. Offer Strategy & Assets",
+        "- Core offer aligned to TopPurchases (e.g., ROI calculator, security posture check, architecture review) and who qualifies.",
+        "- Fallback offer (low friction) anchored on a strong ClaimID.",
+        "- Landing page wire copy blocks:",
+        "  • Outcome header; single sentence proof; 3-step 'How it works'; outcomes grid with metrics + ClaimIDs;",
+        "    testimonial(s) with role; CTA; substantiation note; privacy link.",
+        "- Asset checklist: LP, case study PDF, ROI worksheet, 3 diagrams, FAQ (objections from TopBlockers).",
+        "",
+        "7. Channel Plan & Orchestration",
+        "- Email sequence (3–5 touches) with subject + 90–120 word bodies:",
+        "  E1: problem→value (1 statistic with ClaimID) + 1 case outcome + CTA (core offer)",
+        "  E2: insight narrative (case story) + LP link",
+        "  E3: risk reversal addressing top TopBlockers",
+        "  E4: new development (≤90 days; ClaimID) + calendar ask",
+        "  E5: breakup/value recap (optional)",
+        "- LinkedIn: connect note, 1 insight post (with ClaimID), 1 DM with value asset, comment strategy.",
+        "- Paid (optional): 3 variants tied to TopPurchases, each with one quantified proof and clear CTA; note exclusions/negatives.",
+        "- Event/webinar concept: agenda, speakers (incl. customer), registration CTA.",
+        "",
+        "8. Sales Enablement Alignment",
+        "- Discovery questions (5–7) that test pains in TopBlockers and confirm TopNeedsSupplier.",
+        "- Objection cards: one per blocker → reframe with ClaimID + case metric + risk reversal mechanism.",
+        "- Proof pack outline: two case studies + 1-pager with outcomes and ClaimIDs.",
+        "- Handoff rules: MQL/SQL definition, required fields, follow-up SLA.",
+        "",
+        "9. Measurement & Learning Plan",
+        "- KPIs (MQLs, SAL%, meetings, pipeline, cost/opportunity, time to value).",
+        "- Weekly test plan (one variable per channel) and win criteria.",
+        "- UTM standards and CRM mapping (optionally include CompanyNumber).",
+        "- Evidence freshness rule: flag ClaimIDs > " + windowMonths + " months old.",
+        "",
+        "10. Compliance & Governance",
+        "- Substantiation file (export of Evidence Log).",
+        "- GDPR/PECR checklist and brand/accessibility checks.",
+        "- Approval log with dates/owners.",
+        "",
+        "11. Risks & Contingencies",
+        "- What happens if a ClaimID is withdrawn/contradicted; actions if budgets freeze.",
+        "",
+        "12. One Page Campaign Summary",
+        "- ICP, offer, three message bullets with proofs, channels & cadence, KPI targets, start date, owners, next review date.",
+        "",
+        "RULES FOR USING INPUTS",
+        "- MUST map TopPurchases → Offer Strategy & Paid variants.",
+        "- MUST map TopNeedsSupplier → Nonnegotiables (ICP & Messaging Matrix).",
+        "- MUST map TopBlockers → Objection cards + at least one email (E3).",
+        "- Company LinkedIn (URL only; do not scrape): " + (company.linkedin || "(none)") + " — craft connect note and DM that align to CSV pains/outcomes.",
+        "- Use company website nouns verbatim where present (PRODUCT HINTS already provided above in the user content).",
+        "",
+        "QUALITY GATE",
+        "- Every market claim must have a ClaimID + Evidence Log row (allowed publisher).",
+        "- At least one named case study or public success example (or clearly flagged as missing).",
+        "- Value statements quantify outcomes; features are secondary.",
+        "- Objections map directly from TopBlockers; offers align to TopPurchases & TopNeedsSupplier.",
+      ].join("\\n");
 
       // === PASS 1: PROSE DRAFT (best-quality writing) ===
       const proseRes = await callModel({
@@ -2002,35 +2073,51 @@ module.exports = async function (context, req) {
 
       // === PASS 2: EXTRACT INTO YOUR EXISTING JSON SHAPE ===
       const extractorPrompt =
-        "You will be given a campaign draft (landing page + 4 emails) and must return a strict JSON object matching the app’s expected keys.\n" +
+        "You will be given a campaign draft (markdown) with sections 1–12 as specified. " +
+        "Return a STRICT JSON object that matches the app’s expected keys. " +
         "Rules:\n" +
-        "- Copy the landing page and emails verbatim (light normalisation only: trim whitespace).\n" +
-        "- Preserve headings, bullet lists, and any inline citations.\n" +
-        "- Do not invent content; if a required field is truly missing, set it to an empty string.\n" +
-        "- Output VALID JSON ONLY, no markdown fences.\n\n" +
-        "Return JSON with these top-level keys ONLY:\n" +
-        // IMPORTANT: keep the keys your app already expects here — do not rename them.
-        // If your app’s schema object is named CampaignSchema, keep the same field names:
-        // executive_summary, landing_page_markdown, emails_markdown (array of 4 strings),
-        // evidence_log, positioning_and_differentiation, messaging_matrix, offer_strategy,
-        // channel_plan, sales_enablement, measurement, compliance, risks, one_pager, meta
-        "{\n" +
-        "  \"executive_summary\": string,\n" +
-        "  \"landing_page_markdown\": string,\n" +
-        "  \"emails_markdown\": [string, string, string, string],\n" +
-        "  \"evidence_log\": array,\n" +
-        "  \"positioning_and_differentiation\": object,\n" +
-        "  \"messaging_matrix\": object,\n" +
-        "  \"offer_strategy\": object,\n" +
-        "  \"channel_plan\": object,\n" +
-        "  \"sales_enablement\": object,\n" +
-        "  \"measurement\": object,\n" +
-        "  \"compliance\": object,\n" +
-        "  \"risks\": object,\n" +
-        "  \"one_pager\": string,\n" +
-        "  \"meta\": object\n" +
-        "}\n\n" +
-        "--- DRAFT TO EXTRACT FROM ---\n" + proseDraft;
+        "- Copy content into the structure below; light normalisation only (trim whitespace). " +
+        "- Preserve bullets and lists (as plain strings). " +
+        "- If a required field is missing, set it to an empty string or an empty array (do NOT invent).\n\n" +
+        "Return JSON with EXACTLY these top-level keys and shapes:\n" +
+        JSON.stringify({
+          executive_summary: "",
+          evidence_log: [{ claim_id: "", claim: "", publisher: "", title: "", date: "YYYY-MM-DD", url: "", relevance: "", excerpt: "" }],
+          case_studies: [{ customer: "", industry: "", problem: "", solution: "", outcomes: "", link: "", source: "" }],
+          positioning_and_differentiation: {
+            value_prop: "",
+            swot: { strengths: [""], weaknesses: [""], opportunities: [""], threats: [""] },
+            differentiators: [""],
+            competitor_set: [{ vendor: "", reason_in_set: "", url: "" }]
+          },
+          messaging_matrix: {
+            nonnegotiables: [""],
+            matrix: [{ persona: "", pain: "", value_statement: "", proof: "", cta: "" }]
+          },
+          offer_strategy: {
+            landing_page: { headline: "", subheadline: "", sections: [{ title: "", content: "", bullets: [""] }], cta: "" },
+            assets_checklist: [""]
+          },
+          channel_plan: {
+            emails: [{ subject: "", preview: "", body: "" }],
+            linkedin: { connect_note: "", insight_post: "", dm: "", comment_strategy: "" },
+            paid: [{ variant: "", proof: "", cta: "" }],
+            event: { concept: "", agenda: "", speakers: "", cta: "" }
+          },
+          sales_enablement: {
+            discovery_questions: [""],
+            objection_cards: [{ blocker: "", reframe_with_claimid: "", proof: "", risk_reversal: "" }],
+            proof_pack_outline: [""],
+            handoff_rules: ""
+          },
+          measurement_and_learning: { kpis: [""], weekly_test_plan: "", utm_and_crm: "", evidence_freshness_rule: "" },
+          compliance_and_governance: { substantiation_file: "", gdpr_pecr_checklist: "", brand_accessibility_checks: "", approval_log_note: "" },
+          risks_and_contingencies: "",
+          one_pager_summary: "",
+          meta: { icp_from_csv: "" },
+          input_proof: {}              // leave empty; server fills from CSV
+        }, null, 2) +
+        "\n\n--- DRAFT TO EXTRACT FROM ---\n" + proseDraft;
 
       const extractorRes = await callModel({
         system: "Return valid JSON only. No commentary.",
@@ -2237,6 +2324,32 @@ module.exports = async function (context, req) {
           } catch { /* non-fatal: continue with original */ }
         }
       }
+
+      // Always enforce competitor_set 5–7 even if USPs were provided
+      {
+        const cs = campaign?.positioning_and_differentiation?.competitor_set || [];
+        if (!Array.isArray(cs) || cs.length < 5 || cs.length > 7) {
+          const fixCSetGeneral = [
+            "FIX: Ensure positioning_and_differentiation.competitor_set contains 5–7 vendors with reason_in_set and url.",
+            "Keep SWOT and differentiators aligned to this set. Return FULL JSON only."
+          ].join("\n");
+          const fixPromptGen = [prompt, "", "PREVIOUS JSON:", JSON.stringify(campaign), "", fixCSetGeneral].join("\n");
+          try {
+            const redoG = await callModel({
+              system: SYSTEM,
+              prompt: fixPromptGen,
+              temperature: 0.2,
+              response_format: { type: "json_object" },
+              max_tokens: 6000
+            });
+            const rrG = extractText(redoG) || "{}";
+            const jjG = JSON.parse(rrG);
+            const zG = CampaignSchema.safeParse(jjG);
+            if (zG.success) campaign = jjG;
+          } catch { /* non-fatal */ }
+        }
+      }
+
 
       // 2b) publisher quality gate for 'Why now:' bullets  (RUNS AFTER campaign is initialised)
       {

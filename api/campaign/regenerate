@@ -1,7 +1,0 @@
-{
-  "bindings": [
-    { "authLevel": "anonymous", "type": "httpTrigger", "direction": "in", "name": "req", "methods": ["post"], "route": "campaign/regenerate" },
-    { "type": "http", "direction": "out", "name": "$return" }
-  ],
-  "scriptFile": "index.js"
-}
