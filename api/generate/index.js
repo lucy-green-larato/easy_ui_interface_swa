@@ -2888,13 +2888,24 @@ module.exports = async function (context, req) {
         status: 200,
         headers: cors,
         body: {
+          // === Back-compat for the existing UI (what your tabs look for) ===
+          campaign,                                                // NEW alias
+          emails: campaign?.channel_plan?.emails || [],            // NEW alias
+          landing_page: campaign?.offer_strategy?.landing_page || null, // NEW alias
+          evidence_log: campaign?.evidence_log || [],              // NEW alias
+
+          // === New contract (keep these) ===
           contract_v1,
           campaign_legacy: campaign,
+
+          version: VERSION,
+          usedModel: true,
+          mode: "campaign",
           _website_citations: websiteCites,
           _recency: campaign._recency,
-          ...(DEBUG_PROMPT ? { _debug_prompt_schema: prompt } : {}),
-          ...(DEBUG_PROMPT && prosePrompt ? { _debug_prompt: prosePrompt } : {}),
-          ...(DEBUG_PROMPT && extractorPrompt ? { _debug_prompt_extractor: extractorPrompt } : {})
+
+          // Debug: show the ACTUAL prompt you sent
+          ...(DEBUG_PROMPT ? { _debug_prompt_schema: prompt, _debug_prompt: prompt } : {})
         }
       };
       return;
