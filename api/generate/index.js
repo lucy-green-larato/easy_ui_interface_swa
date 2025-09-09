@@ -9,7 +9,20 @@ try {
 const { z } = require("zod");
 const DEBUG_PROMPT = process.env.DEBUG_PROMPT === "1";
 
+/* === timeouts / abortable fetch === */
+const DEFAULT_FETCH_TIMEOUT = Number(process.env.FETCH_TIMEOUT_MS || "6500");   // ms per HTTP fetch (web pages)
+const DEFAULT_LLM_TIMEOUT = Number(process.env.LLM_TIMEOUT_MS || "45000"); // ms per LLM call
+
+
 /* ========================= Helpers / Utilities ========================= */
+
+
+function abortableFetch(url, init = {}, ms = DEFAULT_FETCH_TIMEOUT) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("timeout")), ms);
+  const merged = { ...init, signal: controller.signal };
+  return fetch(url, merged).finally(() => clearTimeout(timer));
+}
 
 function splitList(s) {
   return String(s || "")
@@ -446,15 +459,15 @@ async function callModel(opts) {
       ...(max_tokens ? { max_tokens } : {})
     };
 
-    const r = await fetch(url, {
+    const r = await abortableFetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "api-key": azKey,
         "User-Agent": "inside-track-tools/" + VERSION
       },
-      body: JSON.stringify(body),
-    });
+      body: JSON.stringify(body)
+    }, DEFAULT_LLM_TIMEOUT);
 
     let data; try { data = await r.json(); } catch { data = {}; }
 
@@ -928,7 +941,7 @@ async function fetchUrlText(url, context) {
 
 // Crawl a few high-signal pages on the same site (about/leadership/news/events/partners/etc.)
 async function crawlSite(rootUrl, opts, context) {
-  const limit = (opts && opts.limit) || 6; // total pages incl. homepage
+  const limit = (opts && opts.limit) || 5;
   const out = { text: "", pages: [] };
   if (!/^https?:\/\//i.test(rootUrl)) return out;
 
@@ -938,7 +951,7 @@ async function crawlSite(rootUrl, opts, context) {
   // fetch one page and return {url, title, text}
   async function fetchPage(u) {
     try {
-      const r = await fetch(u, { headers: { "User-Agent": "inside-track-tools/" + VERSION } });
+      const r = await abortableFetch(u, { headers: { "User-Agent": "inside-track-tools/" + VERSION } }, DEFAULT_FETCH_TIMEOUT);
       if (!r.ok) return null;
       const html = await r.text();
       const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
@@ -1688,14 +1701,114 @@ module.exports = async function (context, req) {
       const productHints = _mineProductHints(websiteText);
       const siteHasCyber = /\bcyber\s*security|cybersecurity\b/i.test(websiteText);
 
-      // ---- Public evidence seed: fetch a few reputable UK pages for the model to quote ----
-      // These are broad, evergreen pages; the model must still quote with year and keep to the recency window.
-      const seedUrls = [
-        "https://www.ofcom.org.uk/research-and-data/telecoms-research/mobile-coverage",
-        "https://www.gov.uk/government/collections/cyber-security-breaches-survey",
-        "https://www.ons.gov.uk/businessindustryandtrade/itandinternetindustry",
-        "https://www.citb.co.uk/industry-insights/uk-construction-skills-network-csn-forecast/"
-      ];
+      // ---- Contextual seed URLs (authoritative, UK-first) ----
+      // Normalise an industry label to a coarse key
+      function _normIndustry(s) {
+        const t = String(s || "").toLowerCase();
+        if (/telecom|connectiv|isp|network/.test(t)) return "telecoms";
+        if (/construct|building|civil/.test(t)) return "construction";
+        if (/educat|school|college|univer/.test(t)) return "education";
+        if (/health|nhs|care|pharma|life\s*science/.test(t)) return "healthcare";
+        if (/manufact|production|engineering/.test(t)) return "manufacturing";
+        if (/retail|ecom|wholesale/.test(t)) return "retail";
+        if (/public|local\s*government|council|central\s*government/.test(t)) return "publicsector";
+        if (/transport|logistic|freight|aviation|rail|maritime/.test(t)) return "transport";
+        if (/energy|utilit|power|water|gas|electric/.test(t)) return "energy";
+        if (/tech|it|software|saas|ai|data/.test(t)) return "technology";
+        if (/hospitality|tourism|leisure|accommodation|food\s*service/.test(t)) return "hospitality";
+        if (/agric|farming|food\s*(and|&)\s*drink/.test(t)) return "agriculture";
+        return "general";
+      }
+
+      // Per-industry authoritative collections (prefer .gov.uk, ons.gov.uk, ofcom.org.uk, citb.co.uk)
+      const SEED_URLS_BY_INDUSTRY = {
+        general: [
+          "https://www.gov.uk/government/statistics",                                    // stats hub
+          "https://www.ons.gov.uk/businessindustryandtrade"                              // ONS business hub
+        ],
+        telecoms: [
+          "https://www.ofcom.org.uk/research-and-data",                                  // Ofcom research
+          "https://www.ons.gov.uk/businessindustryandtrade/itandinternetindustry"        // ONS IT & internet
+        ],
+        construction: [
+          "https://www.citb.co.uk/industry-insights/",                                   // CITB insights
+          "https://www.citb.co.uk/industry-insights/uk-construction-skills-network-csn-forecast/"
+        ],
+        education: [
+          "https://www.gov.uk/government/organisations/department-for-education/about/statistics",
+          "https://www.ons.gov.uk/peoplepopulationandcommunity/educationandchildcare"
+        ],
+        healthcare: [
+          "https://www.gov.uk/government/organisations/department-of-health-and-social-care/about/statistics",
+          "https://www.ons.gov.uk/peoplepopulationandcommunity/healthandsocialcare"
+        ],
+        manufacturing: [
+          "https://www.ons.gov.uk/businessindustryandtrade/manufacturingandproductionindustry",
+          "https://www.gov.uk/government/collections/uk-manufacturing"                   // umbrella collection
+        ],
+        retail: [
+          "https://www.ons.gov.uk/businessindustryandtrade/retailindustry",
+          "https://www.gov.uk/government/collections/retail-sector"                      // umbrella collection
+        ],
+        publicsector: [
+          "https://www.gov.uk/government/collections/local-government-statistical-collections",
+          "https://www.ons.gov.uk/economy/governmentpublicsectorandtaxes/publicsectorfinance"
+        ],
+        transport: [
+          "https://www.gov.uk/government/organisations/department-for-transport/about/statistics",
+          "https://www.ons.gov.uk/businessindustryandtrade/transportindustry"
+        ],
+        energy: [
+          "https://www.gov.uk/government/collections/uk-energy-in-brief",
+          "https://www.ons.gov.uk/economy/environmentalaccounts/energy"
+        ],
+        technology: [
+          "https://www.ons.gov.uk/businessindustryandtrade/itandinternetindustry",
+          "https://www.gov.uk/government/collections/cyber-security-breaches-survey"     // often relevant to tech
+        ],
+        hospitality: [
+          "https://www.ons.gov.uk/businessindustryandtrade/tourismindustry",
+          "https://www.gov.uk/government/collections/hospitality-sector"                 // umbrella collection
+        ],
+        agriculture: [
+          "https://www.gov.uk/government/organisations/department-for-environment-food-rural-affairs/about/statistics",
+          "https://www.ons.gov.uk/economy/agricultureandfishing"
+        ]
+      };
+
+      // Build final list, adding cyber breaches only when relevant
+      function buildSeedUrlsByIndustry(industriesArr, opts) {
+        const set = new Set();
+        const add = (u) => { if (u) set.add(String(u)); };
+
+        // Always include general anchors
+        SEED_URLS_BY_INDUSTRY.general.forEach(add);
+
+        // Add per-industry anchors
+        (industriesArr || []).forEach(i => {
+          const k = _normIndustry(i);
+          (SEED_URLS_BY_INDUSTRY[k] || []).forEach(add);
+        });
+
+        // If the prospect hints at security, add the cyber breaches collection
+        if (opts && opts.securityHint) {
+          add("https://www.gov.uk/government/collections/cyber-security-breaches-survey");
+        }
+
+        // Optional: allow ops to append comma-separated extras via env without code edits
+        const extra = String(process.env.EXTRA_SEED_URLS || "").split(",").map(s => s.trim()).filter(Boolean);
+        extra.forEach(add);
+
+        // Cap to keep prompt size predictable
+        return Array.from(set).slice(0, 12);
+      }
+
+      // --- Public evidence seed: contextual authoritative UK pages ---
+      const securityHint =
+        siteHasCyber || (topNeeds || []).some(t => /\bsec(urity)?|cyber/i.test(String(t.text || t)));
+
+      const seedUrls = buildSeedUrlsByIndustry(industries, { securityHint });
+
       let seedsText = "";
       try {
         const seeds = [];
@@ -1845,7 +1958,18 @@ module.exports = async function (context, req) {
         try { return new URL(u).host.replace(/^www\./, "").toLowerCase(); } catch { return ""; }
       }
       const companyHost = company.website ? domainFromUrl(company.website) : "";
-      const allowedPublisherRx = /(ofcom\.org\.uk|gov\.uk|ons\.gov\.uk|citb\.co\.uk)/i;
+      // Replace your allowedPublisherRx with this
+      const EXTRA_ALLOWED = String(process.env.ALLOWED_PUBLISHER_DOMAINS || "")
+        .split(",").map(s => s.trim()).filter(Boolean)
+        .map(d => d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")); // escape
+
+      const allowedPublisherRx = new RegExp(
+        "(ofcom\\.org\\.uk|gov\\.uk|ons\\.gov\\.uk|citb\\.co\\.uk" +
+        (EXTRA_ALLOWED.length ? "|" + EXTRA_ALLOWED.join("|") : "") +
+        ")",
+        "i"
+      );
+
       function isAllowedPublisher(url, publisher) {
         const d = domainFromUrl(url);
         if (!d) return false;
@@ -2028,125 +2152,29 @@ module.exports = async function (context, req) {
         "- Objections map directly from TopBlockers; offers align to TopPurchases & TopNeedsSupplier.",
       ].join("\\n");
 
-      // === PASS 1: PROSE DRAFT (best-quality writing) ===
-      const proseRes = await callModel({
-        // keep system minimal so it doesn't override your crafted prompt
-        system: "UK business English. Follow the user’s instructions exactly.",
-        prompt: prosePrompt,
-        temperature: 0.25,       // consistent but not flat
-        max_tokens: 7000         // enough headroom for LP + 4 emails
-      });
-      const proseDraft = extractText(proseRes) || "";
-
-      // Early escape if the draft is unusable (so you can see what came back)
-      if (!proseDraft || proseDraft.length < 400) {
-        context.res = {
-          status: 200,
-          headers: cors,
-          body: {
-            mode: "prose-only",
-            text: proseDraft || "(empty response)",
-            _debug_prompt: prosePrompt,
-            _debug_prompt_extractor: undefined,
-            _debug_prompt_schema: prompt
-          }
-        };
-        return;
-      }
-
-      // === PASS 2: EXTRACT INTO YOUR EXISTING JSON SHAPE ===
-      const extractorPrompt =
-        "You will be given a campaign draft (markdown) with sections 1–12 as specified. " +
-        "Return a STRICT JSON object that matches the app’s expected keys. " +
-        "Rules:\n" +
-        "- Copy content into the structure below; light normalisation only (trim whitespace). " +
-        "- Preserve bullets and lists (as plain strings). " +
-        "- If a required field is missing, set it to an empty string or an empty array (do NOT invent).\n\n" +
-        "Return JSON with EXACTLY these top-level keys and shapes:\n" +
-        JSON.stringify({
-          executive_summary: "",
-          evidence_log: [{ claim_id: "", claim: "", publisher: "", title: "", date: "YYYY-MM-DD", url: "", relevance: "", excerpt: "" }],
-          case_studies: [{ customer: "", industry: "", problem: "", solution: "", outcomes: "", link: "", source: "" }],
-          positioning_and_differentiation: {
-            value_prop: "",
-            swot: { strengths: [""], weaknesses: [""], opportunities: [""], threats: [""] },
-            differentiators: [""],
-            competitor_set: [{ vendor: "", reason_in_set: "", url: "" }]
-          },
-          messaging_matrix: {
-            nonnegotiables: [""],
-            matrix: [{ persona: "", pain: "", value_statement: "", proof: "", cta: "" }]
-          },
-          offer_strategy: {
-            landing_page: { headline: "", subheadline: "", sections: [{ title: "", content: "", bullets: [""] }], cta: "" },
-            assets_checklist: [""]
-          },
-          channel_plan: {
-            emails: [{ subject: "", preview: "", body: "" }],
-            linkedin: { connect_note: "", insight_post: "", dm: "", comment_strategy: "" },
-            paid: [{ variant: "", proof: "", cta: "" }],
-            event: { concept: "", agenda: "", speakers: "", cta: "" }
-          },
-          sales_enablement: {
-            discovery_questions: [""],
-            objection_cards: [{ blocker: "", reframe_with_claimid: "", proof: "", risk_reversal: "" }],
-            proof_pack_outline: [""],
-            handoff_rules: ""
-          },
-          measurement_and_learning: { kpis: [""], weekly_test_plan: "", utm_and_crm: "", evidence_freshness_rule: "" },
-          compliance_and_governance: { substantiation_file: "", gdpr_pecr_checklist: "", brand_accessibility_checks: "", approval_log_note: "" },
-          risks_and_contingencies: "",
-          one_pager_summary: "",
-          meta: { icp_from_csv: "" },
-          input_proof: {}              // leave empty; server fills from CSV
-        }, null, 2) +
-        "\n\n--- DRAFT TO EXTRACT FROM ---\n" + proseDraft;
-
-      const extractorRes = await callModel({
-        system: "Return valid JSON only. No commentary.",
-        prompt: extractorPrompt,
-        temperature: 0.0,
-        // If your provider supports json_schema you can set it here; otherwise parse/validate yourself
-        max_tokens: 4000
-      });
-
-      const rawExtract = extractText(extractorRes) || "";
-      const extracted = safeJson(stripJsonFences(rawExtract));
-
-      /* ---------- adopt extracted JSON or fall back ---------- */
+      /* === SINGLE-PASS (timeout-safe) ===
+   Skip prose+extractor to keep total runtime under gateway timeouts.
+   We ask the model to return the full campaign JSON directly.
+*/
       let campaign = null, issues = null;
 
-      if (extracted) {
-        const r = CampaignSchema.safeParse(extracted);
-        if (r.success) {
-          campaign = r.data;          // ✅ use the extractor result
-        } else {
-          issues = r.error.issues;    // keep for fallback reporting
-        }
-      }
-
-      if (!campaign) {
-        // Fallback: run the original JSON-only call with the schema prompt
-        let llmRes, raw;
-        try {
-          llmRes = await callModel({
-            system: SYSTEM,
-            prompt,                    // <-- the original JSON prompt
-            temperature: 0.2,
-            response_format: { type: "json_object" },
-            max_tokens: 8000
-          });
-          raw = extractText(llmRes) || "{}";
-        } catch (e) {
-          context.res = { status: 502, headers: cors, body: { error: "LLM call failed", detail: String(e && e.message || e), version: VERSION } };
-          return;
-        }
-        try {
-          campaign = JSON.parse(raw);
-        } catch {
-          context.res = { status: 502, headers: cors, body: { error: "Model did not return valid JSON", version: VERSION, sample: String(raw).slice(0, 300), fallback_issues: issues || undefined } };
-          return;
-        }
+      try {
+        const llmRes = await callModel({
+          system: SYSTEM,         // (already defined above in your code)
+          prompt,                 // (the JSON prompt you built above)
+          temperature: 0.2,
+          response_format: { type: "json_object" },
+          max_tokens: 6500
+        });
+        const raw = extractText(llmRes) || "{}";
+        campaign = JSON.parse(raw);
+      } catch (e) {
+        context.res = {
+          status: 502,
+          headers: cors,
+          body: { error: "LLM call failed", detail: String(e && e.message || e), version: VERSION }
+        };
+        return;
       }
 
       /* ---------- validation & quality gate ---------- */
