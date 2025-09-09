@@ -1608,6 +1608,9 @@ module.exports = async function (context, req) {
       // - Objections map to TopBlockers; Offer aligns to TopPurchases/TopNeedsSupplier
       // - Website crawl used for product/offer nouns (no external web search here)
 
+      let prosePrompt = "";
+      let extractorPrompt = "";
+
       /* ---------- inputs ---------- */
       const csvText = String(body.csv_text || "").trim();
       if (!csvText || csvText.length < 20) {
@@ -2070,7 +2073,7 @@ module.exports = async function (context, req) {
       // Build a prose-specific prompt by reusing the inputs block and removing the JSON schema section.
       const lead = prompt.split("OUTPUT — ONE JSON OBJECT")[0];
 
-      const prosePrompt = [
+      prosePrompt = [
         lead.trim(),
         "",
         "OUTPUT — Write ONE campaign document in markdown with EXACTLY these sections and in THIS order:",
@@ -2150,7 +2153,7 @@ module.exports = async function (context, req) {
         "- At least one named case study or public success example (or clearly flagged as missing).",
         "- Value statements quantify outcomes; features are secondary.",
         "- Objections map directly from TopBlockers; offers align to TopPurchases & TopNeedsSupplier.",
-      ].join("\\n");
+      ].join("\n");
 
       /* === SINGLE-PASS (timeout-safe) ===
    Skip prose+extractor to keep total runtime under gateway timeouts.
@@ -2889,9 +2892,9 @@ module.exports = async function (context, req) {
           campaign_legacy: campaign,
           _website_citations: websiteCites,
           _recency: campaign._recency,
-          _debug_prompt: prosePrompt,
-          _debug_prompt_extractor: extractorPrompt,
-          _debug_prompt_schema: prompt
+          ...(DEBUG_PROMPT ? { _debug_prompt_schema: prompt } : {}),
+          ...(DEBUG_PROMPT && prosePrompt ? { _debug_prompt: prosePrompt } : {}),
+          ...(DEBUG_PROMPT && extractorPrompt ? { _debug_prompt_extractor: extractorPrompt } : {})
         }
       };
       return;
