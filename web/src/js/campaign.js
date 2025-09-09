@@ -176,8 +176,8 @@
         <thead><tr><th>Publisher</th><th>Title</th><th>Date</th><th>URL</th><th>Excerpt</th></tr></thead>
         <tbody>
           ${ev
-            .map(
-              (x) => `
+        .map(
+          (x) => `
             <tr>
               <td>${x.publisher || ""}</td>
               <td>${x.title || ""}</td>
@@ -185,8 +185,8 @@
               <td>${x.url ? `<a href="${x.url}" target="_blank" rel="noopener">${x.url}</a>` : ""}</td>
               <td>${x.excerpt || ""}</td>
             </tr>`
-            )
-            .join("")}
+        )
+        .join("")}
         </tbody>
       </table>
     `;
@@ -221,7 +221,7 @@
     let data = {};
     try {
       data = JSON.parse(text);
-    } catch {}
+    } catch { }
     if (!res.ok) throw new Error(`generate ${res.status}: ${text.slice(0, 400)}`);
     return data;
   }
@@ -268,13 +268,30 @@
       const result = await generate(payload);
       const ms = Date.now() - t0;
       log(`Received response in ${ms}ms`);
-      if (result && result._debug_prompt) log("---- PROMPT SENT TO LLM ----\n" + result._debug_prompt);
+
+      // NEW: normalise envelope and use contract if available
+      const body = (result && result.body) ? result.body : result;
+      if (body && (body._debug_prompt || result._debug_prompt)) {
+        log("---- PROMPT SENT TO LLM ----\n" + (body._debug_prompt || result._debug_prompt));
+      }
 
       updateStage("DraftCampaign");
       updateStage("QualityGate");
       updateStage("Completed");
-      renderAll(result);
-      setStatus("Completed", "ok");
+
+      // Prefer the new contract UI if present
+      if (body && body.contract_v1 && window.CampaignUI && typeof window.CampaignUI.setContract === "function") {
+        window.lastResult = body;             // optional: handy for debugging
+        window.lastContract = body.contract_v1;
+        window.CampaignUI.setContract(body.contract_v1);
+        setStatus("Completed (contract)", "ok");
+      } else {
+        // Fallback to legacy renderer (your current tabs)
+        const legacy = (body && body.campaign_legacy) ? body.campaign_legacy : body;
+        renderAll(legacy);
+        setStatus("Completed", "ok");
+      }
+
       setActiveTab("tab-overview");
     } catch (e) {
       log(`Error: ${e && e.message ? e.message : e}`);
