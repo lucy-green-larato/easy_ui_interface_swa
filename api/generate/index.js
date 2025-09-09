@@ -2888,13 +2888,13 @@ module.exports = async function (context, req) {
         status: 200,
         headers: cors,
         body: {
-          // === Back-compat for the existing UI (what your tabs look for) ===
-          campaign,                                                // NEW alias
-          emails: campaign?.channel_plan?.emails || [],            // NEW alias
-          landing_page: campaign?.offer_strategy?.landing_page || null, // NEW alias
-          evidence_log: campaign?.evidence_log || [],              // NEW alias
+          // back-compat aliases ...
+          campaign,
+          emails: campaign?.channel_plan?.emails || [],
+          landing_page: campaign?.offer_strategy?.landing_page || null,
+          evidence_log: campaign?.evidence_log || [],
 
-          // === New contract (keep these) ===
+          // new contract
           contract_v1,
           campaign_legacy: campaign,
 
@@ -2904,8 +2904,8 @@ module.exports = async function (context, req) {
           _website_citations: websiteCites,
           _recency: campaign._recency,
 
-          // Debug: show the ACTUAL prompt you sent
-          ...(DEBUG_PROMPT ? { _debug_prompt_schema: prompt, _debug_prompt: prompt } : {})
+          // show the real prompt your debug window expects
+          ...(DEBUG_PROMPT ? { _debug_prompt: prompt, _debug_prompt_schema: prompt } : {})
         }
       };
       return;
