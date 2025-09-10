@@ -17,6 +17,9 @@
     { "route": "/lead-qualification", "redirect": "/qualification", "statusCode": 301 },
     { "route": "/lead-qualification/*", "redirect": "/qualification", "statusCode": 301 },
 
+    { "route": "/ch-strategic", "rewrite": "/ch-strategic/index.html" },
+    { "route": "/ch-strategic/*", "rewrite": "/ch-strategic/index.html"}
+
     { "route": "/campaign", "rewrite": "/campaign/index.html", "headers": { "cache-control": "no-cache, no-store, must-revalidate" } },
     { "route": "/campaign/*", "rewrite": "/campaign/index.html", "headers": { "cache-control": "no-cache, no-store, must-revalidate" } },
 
