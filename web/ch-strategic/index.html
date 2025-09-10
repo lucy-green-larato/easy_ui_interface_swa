@@ -5,9 +5,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Tools · Strategic review evidence</title>
-  <link rel="stylesheet" href="/styles.css?v=2025-08-24-1">
+  <link rel="stylesheet" href="/styles.css?v=2025-08-24-1" />
 </head>
 <body>
+  <!-- App header (shared shell) -->
   <header class="app-header" role="banner">
     <div class="header-left">
       <img class="logo" src="/assets/larato-logo-bullet.svg" alt="Larato Inside Track Sales Tools" />
@@ -16,7 +17,9 @@
         <p class="kicker">Strategic review evidence</p>
       </div>
     </div>
+
     <div class="header-right">
+      <!-- Sales model mini (retained for consistency across tools) -->
       <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
         <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
         <select id="call_type" name="call_type" form="ch-strategic-form" required aria-describedby="call_type_error">
@@ -48,36 +51,53 @@
   </header>
 
   <main id="main" class="layout" role="main">
-    <!-- LEFT -->
+    <!-- LEFT PANEL :: Form -->
     <section class="panel left" aria-label="Form">
       <form id="ch-strategic-form" novalidate>
+        <!-- 1. Evidence tag -->
         <fieldset class="card" aria-labelledby="legend-evidence">
           <legend id="legend-evidence">1. Evidence tag</legend>
           <div class="grid-2">
             <div class="field">
               <label for="evidence_tag">Keyword or phrase <span aria-hidden="true" class="req">*</span></label>
-              <input id="evidence_tag" name="evidence_tag" maxlength="80" placeholder="e.g., international" required autocomplete="off" spellcheck="false" />
-              <p class="muted">Flexible matching: case-insensitive, OCR-typo tolerance, curated synonyms (e.g. <em>global</em>, <em>overseas</em>, <em>worldwide</em>). Single tag only.</p>
+              <input id="evidence_tag" name="evidence_tag" maxlength="80"
+                     placeholder="e.g., international"
+                     required autocomplete="off" spellcheck="false"
+                     aria-describedby="evidence_help evidence_error" />
+              <p id="evidence_help" class="muted">
+                Looks only in the Strategic Report. Literal match with smart tolerance for OCR and common variants.
+              </p>
+              <span id="evidence_error" class="error-inline" role="alert" aria-live="polite"></span>
             </div>
           </div>
         </fieldset>
 
+        <!-- 2. Companies -->
         <fieldset class="card" aria-labelledby="legend-companies">
           <legend id="legend-companies">2. Companies</legend>
           <div class="grid-2">
             <div class="field">
               <label for="csv_file">Upload CSV <span aria-hidden="true" class="req">*</span></label>
-              <input id="csv_file" name="csv_file" type="file" accept=".csv" required />
-              <p class="muted">Only <code>Company Name</code> and <code>Company Number</code> are read. Other columns are ignored.</p>
+              <input id="csv_file" name="csv_file" type="file" accept=".csv" required
+                     aria-describedby="csv_help csv_error" />
+              <p id="csv_help" class="muted">
+                CSV must include headers <code>Company Name</code> and <code>Company Number</code>. Other columns are ignored.
+              </p>
+              <span id="csv_error" class="error-inline" role="alert" aria-live="polite"></span>
             </div>
+
             <div class="field">
               <label for="importPbiBtn">Or import from Power BI</label>
-              <button id="importPbiBtn" class="btn inline" type="button">Import current selection</button>
-              <p class="muted">Reuses the main report wiring to pull <strong>Company Name</strong> and <strong>Company Number</strong>.</p>
+              <button id="importPbiBtn" class="btn inline" type="button"
+                      aria-haspopup="dialog" aria-controls="pbi-dialog">Import current selection</button>
+              <p class="muted">
+                Reuses the main report wiring to pull <strong>Company Name</strong> and <strong>Company Number</strong>.
+              </p>
             </div>
           </div>
         </fieldset>
 
+        <!-- 3. Actions -->
         <fieldset class="card" aria-labelledby="legend-actions">
           <legend id="legend-actions">3. Actions</legend>
           <div class="actions">
@@ -85,13 +105,18 @@
               <span class="btn-label">Analyze</span>
               <span class="spinner" aria-hidden="true"></span>
             </button>
+            <button id="startLargeBtn" class="btn" type="button" hidden>Start large run</button>
             <button id="resetBtn" type="reset" class="btn small">Reset</button>
           </div>
-          <p class="muted">Lists ≤ 50 run immediately. Larger lists (up to 5,000) run as a background job and stream matches into a downloadable CSV.</p>
+          <p class="muted">
+            Lists ≤ 50 run immediately. Larger lists (up to 5,000) run as a background job and stream matches into a downloadable CSV.
+          </p>
         </fieldset>
 
+        <!-- Live status for validation/upload/API messages -->
         <div id="status" class="status" role="status" aria-live="polite"></div>
 
+        <!-- Diagnostics (collapsible) -->
         <details id="diagnostics" class="diag card" style="margin-top:var(--s-5)">
           <summary>Diagnostics</summary>
           <pre id="diag-json" tabindex="0" aria-label="Diagnostics JSON"></pre>
@@ -100,24 +125,34 @@
       </form>
     </section>
 
-    <!-- MIDDLE -->
+    <!-- MIDDLE PANEL :: Results -->
     <section class="panel middle">
       <div class="row-between output-head">
         <h2 id="output-title">Results</h2>
-        <div id="downloadContainer"></div>
+        <div id="downloadContainer" aria-live="polite"></div>
       </div>
 
-      <div id="progress" class="progress" hidden aria-hidden="true">
+      <!-- Progress bar -->
+      <div id="progress" class="progress" hidden aria-hidden="true" aria-label="Processing progress">
         <div id="progressFill" class="progress__fill" style="width:0%"></div>
       </div>
 
+      <!-- Counters -->
+      <div id="counters" class="muted" aria-live="polite" style="margin-top:var(--s-3)">
+        <span id="count-total" data-count="0">Total: 0</span> ·
+        <span id="count-processed" data-count="0">Processed: 0</span> ·
+        <span id="count-matched" data-count="0">Matches: 0</span> ·
+        <span id="count-skipped" data-count="0">Skipped: 0</span>
+      </div>
+
+      <!-- Skipped & errors -->
       <section style="margin-top:var(--s-4)">
         <h3>Skipped &amp; errors</h3>
-        <div id="results" class="results"></div>
+        <div id="results" class="results" aria-live="polite"></div>
       </section>
     </section>
 
-    <!-- RIGHT -->
+    <!-- RIGHT PANEL :: Helpers -->
     <section class="panel right" aria-labelledby="helpers-title">
       <div class="row-between output-head">
         <h2 id="helpers-title">Helpers</h2>
@@ -126,12 +161,13 @@
       <aside class="intel card">
         <div class="intel-head">
           <h2 id="intel-title">Buyer needs</h2>
-          <button id="toggle-intel" class="btn small" type="button" aria-expanded="false" aria-controls="intel-body">Show</button>
+          <button id="toggle-intel" class="btn small" type="button"
+                  aria-expanded="false" aria-controls="intel-body">Show</button>
         </div>
         <div id="intel-body" hidden>
           <div class="intel-grid">
             <section>
-              <h3>1) Buyer Priorities</h3>
+              <h3>1) Buyer priorities</h3>
               <ul>
                 <li>Clarity on geographic activities</li>
                 <li>Evidence tags map to strategic themes</li>
@@ -170,13 +206,38 @@
         </div>
         <div id="tips-body" hidden>
           <ul>
-            <li>Keep tags simple (e.g., <em>international</em>, <em>overseas</em>, country names).</li>
-            <li>Some accounts omit a Strategic Report—those will be skipped.</li>
-            <li>Use the CSV export even while a large job is still running.</li>
+            <li>This looks only in the <em>Strategic Report</em> section.</li>
+            <li>Use simple tags (e.g., <em>international</em>, <em>overseas</em>, or a country/region).</li>
+            <li>Some accounts omit a Strategic Report — those will be skipped.</li>
+            <li>Large jobs (up to 5,000 companies) may take hours; results stream into the CSV as they’re found.</li>
           </ul>
         </div>
       </aside>
     </section>
   </main>
+
+  <!-- Power BI Import Dialog -->
+  <dialog id="pbi-dialog" aria-labelledby="pbi-title" aria-describedby="pbi-desc">
+    <form method="dialog" class="card" id="pbi-form">
+      <h3 id="pbi-title">Import from Power BI</h3>
+      <p id="pbi-desc" class="muted">Pull the current selection and trim to <em>Company Name</em> and <em>Company Number</em>.</p>
+      <div class="field">
+        <label for="pbi-report-id">Report Id</label>
+        <input id="pbi-report-id" name="pbi-report-id" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label for="pbi-visual">Visual name or DAX</label>
+        <input id="pbi-visual" name="pbi-visual" autocomplete="off" />
+      </div>
+      <div class="actions">
+        <button id="pbi-import" class="btn primary" type="submit" value="import">Import</button>
+        <button class="btn" value="cancel">Cancel</button>
+      </div>
+      <p id="pbi-status" class="status" role="status" aria-live="polite"></p>
+    </form>
+  </dialog>
+
+  <!-- JS module (handles validation, API calls, progress, download, PBI import) -->
+  <script type="module" src="/src/js/ch-strategic.js?v=2025-08-24-1"></script>
 </body>
 </html>
