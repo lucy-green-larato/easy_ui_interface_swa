@@ -1,0 +1,278 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://your-domain.example/schemas/campaign.schema.json",
+  "title": "campaign",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "executive_summary",
+    "evidence_log",
+    "case_studies",
+    "positioning_and_differentiation",
+    "messaging_matrix",
+    "offer_strategy",
+    "channel_plan",
+    "sales_enablement",
+    "measurement_and_learning",
+    "compliance_and_governance",
+    "risks_and_contingencies",
+    "one_pager_summary",
+    "meta"
+  ],
+  "properties": {
+    "executive_summary": { "type": "string", "minLength": 1 },
+
+    "evidence_log": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claim_id", "publisher", "title", "date", "url", "relevance", "excerpt"],
+        "properties": {
+          "claim_id": { "type": "string", "minLength": 1 },
+          "claim": { "type": "string" },
+          "publisher": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "date": { "type": "string", "format": "date" },
+          "url": { "type": "string", "format": "uri" },
+          "relevance": { "type": "string", "minLength": 1 },
+          "excerpt": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "case_studies": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["customer", "industry", "problem", "solution", "outcomes", "link", "source"],
+        "properties": {
+          "customer": { "type": "string" },
+          "industry": { "type": "string" },
+          "problem": { "type": "string" },
+          "solution": { "type": "string" },
+          "outcomes": { "type": "string" },
+          "link": { "type": "string", "format": "uri" },
+          "source": { "type": "string" }
+        }
+      }
+    },
+
+    "positioning_and_differentiation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value_prop", "swot", "differentiators", "competitor_set"],
+      "properties": {
+        "value_prop": { "type": "string" },
+        "swot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["strengths", "weaknesses", "opportunities", "threats"],
+          "properties": {
+            "strengths": { "type": "array", "items": { "type": "string" } },
+            "weaknesses": { "type": "array", "items": { "type": "string" } },
+            "opportunities": { "type": "array", "items": { "type": "string" } },
+            "threats": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "differentiators": { "type": "array", "minItems": 3, "items": { "type": "string" } },
+        "competitor_set": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["vendor", "reason_in_set", "url"],
+            "properties": {
+              "vendor": { "type": "string" },
+              "reason_in_set": { "type": "string" },
+              "url": { "type": "string", "format": "uri" }
+            }
+          }
+        }
+      }
+    },
+
+    "messaging_matrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nonnegotiables", "matrix"],
+      "properties": {
+        "nonnegotiables": { "type": "array", "minItems": 3, "items": { "type": "string" } },
+        "matrix": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["persona", "pain", "value_statement", "proof", "cta"],
+            "properties": {
+              "persona": { "type": "string" },
+              "pain": { "type": "string" },
+              "value_statement": { "type": "string" },
+              "proof": { "type": "string" },
+              "cta": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "offer_strategy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["landing_page", "assets_checklist"],
+      "properties": {
+        "landing_page": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["headline", "subheadline", "sections", "cta"],
+          "properties": {
+            "headline": { "type": "string" },
+            "subheadline": { "type": "string" },
+            "sections": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["title", "content", "bullets"],
+                "properties": {
+                  "title": { "type": "string" },
+                  "content": { "type": "string" },
+                  "bullets": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            },
+            "cta": { "type": "string" }
+          }
+        },
+        "assets_checklist": { "type": "array", "minItems": 5, "items": { "type": "string" } }
+      }
+    },
+
+    "channel_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["emails", "linkedin"],
+      "properties": {
+        "emails": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["subject", "preview", "body"],
+            "properties": {
+              "subject": { "type": "string" },
+              "preview": { "type": "string" },
+              "body": { "type": "string" }
+            }
+          }
+        },
+        "linkedin": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["connect_note", "insight_post", "dm", "comment_strategy"],
+          "properties": {
+            "connect_note": { "type": "string" },
+            "insight_post": { "type": "string" },
+            "dm": { "type": "string" },
+            "comment_strategy": { "type": "string" }
+          }
+        },
+        "paid": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["variant", "proof", "cta"],
+            "properties": {
+              "variant": { "type": "string" },
+              "proof": { "type": "string" },
+              "cta": { "type": "string" }
+            }
+          }
+        },
+        "event": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "concept": { "type": "string" },
+            "agenda": { "type": "string" },
+            "speakers": { "type": "string" },
+            "cta": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "sales_enablement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discovery_questions", "objection_cards", "proof_pack_outline", "handoff_rules"],
+      "properties": {
+        "discovery_questions": { "type": "array", "minItems": 5, "items": { "type": "string" } },
+        "objection_cards": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["blocker", "reframe_with_claimid", "proof", "risk_reversal"],
+            "properties": {
+              "blocker": { "type": "string" },
+              "reframe_with_claimid": { "type": "string" },
+              "proof": { "type": "string" },
+              "risk_reversal": { "type": "string" }
+            }
+          }
+        },
+        "proof_pack_outline": { "type": "array", "items": { "type": "string" } },
+        "handoff_rules": { "type": "string" }
+      }
+    },
+
+    "measurement_and_learning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kpis", "weekly_test_plan", "utm_and_crm", "evidence_freshness_rule"],
+      "properties": {
+        "kpis": { "type": "array", "items": { "type": "string" } },
+        "weekly_test_plan": { "type": "string" },
+        "utm_and_crm": { "type": "string" },
+        "evidence_freshness_rule": { "type": "string" }
+      }
+    },
+
+    "compliance_and_governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["substantiation_file", "gdpr_pecr_checklist", "brand_accessibility_checks", "approval_log_note"],
+      "properties": {
+        "substantiation_file": { "type": "string" },
+        "gdpr_pecr_checklist": { "type": "string" },
+        "brand_accessibility_checks": { "type": "string" },
+        "approval_log_note": { "type": "string" }
+      }
+    },
+
+    "risks_and_contingencies": { "type": "string" },
+    "one_pager_summary": { "type": "string" },
+
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["icp_from_csv", "it_spend_buckets"],
+      "properties": {
+        "icp_from_csv": { "type": "string" },
+        "it_spend_buckets": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "input_proof": { "type": "object" }
+  }
+}
