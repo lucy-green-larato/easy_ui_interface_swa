@@ -1,7 +1,7 @@
 // index.js – Azure Function handler for /api/generate
 // Version: v3-markdown-first-2025-09-08-1 json compatibility
 
-const VERSION = "DEV-verify-2025-09-07-1"; // <-- bump this every edit
+const VERSION = "DEV-verify-2025-09-10-1"; // <-- bump this every edit
 try {
   console.log(`[${VERSION}] module loaded at ${new Date().toISOString()} cwd=${process.cwd()} dir=${__dirname}`);
 } catch { }
@@ -13,6 +13,15 @@ const DEBUG_PROMPT = process.env.DEBUG_PROMPT === "1";
 const DEFAULT_FETCH_TIMEOUT = Number(process.env.FETCH_TIMEOUT_MS || "6500");   // ms per HTTP fetch (web pages)
 const DEFAULT_LLM_TIMEOUT = Number(process.env.LLM_TIMEOUT_MS || "45000"); // ms per LLM call
 
+// === structured JSON for campaign ===
+const fs = require("fs");
+const path = require("path");
+const CAMPAIGN_SCHEMA = JSON.parse(
+  fs.readFileSync(
+    path.join(__dirname, "..", "schemas", "campaign.schema.json"),
+    "utf8"
+  )
+);
 
 /* ========================= Helpers / Utilities ========================= */
 
@@ -2155,10 +2164,14 @@ module.exports = async function (context, req) {
         "- Objections map directly from TopBlockers; offers align to TopPurchases & TopNeedsSupplier.",
       ].join("\n");
 
-      /* === SINGLE-PASS (timeout-safe) ===
-   Skip prose+extractor to keep total runtime under gateway timeouts.
+      /* === SINGLE-PASS (timeout-safe) ===   Skip prose+extractor to keep total runtime under gateway timeouts.
    We ask the model to return the full campaign JSON directly.
 */
+      const isAzure = !!process.env.AZURE_OPENAI_ENDPOINT;
+      const response_format = isAzure
+        ? { type: "json_object" }                               // Azure: no json_schema support
+        : { type: "json_schema", json_schema: CAMPAIGN_SCHEMA };// OpenAI: enforce schema
+
       let campaign = null, issues = null;
 
       try {
@@ -2166,11 +2179,12 @@ module.exports = async function (context, req) {
           system: SYSTEM,         // (already defined above in your code)
           prompt,                 // (the JSON prompt you built above)
           temperature: 0.2,
-          response_format: { type: "json_object" },
+          response_format,
           max_tokens: 6500
         });
         const raw = extractText(llmRes) || "{}";
-        campaign = JSON.parse(raw);
+        const stripped = stripJsonFences(raw);
+        campaign = safeJson(stripped) || JSON.parse(stripped);
       } catch (e) {
         context.res = {
           status: 502,
@@ -2232,7 +2246,7 @@ module.exports = async function (context, req) {
               system: SYSTEM,
               prompt: fixPrompt,
               temperature: 0.2,
-              response_format: { type: "json_object" },
+              response_format,
               max_tokens: 8000
             });
             const rraw = extractText(redo) || "{}";
@@ -2303,7 +2317,7 @@ module.exports = async function (context, req) {
             system: SYSTEM,
             prompt: redoPrompt,
             temperature: 0.2,
-            response_format: { type: "json_object" },
+            response_format,
             max_tokens: 8000
           });
           const raw2 = extractText(redo) || "{}";
@@ -2328,7 +2342,7 @@ module.exports = async function (context, req) {
               system: SYSTEM,
               prompt: fixPrompt2,
               temperature: 0.2,
-              response_format: { type: "json_object" },
+              response_format,
               max_tokens: 8000
             });
             const rr = extractText(redo2) || "{}";
@@ -2353,7 +2367,7 @@ module.exports = async function (context, req) {
               system: SYSTEM,
               prompt: fixPromptGen,
               temperature: 0.2,
-              response_format: { type: "json_object" },
+              response_format,
               max_tokens: 6000
             });
             const rrG = extractText(redoG) || "{}";
@@ -2403,7 +2417,7 @@ module.exports = async function (context, req) {
               system: SYSTEM,
               prompt: redoPromptWN,
               temperature: 0.2,
-              response_format: { type: "json_object" },
+              response_format,
               max_tokens: 4000
             });
             const rrWN = extractText(redoWN) || "{}";
