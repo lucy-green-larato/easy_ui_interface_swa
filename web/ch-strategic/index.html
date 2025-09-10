@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en" data-app="inside-track-tools">
+<head>
+  <base href="/" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inside Track Tools · Strategic review evidence</title>
+  <link rel="stylesheet" href="/styles.css?v=2025-08-24-1">
+</head>
+<body>
+  <header class="app-header" role="banner">
+    <div class="header-left">
+      <img class="logo" src="/assets/larato-logo-bullet.svg" alt="Larato Inside Track Sales Tools" />
+      <div class="brand-text">
+        <h1 class="app-title">Inside Track Tools</h1>
+        <p class="kicker">Strategic review evidence</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
+        <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
+        <select id="call_type" name="call_type" form="ch-strategic-form" required aria-describedby="call_type_error">
+          <option value="">Select…</option>
+          <option>Direct</option>
+          <option>Partner</option>
+        </select>
+        <label class="remember">
+          <input type="checkbox" id="remember_call_type" form="ch-strategic-form" /> Remember
+        </label>
+        <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
+      </div>
+
+      <span class="model-note">
+        <span class="label">Sales model in use:</span>
+        <strong id="map-label">Direct</strong>
+      </span>
+
+      <button id="help" class="btn inline" type="button" title="About this tool">Help</button>
+
+      <span id="user-badge" class="badge is-hidden" aria-live="polite" aria-atomic="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="7" r="4"></circle>
+          <path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path>
+        </svg>
+        <span id="user-email">Loading…</span>
+      </span>
+    </div>
+  </header>
+
+  <main id="main" class="layout" role="main">
+    <!-- LEFT -->
+    <section class="panel left" aria-label="Form">
+      <form id="ch-strategic-form" novalidate>
+        <fieldset class="card" aria-labelledby="legend-evidence">
+          <legend id="legend-evidence">1. Evidence tag</legend>
+          <div class="grid-2">
+            <div class="field">
+              <label for="evidence_tag">Keyword or phrase <span aria-hidden="true" class="req">*</span></label>
+              <input id="evidence_tag" name="evidence_tag" maxlength="80" placeholder="e.g., international" required autocomplete="off" spellcheck="false" />
+              <p class="muted">Flexible matching: case-insensitive, OCR-typo tolerance, curated synonyms (e.g. <em>global</em>, <em>overseas</em>, <em>worldwide</em>). Single tag only.</p>
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset class="card" aria-labelledby="legend-companies">
+          <legend id="legend-companies">2. Companies</legend>
+          <div class="grid-2">
+            <div class="field">
+              <label for="csv_file">Upload CSV <span aria-hidden="true" class="req">*</span></label>
+              <input id="csv_file" name="csv_file" type="file" accept=".csv" required />
+              <p class="muted">Only <code>Company Name</code> and <code>Company Number</code> are read. Other columns are ignored.</p>
+            </div>
+            <div class="field">
+              <label for="importPbiBtn">Or import from Power BI</label>
+              <button id="importPbiBtn" class="btn inline" type="button">Import current selection</button>
+              <p class="muted">Reuses the main report wiring to pull <strong>Company Name</strong> and <strong>Company Number</strong>.</p>
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset class="card" aria-labelledby="legend-actions">
+          <legend id="legend-actions">3. Actions</legend>
+          <div class="actions">
+            <button id="analyzeBtn" class="btn primary" type="button" disabled>
+              <span class="btn-label">Analyze</span>
+              <span class="spinner" aria-hidden="true"></span>
+            </button>
+            <button id="resetBtn" type="reset" class="btn small">Reset</button>
+          </div>
+          <p class="muted">Lists ≤ 50 run immediately. Larger lists (up to 5,000) run as a background job and stream matches into a downloadable CSV.</p>
+        </fieldset>
+
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+
+        <details id="diagnostics" class="diag card" style="margin-top:var(--s-5)">
+          <summary>Diagnostics</summary>
+          <pre id="diag-json" tabindex="0" aria-label="Diagnostics JSON"></pre>
+          <p class="muted">If you see a 401 unauthorised error, please <a href="/.auth/login/aad">sign in again</a>.</p>
+        </details>
+      </form>
+    </section>
+
+    <!-- MIDDLE -->
+    <section class="panel middle">
+      <div class="row-between output-head">
+        <h2 id="output-title">Results</h2>
+        <div id="downloadContainer"></div>
+      </div>
+
+      <div id="progress" class="progress" hidden aria-hidden="true">
+        <div id="progressFill" class="progress__fill" style="width:0%"></div>
+      </div>
+
+      <section style="margin-top:var(--s-4)">
+        <h3>Skipped &amp; errors</h3>
+        <div id="results" class="results"></div>
+      </section>
+    </section>
+
+    <!-- RIGHT -->
+    <section class="panel right" aria-labelledby="helpers-title">
+      <div class="row-between output-head">
+        <h2 id="helpers-title">Helpers</h2>
+      </div>
+
+      <aside class="intel card">
+        <div class="intel-head">
+          <h2 id="intel-title">Buyer needs</h2>
+          <button id="toggle-intel" class="btn small" type="button" aria-expanded="false" aria-controls="intel-body">Show</button>
+        </div>
+        <div id="intel-body" hidden>
+          <div class="intel-grid">
+            <section>
+              <h3>1) Buyer Priorities</h3>
+              <ul>
+                <li>Clarity on geographic activities</li>
+                <li>Evidence tags map to strategic themes</li>
+                <li>Quick export for downstream use</li>
+              </ul>
+            </section>
+            <section>
+              <h3>2) Triggers</h3>
+              <ul>
+                <li>Mentions of overseas/global expansion</li>
+                <li>New market entries by region</li>
+                <li>Export growth statements</li>
+              </ul>
+            </section>
+          </div>
+        </div>
+      </aside>
+
+      <aside class="intel card" style="margin-top:var(--s-4)">
+        <div class="intel-head">
+          <h2>Call opener ideas</h2>
+          <button class="btn small" type="button" aria-expanded="false" aria-controls="openers-body">Show</button>
+        </div>
+        <div id="openers-body" hidden>
+          <ul>
+            <li>“I noticed your strategic report references overseas expansion…”</li>
+            <li>“You mentioned growth in specific regions—how are you approaching those geographies?”</li>
+          </ul>
+        </div>
+      </aside>
+
+      <aside class="intel card" style="margin-top:var(--s-4)">
+        <div class="intel-head">
+          <h2>Helpful tips</h2>
+          <button class="btn small" type="button" aria-expanded="false" aria-controls="tips-body">Show</button>
+        </div>
+        <div id="tips-body" hidden>
+          <ul>
+            <li>Keep tags simple (e.g., <em>international</em>, <em>overseas</em>, country names).</li>
+            <li>Some accounts omit a Strategic Report—those will be skipped.</li>
+            <li>Use the CSV export even while a large job is still running.</li>
+          </ul>
+        </div>
+      </aside>
+    </section>
+  </main>
+</body>
+</html>
