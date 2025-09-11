@@ -15,16 +15,25 @@
     { "route": "/lead-qualification", "redirect": "/qualification", "statusCode": 301 },
     { "route": "/lead-qualification/*", "redirect": "/qualification", "statusCode": 301 },
 
-    { "route": "/content/call-library/*", "headers": { "cache-control": "no-store" } }
+    { "route": "/content/call-library/*", "headers": { "cache-control": "no-store" } },
+
+    { "route": "/admin/*",   "allowedRoles": ["admin"] },
+    { "route": "/campaign/*", "allowedRoles": ["campaignmanager"] },
+    { "route": "/leader/*",  "allowedRoles": ["salesleader"] },
+    { "route": "/user/*",    "allowedRoles": ["salesuser"] }
   ],
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/images/*", "/css/*"]
+  },
   "globalHeaders": {
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Content-Type-Options": "nosniff"
   },
   "mimeTypes": {
-    ".md":  "text/markdown; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
     ".mdx": "text/markdown; charset=utf-8",
-    ".js":  "application/javascript; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
     ".mjs": "application/javascript; charset=utf-8",
     ".json": "application/json; charset=utf-8"
   }
