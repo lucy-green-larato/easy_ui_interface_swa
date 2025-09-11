@@ -15,19 +15,18 @@
     { "route": "/lead-qualification", "redirect": "/qualification", "statusCode": 301 },
     { "route": "/lead-qualification/*", "redirect": "/qualification", "statusCode": 301 },
 
-    { "route": "/content/call-library/*", "headers": { "cache-control": "no-store" } }
+    { "route": "/content/call-library/*", "headers": { "cache-control": "no-store" } },
+
+    { "route": "/admin/*", "allowedRoles": ["admin"] },
+    { "route": "/campaign/*", "allowedRoles": ["campaignmanager"] },
+    { "route": "/leader/*", "allowedRoles": ["salesleader"] },
+    { "route": "/user/*", "allowedRoles": ["salesuser"] }
   ],
   "responseOverrides": {
     "401": {
       "rewrite": "/index.html",
       "statusCode": 302
     }
-  },
-  "roleAssignments": {
-    "admin": ["/admin/*"],
-    "campaignmanager": ["/campaign/*"],
-    "salesleader": ["/leader/*"],
-    "salesuser": ["/user/*"]
   },
   "globalHeaders": {
     "Referrer-Policy": "strict-origin-when-cross-origin",
