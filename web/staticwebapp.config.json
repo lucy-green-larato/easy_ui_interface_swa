@@ -17,14 +17,26 @@
 
     { "route": "/content/call-library/*", "headers": { "cache-control": "no-store" } }
   ],
+  "responseOverrides": {
+    "401": {
+      "rewrite": "/index.html",
+      "statusCode": 302
+    }
+  },
+  "roleAssignments": {
+    "admin": ["/admin/*"],
+    "campaignmanager": ["/campaign/*"],
+    "salesleader": ["/leader/*"],
+    "salesuser": ["/user/*"]
+  },
   "globalHeaders": {
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Content-Type-Options": "nosniff"
   },
   "mimeTypes": {
-    ".md":  "text/markdown; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
     ".mdx": "text/markdown; charset=utf-8",
-    ".js":  "application/javascript; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
     ".mjs": "application/javascript; charset=utf-8",
     ".json": "application/json; charset=utf-8"
   }
