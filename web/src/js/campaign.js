@@ -195,10 +195,10 @@
       updateStage("QualityGate");
       updateStage("Completed");
 
-      // Contract-only renderer
+      // Contract-only renderer: API returns the bare contract (no contract_v1 wrapper)
       const hasSetter = window.CampaignUI && typeof window.CampaignUI.setContract === "function";
-      window.lastResult = body;             // optional: handy for debugging
-      window.lastContract = body && body.contract_v1 ? body.contract_v1 : null;
+      window.lastResult = body;                 // keep for debugging
+      window.lastContract = body;               // the body IS the contract
       if (hasSetter) window.CampaignUI.setContract(window.lastContract);
       setStatus("Completed (contract)", "ok");
 
