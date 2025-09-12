@@ -1634,9 +1634,6 @@ module.exports = async function (context, req) {
       // - Objections map to TopBlockers; Offer aligns to TopPurchases/TopNeedsSupplier
       // - Website crawl used for product/offer nouns (no external web search here)
 
-      let prosePrompt = "";
-      let extractorPrompt = "";
-
       /* ---------- inputs ---------- */
       const csvText = String(body.csv_text || "").trim();
       if (!csvText || csvText.length < 20) {
@@ -1766,12 +1763,14 @@ module.exports = async function (context, req) {
         }
         return out;
       }
-      const hints = mineProductHints(execText, {
+      const productHints = mineProductHints(websiteText, {
         company,                                  // { name, website, linkedin, usps }
         csvTopPurchases: topPurchases.map(v => v.text || v),
         uspsItems: (uspsProvided ? (company.usps ? company.usps.split(/[;,/]/).map(s => s.trim()).filter(Boolean) : []) : [])
       });
-      //const siteHasCyber = /\bcyber\s*security|cybersecurity\b/i.test(websiteText);//
+
+
+      const siteHasCyber = /\bcyber\s*security|cybersecurity\b/i.test(websiteText);
 
       // ---- Contextual seed URLs (authoritative, UK-first) ----
       // Normalise an industry label to a coarse key
@@ -1877,7 +1876,7 @@ module.exports = async function (context, req) {
 
       // --- Public evidence seed: contextual authoritative UK pages ---
       const securityHint =
-        siteHasCyber || (topNeeds || []).some(t => /\bsec(urity)?|cyber/i.test(String(t.text || t)));
+        siteHasCyber || (topNeeds || []).some(t => /\b(?:sec(?:urity)?|cyber)\b/i.test(String(t.text || t)));
 
       const seedUrls = buildSeedUrlsByIndustry(industries, { securityHint });
 
@@ -1893,7 +1892,7 @@ module.exports = async function (context, req) {
 
       /* ---------- strict schema (zod) ---------- */
       const CampaignSchema = z.object({
-        executive_summary: z.string().min(1000).max(1800),
+        executive_summary: z.string().min(600).max(1600),
         evidence_log: z.array(z.object({
           claim_id: z.string().min(1),
           claim: z.string().min(15),
@@ -1953,7 +1952,7 @@ module.exports = async function (context, req) {
           assets_checklist: z.array(z.string()).min(3)
         }),
         channel_plan: z.object({
-          emails: z.array(z.object({ subject: z.string(), preview: z.string(), body: z.string() })).min(2),
+          emails: z.array(z.object({ subject: z.string(), preview: z.string(), body: z.string() })).min(3),
           linkedin: z.object({ connect_note: z.string(), insight_post: z.string(), dm: z.string(), comment_strategy: z.string() }),
           paid: z.array(z.object({ variant: z.string(), proof: z.string(), cta: z.string() })).optional(),
           event: z.object({ concept: z.string(), agenda: z.string(), speakers: z.string(), cta: z.string() }).optional()
@@ -2036,9 +2035,9 @@ module.exports = async function (context, req) {
         .map(d => d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")); // escape
 
       const allowedPublisherRx = new RegExp(
-        "(ofcom\\.org\\.uk|gov\\.uk|ons\\.gov\\.uk|citb\\.co\\.uk" +
+        "^(?:[a-z0-9-]+\\.)*(?:ofcom\\.org\\.uk|gov\\.uk|ons\\.gov\\.uk|citb\\.co\\.uk" +
         (EXTRA_ALLOWED.length ? "|" + EXTRA_ALLOWED.join("|") : "") +
-        ")",
+        ")$",
         "i"
       );
 
@@ -2078,65 +2077,76 @@ module.exports = async function (context, req) {
 
       /* ---------- canonical shape to echo in the prompt (Azure needs a shape hint) ---------- */
       const CAMPAIGN_JSON_SHAPE = {
-        executive_summary_struct: {
-          positioning_line: "",                                  // ≤ 35 words; name the company and offers
-          why_now: [{ text: "", claim_id: "" }],                 // 4–5 bullets; each must have ClaimID
-          outcomes: [""],                                        // 3–5 outcome statements
-          primary_offer: "",
-          proof_points: { case_ids: [""], claim_ids: [""] },
-          word_target: 200
-        },
+        executive_summary: "",
         evidence_log: [
           { claim_id: "", claim: "", publisher: "", title: "", date: "YYYY-MM-DD", url: "", relevance: "", excerpt: "" }
         ],
         case_studies: [
-          { customer: "", industry: "", problem: "", solution: "", outcomes: "", link: "", source: "" }
+          { customer: "", industry: "", problem: "", solution: "", outcomes: "", link: null, source: null }
         ],
         positioning_and_differentiation: {
           value_prop: "",
           swot: { strengths: [""], weaknesses: [""], opportunities: [""], threats: [""] },
-          differentiators: [""],
-          competitor_set: [{ vendor: "", reason_in_set: "", url: "" }]
+          differentiators: ["", "", ""],
+          competitor_set: [
+            { vendor: "", reason_in_set: "", url: null },
+            { vendor: "", reason_in_set: "", url: null },
+            { vendor: "", reason_in_set: "", url: null },
+            { vendor: "", reason_in_set: "", url: null },
+            { vendor: "", reason_in_set: "", url: null }
+          ]
         },
         messaging_matrix: {
-          nonnegotiables: [""],
-          matrix: [{ persona: "", pain: "", value_statement: "", proof: "", cta: "" }]
+          nonnegotiables: ["", "", ""],
+          matrix: [
+            { persona: "", pain: "", value_statement: "", proof: "", cta: "" },
+            { persona: "", pain: "", value_statement: "", proof: "", cta: "" },
+            { persona: "", pain: "", value_statement: "", proof: "", cta: "" }
+          ]
         },
         offer_strategy: {
           landing_page: {
-            outcome_header: "", proof_line: "",
-            how_it_works_steps: ["Discover", "Design", "Deliver"],
-            outcomes_grid: [{ metric: "", value: "", claim_ids: [""] }],
+            headline: "",
+            subheadline: "",
+            sections: [{ title: "", content: "", bullets: [""] }],
             cta: ""
           },
-          assets_checklist: [""]
+          assets_checklist: ["", "", ""]
         },
         channel_plan: {
-          emails: [{ id: "E1", subject: "", body_90_120_words: "", claim_ids_included: [] }],
-          linkedin: { connect_note: "", insight_post: { copy: "", claim_id: "" }, dm_with_value_asset: { copy: "", asset_link: "" }, comment_strategy: "" },
-          paid_optional: { enabled: true, variants: [{ name: "", quantified_proof: "", claim_id: "", cta: "" }] },
-          event_webinar: { concept: "", agenda: [""], speakers: [""], registration_cta: "" }
+          emails: [
+            { subject: "", preview: "", body: "" },
+            { subject: "", preview: "", body: "" },
+            { subject: "", preview: "", body: "" }
+          ],
+          linkedin: { connect_note: "", insight_post: "", dm: "", comment_strategy: "" },
+          paid: [{ variant: "", proof: "", cta: "" }],
+          event: { concept: "", agenda: "", speakers: "", cta: "" }
         },
         sales_enablement: {
-          discovery_questions: [""],
-          objection_cards: [{ blocker: "", reframe_with_evidence: "", claim_id: "", proof_case_metric: "", risk_reversal_mechanism: "" }],
-          proof_pack_outline: { case_studies: [""], one_pager: { outcomes: [], claim_ids: [""] } },
-          handoff_rules: { follow_up_sla: "" }
+          discovery_questions: ["", "", "", "", ""],
+          objection_cards: [
+            { blocker: "", reframe_with_claimid: "", proof: "", risk_reversal: "" },
+            { blocker: "", reframe_with_claimid: "", proof: "", risk_reversal: "" },
+            { blocker: "", reframe_with_claimid: "", proof: "", risk_reversal: "" }
+          ],
+          proof_pack_outline: ["", "", ""],
+          handoff_rules: ""
         },
         measurement_and_learning: {
-          kpis: { mqls: null, sal_percent: null, meetings: null, pipeline: null, cost_per_opportunity: null, time_to_value: null },
-          weekly_test_plan: [],
-          utm_and_crm: { utm_standard: { source: "", medium: "", campaign: "", content: "", term: "" }, crm_fields: { company_number_optional: "CompanyNumber", campaign_member_fields: [] } },
+          kpis: ["", "", ""],
+          weekly_test_plan: "",
+          utm_and_crm: "",
           evidence_freshness_rule: ""
         },
         compliance_and_governance: {
-          substantiation_file: { type: "export_of_evidence_log", format: "CSV or XLSX", path_or_link: "" },
-          gdpr_pecr_checklist: [],
-          brand_accessibility_checks: [],
+          substantiation_file: "",
+          gdpr_pecr_checklist: "",
+          brand_accessibility_checks: "",
           approval_log_note: ""
         },
-        risks_and_contingencies: { triggers_and_actions: [{ trigger: "", action: "" }] },
-        one_pager_summary: { icp: "", offer: "", message_bullets_with_proofs: [], channels_and_cadence: "", kpi_targets: "", start_date: "", owners: [], next_review_date: "" },
+        risks_and_contingencies: "",
+        one_pager_summary: "",
         meta: { icp_from_csv: icpFromCsv, it_spend_buckets: [] },
         input_proof: {
           fields_validated: true,
@@ -2189,9 +2199,7 @@ module.exports = async function (context, req) {
          Ask the model to return the full campaign JSON directly (structured ES included).
       */
       const isAzure = !!process.env.AZURE_OPENAI_ENDPOINT;
-      const response_format = isAzure
-        ? { type: "json_object" }               // Azure: JSON only
-        : { type: "json_schema", json_schema: CAMPAIGN_SCHEMA }; // OpenAI: enforce schema
+      const response_format = { type: "json_object" };
 
       let campaign = null;
 
@@ -2205,7 +2213,30 @@ module.exports = async function (context, req) {
           response_format
         });
 
-        const raw = extractText(llmRes) || "{}";
+        // Parse model output, validate with Zod, and flag stale evidence
+        const raw =
+          typeof llmRes === "string"
+            ? llmRes
+            : (llmRes?.content ?? llmRes?.text ?? "");
+
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (e) {
+          throw new Error(`Model did not return valid JSON: ${e.message || e}`);
+        }
+
+        campaign = CampaignSchema.parse(parsed); // throws if invalid
+
+        // Server-side recency check (warn/flag if stale)
+        const stale = (campaign.evidence_log ?? []).filter(e => isStale(e.date, windowMonths));
+        if (stale.length) {
+          campaign.meta = {
+            ...(campaign.meta || {}),
+            stale_evidence_count: stale.length,
+            stale_claim_ids: stale.map(e => e.claim_id).filter(Boolean)
+          };
+        }
         const stripped = stripJsonFences(raw);
         campaign = safeJson(stripped) || JSON.parse(stripped);
       } catch (e) {
@@ -2270,7 +2301,7 @@ module.exports = async function (context, req) {
               prompt: fixPrompt,
               temperature: 0.2,
               response_format,
-              max_tokens: 8000
+              max_tokens: 12000
             });
             const rraw = extractText(redo) || "{}";
             const rjson = JSON.parse(rraw);
@@ -2312,20 +2343,21 @@ module.exports = async function (context, req) {
         const t = String(text || "");
         const missing = [];
         for (const h of (productHints || [])) {
-          const rx = new RegExp("\\b" + _escapeRe(h) + "\\b", "i");
+          // Prefer tolerant matching (spaces OR hyphens), fallback to strict word-boundary match
+          const rx = _termToRegex(h) || new RegExp("\\b" + _escapeRx(h) + "\\b", "i");
           if (!rx.test(t)) missing.push(h);
         }
         return missing;
       }
-
-      let needsRewrite = esWords > 180 || !containsWhyNowBullets(es);
+      
+      let needsRewrite = esWords > 280 || !containsWhyNowBullets(es);
       const missingHints = _missingProductHints(es);
       if (!needsRewrite && missingHints.length) needsRewrite = true;
 
       if (needsRewrite) {
         const fixLines = [
           "FIX: Rewrite Executive Summary ONLY.",
-          "- ≤180 words.",
+          "- ≤250 words.",
           "- Must include 'Why now:' followed by 3–5 bullets, each tied to a ClaimID in the Evidence Log.",
           "- Remove generic wording; be specific with offer nouns from website text."
         ];
@@ -2427,7 +2459,7 @@ module.exports = async function (context, req) {
         if (invalidWhyNow) {
           const fixInstrWN = [
             "FIX: Rebuild ONLY the Executive Summary to comply with publisher rules.",
-            "- ≤180 words.",
+            "- ≤250 words.",
             "- Include 'Why now:' with 3–5 bullets.",
             "- Each bullet must include a ClaimID that maps to an Evidence Log item with an allowed publisher domain (ofcom.org.uk, gov.uk incl. ONS/NCSC, ons.gov.uk, citb.co.uk).",
             "- Do NOT cite the company itself. If you cannot support a bullet with an allowed publisher, write 'No public evidence found' for that bullet.",
