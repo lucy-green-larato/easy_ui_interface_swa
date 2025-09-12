@@ -212,6 +212,118 @@
     }
   });
 
+  // ---------- Contract-aware renderer ----------
+  window.CampaignUI = window.CampaignUI || {};
+  window.CampaignUI.setContract = function (contract) {
+    try {
+      if (!contract || typeof contract !== "object") {
+        setStatus("No contract to render", "err");
+        return;
+      }
+
+      // Top-level numbered sections (bracket notation)
+      const wf = contract["2_workflow"] || {};
+      const out = contract["3_campaign_output"] || {};
+
+      // Dotted subsections (bracket notation)
+      const exec = out["3.1_executive_summary"] || {};
+      const offer = out["3.4_offer_strategy_and_assets"] || {};
+      const chan = out["3.5_channel_plan_and_orchestration"] || {};
+      const sales = out["3.6_sales_enablement_alignment"] || {};
+
+      // Evidence entries live under workflow 2C
+      const evidenceLog = (wf["2C_evidence_log"] && wf["2C_evidence_log"].entries) || [];
+
+      // -------- Overview tab
+      if (els.tabOverview) {
+        const html = exec.draft ? `<div class="pre">${String(exec.draft)}</div>` : `<div class="muted">(no executive summary)</div>`;
+        els.tabOverview.innerHTML = html;
+        els.tabOverview.style.display = "";
+      }
+
+      // -------- Landing tab
+      if (els.tabLanding) {
+        const lp = (offer.landing_page_wire_copy || {});
+        const list = Array.isArray(lp.how_it_works_steps) ? lp.how_it_works_steps : [];
+        const grid = Array.isArray(lp.outcomes_grid) ? lp.outcomes_grid : [];
+        els.tabLanding.innerHTML = `
+          <h3>${lp.outcome_header || "Achieve [result] in [timeframe]"}</h3>
+          <p class="muted">${lp.proof_line || "Backed by [CaseID] and [ClaimID]"}</p>
+          <h4>How it works</h4>
+          <ul>${list.map(s => `<li>${String(s)}</li>`).join("")}</ul>
+          <h4>Outcomes</h4>
+          <ul>${grid.map(g => `<li>${String(g.metric || g.result || "")}</li>`).join("")}</ul>
+          <p><strong>CTA:</strong> ${lp.cta || "Get your [offer]"}</p>
+        `;
+        els.tabLanding.style.display = "";
+      }
+
+      // -------- Emails tab
+      if (els.tabEmails) {
+        const emails = Array.isArray(chan.email_sequence) ? chan.email_sequence : [];
+        els.tabEmails.innerHTML = emails.length
+          ? emails.map((e, i) => `
+              <div class="card" style="padding:10px; margin:8px 0">
+                <div class="email-head">
+                  <span class="email-subject">${String(e.subject || "")}</span>
+                  <span class="muted">#${i + 1}</span>
+                </div>
+                <pre class="pre">${String(e.body_90_120_words || e.body || "")}</pre>
+              </div>
+            `).join("")
+          : '<div class="muted">No emails.</div>';
+        els.tabEmails.style.display = "";
+      }
+
+      // -------- Evidence tab
+      if (els.tabEvidence) {
+        els.tabEvidence.innerHTML = evidenceLog.length
+          ? `
+            <table class="table">
+              <thead>
+                <tr><th>Publisher</th><th>Title</th><th>Date</th><th>URL</th><th>Excerpt</th></tr>
+              </thead>
+              <tbody>
+                ${evidenceLog.map(x => `
+                  <tr>
+                    <td>${String(x.publisher || "")}</td>
+                    <td>${String(x.title || "")}</td>
+                    <td>${String(x.date || "")}</td>
+                    <td>${x.url ? `<a href="${x.url}" target="_blank" rel="noreferrer">link</a>` : ""}</td>
+                    <td>${String(x.excerpt_max_2_lines || x.excerpt || "")}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>`
+          : '<div class="muted">No evidence entries.</div>';
+        els.tabEvidence.style.display = "";
+      }
+
+      // -------- Sales tab
+      if (els.tabSales) {
+        const qs = Array.isArray(sales.discovery_questions_5_to_7) ? sales.discovery_questions_5_to_7 : [];
+        const cards = Array.isArray(sales.objection_cards) ? sales.objection_cards : [];
+        els.tabSales.innerHTML = `
+          <h4>Discovery questions</h4>
+          <ul>${qs.map(q => `<li>${String(q)}</li>`).join("")}</ul>
+          <h4>Objection cards</h4>
+          ${cards.length ? cards.map(c => `
+            <div class="card" style="padding:10px; margin:8px 0">
+              <div><strong>Blocker:</strong> ${String(c.blocker || "")}</div>
+              <div><strong>Reframe:</strong> ${String(c.reframe_with_evidence || "")}</div>
+              <div><strong>Proof:</strong> ${String(c.proof_case_metric || "")}</div>
+              <div><strong>Risk reversal:</strong> ${String(c.risk_reversal_mechanism || "")}</div>
+            </div>
+          `).join("") : '<div class="muted">No objections.</div>'}
+        `;
+        els.tabSales.style.display = "";
+      }
+    } catch (err) {
+      log(`render error: ${err && err.message ? err.message : err}`);
+      setStatus("Render error", "err");
+    }
+  };
+  
   // ---------- Expose minimal globals expected by your page ----------
   window.CampaignPage = window.CampaignPage || { setActiveTab, updateStage, setRunId };
   window.Campaign = window.Campaign || {
