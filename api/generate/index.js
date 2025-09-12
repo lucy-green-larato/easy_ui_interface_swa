@@ -2740,11 +2740,19 @@ module.exports = async function (context, req) {
             email_sequence: emails,
             linkedin: {
               connect_note: String(linkedin.connect_note || ""),
-              insight_post: { copy: String((linkedin.insight_post && linkedin.insight_post) || ""), claim_id: (idsInText(linkedin.insight_post || "")[0] || "") },
-              dm_with_value_asset: { copy: String(linkedin.dm || ""), asset_link: "" },
-              comment_strategy: String(linkedin.comment_strategy || "")
+              // FIX: always pass a string for copy and extract ClaimID from that string
+              insight_post: {
+                copy: String(linkedin?.insight_post?.copy || ""),
+                claim_id: (idsInText(linkedin?.insight_post?.copy || "")[0] || "")
+              },
+              dm_with_value_asset: {
+                copy: String(linkedin?.dm || ""),
+                asset_link: ""
+              },
+              comment_strategy: String(linkedin?.comment_strategy || "")
             },
             paid_optional: {
+              // (small hardening) enabled is true only when we have variants
               enabled: Array.isArray(paidOpt) && paidOpt.length > 0,
               variants: paidOpt.map(p => ({
                 name: String(p.variant || ""),
