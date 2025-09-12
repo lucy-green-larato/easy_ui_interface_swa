@@ -1,0 +1,26 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AUTH_DEV_ALWAYS": "1",
+    "AUTH_DEV_EMAIL": "lucy.green@larato.co.uk",
+    "ALLOWED_ORIGIN": "https://sales-tools.larato.co.uk",
+    "AzureWebJobsSecretStorageType": "files",
+    "AzureWebJobsStorage": "
+    "AZURE_OPENAI_API_KEY":
+    "AZURE_OPENAI_DEPLOYMENT": "sales-tools",
+    "AZURE_OPENAI_ENDPOINT": "https://sales-tools.openai.azure.com",
+    "BLOB_ACCOUNT_URL":"https://stinsidetrackuksouth.blob.core.windows.net/",
+    "CALL_LIB_BASE":"https://sales-tools.larato.co.uk",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "ALLOW_ANON": "1",
+    "TENANT_ID": "",
+    "PBI_TENANT_ID": "",
+    "PBI_REPORT_ID": "
+    "PBI_CLIENT_ID": "
+    "PBI_CLIENT_SECRET": ",
+    "PBI_WORKSPACE_ID" : "",
+    "PY_API_BASE": "http://127.0.0.1:7071",
+    "DEBUG_PROMPT":"1",
+    "UPLOADS_SAS_URL": "https://stinsidetrackuksouth.blob.core.windows.net/"
+  }
+}

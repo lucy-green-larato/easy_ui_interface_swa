@@ -581,7 +581,7 @@
           window.CampaignPage.updateStage("DraftCampaign");
           window.CampaignPage.updateStage("QualityGate");
           window.CampaignPage.updateStage("Completed");
-          renderCampaign(data);
+          window.CampaignUI.setContract(data && data.contract_v1 ? data.contract_v1 : null);
           setStatus("Completed", "ok");
           $("#goBtn").disabled = false;
         } catch (e) {
@@ -632,60 +632,12 @@
             const res = await fetch(u);
             if (!res.ok) { log(`fetch ${u} -> ${res.status}`); continue; }
             const js = await res.json().catch(() => ({}));
-            renderCampaign(js);
+            window.CampaignUI.setContract(js && js.contract_v1 ? js.contract_v1 : null);
             setStatus("Done", "ok");
             return;
           } catch (e) { log(`fetch error: ${e}`); }
         }
         setStatus("Fetch failed", "err");
-      }
-
-      function renderCampaign(c) {
-        try {
-          // Overview (summary only)
-          const ov = document.getElementById("tab-overview");
-          ov.innerHTML = "";
-          const ex = document.createElement("div"); ex.className = "pre";
-          ex.textContent = (c.executive_summary || "(no executive summary)");
-          ov.appendChild(ex);
-          // Landing page
-          const lp = c.landing_page || {};
-          const lpel = document.getElementById("tab-landing");
-          lpel.style.display = ""; lpel.innerHTML = `
-            <h3>${lp.headline || ""}</h3>
-            <p>${lp.subheadline || ""}</p>
-            <ul>${(lp.sections || []).map(s => `<li><strong>${s.title || ""}</strong>: ${s.content || ""}</li>`).join("")}</ul>
-            <p><strong>CTA:</strong> ${lp.cta || ""}</p>`;
-
-          // Emails
-          const emel = document.getElementById("tab-emails");
-          emel.style.display = ""; emel.innerHTML = (c.emails || []).map((e, i) => `
-            <div class="card" style="padding:10px; margin:8px 0">
-              <div class="email-head"><span class="email-subject">${e.subject || ""}</span><span class="muted">#${i + 1}</span></div>
-              <div class="email-preview muted">${e.preview || ""}</div>
-              <pre class="pre">${e.body || ""}</pre>
-            </div>`).join("") || '<div class="muted">No emails.</div>';
-
-          // Evidence
-          const ev = document.getElementById("tab-evidence");
-          ev.style.display = ""; ev.innerHTML = `
-            <table class="table">
-              <thead><tr><th>Publisher</th><th>Title</th><th>Date</th><th>URL</th><th>Excerpt</th></tr></thead>
-              <tbody>${(c.evidence_log || []).map(x => `
-                <tr><td>${x.publisher || ""}</td><td>${x.title || ""}</td><td>${x.date || ""}</td>
-                <td><a href="${x.url || "#"}" target="_blank">${x.url || ""}</a></td><td>${x.excerpt || ""}</td></tr>`).join("")}
-              </tbody>
-            </table>`;
-
-          // Sales enablement
-          const sel = document.getElementById("tab-sales");
-          sel.style.display = ""; sel.innerHTML = `
-            <h4>Call script</h4><pre class="pre">${(c.sales_enablement && c.sales_enablement.call_script) || ""}</pre>
-            <h4>One pager</h4><pre class="pre">${(c.sales_enablement && c.sales_enablement.one_pager) || ""}</pre>
-          `;
-        } catch (e) {
-          log(`render error: ${e}`);
-        }
       }
 
       // expose minimal API if other modules expect it

@@ -502,15 +502,15 @@ async function callModel(opts) {
       ...(max_tokens ? { max_tokens } : {})
     };
 
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    const r = await abortableFetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": "Bearer " + oaKey,
         "User-Agent": "inside-track-tools/" + VERSION
       },
-      body: JSON.stringify(payload),
-    });
+      body: JSON.stringify(payload)
+    }, DEFAULT_LLM_TIMEOUT);
 
     let data; try { data = await r.json(); } catch { data = {}; }
     if (!r.ok) {
@@ -2897,30 +2897,11 @@ module.exports = async function (context, req) {
         }
       };
 
-      // Return the new contract, plus legacy for compatibility
+      // Return contract only (no legacy mirrors, no shims, no debug fields)
       context.res = {
         status: 200,
         headers: cors,
-        body: {
-          // back-compat aliases ...
-          campaign,
-          emails: campaign?.channel_plan?.emails || [],
-          landing_page: campaign?.offer_strategy?.landing_page || null,
-          evidence_log: campaign?.evidence_log || [],
-
-          // new contract
-          contract_v1,
-          campaign_legacy: campaign,
-
-          version: VERSION,
-          usedModel: true,
-          mode: "campaign",
-          _website_citations: websiteCites,
-          _recency: campaign._recency,
-
-          // show the real prompt your debug window expects
-          ...(DEBUG_PROMPT ? { _debug_prompt: prompt, _debug_prompt_schema: prompt } : {})
-        }
+        body: contract_v1
       };
       return;
     }

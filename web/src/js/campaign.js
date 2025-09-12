@@ -126,90 +126,6 @@
     log(`CSV ready: rows=${rowCount}, sha256=${csvSha}`);
   });
 
-  // ---------- Renderers (IDs/fields unchanged) ----------
-  function renderOverview(c) {
-    if (!els.tabOverview) return;
-    els.tabOverview.innerHTML = "";
-    const ex = document.createElement("div");
-    ex.className = "pre";
-    ex.textContent = c?.executive_summary || "(no executive summary)";
-    els.tabOverview.appendChild(ex);
-  }
-
-  function renderLanding(c) {
-    if (!els.tabLanding) return;
-    const lp = c?.landing_page || {};
-    els.tabLanding.style.display = "";
-    els.tabLanding.innerHTML = `
-      <h3>${lp.headline || ""}</h3>
-      <p>${lp.subheadline || ""}</p>
-      <ul>${(lp.sections || [])
-        .map((s) => `<li><strong>${s.title || ""}</strong>: ${s.content || ""}</li>`)
-        .join("")}</ul>
-      <p><strong>CTA:</strong> ${lp.cta || ""}</p>
-    `;
-  }
-
-  function renderEmails(c) {
-    if (!els.tabEmails) return;
-    const emails = Array.isArray(c?.emails) ? c.emails : [];
-    els.tabEmails.style.display = "";
-    els.tabEmails.innerHTML =
-      emails
-        .map(
-          (e, i) => `
-        <div class="card" style="padding:10px; margin:8px 0">
-          <div class="email-head"><span class="email-subject">${e.subject || ""}</span><span class="muted">#${i + 1}</span></div>
-          <div class="email-preview muted">${e.preview || ""}</div>
-          ${e.html ? `<div>${e.html}</div>` : `<pre class="pre">${e.body || e.text || ""}</pre>`}
-        </div>`
-        )
-        .join("") || '<div class="muted">No emails.</div>';
-  }
-
-  function renderEvidence(c) {
-    if (!els.tabEvidence) return;
-    const ev = Array.isArray(c?.evidence_log) ? c.evidence_log : [];
-    els.tabEvidence.style.display = "";
-    els.tabEvidence.innerHTML = `
-      <table class="table">
-        <thead><tr><th>Publisher</th><th>Title</th><th>Date</th><th>URL</th><th>Excerpt</th></tr></thead>
-        <tbody>
-          ${ev
-        .map(
-          (x) => `
-            <tr>
-              <td>${x.publisher || ""}</td>
-              <td>${x.title || ""}</td>
-              <td>${x.date || ""}</td>
-              <td>${x.url ? `<a href="${x.url}" target="_blank" rel="noopener">${x.url}</a>` : ""}</td>
-              <td>${x.excerpt || ""}</td>
-            </tr>`
-        )
-        .join("")}
-        </tbody>
-      </table>
-    `;
-  }
-
-  function renderSales(c) {
-    if (!els.tabSales) return;
-    const s = c?.sales_enablement || {};
-    els.tabSales.style.display = "";
-    els.tabSales.innerHTML = `
-      <h4>Call script</h4><pre class="pre">${s.call_script || ""}</pre>
-      <h4>One pager</h4><pre class="pre">${s.one_pager || ""}</pre>
-    `;
-  }
-
-  function renderAll(c) {
-    renderOverview(c);
-    renderLanding(c);
-    renderEmails(c);
-    renderEvidence(c);
-    renderSales(c);
-  }
-
   // ---------- API ----------
   async function generate(payload) {
     const res = await fetch("/api/generate", {
@@ -279,18 +195,12 @@
       updateStage("QualityGate");
       updateStage("Completed");
 
-      // Prefer the new contract UI if present
-      if (body && body.contract_v1 && window.CampaignUI && typeof window.CampaignUI.setContract === "function") {
-        window.lastResult = body;             // optional: handy for debugging
-        window.lastContract = body.contract_v1;
-        window.CampaignUI.setContract(body.contract_v1);
-        setStatus("Completed (contract)", "ok");
-      } else {
-        // Fallback to legacy renderer (your current tabs)
-        const legacy = (body && body.campaign_legacy) ? body.campaign_legacy : body;
-        renderAll(legacy);
-        setStatus("Completed", "ok");
-      }
+      // Contract-only renderer
+      const hasSetter = window.CampaignUI && typeof window.CampaignUI.setContract === "function";
+      window.lastResult = body;             // optional: handy for debugging
+      window.lastContract = body && body.contract_v1 ? body.contract_v1 : null;
+      if (hasSetter) window.CampaignUI.setContract(window.lastContract);
+      setStatus("Completed (contract)", "ok");
 
       setActiveTab("tab-overview");
     } catch (e) {

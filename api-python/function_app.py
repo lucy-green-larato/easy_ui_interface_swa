@@ -149,11 +149,20 @@ async def campaign_fetch(req: HttpRequest, client: df.DurableOrchestrationClient
         # Tell caller to retry shortly
         return HttpResponse('{"status":"Running"}', status_code=202, mimetype="application/json", headers={"Retry-After": "2"})
 
-    # Completed: return the orchestrator output (whatever your orchestrator produced)
+    # Completed: return CONTRACT ONLY (strip envelopes/legacy if present)
     out = st.output
+
+    # If the orchestrator returned an envelope, extract the contract
+    if isinstance(out, dict):
+        if "contract_v1" in out and isinstance(out["contract_v1"], dict):
+            out = out["contract_v1"]
+        elif "body" in out and isinstance(out["body"], dict) and "contract_v1" in out["body"]:
+            out = out["body"]["contract_v1"]
+
+    # Now 'out' should be the contract object (dict). Return JSON.
     try:
-        body = json.dumps(out)
-        return HttpResponse(body, status_code=200, mimetype="application/json")
+        return HttpResponse(json.dumps(out), status_code=200, mimetype="application/json")
     except Exception:
-        # If output isn't JSON-serializable, return as text
+        # Last resort: return as text (should not happen for a dict contract)
         return HttpResponse(str(out), status_code=200, mimetype="text/plain")
+
