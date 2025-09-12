@@ -364,6 +364,11 @@ function extractText(res) {
   return "";
 }
 
+function safeJsonParse(s, label = "JSON") {
+  try { return JSON.parse(String(s || "")); }
+  catch (e) { throw new Error(`${label}: invalid JSON from model`); }
+}
+
 // --- Tips utilities ---
 const TIP_MIN = 3;   // how many we show
 const TIP_MAX = 3;   // clamp hard to 3
@@ -434,9 +439,11 @@ async function callModel(opts) {
     Number.isFinite(opts?.max_tokens) ? opts.max_tokens :
       (Number.isFinite(opts?.maxTokens) ? opts.maxTokens : undefined);
 
+  const top_p = (typeof opts?.top_p === "number") ? opts.top_p : undefined;   // NEW
+
   const system = opts?.system || "";
   const prompt = opts?.prompt || "";
-  const temperature = typeof opts?.temperature === "number" ? opts.temperature : 0.6;
+  const temperature = (typeof opts?.temperature === "number") ? opts.temperature : 0.6; // default tighter
   const response_format = opts?.response_format; // pass-through
 
   const messages = [
@@ -444,113 +451,123 @@ async function callModel(opts) {
     { role: "user", content: prompt }
   ];
 
-  // ENV
-  const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-  const azKey = process.env.AZURE_OPENAI_API_KEY;
-  const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-  const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
-
-  const oaKey = process.env.OPENAI_API_KEY;
-  const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
-
-  const forceOpenAI = process.env.FORCE_OPENAI === "1";
-  const azureConfigured = Boolean(azEndpoint && azKey && azDeployment);
-
-  async function callAzureOnce() {
-    const url = azEndpoint.replace(/\/+$/, "") +
-      "/openai/deployments/" + encodeURIComponent(azDeployment) +
-      "/chat/completions?api-version=" + encodeURIComponent(azApiVersion);
-
-    const body = {
-      temperature,
-      messages,
-      ...(response_format ? { response_format } : {}),
-      ...(max_tokens ? { max_tokens } : {})
-    };
-
-    const r = await abortableFetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "api-key": azKey,
-        "User-Agent": "inside-track-tools/" + VERSION
-      },
-      body: JSON.stringify(body)
-    }, DEFAULT_LLM_TIMEOUT);
-
-    let data; try { data = await r.json(); } catch { data = {}; }
-
-    if (!r.ok) {
-      const code = data?.error?.code || r.status;
-      const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
-      const retryAfter = r.headers.get("retry-after") || "";
-      const err = new Error(`[AZURE ${code}] ${msg}${retryAfter ? ` (retry-after=${retryAfter}s)` : ""}`);
-      // Tag rate-limit/transient errors so we can fall back
-      err.__isAzure429 = (String(code) === "429" || /rate\s*limit|thrott|too\s*many\s*requests/i.test(msg));
-      err.__isTransient = /ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed/i.test(msg);
-      throw err;
-    }
-    return data;
-  }
-
-  async function callOpenAIOnce() {
-    const payload = {
-      model: oaModel,
-      temperature,
-      messages,
-      ...(response_format ? { response_format } : {}),
-      ...(max_tokens ? { max_tokens } : {})
-    };
-
-    const r = await abortableFetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + oaKey,
-        "User-Agent": "inside-track-tools/" + VERSION
-      },
-      body: JSON.stringify(payload)
-    }, DEFAULT_LLM_TIMEOUT);
-
-    let data; try { data = await r.json(); } catch { data = {}; }
-    if (!r.ok) {
-      const code = data?.error?.type || r.status;
-      const msg = data?.error?.message || r.statusText || "OpenAI request failed";
-      throw new Error(`[OPENAI ${code}] ${msg}`);
-    }
-    return data;
-  }
-
-  // Routing
-  if (forceOpenAI && oaKey) {
-    console.warn("[callModel] FORCE_OPENAI=1 → using OpenAI");
-    const data = await callOpenAIOnce();
-    return tagProvider(data, "openai");
-  }
-
-  if (azureConfigured) {
-    try {
-      const data = await callAzureOnce();
-      return tagProvider(data, "azure");
-    } catch (e) {
-      const canFallback = Boolean(oaKey);
-      if ((e.__isAzure429 || e.__isTransient) && canFallback) {
-        console.warn("[callModel] Azure rate-limited/unavailable → falling back to OpenAI");
-        const data = await callOpenAIOnce();
-        return tagProvider(data, "openai_fallback");
-      }
-      throw new Error(`[callModel] ${e.message || e}`);
-    }
-  }
-
-  if (oaKey) {
-    console.warn("[callModel] Azure not configured → using OpenAI");
-    const data = await callOpenAIOnce();
-    return tagProvider(data, "openai");
-  }
-
-  throw new Error("No model configured. Set AZURE_OPENAI_* or OPENAI_API_KEY.");
+  // When you call your provider client, make sure you include these:
+  // (Replace with your actual client call)
+  return modelClient.chat.completions.create({
+    messages,
+    temperature,
+    top_p,                 // include if defined
+    max_tokens,            // include if defined
+    response_format        // include if your client supports it
+  });
 }
+
+// ENV
+const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
+const azKey = process.env.AZURE_OPENAI_API_KEY;
+const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
+
+const oaKey = process.env.OPENAI_API_KEY;
+const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+const forceOpenAI = process.env.FORCE_OPENAI === "1";
+const azureConfigured = Boolean(azEndpoint && azKey && azDeployment);
+
+async function callAzureOnce() {
+  const url = azEndpoint.replace(/\/+$/, "") +
+    "/openai/deployments/" + encodeURIComponent(azDeployment) +
+    "/chat/completions?api-version=" + encodeURIComponent(azApiVersion);
+
+  const body = {
+    temperature,
+    messages,
+    ...(response_format ? { response_format } : {}),
+    ...(max_tokens ? { max_tokens } : {})
+  };
+
+  const r = await abortableFetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "api-key": azKey,
+      "User-Agent": "inside-track-tools/" + VERSION
+    },
+    body: JSON.stringify(body)
+  }, DEFAULT_LLM_TIMEOUT);
+
+  let data; try { data = await r.json(); } catch { data = {}; }
+
+  if (!r.ok) {
+    const code = data?.error?.code || r.status;
+    const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
+    const retryAfter = r.headers.get("retry-after") || "";
+    const err = new Error(`[AZURE ${code}] ${msg}${retryAfter ? ` (retry-after=${retryAfter}s)` : ""}`);
+    // Tag rate-limit/transient errors so we can fall back
+    err.__isAzure429 = (String(code) === "429" || /rate\s*limit|thrott|too\s*many\s*requests/i.test(msg));
+    err.__isTransient = /ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed/i.test(msg);
+    throw err;
+  }
+  return data;
+}
+
+async function callOpenAIOnce() {
+  const payload = {
+    model: oaModel,
+    temperature,
+    messages,
+    ...(response_format ? { response_format } : {}),
+    ...(max_tokens ? { max_tokens } : {})
+  };
+
+  const r = await abortableFetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + oaKey,
+      "User-Agent": "inside-track-tools/" + VERSION
+    },
+    body: JSON.stringify(payload)
+  }, DEFAULT_LLM_TIMEOUT);
+
+  let data; try { data = await r.json(); } catch { data = {}; }
+  if (!r.ok) {
+    const code = data?.error?.type || r.status;
+    const msg = data?.error?.message || r.statusText || "OpenAI request failed";
+    throw new Error(`[OPENAI ${code}] ${msg}`);
+  }
+  return data;
+}
+
+// Routing
+if (forceOpenAI && oaKey) {
+  console.warn("[callModel] FORCE_OPENAI=1 → using OpenAI");
+  const data = await callOpenAIOnce();
+  return tagProvider(data, "openai");
+}
+
+if (azureConfigured) {
+  try {
+    const data = await callAzureOnce();
+    return tagProvider(data, "azure");
+  } catch (e) {
+    const canFallback = Boolean(oaKey);
+    if ((e.__isAzure429 || e.__isTransient) && canFallback) {
+      console.warn("[callModel] Azure rate-limited/unavailable → falling back to OpenAI");
+      const data = await callOpenAIOnce();
+      return tagProvider(data, "openai_fallback");
+    }
+    throw new Error(`[callModel] ${e.message || e}`);
+  }
+}
+
+if (oaKey) {
+  console.warn("[callModel] Azure not configured → using OpenAI");
+  const data = await callOpenAIOnce();
+  return tagProvider(data, "openai");
+}
+
+throw new Error("No model configured. Set AZURE_OPENAI_* or OPENAI_API_KEY.");
 
 function toModeId(v) {
   const s = String(v || "").toLowerCase();
@@ -1691,27 +1708,70 @@ module.exports = async function (context, req) {
           .map(p => ({ label: `Website: ${p.label}`, url: p.url }));
       }
 
-      // ---- Mine product nouns from website text (used to force specificity) ----
-      function _mineProductHints(txt) {
+      // Util: escape a term for use in a RegExp
+      function _escapeRx(s) {
+        return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      }
+
+      // Util: make a tolerant regex for a multi-word term (spaces or hyphens)
+      function _termToRegex(term) {
+        const parts = String(term).trim().split(/\s+/).map(_escapeRx).filter(Boolean);
+        if (!parts.length) return null;
+        // allow space OR hyphen between words, case-insensitive
+        return new RegExp("\\b" + parts.join("[\\s-]+") + "\\b", "i");
+      }
+
+      /**
+       * Mine product/offer hints from text using ONLY caller-supplied candidates.
+       * @param {string} txt - the text to scan (e.g., exec summary / positioning)
+       * @param {object} ctx - { company, csvTopPurchases, uspsItems }
+       *   - company.usps: free text (e.g., "Bonded Internet; SD-One")
+       *   - csvTopPurchases: array of strings (from CSV n-grams)
+       *   - uspsItems: array of strings (from requirements/inputs, optional)
+       * @returns {string[]} unique matched terms (original-cased from candidates)
+       */
+      function mineProductHints(txt, { company = {}, csvTopPurchases = [], uspsItems = [] } = {}) {
         const t = String(txt || "");
-        const hits = [];
-        const push = (label, rx) => { if (rx.test(t)) hits.push(label); };
-        // Common patterns you want the model to use verbatim when present:
-        push("Bonded Internet", /\bBonded\s+Internet\b/i);
-        push("SD-One", /\bSD[-\s]?One\b/i);
-        push("Continuum", /\bContinuum\b/i);
-        push("Continuum Constellation", /\bContinuum\s+Constellation\b/i);
-        push("Starlink", /\bStarlink\b/i);
-        push("fixed public IPs", /\bfixed\s+public\s+IPs?\b/i);
-        push("millisecond failover", /\bmillisecond\s+failover\b/i);
-        push("bonding", /\bbond(?:ing|ed)\b/i);
-        // de-dup
-        const seen = new Set(); const out = [];
-        for (const s of hits) { const k = s.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(s); } }
+        // Build candidate list from supplied context only
+        const fromUspsFreeText = String(company.usps || "")
+          .split(/[;,/]| and /gi)
+          .map(s => s.trim())
+          .filter(Boolean);
+
+        const fromUspsItems = (Array.isArray(uspsItems) ? uspsItems : []).map(s => String(s).trim()).filter(Boolean);
+        const fromCsv = (Array.isArray(csvTopPurchases) ? csvTopPurchases : [])
+          .map(v => (typeof v === "string" ? v : v?.text))
+          .map(s => String(s || "").trim())
+          .filter(Boolean);
+
+        // Merge & de-dup candidates (avoid one-letter noise)
+        const candSet = new Map(); // key: lower, val: original
+        for (const s of [...fromUspsFreeText, ...fromUspsItems, ...fromCsv]) {
+          const clean = s.replace(/\s+/g, " ").trim();
+          if (clean.length < 2) continue;
+          const key = clean.toLowerCase();
+          if (!candSet.has(key)) candSet.set(key, clean);
+        }
+
+        // Test each candidate with a tolerant regex
+        const seen = new Set();
+        const out = [];
+        for (const original of candSet.values()) {
+          const rx = _termToRegex(original);
+          if (rx && rx.test(t)) {
+            const k = original.toLowerCase();
+            if (!seen.has(k)) { seen.add(k); out.push(original); }
+          }
+          if (out.length >= 8) break; // keep prompt compact
+        }
         return out;
       }
-      const productHints = _mineProductHints(websiteText);
-      const siteHasCyber = /\bcyber\s*security|cybersecurity\b/i.test(websiteText);
+      const hints = mineProductHints(execText, {
+        company,                                  // { name, website, linkedin, usps }
+        csvTopPurchases: topPurchases.map(v => v.text || v),
+        uspsItems: (uspsProvided ? (company.usps ? company.usps.split(/[;,/]/).map(s => s.trim()).filter(Boolean) : []) : [])
+      });
+      //const siteHasCyber = /\bcyber\s*security|cybersecurity\b/i.test(websiteText);//
 
       // ---- Contextual seed URLs (authoritative, UK-first) ----
       // Normalise an industry label to a coarse key
@@ -1833,7 +1893,7 @@ module.exports = async function (context, req) {
 
       /* ---------- strict schema (zod) ---------- */
       const CampaignSchema = z.object({
-        executive_summary: z.string().min(50).max(1600),
+        executive_summary: z.string().min(1000).max(1800),
         evidence_log: z.array(z.object({
           claim_id: z.string().min(1),
           claim: z.string().min(15),
@@ -1854,7 +1914,7 @@ module.exports = async function (context, req) {
           source: z.string().optional().nullable()
         })).optional(),
         positioning_and_differentiation: z.object({
-          value_prop: z.string().min(20),
+          value_prop: z.string().min(400),
           swot: z.object({
             strengths: z.array(z.string()),
             weaknesses: z.array(z.string()),
@@ -1870,13 +1930,13 @@ module.exports = async function (context, req) {
         }),
 
         messaging_matrix: z.object({
-          nonnegotiables: z.array(z.string()).min(3),
+          nonnegotiables: z.array(z.string().min(10).max(200)).min(3),
           matrix: z.array(z.object({
             persona: z.string(),
-            pain: z.string(),
-            value_statement: z.string(),
-            proof: z.string(),
-            cta: z.string()
+            pain: z.string().min(300).max(500),
+            value_statement: z.string().min(500).max(1000),
+            proof: z.string().min(500),
+            cta: z.string().min(500)
           })).min(3)
         }),
         offer_strategy: z.object({
@@ -1990,7 +2050,7 @@ module.exports = async function (context, req) {
         return allowedPublisherRx.test(d);
       }
 
-      /* ---------- build strict prompt ---------- */
+      /* ---------- build strict prompt (single-pass, JSON-only) ---------- */
       const banlist = [
         "positioned to leverage", "cutting-edge", "best-in-class", "holistic",
         "client-centric", "industry-leading", "robust posture", "market differentiation"
@@ -2000,12 +2060,12 @@ module.exports = async function (context, req) {
         "You are an expert UK B2B technology marketer.",
         "Return VALID JSON ONLY (no markdown/prose outside JSON). British English. Concise.",
         "Absolutely avoid: " + banlist.join(", ") + ".",
-        "No assumptions. Every market statement must have an Evidence Log row with: claim_id, claim, publisher, title, date (YYYY-MM-DD), url, ≤2-line excerpt, and a short relevance note.",
-        "Executive Summary must be ≤180 words and include a 'Why now:' list of 3–5 bullets with ClaimIDs.",
+        "No assumptions. Every market statement must have an Evidence Log row with: claim_id, claim, publisher, title, date (YYYY-MM-DD), url, ≤2-line excerpt, relevance.",
+        "Executive Summary must include a positioning line and a 'Why now:' list of 4–5 quantified bullets with ClaimIDs.",
         "Use CSV fields only: CompanyName, CompanyNumber, SimplifiedIndustry, ITSpendPct, TopPurchases, TopBlockers, TopNeedsSupplier.",
         "Map objections from TopBlockers. Align offers to TopPurchases & TopNeedsSupplier.",
         "Do NOT cite the company or its website as the publisher for 'Why now'. Prefer reputable UK sources: ofcom.org.uk, gov.uk (incl. ONS/NCSC), ons.gov.uk, citb.co.uk.",
-        "If you cannot support a bullet with an allowed publisher, write 'No public evidence found' for that bullet (still keep it under 'Why now:').",
+        "If you cannot support a bullet with an allowed publisher, write 'No public evidence found' for that bullet (still include it).",
         "Ignore AdopterProfile and Connectivity needs for now."
       ].join("\n");
 
@@ -2013,9 +2073,80 @@ module.exports = async function (context, req) {
         "MISSING USP PATH:",
         "- Build a competitor set (5–7 vendors) active in the same solution space. Use reputable, recent sources.",
         "- Create a SWOT for the company vs. competitors, mapped to buyer-visible outcomes. Cite every point.",
-        "- Extract 3–5 outcome-oriented differentiators to use across the campaign (these populate positioning_and_differentiation.differentiators)."
+        "- Extract 3–5 outcome-oriented differentiators (populate positioning_and_differentiation.differentiators)."
       ].join("\n");
 
+      /* ---------- canonical shape to echo in the prompt (Azure needs a shape hint) ---------- */
+      const CAMPAIGN_JSON_SHAPE = {
+        executive_summary_struct: {
+          positioning_line: "",                                  // ≤ 35 words; name the company and offers
+          why_now: [{ text: "", claim_id: "" }],                 // 4–5 bullets; each must have ClaimID
+          outcomes: [""],                                        // 3–5 outcome statements
+          primary_offer: "",
+          proof_points: { case_ids: [""], claim_ids: [""] },
+          word_target: 200
+        },
+        evidence_log: [
+          { claim_id: "", claim: "", publisher: "", title: "", date: "YYYY-MM-DD", url: "", relevance: "", excerpt: "" }
+        ],
+        case_studies: [
+          { customer: "", industry: "", problem: "", solution: "", outcomes: "", link: "", source: "" }
+        ],
+        positioning_and_differentiation: {
+          value_prop: "",
+          swot: { strengths: [""], weaknesses: [""], opportunities: [""], threats: [""] },
+          differentiators: [""],
+          competitor_set: [{ vendor: "", reason_in_set: "", url: "" }]
+        },
+        messaging_matrix: {
+          nonnegotiables: [""],
+          matrix: [{ persona: "", pain: "", value_statement: "", proof: "", cta: "" }]
+        },
+        offer_strategy: {
+          landing_page: {
+            outcome_header: "", proof_line: "",
+            how_it_works_steps: ["Discover", "Design", "Deliver"],
+            outcomes_grid: [{ metric: "", value: "", claim_ids: [""] }],
+            cta: ""
+          },
+          assets_checklist: [""]
+        },
+        channel_plan: {
+          emails: [{ id: "E1", subject: "", body_90_120_words: "", claim_ids_included: [] }],
+          linkedin: { connect_note: "", insight_post: { copy: "", claim_id: "" }, dm_with_value_asset: { copy: "", asset_link: "" }, comment_strategy: "" },
+          paid_optional: { enabled: true, variants: [{ name: "", quantified_proof: "", claim_id: "", cta: "" }] },
+          event_webinar: { concept: "", agenda: [""], speakers: [""], registration_cta: "" }
+        },
+        sales_enablement: {
+          discovery_questions: [""],
+          objection_cards: [{ blocker: "", reframe_with_evidence: "", claim_id: "", proof_case_metric: "", risk_reversal_mechanism: "" }],
+          proof_pack_outline: { case_studies: [""], one_pager: { outcomes: [], claim_ids: [""] } },
+          handoff_rules: { follow_up_sla: "" }
+        },
+        measurement_and_learning: {
+          kpis: { mqls: null, sal_percent: null, meetings: null, pipeline: null, cost_per_opportunity: null, time_to_value: null },
+          weekly_test_plan: [],
+          utm_and_crm: { utm_standard: { source: "", medium: "", campaign: "", content: "", term: "" }, crm_fields: { company_number_optional: "CompanyNumber", campaign_member_fields: [] } },
+          evidence_freshness_rule: ""
+        },
+        compliance_and_governance: {
+          substantiation_file: { type: "export_of_evidence_log", format: "CSV or XLSX", path_or_link: "" },
+          gdpr_pecr_checklist: [],
+          brand_accessibility_checks: [],
+          approval_log_note: ""
+        },
+        risks_and_contingencies: { triggers_and_actions: [{ trigger: "", action: "" }] },
+        one_pager_summary: { icp: "", offer: "", message_bullets_with_proofs: [], channels_and_cadence: "", kpi_targets: "", start_date: "", owners: [], next_review_date: "" },
+        meta: { icp_from_csv: icpFromCsv, it_spend_buckets: [] },
+        input_proof: {
+          fields_validated: true,
+          csv_fields_found: fieldsFound,
+          simplified_industry_values: industries,
+          top_terms: { purchases: topPurchases, blockers: topBlockers, needs: topNeeds }
+        }
+      };
+
+      /* ---------- build the single prompt (no prose variant) ---------- */
       let prompt = [
         "INPUTS",
         `Company: ${company.name || "(n/a)"} ${company.website ? "(" + company.website + ")" : ""} ${company.linkedin ? "| " + company.linkedin : ""}`,
@@ -2031,157 +2162,49 @@ module.exports = async function (context, req) {
         "WEBSITE TEXT (multiple pages; for product/offer nouns & proof):",
         websiteText ? websiteText.slice(0, 120000) : "(none)",
         "",
-        "VALIDATION SOURCES (authoritative UK pages — use ONLY to corroborate or refute claims you already derived from CSV & the company website; do not originate new points from these):",
-        seedUrls.length
-          ? seedUrls.map(u => "- " + u).join("\n")
-          : "(none)",
+        "VALIDATION SOURCES (authoritative UK pages — use ONLY to corroborate/refute claims derived from CSV & company site):",
+        seedUrls.length ? seedUrls.map(u => "- " + u).join("\n") : "(none)",
         "",
-        "OUTPUT — ONE JSON OBJECT with keys in this exact order:",
-        JSON.stringify({
-          executive_summary: "",
-          evidence_log: [{ claim_id: "", claim: "", publisher: "", title: "", date: "YYYY-MM-DD", url: "", relevance: "", excerpt: "" }],
-          case_studies: [{ customer: "", industry: "", problem: "", solution: "", outcomes: "", link: "", source: "" }],
-          positioning_and_differentiation: {
-            value_prop: "", swot: { strengths: [""], weaknesses: [""], opportunities: [""], threats: [""] },
-            differentiators: [""],
-            competitor_set: [{ vendor: "", reason_in_set: "", url: "" }]
-          },
-          messaging_matrix: { nonnegotiables: [""], matrix: [{ persona: "", pain: "", value_statement: "", proof: "", cta: "" }] },
-          offer_strategy: { landing_page: { headline: "", subheadline: "", sections: [{ title: "", content: "", bullets: [""] }], cta: "" }, assets_checklist: [""] },
-          channel_plan: { emails: [{ subject: "", preview: "", body: "" }], linkedin: { connect_note: "", insight_post: "", dm: "", comment_strategy: "" }, paid: [{ variant: "", proof: "", cta: "" }], event: { concept: "", agenda: "", speakers: "", cta: "" } },
-          sales_enablement: { discovery_questions: [""], objection_cards: [{ blocker: "", reframe_with_claimid: "", proof: "", risk_reversal: "" }], proof_pack_outline: [""], handoff_rules: "" },
-          measurement_and_learning: { kpis: [""], weekly_test_plan: "", utm_and_crm: "", evidence_freshness_rule: "" },
-          compliance_and_governance: { substantiation_file: "", gdpr_pecr_checklist: "", brand_accessibility_checks: "", approval_log_note: "" },
-          risks_and_contingencies: "",
-          one_pager_summary: "",
-          meta: { icp_from_csv: icpFromCsv, it_spend_buckets: [] },
-          input_proof: {
-            fields_validated: true, csv_fields_found: fieldsFound, simplified_industry_values: industries,
-            top_terms: { purchases: topPurchases, blockers: topBlockers, needs: topNeeds }
-          }
-        }, null, 2),
-        "",
-        "RULES",
-        "- Executive Summary must open with a concrete, outcome-led statement for the ICP.",
-        "- Include 'Why now:' with 3–5 bullets, each tied to a ClaimID that maps to an Evidence Log item whose publisher URL domain is in the allowed list (ofcom.org.uk, gov.uk incl. ONS/NCSC, ons.gov.uk, citb.co.uk).",
-        "- Never cite the company itself as publisher for 'Why now'. If no allowed evidence is available, write 'No public evidence found' in that bullet.",
-        "- Use company website nouns (offers, features) exactly where relevant.",
-        "- Every objection_cards[*].reframe_with_claimid must reference an Evidence Log claim_id.",
-        "- MINIMUM COUNTS: messaging_matrix.nonnegotiables ≥ 3; messaging_matrix.matrix ≥ 3; channel_plan.emails ≥ 3; sales_enablement.discovery_questions ≥ 5; sales_enablement.objection_cards ≥ 3.",
-        (missingUspBlock || "(USPs provided; skip competitor set)")
-      ].filter(Boolean).join("\n");
-      // Enforce product nouns + security scope (appended to the prompt)
-      prompt += "\nPRODUCT HINTS (from website; use verbatim if present): " +
-        (productHints.length ? productHints.join(", ") : "(none)") + "\n" +
-        "CONSTRAINTS:\n" +
-        "- If product nouns are provided above, you MUST use those exact nouns verbatim in the Executive summary and Positioning sections (do not paraphrase or invent new brands).\n" +
+        "PRODUCT HINTS (use verbatim if present): " + (productHints.length ? productHints.join(", ") : "(none)"),
+        "CONSTRAINTS:",
+        "- If product nouns are provided above, use those exact nouns verbatim in Executive Summary and Positioning (no paraphrase).",
         (siteHasCyber
-          ? "- Security: keep claims aligned with the website content; you may mention VPN/fixed public IPs/remote management if present."
-          : "- Do NOT pitch cybersecurity products/services; only refer to connectivity security controls (e.g., fixed public IPs, VPN) if evidenced on the website.") + "\n";
+          ? "- Security: keep claims aligned with website content; you may mention VPN/fixed public IPs/remote management if present."
+          : "- Do NOT pitch cybersecurity products/services; only refer to connectivity security controls (e.g., fixed public IPs, VPN) if evidenced on the website."
+        ),
+        (missingUspBlock || "(USPs provided; skip competitor set)"),
+        "",
+        "MINIMUM COUNTS (hard):",
+        "- executive_summary_struct.why_now ≥ 4 and ≤ 5; outcomes ≥ 3 and ≤ 5.",
+        "- messaging_matrix.nonnegotiables ≥ 3; messaging_matrix.matrix ≥ 3.",
+        "- channel_plan.emails ≥ 3.",
+        "- sales_enablement.discovery_questions ≥ 5; sales_enablement.objection_cards ≥ 3.",
+        "",
+        "RETURN FORMAT — JSON ONLY. Use EXACTLY this top-level shape (fill all fields):",
+        JSON.stringify(CAMPAIGN_JSON_SHAPE, null, 2),
+        "JSON ONLY. No extra keys."
+      ].filter(Boolean).join("\n");
 
-      // Build a prose-specific prompt by reusing the inputs block and removing the JSON schema section.
-      const lead = prompt.split("OUTPUT — ONE JSON OBJECT")[0];
-
-      prosePrompt = [
-        lead.trim(),
-        "",
-        "OUTPUT — Write ONE campaign document in markdown with EXACTLY these sections and in THIS order:",
-        "",
-        "1. Executive Summary (≤180 words)",
-        "- ICP (from SimplifiedIndustry), the pressing problem (use ClaimIDs), your quantified outcome promise, primary offer, and proof points.",
-        "- Include 'Why now:' 3–5 bullets. Each bullet MUST reference a ClaimID that maps to an Evidence Log row whose publisher domain is allowed (ofcom.org.uk, gov.uk incl. ONS/NCSC, ons.gov.uk, citb.co.uk).",
-        "",
-        "2. Evidence Log (table)",
-        "- Columns: ClaimID | Publisher | Title | Date (YYYY-MM-DD) | URL | 2-line excerpt | Relevance.",
-        "- Cite ONLY allowed domains or write 'No public evidence found'.",
-        "",
-        "3. Case Study Library (table)",
-        "- Columns: Customer | Industry | Problem | Solution | Outcomes | Link | Source.",
-        "",
-        "4. Positioning & Differentiation",
-        "- Value proposition that binds TopPurchases (outcomes) with TopNeedsSupplier (selection criteria) and case proof.",
-        "- SWOT and 3–5 differentiators (do this even if USPs were provided).",
-        "- Competitor set: 5–7 named vendors with reason_in_set and URL (allowed domains preferred).",
-        "",
-        "5. ICP & Messaging Matrix (table)",
-        "- ICP slices by SimplifiedIndustry and ITSpendPct ranges (low/med/high).",
-        "- Nonnegotiables (from TopNeedsSupplier).",
-        "- Matrix columns: Persona → Pain (from TopBlockers) → Value statement → Proof (Case IDs + ClaimIDs) → CTA.",
-        "",
-        "6. Offer Strategy & Assets",
-        "- Core offer aligned to TopPurchases (e.g., ROI calculator, security posture check, architecture review) and who qualifies.",
-        "- Fallback offer (low friction) anchored on a strong ClaimID.",
-        "- Landing page wire copy blocks:",
-        "  • Outcome header; single sentence proof; 3-step 'How it works'; outcomes grid with metrics + ClaimIDs;",
-        "    testimonial(s) with role; CTA; substantiation note; privacy link.",
-        "- Asset checklist: LP, case study PDF, ROI worksheet, 3 diagrams, FAQ (objections from TopBlockers).",
-        "",
-        "7. Channel Plan & Orchestration",
-        "- Email sequence (3–5 touches) with subject + 90–120 word bodies:",
-        "  E1: problem→value (1 statistic with ClaimID) + 1 case outcome + CTA (core offer)",
-        "  E2: insight narrative (case story) + LP link",
-        "  E3: risk reversal addressing top TopBlockers",
-        "  E4: new development (≤90 days; ClaimID) + calendar ask",
-        "  E5: breakup/value recap (optional)",
-        "- LinkedIn: connect note, 1 insight post (with ClaimID), 1 DM with value asset, comment strategy.",
-        "- Paid (optional): 3 variants tied to TopPurchases, each with one quantified proof and clear CTA; note exclusions/negatives.",
-        "- Event/webinar concept: agenda, speakers (incl. customer), registration CTA.",
-        "",
-        "8. Sales Enablement Alignment",
-        "- Discovery questions (5–7) that test pains in TopBlockers and confirm TopNeedsSupplier.",
-        "- Objection cards: one per blocker → reframe with ClaimID + case metric + risk reversal mechanism.",
-        "- Proof pack outline: two case studies + 1-pager with outcomes and ClaimIDs.",
-        "- Handoff rules: MQL/SQL definition, required fields, follow-up SLA.",
-        "",
-        "9. Measurement & Learning Plan",
-        "- KPIs (MQLs, SAL%, meetings, pipeline, cost/opportunity, time to value).",
-        "- Weekly test plan (one variable per channel) and win criteria.",
-        "- UTM standards and CRM mapping (optionally include CompanyNumber).",
-        "- Evidence freshness rule: flag ClaimIDs > " + windowMonths + " months old.",
-        "",
-        "10. Compliance & Governance",
-        "- Substantiation file (export of Evidence Log).",
-        "- GDPR/PECR checklist and brand/accessibility checks.",
-        "- Approval log with dates/owners.",
-        "",
-        "11. Risks & Contingencies",
-        "- What happens if a ClaimID is withdrawn/contradicted; actions if budgets freeze.",
-        "",
-        "12. One Page Campaign Summary",
-        "- ICP, offer, three message bullets with proofs, channels & cadence, KPI targets, start date, owners, next review date.",
-        "",
-        "RULES FOR USING INPUTS",
-        "- MUST map TopPurchases → Offer Strategy & Paid variants.",
-        "- MUST map TopNeedsSupplier → Nonnegotiables (ICP & Messaging Matrix).",
-        "- MUST map TopBlockers → Objection cards + at least one email (E3).",
-        "- Company LinkedIn (URL only; do not scrape): " + (company.linkedin || "(none)") + " — craft connect note and DM that align to CSV pains/outcomes.",
-        "- Use company website nouns verbatim where present (PRODUCT HINTS already provided above in the user content).",
-        "",
-        "QUALITY GATE",
-        "- Every market claim must have a ClaimID + Evidence Log row (allowed publisher).",
-        "- At least one named case study or public success example (or clearly flagged as missing).",
-        "- Value statements quantify outcomes; features are secondary.",
-        "- Objections map directly from TopBlockers; offers align to TopPurchases & TopNeedsSupplier.",
-      ].join("\n");
-
-      /* === SINGLE-PASS (timeout-safe) ===   Skip prose+extractor to keep total runtime under gateway timeouts.
-   We ask the model to return the full campaign JSON directly.
-*/
+      /* === SINGLE-PASS GENERATION ===
+         Ask the model to return the full campaign JSON directly (structured ES included).
+      */
       const isAzure = !!process.env.AZURE_OPENAI_ENDPOINT;
       const response_format = isAzure
-        ? { type: "json_object" }                               // Azure: no json_schema support
-        : { type: "json_schema", json_schema: CAMPAIGN_SCHEMA };// OpenAI: enforce schema
+        ? { type: "json_object" }               // Azure: JSON only
+        : { type: "json_schema", json_schema: CAMPAIGN_SCHEMA }; // OpenAI: enforce schema
 
-      let campaign = null, issues = null;
+      let campaign = null;
 
       try {
         const llmRes = await callModel({
-          system: SYSTEM,         // (already defined above in your code)
-          prompt,                 // (the JSON prompt you built above)
-          temperature: 0.2,
-          response_format,
-          max_tokens: 6500
+          system: SYSTEM,
+          prompt,
+          temperature: 0.25,
+          top_p: 1,
+          max_tokens: 2200,
+          response_format
         });
+
         const raw = extractText(llmRes) || "{}";
         const stripped = stripJsonFences(raw);
         campaign = safeJson(stripped) || JSON.parse(stripped);
@@ -2947,6 +2970,7 @@ module.exports = async function (context, req) {
         temperature: 0.3
       });
       const provider = String(llmRes?._provider || "unknown");
+
 
       let text = extractText(llmRes) || "";
       // Guarantee the Subject line is present and correct at the top
