@@ -571,7 +571,9 @@
             body: JSON.stringify(payload)
           });
           const data = await res.json().catch(() => ({}));
-          log("---- PROMPT SENT TO LLM ----\n" + data._debug_prompt);
+          if (data && data._debug_prompt) {
+            log("---- PROMPT SENT TO LLM ----\n" + data._debug_prompt);
+          }
           if (!res.ok) {
             log(`generate failed ${res.status}: ${JSON.stringify(data)}`);
             setStatus("Failed", "err");
@@ -581,9 +583,12 @@
           window.CampaignPage.updateStage("DraftCampaign");
           window.CampaignPage.updateStage("QualityGate");
           window.CampaignPage.updateStage("Completed");
-          window.CampaignUI.setContract(data && data.contract_v1 ? data.contract_v1 : null);
+
+          // API now returns the bare contract (no contract_v1 wrapper)
+          window.CampaignUI.setContract(data);
           setStatus("Completed", "ok");
           $("#goBtn").disabled = false;
+
         } catch (e) {
           log(`generate error: ${e && e.message ? e.message : e}`);
           setStatus("Error", "err");
@@ -632,7 +637,7 @@
             const res = await fetch(u);
             if (!res.ok) { log(`fetch ${u} -> ${res.status}`); continue; }
             const js = await res.json().catch(() => ({}));
-            window.CampaignUI.setContract(js && js.contract_v1 ? js.contract_v1 : null);
+            window.CampaignUI.setContract(js);
             setStatus("Done", "ok");
             return;
           } catch (e) { log(`fetch error: ${e}`); }
@@ -1091,11 +1096,12 @@
       document.addEventListener('DOMContentLoaded', () => {
         mountTabs();
         // If your existing code drops the last result on window, adopt it without breaking anything
-        if (window.lastResult && window.lastResult.contract_v1) {
-          window.CampaignUI.setContract(window.lastResult.contract_v1);
+        if (window.lastResult) {
+          window.CampaignUI.setContract(window.lastResult);
         }
       });
     })();
   </script>
 </body>
+
 </html>
