@@ -964,7 +964,7 @@ async function callOpenAIOnce({ messages, temperature, response_format, max_toke
   if (!r.ok) {
     const code = data?.error?.code || r.status;
     const msg = data?.error?.message || r.statusText || "OpenAI request failed";
-    throw new Error(`[AZURE ${code}] ${msg}`);
+    throw new Error(`[OPENAI ${code}] ${msg}`);
   }
   return data;
 }
