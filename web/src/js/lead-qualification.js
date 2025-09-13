@@ -910,7 +910,8 @@ form?.addEventListener("reset", () => {
 
   // Preload “financial analysis needed” nudge if CH missing
   const ch = (form?.elements?.company_number?.value || "").trim();
-  if (!ch) document.getElementById("company_number_hint").style.display = "";
+  const hintEl = document.getElementById("company_number_hint");
+  if (!ch && hintEl) hintEl.style.display = "";
 
   enableSubmitIfValid();
   renderActivity();
