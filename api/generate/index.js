@@ -2457,7 +2457,7 @@ module.exports = async function (context, req) {
           "- Begin with exactly one positioning sentence.",
           "- Then a blank line.",
           "- Then a line containing only: Why now:",
-          "- Then exactly 4 or 5 bullet lines, each starting with \"- \".",
+          "- Then exactly 2 or 3 bullet lines, each starting with \"- \".",
           `- Each bullet MUST contain a quantified claim and 'ClaimID: <id>' where <id> is in this allowed set: ${idList}.`,
           `- Prefer the freshest items within ${windowMonths} months.`,
           "",
@@ -2699,12 +2699,14 @@ module.exports = async function (context, req) {
             // Apply the repaired ES to the campaign object
             campaign.executive_summary = es;
           } catch (e) {
+            const bulletCount = Array.isArray(bullets) ? bullets.length : 0;
             context.res = {
               status: 422,
               headers: cors,
               body: {
                 error: "Executive Summary must include a 'Why now:' section with 4–5 bullets.",
-                detail: String(e && e.message || e),
+                found_bullets: bulletCount,           // <— how many bullets we actually saw
+                has_why_now: !!hasWhyNow,             // <— whether the heading was detected
                 version: VERSION
               }
             };
@@ -2754,17 +2756,32 @@ module.exports = async function (context, req) {
             });
             campaign.executive_summary = es1;
 
-            // Re-parse bullets/ids using your existing parser
+            // Re-parse bullets/ids using your existing parser (tolerate "Claim ID" and "ClaimID")
             const esParsed1 = (function parseBulletsAndIds(text) {
               const hasWhyNow = /(^|\n)\s*why\s*now\s*:\s*$/i.test(text);
               const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
               const bulletIds = [];
               bullets.forEach(b => {
-                const m = b.match(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/);
+                const m = b.match(/\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)/); // <— tolerant regex
                 if (m) bulletIds.push(m[1]);
               });
               return { hasWhyNow, bullets, bulletIds };
             })(campaign.executive_summary);
+
+            // If repair broke the structure (rare), short-circuit with bullet count info
+            if (!esParsed1.hasWhyNow || esParsed1.bullets.length < 4 || esParsed1.bullets.length > 5) {
+              context.res = {
+                status: 422,
+                headers: cors,
+                body: {
+                  error: "Executive Summary must include a 'Why now:' section with 4–5 bullets.",
+                  has_why_now: !!esParsed1.hasWhyNow,
+                  found_bullets: esParsed1.bullets.length,
+                  version: VERSION
+                }
+              };
+              return;
+            }
 
             // Recheck staleness with repaired IDs
             let staleFound1 = false;
@@ -2799,18 +2816,35 @@ module.exports = async function (context, req) {
                 const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
                 const bulletIds = [];
                 bullets.forEach(b => {
-                  const m = b.match(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/);
+                  const m = b.match(/\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)/); // <— tolerant regex
                   if (m) bulletIds.push(m[1]);
                 });
                 return { hasWhyNow, bullets, bulletIds };
               })(campaign.executive_summary);
 
+              // If second repair broke structure, report bullet count too
+              if (!esParsed2.hasWhyNow || esParsed2.bullets.length < 4 || esParsed2.bullets.length > 5) {
+                context.res = {
+                  status: 422,
+                  headers: cors,
+                  body: {
+                    error: "Executive Summary must include a 'Why now:' section with 4–5 bullets.",
+                    has_why_now: !!esParsed2.hasWhyNow,
+                    found_bullets: esParsed2.bullets.length,
+                    version: VERSION
+                  }
+                };
+                return;
+              }
+
+              // Final staleness check (against original window)
               let staleFound2 = false;
+              const staleIds = [];
               for (const id of esParsed2.bulletIds) {
                 const ev = idToEvidence.get(id);
-                if (ev && isStale(ev.date, windowMonths)) { // NOTE: check against original window
+                if (ev && isStale(ev.date, windowMonths)) {
                   staleFound2 = true;
-                  break;
+                  staleIds.push(id);
                 }
               }
 
@@ -2820,6 +2854,9 @@ module.exports = async function (context, req) {
                   headers: cors,
                   body: {
                     error: "One or more 'Why now' ClaimIDs are older than the configured evidence window.",
+                    found_bullets: esParsed2.bullets.length,   // <— how many bullets were present
+                    has_why_now: !!esParsed2.hasWhyNow,        // <— whether heading was detected
+                    stale_claim_ids: staleIds,                  // <— which IDs were stale
                     version: VERSION
                   }
                 };
@@ -2827,12 +2864,18 @@ module.exports = async function (context, req) {
               }
             }
           } catch (e) {
+            // Include best-effort bullet count if available in the exception path
+            const esText = String(campaign.executive_summary || "");
+            const bullets = (esText.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []);
+            const hasWhyNow = /(^|\n)\s*why\s*now\s*:\s*$/i.test(esText);
             context.res = {
               status: 422,
               headers: cors,
               body: {
                 error: "One or more 'Why now' ClaimIDs are older than the configured evidence window.",
                 detail: String(e && e.message || e),
+                has_why_now: !!hasWhyNow,
+                found_bullets: bullets.length,
                 version: VERSION
               }
             };
