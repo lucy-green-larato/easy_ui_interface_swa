@@ -411,6 +411,17 @@ function normalizeCampaignKeys(input) {
     return out;
   };
 
+  function normalizeUrl(u) {
+    const s = String(u || "").trim();
+    if (!s) return "";
+    if (/^https?:\/\//i.test(s)) return s;
+    // default to https
+    return "https://" + s.replace(/^[./]+/, "");
+  }
+  function hostnameOf(u) {
+    try { return new URL(u).hostname.toLowerCase(); } catch { return ""; }
+  }
+
   const setDeep = (root, path, value) => {
     let cur = root;
     for (let i = 0; i < path.length - 1; i++) {
@@ -2335,7 +2346,8 @@ module.exports = async function (context, req) {
       const SEED_URLS_BY_INDUSTRY = {
         general: [
           "https://www.gov.uk/government/statistics",
-          "https://www.ons.gov.uk/businessindustryandtrade"
+          "https://www.ons.gov.uk/businessindustryandtrade",
+          "https://www.deloitte.com/us/en/insights.html"
         ],
         telecoms: [
           "https://www.ofcom.org.uk/research-and-data",
@@ -2403,6 +2415,61 @@ module.exports = async function (context, req) {
       }
       const securityHint = siteHasCyber || (topNeeds || []).some(t => /\bsec(urity)?|cyber/i.test(String(t.text || t)));
       const seedUrls = buildSeedUrlsByIndustry(industries, { securityHint });
+
+      // ---- Add company website + LinkedIn seeds (dedup + cap to 12) ----
+      try {
+        const set = new Set(seedUrls);
+        const add = (u) => { if (u && typeof u === "string") set.add(u); };
+        const norm = (u) => {
+          const s = String(u || "").trim();
+          if (!s) return "";
+          return /^https?:\/\//i.test(s) ? s : ("https://" + s.replace(/^[./]+/, ""));
+        };
+
+        // Pull from your known fields
+        const companyWebRaw =
+          (company && company.website) ||
+          (campaign?.meta?.company_details?.company_website_url) || "";
+        const companyLiRaw =
+          (company && company.linkedin) ||
+          (campaign?.meta?.company_details?.company_linkedin_url) || "";
+
+        // Company website: add home and useful sections for positioning/context
+        const companyWeb = norm(companyWebRaw);
+        if (companyWeb) {
+          let base = "";
+          try { base = new URL(companyWeb).origin; } catch { base = ""; }
+          if (base) {
+            add(base);
+            add(base + "/about");
+            add(base + "/news");
+            add(base + "/insights");
+            add(base + "/blog");
+            add(base + "/press");
+          }
+        }
+
+        // LinkedIn company page (+ About subpage when applicable)
+        const companyLi = norm(companyLiRaw);
+        if (companyLi) {
+          add(companyLi);
+          try {
+            const u = new URL(companyLi);
+            if (/linkedin\.com\/company\//i.test(u.href)) {
+              add(u.origin + u.pathname.replace(/\/+$/, "") + "/about/");
+            }
+          } catch { }
+        }
+
+        // Finalize (dedup + cap to keep token budget predictable)
+        seedUrls = Array.from(set).slice(0, 12);
+
+        // One-time visibility
+        context.log?.info?.("[seed] using URLs:", seedUrls);
+      } catch {
+        // Non-fatal; keep original seedUrls
+      }
+
       // Pull the text of each seed URL and append to the prompt as a bounded corpus
       let seedsText = "";
       try {
@@ -2415,6 +2482,129 @@ module.exports = async function (context, req) {
         seedsText = seeds.join("\n\n").slice(0, 150000);
       } catch {
         seedsText = "";
+      }
+
+      // --- Helpers to map bullets -> evidence rows by publisher/domain/alias ---
+
+      function parseBulletsAndIdsFromES(text) {
+        const hasWhyNow = /(^|\n)\s*why\s*now\s*:\s*$/i.test(text);
+        const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
+        const bulletIds = bullets.map(b => {
+          const m = b.match(/\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)/); // tolerate "Claim ID" / "ClaimID"
+          return m ? m[1] : null;
+        });
+        return { hasWhyNow, bullets, bulletIds };
+      }
+
+      function hostnameFromUrl(u) {
+        try { return new URL(String(u)).hostname.toLowerCase(); } catch { return ""; }
+      }
+
+      function norm(s) { return String(s || "").toLowerCase().trim(); }
+
+      // Map common display names -> canonical hostnames or publisher keys
+      // (You can extend this list without touching any other code.)
+      const PUBLISHER_ALIASES = new Map([
+        ["gov.uk", ["gov.uk", "government uk", "cabinet office", "gov uk"]],
+        ["ons.gov.uk", ["ons", "office for national statistics", "ons.gov.uk"]],
+        ["ofcom.org.uk", ["ofcom", "ofcom.org.uk"]],
+        ["citb.co.uk", ["citb", "construction industry training board", "citb.co.uk"]],
+      ]);
+
+      function inferMentionedKeys(bulletText) {
+        const t = norm(bulletText);
+        const keys = new Set();
+        for (const [key, aliases] of PUBLISHER_ALIASES.entries()) {
+          if (aliases.some(a => t.includes(norm(a)))) keys.add(key);
+        }
+        // Also try to extract raw hostnames present in the bullet
+        const urlish = Array.from(t.matchAll(/\b(https?:\/\/[^\s)]+|[a-z0-9.-]+\.[a-z]{2,})\b/g)).map(m => m[1]);
+        urlish.forEach(s => {
+          const h = hostnameFromUrl(/^https?:/i.test(s) ? s : `https://${s}`);
+          if (h) keys.add(h);
+        });
+        return Array.from(keys);
+      }
+
+      function buildEvidenceIndex(evidence_log) {
+        // Build lookups by hostname and by normalized publisher
+        const byHost = new Map();       // host -> array of evidence rows
+        const byPub = new Map();       // normalized publisher -> array of evidence rows
+        const byId = new Map();       // claim_id -> evidence row
+
+        for (const e of (evidence_log || [])) {
+          const id = String(e?.claim_id || "").trim();
+          if (id) byId.set(id, e);
+          const host = hostnameFromUrl(e?.url || "");
+          if (host) {
+            if (!byHost.has(host)) byHost.set(host, []);
+            byHost.get(host).push(e);
+          }
+          const pub = norm(e?.publisher || "");
+          if (pub) {
+            if (!byPub.has(pub)) byPub.set(pub, []);
+            byPub.get(pub).push(e);
+          }
+        }
+        return { byHost, byPub, byId };
+      }
+
+      // Try to select the "best" evidence row for a bullet given inferred keys.
+      // Preference order: exact hostname match > alias->hostname match > publisher name contains alias token.
+      // Returns an evidence object or null.
+      function pickEvidenceForBullet(bullet, index) {
+        const keys = inferMentionedKeys(bullet); // array of hostnames/keys
+        // Try exact hostname hits first
+        for (const k of keys) {
+          if (index.byHost.has(k)) return index.byHost.get(k)[0];
+        }
+        // Map alias keys to hosts and try again (e.g., "ons" -> "ons.gov.uk")
+        for (const k of keys) {
+          for (const [host, aliases] of PUBLISHER_ALIASES.entries()) {
+            if (aliases.includes(k) && index.byHost.has(host)) return index.byHost.get(host)[0];
+          }
+        }
+        // Finally, try publisher substrings
+        for (const [pub, arr] of index.byPub.entries()) {
+          if (keys.some(k => pub.includes(norm(k)))) return arr[0];
+        }
+        return null;
+      }
+
+      // Rewrite bullets so each one carries a real ClaimID from evidence_log, chosen by mapping the bullet's source.
+      function rewriteBulletsMappingToEvidence(es, evidence_log) {
+        const { hasWhyNow, bullets, bulletIds } = parseBulletsAndIdsFromES(es);
+        if (!hasWhyNow || bullets.length === 0) return null;
+
+        const index = buildEvidenceIndex(evidence_log);
+        const seen = new Set(bulletIds.filter(Boolean).map(norm)); // already-present IDs
+
+        const out = bullets.map((b, i) => {
+          const currentId = bulletIds[i] && String(bulletIds[i]).trim();
+          if (currentId && index.byId.has(currentId)) return b; // OK as-is
+
+          // Pick a matching evidence row by source mention
+          const ev = pickEvidenceForBullet(b, index);
+          if (!ev || !ev.claim_id) return null; // cannot fix this bullet deterministically
+
+          const cid = String(ev.claim_id).trim();
+          if (seen.has(norm(cid))) return b.includes("ClaimID") ? b : `${b} (ClaimID: ${cid})`; // avoid duplication
+
+          // Replace existing wrong ClaimID or append a new correct one
+          const withId = /\b[Cc]laim\s*ID[:\s]*[A-Za-z0-9_.-]+/.test(b)
+            ? b.replace(/\b[Cc]laim\s*ID[:\s]*[A-Za-z0-9_.-]+/, `ClaimID: ${cid}`)
+            : `${b} (ClaimID: ${cid})`;
+
+          seen.add(norm(cid));
+          return withId;
+        });
+
+        if (out.some(x => x === null)) return null;
+
+        // Rebuild ES preserving preface
+        const before = es.replace(/(\n|\r\n)?\s*why\s*now\s*:\s*[\s\S]*$/i, "").trimEnd();
+        const rebuilt = `${before}\n\nWhy now:\n${out.map(x => (x.startsWith("-") ? x : `- ${x}`)).join("\n")}`;
+        return rebuilt;
       }
 
       // ---------- domain allow list ----------
@@ -2671,8 +2861,47 @@ module.exports = async function (context, req) {
         const cutoff = new Date(now.getFullYear(), now.getMonth() - months, now.getDate());
         return d < cutoff;
       }
-      const logIds = new Set((campaign.evidence_log || []).map(e => String(e.claim_id || "").trim()).filter(Boolean));
+      {
+        const logIds = new Set((campaign.evidence_log || [])
+          .map(e => String(e.claim_id || "").trim())
+          .filter(Boolean));
 
+        let { hasWhyNow, bullets, bulletIds } = parseBulletsAndIdsFromES(String(campaign.executive_summary || ""));
+
+        // If any ID is missing/invalid, attempt a single source-aware rewrite using evidence_log
+        const allExist = bulletIds.length === bullets.length && bulletIds.every(id => id && logIds.has(String(id).trim()));
+        if (hasWhyNow && bullets.length >= 4 && bullets.length <= 5 && !allExist) {
+          const repaired = rewriteBulletsMappingToEvidence(String(campaign.executive_summary || ""), campaign.evidence_log);
+          if (repaired) {
+            campaign.executive_summary = repaired;
+            ({ hasWhyNow, bullets, bulletIds } = parseBulletsAndIdsFromES(repaired));
+          }
+        }
+
+        // Final strict check
+        const finalOk =
+          hasWhyNow &&
+          bullets.length >= 4 && bullets.length <= 5 &&
+          bulletIds.length === bullets.length &&
+          bulletIds.every(id => id && logIds.has(String(id).trim()));
+
+        if (!finalOk) {
+          const bulletCount = Array.isArray(bullets) ? bullets.length : 0;
+          const missing = bulletIds.filter(id => !id || !logIds.has(String(id).trim()));
+          context.res = {
+            status: 422,
+            headers: cors,
+            body: {
+              error: "Every 'Why now' bullet must reference a ClaimID that exists in evidence_log.",
+              has_why_now: !!hasWhyNow,
+              found_bullets: bulletCount,
+              missing_or_invalid_claimids: missing,
+              version: VERSION
+            }
+          };
+          return;
+        }
+      }
       // 3) Executive Summary: enforce Why-now mapping and count 4–5 bullets
       {
         const es0 = String(campaign.executive_summary || "");
