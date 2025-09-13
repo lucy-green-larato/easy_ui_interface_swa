@@ -2436,7 +2436,51 @@ module.exports = async function (context, req) {
         if (publisher && company.name && publisher.toLowerCase().includes(company.name.toLowerCase())) return false;
         return allowedPublisherRx.test(d);
       }
+      // Fix only the executive_summary to satisfy "Why now: 4–5 bullets" rule.
+      // Uses the evidence_log already produced, and your configured windowMonths.
+      async function repairExecutiveSummary({ campaign, windowMonths, callModel }) {
+        const validIds = (campaign?.evidence_log || [])
+          .map(e => String(e.claim_id || "").trim())
+          .filter(Boolean);
 
+        const system = [
+          "You are a precise assistant that outputs valid JSON only.",
+          "Return exactly one JSON object with a single key: executive_summary.",
+          "Do not include markdown fences."
+        ].join(" ");
+
+        // We constrain output: exactly 4–5 bullets; each includes 'ClaimID: <id>' from validIds.
+        const user = [
+          "Rewrite the executive_summary to satisfy these hard rules:",
+          "- It MUST contain a literal heading 'Why now:' on its own line (case-insensitive OK).",
+          "- It MUST have exactly 4 or 5 bullets immediately after that heading.",
+          "- Each bullet MUST include 'ClaimID: <id>' where <id> is one of these: ",
+          validIds.length ? validIds.join(", ") : "(none)",
+          "- If there are no valid IDs, still write 4 bullets but include 'ClaimID: TBD'.",
+          `- Avoid referencing evidence older than ${windowMonths} months; prefer fresher items if mentioned.`,
+          "",
+          "Return JSON of the form:",
+          '{ "executive_summary": "Your full executive summary text with\\nWhy now:\\n- bullet 1 (ClaimID: X)\\n- bullet 2 (ClaimID: Y)\\n..." }',
+          "",
+          "Only return JSON; no commentary."
+        ].join("\n");
+
+        const resp = await callModel({
+          system,
+          prompt: user,
+          temperature: 0.2,
+          max_tokens: 400,
+          response_format: { type: "json_object" } // minimal and fast; we just need one string
+        });
+
+        const raw = extractText(resp) || "{}";
+        const stripped = stripJsonFences(raw);
+        const obj = safeJson(stripped) ?? JSON.parse(stripped);
+        const es = typeof obj?.executive_summary === "string" ? obj.executive_summary : "";
+
+        if (!es.trim()) throw new Error("Executive Summary repair produced empty text");
+        return es;
+      }
       // ---------- model prompt (JSON-only) ----------
       const banlist = [
         "positioned to leverage", "cutting-edge", "best-in-class", "holistic",
@@ -2447,7 +2491,8 @@ module.exports = async function (context, req) {
         "Return VALID JSON ONLY (no markdown/prose outside JSON). British English. Concise.",
         "Absolutely avoid: " + banlist.join(", ") + ".",
         "No assumptions. Every market statement must have an Evidence Log row with: claim_id, claim, publisher, title, date (YYYY-MM-DD), url, ≤2-line excerpt, relevance.",
-        "Executive Summary must open with a positioning line and include a 'Why now:' list of 4–5 quantified bullets with ClaimIDs.",
+        "Executive Summary structure: positioning sentence → blank line → Why now: (literal, on its own line) → exactly 4–5 bullets, each line starts with -.",
+        "Each bullet includes a quantified claim and ClaimID: <id> referencing an existing evidence_log.claim_id.",
         "Use CSV fields only: CompanyName, CompanyNumber, SimplifiedIndustry, ITSpendPct, TopPurchases, TopBlockers, TopNeedsSupplier.",
         "Map objections from TopBlockers. Align offers to TopPurchases & TopNeedsSupplier.",
         "Do NOT cite the company or its website as the publisher for 'Why now'. Prefer reputable UK sources: ofcom.org.uk, gov.uk (incl. ONS/NCSC), ons.gov.uk, citb.co.uk.",
@@ -2627,58 +2672,75 @@ module.exports = async function (context, req) {
       const logIds = new Set((campaign.evidence_log || []).map(e => String(e.claim_id || "").trim()).filter(Boolean));
 
       // 3) Executive Summary: enforce Why-now mapping and count 4–5 bullets
-      //    We parse bullets from 'Why now:' in the plain executive_summary string.
-      const es = String(campaign.executive_summary || "");
-      const hasWhyNow = /why\s*now\s*:/i.test(es);
-      const bullets = (es.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
+      {
+        const es0 = String(campaign.executive_summary || "");
+        let es = es0;
 
-      if (!hasWhyNow || bullets.length < 4 || bullets.length > 5) {
-        context.res = {
-          status: 422,
-          headers: cors,
-          body: { error: "Executive Summary must include a 'Why now:' section with 4–5 bullets.", version: VERSION }
-        };
-        return;
+        function parseBulletsAndIds(text) {
+          const hasWhyNow = /(^|\n)\s*why\s*now\s*:\s*$/i.test(text);
+          const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
+          const bulletIds = [];
+          bullets.forEach(b => {
+            const m = b.match(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/);
+            if (m) bulletIds.push(m[1]);
+          });
+          return { hasWhyNow, bullets, bulletIds };
+        }
+        // First evaluation
+        let { hasWhyNow, bullets, bulletIds } = parseBulletsAndIds(es);
+        // If not compliant, run a single targeted repair pass
+        if (!hasWhyNow || bullets.length < 4 || bullets.length > 5) {
+          try {
+            es = await repairExecutiveSummary({ campaign, windowMonths, callModel });
+            // Re-parse
+            ({ hasWhyNow, bullets, bulletIds } = parseBulletsAndIds(es));
+            // Apply the repaired ES to the campaign object
+            campaign.executive_summary = es;
+          } catch (e) {
+            context.res = {
+              status: 422,
+              headers: cors,
+              body: {
+                error: "Executive Summary must include a 'Why now:' section with 4–5 bullets.",
+                detail: String(e && e.message || e),
+                version: VERSION
+              }
+            };
+            return;
+          }
+        }
+        // Continue with your existing mapping & freshness checks (unchanged)
+        const logIds = new Set((campaign.evidence_log || []).map(e => String(e.claim_id || "").trim()).filter(Boolean));
+        if (bulletIds.length !== bullets.length || bulletIds.some(id => !logIds.has(id))) {
+          context.res = {
+            status: 422,
+            headers: cors,
+            body: { error: "Every 'Why now' bullet must reference a ClaimID that exists in evidence_log.", version: VERSION }
+          };
+          return;
+        }
+        // Freshness evaluation (your existing code)
+        let staleFound = false;
+        const idToEvidence = new Map();
+        for (const e of (campaign.evidence_log || [])) {
+          const dt = e.date;
+          const stale = isStale(dt, windowMonths);
+          if (typeof e.freshness_status !== "string") e.freshness_status = stale ? "stale" : "fresh";
+          idToEvidence.set(String(e.claim_id || "").trim(), e);
+        }
+        for (const id of bulletIds) {
+          const ev = idToEvidence.get(id);
+          if (ev && isStale(ev.date, windowMonths)) { staleFound = true; break; }
+        }
+        if (staleFound) {
+          context.res = {
+            status: 422,
+            headers: cors,
+            body: { error: "One or more 'Why now' ClaimIDs are older than the configured evidence window.", version: VERSION }
+          };
+          return;
+        }
       }
-
-      // 3a) Each why-now bullet must reference a ClaimID present in evidence_log
-      const bulletClaimIds = [];
-      bullets.forEach(b => {
-        const m = b.match(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/);
-        if (m) bulletClaimIds.push(m[1]);
-      });
-      if (bulletClaimIds.length !== bullets.length || bulletClaimIds.some(id => !logIds.has(id))) {
-        context.res = {
-          status: 422,
-          headers: cors,
-          body: { error: "Every 'Why now' bullet must reference a ClaimID that exists in evidence_log.", version: VERSION }
-        };
-        return;
-      }
-
-      // 3b) Freshness check for Why-now references
-      //     Add 'freshness_status' if missing; fail if any Why-now evidence is older than windowMonths.
-      let staleFound = false;
-      const idToEvidence = new Map();
-      for (const e of (campaign.evidence_log || [])) {
-        const dt = e.date;
-        const stale = isStale(dt, windowMonths);
-        if (typeof e.freshness_status !== "string") e.freshness_status = stale ? "stale" : "fresh";
-        idToEvidence.set(String(e.claim_id || "").trim(), e);
-      }
-      for (const id of bulletClaimIds) {
-        const ev = idToEvidence.get(id);
-        if (ev && isStale(ev.date, windowMonths)) { staleFound = true; break; }
-      }
-      if (staleFound) {
-        context.res = {
-          status: 422,
-          headers: cors,
-          body: { error: "One or more 'Why now' ClaimIDs are older than the configured evidence window.", version: VERSION }
-        };
-        return;
-      }
-
       // 4) Allowed publisher domains for all evidence rows
       const badPublisher = (campaign.evidence_log || []).find(e => !isAllowedPublisher(e.url, e.publisher));
       if (badPublisher) {
@@ -2689,7 +2751,6 @@ module.exports = async function (context, req) {
         };
         return;
       }
-
       // 5) Email thresholds: ≥3 emails; 90–200 word bodies; ≥1 ClaimID in each
       if (!Array.isArray(campaign.channel_plan?.emails) || campaign.channel_plan.emails.length < 3) {
         context.res = {
