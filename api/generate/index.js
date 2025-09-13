@@ -1,7 +1,7 @@
 // index.js – Azure Function handler for /api/generate
-// Version: v3-markdown-first-2025-09-08-1 json compatibility
+// Version: v3-markdown-first-2025-09-13-1 json compatibility
 
-const VERSION = "DEV-verify-2025-09-10-1"; // <-- bump this every edit
+const VERSION = "DEV-verify-2025-09-13-1"; // <-- bump this every edit
 try {
   console.log(`[${VERSION}] module loaded at ${new Date().toISOString()} cwd=${process.cwd()} dir=${__dirname}`);
 } catch { }
@@ -878,7 +878,8 @@ async function callModel(opts) {
 const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
 const azKey = process.env.AZURE_OPENAI_API_KEY;
 const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
+const AZURE_API_VERSION_DEFAULT = "2024-08-01-preview";
+const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || AZURE_API_VERSION_DEFAULT;
 
 const oaKey = process.env.OPENAI_API_KEY;
 const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
