@@ -432,6 +432,57 @@ function normalizeCampaignKeys(input) {
 
 // Compile once
 const validateCampaign = ajv.compile(WRITE_CAMPAIGN_SCHEMA);
+// Make a JSON Schema acceptable to Azure response_format=json_schema.
+// Rule: whenever an object has `properties`, add/overwrite:
+//   - type: "object"
+//   - required: every key in `properties`
+//   - additionalProperties: false (defensive)
+function azureifyJsonSchemaForResponseFormat(schema) {
+  function clone(x) {
+    return (x && typeof x === "object") ? JSON.parse(JSON.stringify(x)) : x;
+  }
+  function walk(node) {
+    if (!node || typeof node !== "object") return node;
+
+    // Arrays
+    if (node.type === "array" || node.items) {
+      const out = { ...node };
+      if (out.items) out.items = walk(out.items);
+      return out;
+    }
+
+    // Objects with properties
+    if (node.properties && typeof node.properties === "object") {
+      const out = { ...node, type: "object" };
+      const props = {};
+      for (const [k, v] of Object.entries(node.properties)) {
+        props[k] = walk(v);
+      }
+      out.properties = props;
+      // REQUIRED must include *every* key in properties for Azure
+      const keys = Object.keys(props);
+      out.required = keys;
+      if (typeof out.additionalProperties === "undefined") {
+        out.additionalProperties = false;
+      }
+      // Recurse combinators if present
+      if (Array.isArray(out.allOf)) out.allOf = out.allOf.map(walk);
+      if (Array.isArray(out.anyOf)) out.anyOf = out.anyOf.map(walk);
+      if (Array.isArray(out.oneOf)) out.oneOf = out.oneOf.map(walk);
+      return out;
+    }
+
+    // Combinators without top-level properties
+    const out = { ...node };
+    if (Array.isArray(out.allOf)) out.allOf = out.allOf.map(walk);
+    if (Array.isArray(out.anyOf)) out.anyOf = out.anyOf.map(walk);
+    if (Array.isArray(out.oneOf)) out.oneOf = out.oneOf.map(walk);
+    return out;
+  }
+
+  return walk(clone(schema));
+}
+
 function summarizeKeyMismatches(obj) {
   const top = Object.keys(obj || {}).sort();
   const expected = [
@@ -2368,19 +2419,18 @@ module.exports = async function (context, req) {
       ].join("\n");
 
       // ---------- response_format ----------
-      const isAzure = !!process.env.AZURE_OPENAI_ENDPOINT && !!process.env.AZURE_OPENAI_KEY;
+      const isAzure = !!(process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_KEY);
 
-      const response_format = isAzure
-        ? { type: "json_object" } // Azure supports JSON object only
-        : {
-          // OpenAI: enforce your schema strictly at generation time
-          type: "json_schema",
-          json_schema: {
-            name: "write_campaign",
-            schema: WRITE_CAMPAIGN_SCHEMA,
-            strict: true
-          }
-        };
+      const response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: "write_campaign",
+          schema: isAzure
+            ? azureifyJsonSchemaForResponseFormat(WRITE_CAMPAIGN_SCHEMA)  // << Azure version
+            : WRITE_CAMPAIGN_SCHEMA,                                      // << Original for OpenAI
+          strict: true
+        }
+      };
 
       // ---------- LLM call ----------
       // ---- Generate + parse ----
