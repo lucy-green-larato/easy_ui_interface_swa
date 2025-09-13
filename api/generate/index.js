@@ -10,8 +10,8 @@ const { z } = require("zod");
 const DEBUG_PROMPT = process.env.DEBUG_PROMPT === "1";
 
 /* === timeouts / abortable fetch === */
-const DEFAULT_FETCH_TIMEOUT = Number(process.env.FETCH_TIMEOUT_MS || "6500");   // ms per HTTP fetch (web pages)
-const DEFAULT_LLM_TIMEOUT = Number(process.env.LLM_TIMEOUT_MS || "45000"); // ms per LLM call
+const DEFAULT_FETCH_TIMEOUT = Number(process.env.FETCH_TIMEOUT_MS || "9000");   // ms per HTTP fetch (web pages)
+const DEFAULT_LLM_TIMEOUT = Number(process.env.LLM_TIMEOUT_MS || "85000"); // ms per LLM call
 
 
 
@@ -377,6 +377,13 @@ const CAMPAIGN_ALIAS_MAP = {
   TopNeedsSupplier: ["meta", "top_needs_supplier"]
 };
 
+function abortableFetch(url, init = {}, ms = DEFAULT_FETCH_TIMEOUT) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("timeout")), ms);
+  const merged = { ...init, signal: controller.signal };
+  return fetch(url, merged).finally(() => clearTimeout(timer));
+};
+
 function normalizeCampaignKeys(input) {
   // Deep clone while applying alias moves
   const visit = (node) => {
@@ -574,13 +581,6 @@ function summarizeKeyMismatches(obj) {
   const missing = expected.filter(k => !(k in (obj || {})));
   const extras = top.filter(k => !expected.includes(k));
   return { missing, extras };
-}
-
-function abortableFetch(url, init = {}, ms = DEFAULT_FETCH_TIMEOUT) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error("timeout")), ms);
-  const merged = { ...init, signal: controller.signal };
-  return fetch(url, merged).finally(() => clearTimeout(timer));
 }
 
 function splitList(s) {
@@ -1047,7 +1047,7 @@ async function callAzureOnce({ messages, temperature, response_format, max_token
     const code = data?.error?.code || r.status;
     const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
 
-    // Retry-After can be a number of seconds or an HTTP-date; normalize to seconds if present
+    // Normalise Retry-After → seconds (handles number or HTTP-date)
     let retryAfter = r.headers.get("retry-after") || "";
     if (retryAfter) {
       const n = Number(retryAfter);
@@ -1056,7 +1056,7 @@ async function callAzureOnce({ messages, temperature, response_format, max_token
         if (!Number.isNaN(dt.getTime())) {
           retryAfter = String(Math.max(0, Math.ceil((dt.getTime() - Date.now()) / 1000)));
         } else {
-          retryAfter = ""; // unparseable; drop from message
+          retryAfter = "";
         }
       } else {
         retryAfter = String(Math.max(0, Math.ceil(n)));
@@ -1064,12 +1064,10 @@ async function callAzureOnce({ messages, temperature, response_format, max_token
     }
 
     const err = new Error(`[AZURE ${code}] ${msg}${retryAfter ? ` (retry-after=${retryAfter}s)` : ""}`);
-    // Tag for router fallback
     err.__isAzure429 = (String(code) === "429" || /rate\s*limit|thrott|too\s*many\s*requests/i.test(String(msg)));
     err.__isTransient = (r.status >= 500) || /ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed/i.test(String(msg));
     throw err;
   }
-
   return data;
 }
 
@@ -2502,16 +2500,17 @@ module.exports = async function (context, req) {
       // ---------- response_format ----------
       const isAzure = !!(process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_KEY);
 
-      const response_format = {
-        type: "json_schema",
-        json_schema: {
-          name: "write_campaign",
-          schema: isAzure
-            ? azureifyJsonSchemaForResponseFormatV2(WRITE_CAMPAIGN_SCHEMA)  // << Azure version
-            : WRITE_CAMPAIGN_SCHEMA,                                      // << Original for OpenAI
-          strict: true
-        }
-      };
+      const response_format = isAzure
+        ? { type: "json_object" } // Azure: avoid on-wire schema validation
+        : {
+          type: "json_schema",  // OpenAI: enforce full schema strictly
+          json_schema: {
+            name: "write_campaign",
+            schema: WRITE_CAMPAIGN_SCHEMA,
+            strict: true
+          }
+        };
+
       /// DEBUG REMOVE AFTER//
       if (isAzure) {
         try {
