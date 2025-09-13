@@ -1171,7 +1171,7 @@ async function callAzureOnce({ messages, temperature, response_format, max_token
     temperature,
     messages,
     ...(response_format ? { response_format } : {}),
-    ...(Number.isFinite(max_tokens) ? { max_output_tokens: max_tokens } : {})
+    ...(Number.isFinite(max_tokens) ? { max_tokens } : {})
   };
 
   const r = await abortableFetch(url, {
@@ -1220,7 +1220,7 @@ async function callOpenAIOnce({ messages, temperature, response_format, max_toke
     temperature,
     messages,
     ...(response_format ? { response_format } : {}),
-    ...(Number.isFinite(max_tokens) ? { max_output_tokens: max_tokens } : {})
+    ...(Number.isFinite(max_tokens) ? { max_tokens } : {})
   };
 
   const r = await abortableFetch("https://api.openai.com/v1/chat/completions", {
@@ -2610,7 +2610,7 @@ module.exports = async function (context, req) {
           if (t) seeds.push(`=== SEED: ${u} ===\n${t}`);
         }
         // Keep this bounded so the prompt stays within token budget
-        seedsText = seeds.join("\n\n").slice(0, 150000);
+        seedsText = seeds.join("\n\n").slice(0, 80000);
       } catch {
         seedsText = "";
       }
