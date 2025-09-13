@@ -837,6 +837,138 @@ function stripJsonFences(s) {
   return t;
 }
 
+function tryJsonParse(s) {
+  if (s == null) return null;
+  if (typeof s !== "string") return null;
+  try { return JSON.parse(s); } catch { return null; }
+}
+
+function stripCodeFences(s) {
+  if (typeof s !== "string") return s;
+  // ```json ... ``` or ``` ... ```
+  const m = s.match(/^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/i);
+  return m ? m[1] : s;
+}
+
+function sliceToOuterBraces(s) {
+  if (typeof s !== "string") return s;
+  const first = s.indexOf("{");
+  const last = s.lastIndexOf("}");
+  if (first >= 0 && last > first) return s.slice(first, last + 1);
+  return s;
+}
+
+// Replace curly “smart quotes” with straight quotes
+function normalizeQuotes(s) {
+  if (typeof s !== "string") return s;
+  return s
+    .replace(/[\u201C\u201D\u2033]/g, '"') // double
+    .replace(/[\u2018\u2019\u2032]/g, "'"); // single
+}
+
+// Remove trailing commas before } or ]
+function stripTrailingCommas(s) {
+  if (typeof s !== "string") return s;
+  return s.replace(/,\s*(\}|\])/g, "$1");
+}
+
+// Escape literal newlines that appear inside quoted JSON strings.
+// This is a heuristic: it replaces raw CR/LF between quotes with \n.
+function escapeNewlinesInsideStrings(s) {
+  if (typeof s !== "string") return s;
+  let out = "";
+  let inString = false;
+  let esc = false;
+  let quote = null;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (!inString) {
+      if (ch === '"' || ch === "'") {
+        inString = true; quote = ch; esc = false; out += ch; continue;
+      }
+      out += ch; continue;
+    }
+    // in string:
+    if (esc) { out += ch; esc = false; continue; }
+    if (ch === "\\") { out += ch; esc = true; continue; }
+    if (ch === quote) { inString = false; quote = null; out += ch; continue; }
+    if (ch === "\n") { out += "\\n"; continue; }
+    if (ch === "\r") { out += "\\r"; continue; }
+    out += ch;
+  }
+  return out;
+}
+
+// Try multiple sanitization passes and return {obj, text, steps}
+function coerceToJsonObject(maybeObjOrText) {
+  // If we already have an object, return it
+  if (maybeObjOrText && typeof maybeObjOrText === "object" && !Array.isArray(maybeObjOrText)) {
+    return { obj: maybeObjOrText, text: null, steps: ["already-object"] };
+  }
+
+  let text = String(maybeObjOrText || "");
+  const steps = [];
+
+  // 1) strip fences
+  text = stripCodeFences(text); steps.push("stripCodeFences");
+
+  // 2) try straight parse
+  let obj = tryJsonParse(text);
+  if (obj) return { obj, text, steps: [...steps, "parse-raw"] };
+
+  // 3) slice to outer braces
+  text = sliceToOuterBraces(text); steps.push("sliceToOuterBraces");
+  obj = tryJsonParse(text);
+  if (obj) return { obj, text, steps: [...steps, "parse-sliced"] };
+
+  // 4) normalize quotes and strip trailing commas
+  text = normalizeQuotes(text); steps.push("normalizeQuotes");
+  text = stripTrailingCommas(text); steps.push("stripTrailingCommas");
+  obj = tryJsonParse(text);
+  if (obj) return { obj, text, steps: [...steps, "parse-normalized"] };
+
+  // 5) escape literal newlines inside quoted strings
+  text = escapeNewlinesInsideStrings(text); steps.push("escapeNewlinesInsideStrings");
+  obj = tryJsonParse(text);
+  if (obj) return { obj, text, steps: [...steps, "parse-escaped-newlines"] };
+
+  // 6) last attempt: trim whitespace and re-slice
+  text = sliceToOuterBraces(text.trim()); steps.push("slice-trimmed");
+  obj = tryJsonParse(text);
+  if (obj) return { obj, text, steps: [...steps, "parse-trimmed"] };
+
+  return { obj: null, text, steps };
+}
+
+// Prefer already-parsed content if provider supplies it
+function extractJsonCandidateFromLLM(llmRes) {
+  // OpenAI/Azure chat completions shape:
+  const msg = llmRes?.choices?.[0]?.message;
+  if (!msg) return null;
+
+  // Some SDKs put parsed JSON here when response_format=json_object
+  if (msg.parsed && typeof msg.parsed === "object" && !Array.isArray(msg.parsed)) {
+    return msg.parsed;
+  }
+  // Some return an object directly in content
+  if (msg.content && typeof msg.content === "object" && !Array.isArray(msg.content)) {
+    return msg.content;
+  }
+  // Usual case: content is a string
+  if (typeof msg.content === "string") return msg.content;
+
+  // Fallback: some providers return tool_messages or content array
+  if (Array.isArray(msg.content)) {
+    // If any item looks like a JSON object, take it
+    const objItem = msg.content.find(x => x && typeof x === "object" && !Array.isArray(x));
+    if (objItem) return objItem;
+    // If it’s a text array, join
+    const text = msg.content.map(x => (typeof x === "string" ? x : (x?.text || ""))).join("\n");
+    if (text.trim()) return text;
+  }
+  return null;
+}
+
 function sanitizeModelJson(obj) {
   // If the whole thing is actually markdown, wrap it.
   if (typeof obj === "string") {
@@ -1965,7 +2097,6 @@ module.exports = async function (context, req) {
         return;
       }
 
-      // Robust parse (handles providers that sneak in stray text)
       // Robust parse with fence stripping
       let parsed = null;
       const stripped = stripJsonFences(raw);
@@ -2762,30 +2893,38 @@ module.exports = async function (context, req) {
       }
 
       // ---------- LLM call ----------
-      // ---- Generate + parse ----
       let campaign = null;
 
       try {
         const llmRes = await callModel({
           system: SYSTEM,
           prompt,
-          temperature: 0.4,
+          temperature: 0.2,
           max_tokens: 3200,
-          response_format
+          response_format,   // your Azure/OpenAI split stays as you have it
+          top_p: 1
         });
 
-        const raw = extractText(llmRes) || "{}";
-        const stripped = stripJsonFences(raw);
-        // try lenient first; fall back to strict parse
-        campaign = safeJson(stripped) ?? JSON.parse(stripped);
+        // 1) Prefer already-parsed content if the provider gave it (json_object paths often do)
+        const candidate = extractJsonCandidateFromLLM(llmRes);
+
+        // 2) Run robust coercion/repair passes if it's text
+        const { obj, text, steps } = coerceToJsonObject(candidate);
+
+        if (!obj) {
+          const preview = (text || "").slice(0, 400);
+          throw new Error(`Could not coerce JSON after steps=[${steps.join("->")}]; preview=${preview}`);
+        }
+
+        campaign = obj;
+
       } catch (e) {
-        // LLM call (or parse) failed
         context.res = {
           status: 502,
           headers: cors,
           body: {
             error: "LLM call failed",
-            detail: String((e && e.message) || e),
+            detail: String(e && e.message || e),
             version: VERSION
           }
         };
