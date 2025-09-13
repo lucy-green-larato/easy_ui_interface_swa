@@ -1171,7 +1171,7 @@ async function callAzureOnce({ messages, temperature, response_format, max_token
     temperature,
     messages,
     ...(response_format ? { response_format } : {}),
-    ...(max_tokens ? { max_tokens } : {})
+    ...(Number.isFinite(max_tokens) ? { max_output_tokens: max_tokens } : {})
   };
 
   const r = await abortableFetch(url, {
@@ -1220,7 +1220,7 @@ async function callOpenAIOnce({ messages, temperature, response_format, max_toke
     temperature,
     messages,
     ...(response_format ? { response_format } : {}),
-    ...(max_tokens ? { max_tokens } : {})
+    ...(Number.isFinite(max_tokens) ? { max_output_tokens: max_tokens } : {})
   };
 
   const r = await abortableFetch("https://api.openai.com/v1/chat/completions", {
@@ -2778,7 +2778,7 @@ module.exports = async function (context, req) {
           "- Begin with exactly one positioning sentence.",
           "- Then a blank line.",
           "- Then a line containing only: Why now:",
-          "- Then exactly 2 or 3 bullet lines, each starting with \"- \".",
+          "- Then exactly 4 or 5 bullet lines, each starting with \"- \".",
           `- Each bullet MUST contain a quantified claim and 'ClaimID: <id>' where <id> is in this allowed set: ${idList}.`,
           `- Prefer the freshest items within ${windowMonths} months.`,
           "",
@@ -2900,7 +2900,7 @@ module.exports = async function (context, req) {
           system: SYSTEM,
           prompt,
           temperature: 0.2,
-          max_tokens: 3200,
+          max_tokens: 7000,
           response_format,   // your Azure/OpenAI split stays as you have it
           top_p: 1
         });
