@@ -2438,31 +2438,33 @@ module.exports = async function (context, req) {
       }
       // Fix only the executive_summary to satisfy "Why now: 4–5 bullets" rule.
       // Uses the evidence_log already produced, and your configured windowMonths.
-      async function repairExecutiveSummary({ campaign, windowMonths, callModel }) {
-        const validIds = (campaign?.evidence_log || [])
-          .map(e => String(e.claim_id || "").trim())
-          .filter(Boolean);
+      // Rewrites ONLY the executive_summary to meet structure rules and to use specific allowed ClaimIDs.
+      // - allowedIds: array of claim_id strings that are considered "fresh" (or relaxed set on 2nd try)
+      // - windowMonths: used only to phrase the constraint; freshness is enforced by allowedIds
+      async function repairExecutiveSummary({ campaign, allowedIds, windowMonths, callModel }) {
+        const ids = Array.from(new Set((allowedIds || []).map(s => String(s || "").trim()).filter(Boolean)));
+        const idList = ids.length ? ids.join(", ") : "(none available)";
 
         const system = [
           "You are a precise assistant that outputs valid JSON only.",
-          "Return exactly one JSON object with a single key: executive_summary.",
-          "Do not include markdown fences."
+          "Return exactly one JSON object with this shape: { \"executive_summary\": \"...\" }.",
+          "Do not include markdown fences or commentary."
         ].join(" ");
 
-        // We constrain output: exactly 4–5 bullets; each includes 'ClaimID: <id>' from validIds.
+        // Hard structural rules; bullets MUST use allowed ClaimIDs (if none, keep 'ClaimID: TBD')
         const user = [
           "Rewrite the executive_summary to satisfy these hard rules:",
-          "- It MUST contain a literal heading 'Why now:' on its own line (case-insensitive OK).",
-          "- It MUST have exactly 4 or 5 bullets immediately after that heading.",
-          "- Each bullet MUST include 'ClaimID: <id>' where <id> is one of these: ",
-          validIds.length ? validIds.join(", ") : "(none)",
-          "- If there are no valid IDs, still write 4 bullets but include 'ClaimID: TBD'.",
-          `- Avoid referencing evidence older than ${windowMonths} months; prefer fresher items if mentioned.`,
+          "- Begin with exactly one positioning sentence.",
+          "- Then a blank line.",
+          "- Then a line containing only: Why now:",
+          "- Then exactly 4 or 5 bullet lines, each starting with \"- \".",
+          `- Each bullet MUST contain a quantified claim and 'ClaimID: <id>' where <id> is in this allowed set: ${idList}.`,
+          `- Prefer the freshest items within ${windowMonths} months.`,
           "",
-          "Return JSON of the form:",
-          '{ "executive_summary": "Your full executive summary text with\\nWhy now:\\n- bullet 1 (ClaimID: X)\\n- bullet 2 (ClaimID: Y)\\n..." }',
+          "If allowed set is empty, still write 4 bullets and use 'ClaimID: TBD'.",
           "",
-          "Only return JSON; no commentary."
+          "Return JSON only:",
+          "{ \"executive_summary\": \"<full text here>\" }"
         ].join("\n");
 
         const resp = await callModel({
@@ -2470,14 +2472,13 @@ module.exports = async function (context, req) {
           prompt: user,
           temperature: 0.2,
           max_tokens: 400,
-          response_format: { type: "json_object" } // minimal and fast; we just need one string
+          response_format: { type: "json_object" }
         });
 
         const raw = extractText(resp) || "{}";
         const stripped = stripJsonFences(raw);
         const obj = safeJson(stripped) ?? JSON.parse(stripped);
         const es = typeof obj?.executive_summary === "string" ? obj.executive_summary : "";
-
         if (!es.trim()) throw new Error("Executive Summary repair produced empty text");
         return es;
       }
@@ -2493,6 +2494,7 @@ module.exports = async function (context, req) {
         "No assumptions. Every market statement must have an Evidence Log row with: claim_id, claim, publisher, title, date (YYYY-MM-DD), url, ≤2-line excerpt, relevance.",
         "Executive Summary structure: positioning sentence → blank line → Why now: (literal, on its own line) → exactly 4–5 bullets, each line starts with -.",
         "Each bullet includes a quantified claim and ClaimID: <id> referencing an existing evidence_log.claim_id.",
+        "When writing executive_summary → Why now bullets, prefer claims whose evidence_log.date is within the past ${windowMonths} months. Avoid referencing older evidence.",
         "Use CSV fields only: CompanyName, CompanyNumber, SimplifiedIndustry, ITSpendPct, TopPurchases, TopBlockers, TopNeedsSupplier.",
         "Map objections from TopBlockers. Align offers to TopPurchases & TopNeedsSupplier.",
         "Do NOT cite the company or its website as the publisher for 'Why now'. Prefer reputable UK sources: ofcom.org.uk, gov.uk (incl. ONS/NCSC), ons.gov.uk, citb.co.uk.",
@@ -2733,12 +2735,109 @@ module.exports = async function (context, req) {
           if (ev && isStale(ev.date, windowMonths)) { staleFound = true; break; }
         }
         if (staleFound) {
-          context.res = {
-            status: 422,
-            headers: cors,
-            body: { error: "One or more 'Why now' ClaimIDs are older than the configured evidence window.", version: VERSION }
-          };
-          return;
+          // Build fresh ID set under current window
+          const freshIds = (campaign.evidence_log || []).reduce((acc, e) => {
+            const id = String(e.claim_id || "").trim();
+            if (!id) return acc;
+            const dt = e.date;
+            if (!isStale(dt, windowMonths)) acc.add(id);
+            return acc;
+          }, new Set());
+
+          try {
+            // First attempt: rewrite ES using only fresh IDs
+            const es1 = await repairExecutiveSummary({
+              campaign,
+              allowedIds: Array.from(freshIds),
+              windowMonths,
+              callModel
+            });
+            campaign.executive_summary = es1;
+
+            // Re-parse bullets/ids using your existing parser
+            const esParsed1 = (function parseBulletsAndIds(text) {
+              const hasWhyNow = /(^|\n)\s*why\s*now\s*:\s*$/i.test(text);
+              const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
+              const bulletIds = [];
+              bullets.forEach(b => {
+                const m = b.match(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/);
+                if (m) bulletIds.push(m[1]);
+              });
+              return { hasWhyNow, bullets, bulletIds };
+            })(campaign.executive_summary);
+
+            // Recheck staleness with repaired IDs
+            let staleFound1 = false;
+            for (const id of esParsed1.bulletIds) {
+              const ev = idToEvidence.get(id);
+              if (ev && isStale(ev.date, windowMonths)) { staleFound1 = true; break; }
+            }
+            if (!staleFound1) {
+              // pass – move on
+            } else {
+              // Second attempt: relax window +3 months once, regenerate with widened fresh set
+              const relaxedMonths = windowMonths + 3;
+              const relaxedFresh = (campaign.evidence_log || []).reduce((acc, e) => {
+                const id = String(e.claim_id || "").trim();
+                if (!id) return acc;
+                const dt = e.date;
+                if (!isStale(dt, relaxedMonths)) acc.add(id);
+                return acc;
+              }, new Set());
+
+              const es2 = await repairExecutiveSummary({
+                campaign,
+                allowedIds: Array.from(relaxedFresh),
+                windowMonths: relaxedMonths,
+                callModel
+              });
+              campaign.executive_summary = es2;
+
+              // Re-parse and final staleness check
+              const esParsed2 = (function parseBulletsAndIds(text) {
+                const hasWhyNow = /(^|\n)\s*why\s*now\s*:\s*$/i.test(text);
+                const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
+                const bulletIds = [];
+                bullets.forEach(b => {
+                  const m = b.match(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/);
+                  if (m) bulletIds.push(m[1]);
+                });
+                return { hasWhyNow, bullets, bulletIds };
+              })(campaign.executive_summary);
+
+              let staleFound2 = false;
+              for (const id of esParsed2.bulletIds) {
+                const ev = idToEvidence.get(id);
+                if (ev && isStale(ev.date, windowMonths)) { // NOTE: check against original window
+                  staleFound2 = true;
+                  break;
+                }
+              }
+
+              if (staleFound2) {
+                context.res = {
+                  status: 422,
+                  headers: cors,
+                  body: {
+                    error: "One or more 'Why now' ClaimIDs are older than the configured evidence window.",
+                    version: VERSION
+                  }
+                };
+                return;
+              }
+            }
+          } catch (e) {
+            context.res = {
+              status: 422,
+              headers: cors,
+              body: {
+                error: "One or more 'Why now' ClaimIDs are older than the configured evidence window.",
+                detail: String(e && e.message || e),
+                version: VERSION
+              }
+            };
+            return;
+          }
         }
       }
       // 4) Allowed publisher domains for all evidence rows
