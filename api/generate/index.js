@@ -300,9 +300,149 @@ const WRITE_CAMPAIGN_SCHEMA = {
   }
 };
 
+// ---- Normalizer: fix predictable casing/placement once before re-validating ----
+const CAMPAIGN_EXPECTED_TOP = new Set([
+  "executive_summary", "evidence_log", "case_studies", "positioning_and_differentiation",
+  "messaging_matrix", "offer_strategy", "channel_plan", "sales_enablement", "measurement_and_learning",
+  "compliance_and_governance", "risks_and_contingencies", "one_pager_summary", "meta", "input_proof"
+]);
+
+// Known alias → canonical key or path (array path = set deep)
+const CAMPAIGN_ALIAS_MAP = {
+  // Top-level PascalCase → snake_case
+  ExecutiveSummary: "executive_summary",
+  EvidenceLog: "evidence_log",
+  CaseStudies: "case_studies",
+  PositioningAndDifferentiation: "positioning_and_differentiation",
+  MessagingMatrix: "messaging_matrix",
+  OfferStrategy: "offer_strategy",
+  ChannelPlan: "channel_plan",
+  SalesEnablement: "sales_enablement",
+  MeasurementAndLearning: "measurement_and_learning",
+  ComplianceAndGovernance: "compliance_and_governance",
+  RisksAndContingencies: "risks_and_contingencies",
+  OnePagerSummary: "one_pager_summary",
+
+  // Frequent extras that should live under meta.*
+  CompanyName: ["meta", "company_name"],
+  CompanyNumber: ["meta", "company_number"],
+  SimplifiedIndustry: ["meta", "simplified_industry"],
+  ITSpendPct: ["meta", "it_spend_pct"],
+  TopPurchases: ["meta", "top_purchases"],
+  TopBlockers: ["meta", "top_blockers"],
+  TopNeedsSupplier: ["meta", "top_needs_supplier"]
+};
+
+function normalizeCampaignKeys(input) {
+  // Deep clone while applying alias moves
+  const visit = (node) => {
+    if (Array.isArray(node)) {
+      return node.map(visit);
+    }
+    if (!node || typeof node !== "object") return node;
+
+    const out = {};
+    for (const [k, v] of Object.entries(node)) {
+      const alias = CAMPAIGN_ALIAS_MAP[k];
+      if (alias) {
+        if (Array.isArray(alias)) {
+          // place value at meta.* path, creating objects as needed
+          setDeep(out, alias, visit(v));
+        } else {
+          out[alias] = visit(v);
+        }
+        continue;
+      }
+
+      // pass-through for keys that are already canonical or unknown (kept for now)
+      out[k] = visit(v);
+    }
+    return out;
+  };
+
+  const setDeep = (root, path, value) => {
+    let cur = root;
+    for (let i = 0; i < path.length - 1; i++) {
+      const key = path[i];
+      if (!cur[key] || typeof cur[key] !== "object" || Array.isArray(cur[key])) cur[key] = {};
+      cur = cur[key];
+    }
+    cur[path[path.length - 1]] = value;
+  };
+
+  // First pass: aliases & deep-copy
+  const out = visit(input) || {};
+
+  // --- Targeted cleanups below ---
+
+  // 1) messaging_matrix.matrix: keep only allowed keys per row
+  if (out?.messaging_matrix?.matrix && Array.isArray(out.messaging_matrix.matrix)) {
+    out.messaging_matrix.matrix = out.messaging_matrix.matrix.map((row) => {
+      if (!row || typeof row !== "object") return row;
+      const { persona, pain, value_statement, proof, cta } = row;
+      return {
+        persona: persona ?? "",
+        pain: pain ?? "",
+        value_statement: value_statement ?? "",
+        proof: proof ?? "",
+        cta: cta ?? ""
+      };
+    });
+  }
+
+  // 2) channel_plan.emails: ensure required keys exist; do not invent content
+  if (out?.channel_plan?.emails && Array.isArray(out.channel_plan.emails)) {
+    out.channel_plan.emails = out.channel_plan.emails.map((e) => ({
+      subject: (e && typeof e.subject === "string") ? e.subject : "",
+      preview: (e && typeof e.preview === "string") ? e.preview : "",
+      body: (e && typeof e.body === "string") ? e.body : ""
+    }));
+  }
+
+  // 3) sales_enablement.objection_cards: ensure only allowed keys present
+  if (out?.sales_enablement?.objection_cards && Array.isArray(out.sales_enablement.objection_cards)) {
+    out.sales_enablement.objection_cards = out.sales_enablement.objection_cards.map((card) => {
+      const c = (card && typeof card === "object") ? card : {};
+      return {
+        blocker: (typeof c.blocker === "string") ? c.blocker : "",
+        reframe_with_claimid: (typeof c.reframe_with_claimid === "string") ? c.reframe_with_claimid : "",
+        proof: (typeof c.proof === "string") ? c.proof : "",
+        risk_reversal: (typeof c.risk_reversal === "string") ? c.risk_reversal : ""
+      };
+    });
+  }
+
+  // 4) Top-level: if model emitted PascalCase variants not covered above but matching expected names,
+  //    map them generically (ExecutiveSummary → executive_summary, etc.).
+  for (const k of Object.keys(out)) {
+    if (!CAMPAIGN_EXPECTED_TOP.has(k) && /^[A-Z][A-Za-z0-9]*$/.test(k)) {
+      const snake = k
+        .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+        .replace(/([A-Z])([A-Z][a-z])/g, "$1_$2")
+        .toLowerCase();
+      if (CAMPAIGN_EXPECTED_TOP.has(snake)) {
+        out[snake] = out[snake] ?? out[k];
+        delete out[k];
+      }
+    }
+  }
+
+  return out;
+}
+
 // Compile once
 const validateCampaign = ajv.compile(WRITE_CAMPAIGN_SCHEMA);
-
+function summarizeKeyMismatches(obj) {
+  const top = Object.keys(obj || {}).sort();
+  const expected = [
+    "executive_summary", "evidence_log", "case_studies", "positioning_and_differentiation",
+    "messaging_matrix", "offer_strategy", "channel_plan", "sales_enablement", "measurement_and_learning",
+    "compliance_and_governance", "risks_and_contingencies", "one_pager_summary", "meta", "input_proof"
+  ];
+  const missing = expected.filter(k => !(k in (obj || {})));
+  const extras = top.filter(k => !expected.includes(k));
+  return { missing, extras };
+}
 
 function abortableFetch(url, init = {}, ms = DEFAULT_FETCH_TIMEOUT) {
   const controller = new AbortController();
@@ -2227,34 +2367,37 @@ module.exports = async function (context, req) {
       ].join("\n");
 
       // ---------- response_format ----------
-      const isAzure = !!process.env.AZURE_OPENAI_ENDPOINT;
-      // For OpenAI: ensure CAMPAIGN_SCHEMA is loaded earlier in your file (unchanged part of your code).
+      const isAzure = !!process.env.AZURE_OPENAI_ENDPOINT && !!process.env.AZURE_OPENAI_KEY;
+
       const response_format = isAzure
-        ? { type: "json_object" } // Azure JSON-only mode
+        ? { type: "json_object" } // Azure supports JSON object only
         : {
-          // OpenAI JSON Schema mode — name + schema required
+          // OpenAI: enforce your schema strictly at generation time
           type: "json_schema",
           json_schema: {
             name: "write_campaign",
-            schema: WRITE_CAMPAIGN_SCHEMA
+            schema: WRITE_CAMPAIGN_SCHEMA,
+            strict: true
           }
         };
+
       // ---------- LLM call ----------
+      // ---- Generate + parse ----
       let campaign = null;
 
       try {
         const llmRes = await callModel({
           system: SYSTEM,
           prompt,
-          temperature: 0.25,
-          top_p: 1,
-          max_tokens: 2200,
+          temperature: 0.4,
+          max_tokens: 3200,
           response_format
         });
 
         const raw = extractText(llmRes) || "{}";
         const stripped = stripJsonFences(raw);
-        campaign = safeJson(stripped) || JSON.parse(stripped);
+        // try lenient first; fall back to strict parse
+        campaign = safeJson(stripped) ?? JSON.parse(stripped);
       } catch (e) {
         // LLM call (or parse) failed
         context.res = {
@@ -2269,20 +2412,51 @@ module.exports = async function (context, req) {
         return;
       }
 
-      // Validate LLM JSON against schema (AJV)
-      const ok = validateCampaign(campaign);
+      // ---- AJV validate → normalize once → re-validate ----
+      let ok = validateCampaign(campaign);
+
       if (!ok) {
+        const firstErrors = validateCampaign.errors || [];
+
+        // Only attempt a predictable shape/casing correction
+        const onlyShapeErrors = firstErrors.every(e =>
+          e && (
+            e.keyword === "required" ||
+            e.keyword === "additionalProperties" ||
+            e.keyword === "type" ||
+            e.keyword === "properties" ||
+            e.keyword === "unevaluatedProperties"
+          )
+        );
+
+        if (onlyShapeErrors) {
+          const normalized = normalizeCampaignKeys(campaign);
+          ok = validateCampaign(normalized);
+          if (ok) {
+            campaign = normalized; // adopt normalized result
+          }
+        }
+      }
+
+      if (!ok) {
+        // Optional: concise debug to see missing/extraneous keys at a glance
+        const key_summary = (typeof summarizeKeyMismatches === "function")
+          ? summarizeKeyMismatches(campaign)
+          : undefined;
+
         context.res = {
           status: 422,
           headers: cors,
           body: {
             error: "Campaign JSON failed schema validation",
             issues: validateCampaign.errors,
+            ...(key_summary ? { key_summary } : {}),
             version: VERSION
           }
         };
         return;
       }
+
 
       // ---------- validation & quality gate ----------
 
