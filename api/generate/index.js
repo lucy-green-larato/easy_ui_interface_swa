@@ -17,7 +17,31 @@ const DEFAULT_LLM_TIMEOUT = Number(process.env.LLM_TIMEOUT_MS || "45000"); // ms
 
 /* ========================= Helpers / Utilities ========================= */
 // === AJV: compile campaign schema once at module load ===
-const Ajv = require("ajv");
+// ---- JSON Schema validation (Draft 2020-12) ----
+let Ajv2020Ctor;
+try {
+  Ajv2020Ctor = require("ajv/dist/2020");
+  Ajv2020Ctor = Ajv2020Ctor.default || Ajv2020Ctor;
+} catch {
+  Ajv2020Ctor = require("ajv");
+  Ajv2020Ctor = Ajv2020Ctor.default || Ajv2020Ctor;
+}
+
+const ajv = new Ajv2020Ctor({
+  allErrors: true,
+  strict: false,
+  allowUnionTypes: true
+});
+
+try {
+  const meta2020 = require("ajv/dist/refs/json-schema-2020-12.json");
+  if (ajv.addMetaSchema) ajv.addMetaSchema(meta2020);
+} catch { /* dialect may already include metaschema */ }
+
+try {
+  const addFormats = require("ajv-formats");
+  (addFormats.default || addFormats)(ajv);
+} catch { /* optional */ }
 
 // Your exact schema (as provided)
 const WRITE_CAMPAIGN_SCHEMA = {
@@ -277,7 +301,6 @@ const WRITE_CAMPAIGN_SCHEMA = {
 };
 
 // Compile once
-const ajv = new Ajv({ allErrors: true, strict: false });
 const validateCampaign = ajv.compile(WRITE_CAMPAIGN_SCHEMA);
 
 
