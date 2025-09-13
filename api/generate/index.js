@@ -130,23 +130,29 @@ const WRITE_CAMPAIGN_SCHEMA = {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "nonnegotiables": { "type": "array", "items": { "type": "string" } },
         "matrix": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["persona", "pain", "value_statement", "proof", "cta"],
             "properties": {
               "persona": { "type": "string" },
               "pain": { "type": "string" },
               "value_statement": { "type": "string" },
               "proof": { "type": "string" },
               "cta": { "type": "string" }
-            }
+            },
+            "required": ["persona", "pain", "value_statement", "proof", "cta"]
           }
+        },
+        "nonnegotiables": {
+          // keep your intended type — using array of strings is common; if yours differs, keep it.
+          "type": "array",
+          "items": { "type": "string" }
         }
-      }
+      },
+      // ↓ Azure requires required to list *every* key under properties
+      "required": ["matrix", "nonnegotiables"]
     },
     "offer_strategy": {
       "type": "object",
@@ -167,14 +173,17 @@ const WRITE_CAMPAIGN_SCHEMA = {
                   "title": { "type": "string" },
                   "content": { "type": "string" },
                   "bullets": { "type": "array", "items": { "type": "string" } }
-                }
+                },
+                "required": ["title", "content", "bullets"]
               }
             },
             "cta": { "type": "string" }
-          }
+          },
+          "required": ["headline", "subheadline", "sections", "cta"]
         },
         "assets_checklist": { "type": "array", "items": { "type": "string" } }
-      }
+      },
+      "required": ["landing_page", "assets_checklist"]
     },
     "channel_plan": {
       "type": "object",
@@ -185,12 +194,12 @@ const WRITE_CAMPAIGN_SCHEMA = {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["subject", "preview", "body"],
             "properties": {
               "subject": { "type": "string" },
               "preview": { "type": "string" },
               "body": { "type": "string" }
-            }
+            },
+            "required": ["subject", "preview", "body"]
           }
         },
         "linkedin": {
@@ -201,19 +210,20 @@ const WRITE_CAMPAIGN_SCHEMA = {
             "insight_post": { "type": "string" },
             "dm": { "type": "string" },
             "comment_strategy": { "type": "string" }
-          }
+          },
+          "required": ["connect_note", "insight_post", "dm", "comment_strategy"]
         },
         "paid": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["variant", "proof", "cta"],
             "properties": {
               "variant": { "type": "string" },
               "proof": { "type": "string" },
               "cta": { "type": "string" }
-            }
+            },
+            "required": ["variant", "proof", "cta"]
           }
         },
         "event": {
@@ -224,9 +234,11 @@ const WRITE_CAMPAIGN_SCHEMA = {
             "agenda": { "type": "string" },
             "speakers": { "type": "string" },
             "cta": { "type": "string" }
-          }
+          },
+          "required": ["concept", "agenda", "speakers", "cta"]
         }
-      }
+      },
+      "required": ["emails", "linkedin", "paid", "event"]
     },
     "sales_enablement": {
       "type": "object",
@@ -238,18 +250,19 @@ const WRITE_CAMPAIGN_SCHEMA = {
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["blocker", "reframe_with_claimid", "proof", "risk_reversal"],
             "properties": {
               "blocker": { "type": "string" },
               "reframe_with_claimid": { "type": "string" },
               "proof": { "type": "string" },
               "risk_reversal": { "type": "string" }
-            }
+            },
+            "required": ["blocker", "reframe_with_claimid", "proof", "risk_reversal"]
           }
         },
         "proof_pack_outline": { "type": "array", "items": { "type": "string" } },
         "handoff_rules": { "type": "string" }
-      }
+      },
+      "required": ["discovery_questions", "objection_cards", "proof_pack_outline", "handoff_rules"]
     },
     "measurement_and_learning": {
       "type": "object",
@@ -259,7 +272,8 @@ const WRITE_CAMPAIGN_SCHEMA = {
         "weekly_test_plan": { "type": "string" },
         "utm_and_crm": { "type": "string" },
         "evidence_freshness_rule": { "type": "string" }
-      }
+      },
+      "required": ["kpis", "weekly_test_plan", "utm_and_crm", "evidence_freshness_rule"]
     },
     "compliance_and_governance": {
       "type": "object",
@@ -269,7 +283,8 @@ const WRITE_CAMPAIGN_SCHEMA = {
         "gdpr_pecr_checklist": { "type": "string" },
         "brand_accessibility_checks": { "type": "string" },
         "approval_log_note": { "type": "string" }
-      }
+      },
+      "required": ["substantiation_file", "gdpr_pecr_checklist", "brand_accessibility_checks", "approval_log_note"]
     },
     "risks_and_contingencies": { "type": "string" },
     "one_pager_summary": { "type": "string" },
@@ -279,7 +294,8 @@ const WRITE_CAMPAIGN_SCHEMA = {
       "properties": {
         "icp_from_csv": { "type": "string" },
         "it_spend_buckets": { "type": "array", "items": { "type": "string" } }
-      }
+      },
+      "required": ["icp_from_csv", "it_spend_buckets"]
     },
     "input_proof": {
       "type": "object",
@@ -292,12 +308,38 @@ const WRITE_CAMPAIGN_SCHEMA = {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "purchases": { "type": "array", "items": { "type": "object", "properties": { "text": { "type": "string" }, "count": { "type": "number" } } } },
-            "blockers": { "type": "array", "items": { "type": "object", "properties": { "text": { "type": "string" }, "count": { "type": "number" } } } },
-            "needs": { "type": "array", "items": { "type": "object", "properties": { "text": { "type": "string" }, "count": { "type": "number" } } } }
-          }
+            "purchases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": { "text": { "type": "string" }, "count": { "type": "number" } },
+                "required": ["text", "count"]
+              }
+            },
+            "blockers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": { "text": { "type": "string" }, "count": { "type": "number" } },
+                "required": ["text", "count"]
+              }
+            },
+            "needs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": { "text": { "type": "string" }, "count": { "type": "number" } },
+                "required": ["text", "count"]
+              }
+            }
+          },
+          "required": ["purchases", "blockers", "needs"]
         }
-      }
+      },
+      "required": ["fields_validated", "csv_fields_found", "simplified_industry_values", "top_terms"]
     }
   }
 };
