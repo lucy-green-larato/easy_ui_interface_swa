@@ -1628,8 +1628,6 @@ module.exports = async function (context, req) {
 
 
       // Call LLM (json_object format)
-      // Ask the model for JSON that matches our schema; Azure ignores json_schema (that's OK).
-      // Choose a response_format the backend supports (Azure vs OpenAI)
       // Choose a response_format the backend supports (Azure vs OpenAI)
       const isAzure = !!process.env.AZURE_OPENAI_ENDPOINT;
       // Use json_schema only for the short Exec/Summary; use json_object for Full to avoid provider-side length friction
@@ -1645,7 +1643,7 @@ module.exports = async function (context, req) {
       let llmRes, raw;
       try {
         llmRes = await callModel({
-          system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.",
+          system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B lead qualification.",
           prompt,
           temperature: 0.2,
           max_tokens: maxTokens,
@@ -1777,7 +1775,7 @@ module.exports = async function (context, req) {
 
         try {
           const redoRes = await callModel({
-            system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.",
+            system: "You are a precise assistant that outputs valid JSON only for evidence-based B2B lead qualification.",
             prompt: promptRedo,
             temperature: 0.2,
             max_tokens: maxTokens,
@@ -2829,7 +2827,8 @@ module.exports = async function (context, req) {
         llmJsonRes = await callModel({
           system: "You are a precise assistant that outputs valid JSON only. Never include markdown or prose outside JSON.",
           prompt: jsonPrompt,
-          temperature: 0.6,
+          temperature: 0.4,
+          max_tokens: 2600,                 // ← set your desired length here
           response_format: { type: "json_object" }
         });
         const raw = extractText(llmJsonRes) || "";
