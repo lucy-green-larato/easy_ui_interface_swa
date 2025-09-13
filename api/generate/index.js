@@ -106,7 +106,8 @@ const WRITE_CAMPAIGN_SCHEMA = {
             "weaknesses": { "type": "array", "items": { "type": "string" } },
             "opportunities": { "type": "array", "items": { "type": "string" } },
             "threats": { "type": "array", "items": { "type": "string" } }
-          }
+          },
+          "required": ["strengths", "weaknesses", "opportunities", "threats"]
         },
         "differentiators": { "type": "array", "items": { "type": "string" } },
         "competitor_set": {
@@ -122,7 +123,8 @@ const WRITE_CAMPAIGN_SCHEMA = {
             }
           }
         }
-      }
+      },
+      "required": ["value_prop", "swot", "differentiators", "competitor_set"]
     },
     "messaging_matrix": {
       "type": "object",
@@ -432,51 +434,88 @@ function normalizeCampaignKeys(input) {
 
 // Compile once
 const validateCampaign = ajv.compile(WRITE_CAMPAIGN_SCHEMA);
-// Make a JSON Schema acceptable to Azure response_format=json_schema.
-// Rule: whenever an object has `properties`, add/overwrite:
+// Azure requires that any object with `properties` must also have
 //   - type: "object"
-//   - required: every key in `properties`
-//   - additionalProperties: false (defensive)
-function azureifyJsonSchemaForResponseFormat(schema) {
+//   - required: an array listing *every* key in `properties`
+// We also default additionalProperties:false if not specified.
+// This walker covers nested locations: $defs/definitions, properties, items/prefixItems,
+// allOf/anyOf/oneOf, if/then/else, dependentSchemas, propertyNames, contains, not, etc.
+
+function azureifyJsonSchemaForResponseFormatV2(schema) {
+  const seen = new WeakSet();
+
   function clone(x) {
     return (x && typeof x === "object") ? JSON.parse(JSON.stringify(x)) : x;
   }
+
   function walk(node) {
     if (!node || typeof node !== "object") return node;
+    if (seen.has(node)) return node;
+    seen.add(node);
+
+    const out = { ...node };
+
+    // Handle object-with-properties: enforce Azure's stricter requirement
+    if (out.properties && typeof out.properties === "object" && !Array.isArray(out.properties)) {
+      out.type = "object";
+      // Recurse into each property
+      const newProps = {};
+      for (const [k, v] of Object.entries(out.properties)) {
+        newProps[k] = walk(v);
+      }
+      out.properties = newProps;
+
+      // REQUIRED must include *every* key defined in properties
+      out.required = Object.keys(newProps);
+
+      if (typeof out.additionalProperties === "undefined") out.additionalProperties = false;
+    }
+
+    // If additionalProperties is a schema (object), recurse into it
+    if (out.additionalProperties && typeof out.additionalProperties === "object" && !Array.isArray(out.additionalProperties)) {
+      out.additionalProperties = walk(out.additionalProperties);
+    }
 
     // Arrays
-    if (node.type === "array" || node.items) {
-      const out = { ...node };
-      if (out.items) out.items = walk(out.items);
-      return out;
-    }
+    if (out.items) out.items = walk(out.items);
+    if (Array.isArray(out.prefixItems)) out.prefixItems = out.prefixItems.map(walk);
+    if (out.contains) out.contains = walk(out.contains);
 
-    // Objects with properties
-    if (node.properties && typeof node.properties === "object") {
-      const out = { ...node, type: "object" };
-      const props = {};
-      for (const [k, v] of Object.entries(node.properties)) {
-        props[k] = walk(v);
-      }
-      out.properties = props;
-      // REQUIRED must include *every* key in properties for Azure
-      const keys = Object.keys(props);
-      out.required = keys;
-      if (typeof out.additionalProperties === "undefined") {
-        out.additionalProperties = false;
-      }
-      // Recurse combinators if present
-      if (Array.isArray(out.allOf)) out.allOf = out.allOf.map(walk);
-      if (Array.isArray(out.anyOf)) out.anyOf = out.anyOf.map(walk);
-      if (Array.isArray(out.oneOf)) out.oneOf = out.oneOf.map(walk);
-      return out;
-    }
-
-    // Combinators without top-level properties
-    const out = { ...node };
+    // Combinators
     if (Array.isArray(out.allOf)) out.allOf = out.allOf.map(walk);
     if (Array.isArray(out.anyOf)) out.anyOf = out.anyOf.map(walk);
     if (Array.isArray(out.oneOf)) out.oneOf = out.oneOf.map(walk);
+    if (out.not) out.not = walk(out.not);
+
+    // Conditionals
+    if (out.if) out.if = walk(out.if);
+    if (out.then) out.then = walk(out.then);
+    if (out.else) out.else = walk(out.else);
+
+    // Dependent schemas
+    if (out.dependentSchemas && typeof out.dependentSchemas === "object" && !Array.isArray(out.dependentSchemas)) {
+      const ds = {};
+      for (const [k, v] of Object.entries(out.dependentSchemas)) ds[k] = walk(v);
+      out.dependentSchemas = ds;
+    }
+
+    // Property names schema (rare, but recurse)
+    if (out.propertyNames && typeof out.propertyNames === "object") {
+      out.propertyNames = walk(out.propertyNames);
+    }
+
+    // $defs / definitions
+    if (out.$defs && typeof out.$defs === "object" && !Array.isArray(out.$defs)) {
+      const defs = {};
+      for (const [k, v] of Object.entries(out.$defs)) defs[k] = walk(v);
+      out.$defs = defs;
+    }
+    if (out.definitions && typeof out.definitions === "object" && !Array.isArray(out.definitions)) {
+      const defs = {};
+      for (const [k, v] of Object.entries(out.definitions)) defs[k] = walk(v);
+      out.definitions = defs;
+    }
+
     return out;
   }
 
@@ -2426,11 +2465,23 @@ module.exports = async function (context, req) {
         json_schema: {
           name: "write_campaign",
           schema: isAzure
-            ? azureifyJsonSchemaForResponseFormat(WRITE_CAMPAIGN_SCHEMA)  // << Azure version
+            ? azureifyJsonSchemaForResponseFormatV2(WRITE_CAMPAIGN_SCHEMA)  // << Azure version
             : WRITE_CAMPAIGN_SCHEMA,                                      // << Original for OpenAI
           strict: true
         }
       };
+      /// DEBUG REMOVE AFTER//
+      if (isAzure) {
+        try {
+          const swotNode =
+            response_format.json_schema.schema
+              ?.properties?.positioning_and_differentiation
+              ?.properties?.swot;
+
+          context.log?.info?.("[DEBUG] Azure swot.required =",
+            Array.isArray(swotNode?.required) ? swotNode.required.join(",") : "(missing)");
+        } catch { }
+      }
 
       // ---------- LLM call ----------
       // ---- Generate + parse ----
