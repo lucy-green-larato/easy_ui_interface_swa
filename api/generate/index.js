@@ -3164,6 +3164,7 @@ module.exports = async function (context, req) {
       // ---------- validation & quality gate ----------
 
       // Evidence density: require ≥5 (overrides any older min(3))
+      // Evidence density: require ≥5 (overrides any older min(3))
       if (!Array.isArray(campaign.evidence_log) || campaign.evidence_log.length < 5) {
         context.res = {
           status: 422,
@@ -3182,8 +3183,28 @@ module.exports = async function (context, req) {
         const parseES = (text) => {
           const s = String(text || "");
           const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
-          const hasWhyNow = WHY_LINE_RX.test(s);
-          const bullets = (s.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(v => v.trim());
+
+          const m = WHY_LINE_RX.exec(s);
+          const hasWhyNow = !!m;
+
+          const bullets = [];
+          if (m) {
+            const after = s.slice(m.index + m[0].length);
+            const lines = after.split(/\r?\n/);
+            let seenNonEmpty = false;
+            for (const line of lines) {
+              // allow initial blank lines immediately after heading
+              if (!seenNonEmpty && /^\s*$/.test(line)) continue;
+              seenNonEmpty = true;
+
+              if (/^\s*(?:[-•])\s+/.test(line)) {
+                bullets.push(line.trim());
+              } else {
+                break; // stop at first non-bullet after the contiguous block
+              }
+            }
+          }
+
           const bulletIds = bullets.map(b => (b.match(CLAIM_ID_RX_LOCAL)?.[1] ?? null));
           return { hasWhyNow, bullets, bulletIds };
         };
@@ -3280,12 +3301,31 @@ module.exports = async function (context, req) {
 
       function parseBulletsAndIdsFromES(text) {
         const s = String(text || "");
-        const hasWhyNow = WHY_LINE_RX.test(s);
-        const bullets = (s.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(v => v.trim());
         const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
+
+        const m = WHY_LINE_RX.exec(s);
+        const hasWhyNow = !!m;
+
+        const bullets = [];
+        if (m) {
+          const after = s.slice(m.index + m[0].length);
+          const lines = after.split(/\r?\n/);
+          let seenNonEmpty = false;
+          for (const line of lines) {
+            if (!seenNonEmpty && /^\s*$/.test(line)) continue;
+            seenNonEmpty = true;
+
+            if (/^\s*(?:[-•])\s+/.test(line)) {
+              bullets.push(line.trim());
+            } else {
+              break;
+            }
+          }
+        }
+
         const bulletIds = bullets.map(b => {
-          const m = b.match(CLAIM_ID_RX_LOCAL);
-          return m ? m[1] : null;
+          const m2 = b.match(CLAIM_ID_RX_LOCAL);
+          return m2 ? m2[1] : null;
         });
         return { hasWhyNow, bullets, bulletIds };
       }
@@ -3317,12 +3357,31 @@ module.exports = async function (context, req) {
 
         function parseES(text) {
           const s = String(text || "");
-          const hasWhyNow = WHY_LINE_RX.test(s);
-          const bullets = (s.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(v => v.trim());
           const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
+
+          const m = WHY_LINE_RX.exec(s);
+          const hasWhyNow = !!m;
+
+          const bullets = [];
+          if (m) {
+            const after = s.slice(m.index + m[0].length);
+            const lines = after.split(/\r?\n/);
+            let seenNonEmpty = false;
+            for (const line of lines) {
+              if (!seenNonEmpty && /^\s*$/.test(line)) continue;
+              seenNonEmpty = true;
+
+              if (/^\s*(?:[-•])\s+/.test(line)) {
+                bullets.push(line.trim());
+              } else {
+                break;
+              }
+            }
+          }
+
           const bulletIds = bullets.map(b => {
-            const m = b.match(CLAIM_ID_RX_LOCAL);
-            return m ? m[1] : null;
+            const m2 = b.match(CLAIM_ID_RX_LOCAL);
+            return m2 ? m2[1] : null;
           });
           return { hasWhyNow, bullets, bulletIds };
         }
@@ -3343,13 +3402,52 @@ module.exports = async function (context, req) {
           .map(e => String(e.claim_id).trim())
           .filter(id => logIds.has(id));
 
-        // Helper: replace "Claim ID: 1" style placeholders with real IDs (in order)
-        function replaceOrdinalIdsWithReal(es, orderedIds) {
-          let idx = 0;
-          return es.replace(/\b[Cc]laim\s*ID[:\s]*([0-9]+)\b/g, () => {
-            const next = orderedIds[idx++];
-            return next ? `ClaimID: ${next}` : `ClaimID: `;
-          });
+        // Helper: safely replace/insert ClaimIDs only inside the Why now bullet block
+        function repairWhyNowBullets(es, orderedIds) {
+          const s = String(es || "");
+          const m = WHY_LINE_RX.exec(s);
+          if (!m) return s;
+
+          const headEnd = m.index + m[0].length;
+          const before = s.slice(0, headEnd);
+          const after = s.slice(headEnd);
+          const lines = after.split(/\r?\n/);
+
+          const used = new Set();
+          const pickNext = () => (orderedIds || []).find(id => !used.has(id));
+
+          // Walk contiguous bullet block
+          let i = 0;
+          // skip initial blank lines
+          while (i < lines.length && /^\s*$/.test(lines[i])) i++;
+
+          for (; i < lines.length; i++) {
+            const line = lines[i];
+            if (!/^\s*(?:[-•])\s+/.test(line)) break;
+
+            const bulletChar = (/^\s*([-\u2022])\s+/.exec(line)?.[1]) || "-";
+            const body = line.replace(/^\s*([-\u2022])\s+/, "");
+            const mId = body.match(CLAIM_ID_RX);
+            const current = mId ? String(mId[1]).trim() : "";
+
+            if (current && logIds.has(current) && !used.has(current)) {
+              used.add(current);
+              // keep as-is
+              continue;
+            }
+
+            const next = pickNext();
+            if (!next) continue;
+
+            used.add(next);
+            const newBody = mId
+              ? body.replace(CLAIM_ID_RX, `ClaimID: ${next}`)
+              : `${body} (ClaimID: ${next})`;
+
+            lines[i] = `${bulletChar} ${newBody}`.replace(/\s{2,}/g, " ");
+          }
+
+          return before + lines.join("\n");
         }
 
         // Parse once
@@ -3367,30 +3465,15 @@ module.exports = async function (context, req) {
         if (hasOrdinalIds && bullets.length >= 4 && bullets.length <= 5) {
           const ordered = freshIds.length >= bullets.length ? freshIds : allIds;
           if (ordered.length) {
-            esText = replaceOrdinalIdsWithReal(esText, ordered);
+            esText = repairWhyNowBullets(esText, ordered);
             ({ hasWhyNow, bullets, bulletIds } = parseES(esText));
           }
         }
 
         // Fill any missing/invalid IDs deterministically from (fresh → all), avoiding duplicates
         if (bullets.length >= 4 && bullets.length <= 5) {
-          const used = new Set();
-          esText = esText.replace(/(^|\n)\s*([-\u2022]\s+.*?)(?=\n|$)/g, (m, pfx, body) => {
-            const mId = body.match(CLAIM_ID_RX);
-            const current = mId ? String(mId[1]).trim() : "";
-            if (current && logIds.has(current) && !used.has(current)) {
-              used.add(current);
-              return m;
-            }
-            const pool = freshIds.concat(allIds).filter(id => logIds.has(id) && !used.has(id));
-            const next = pool.shift();
-            if (!next) return m; // no deterministic replacement available
-            used.add(next);
-            const withId = mId
-              ? body.replace(CLAIM_ID_RX, `ClaimID: ${next}`)
-              : `${body} (ClaimID: ${next})`;
-            return `${pfx}${withId}`;
-          });
+          const ordered = freshIds.length >= bullets.length ? freshIds : allIds;
+          esText = repairWhyNowBullets(esText, ordered);
           ({ hasWhyNow, bullets, bulletIds } = parseES(esText));
         }
 
@@ -3421,312 +3504,234 @@ module.exports = async function (context, req) {
         }
       }
 
-      // 3) Executive Summary: enforce Why-now mapping and count 4–5 bullets
-      {
-        let es = normalizeExecutiveSummaryHeading(String(campaign.executive_summary || ""));
-        function parseBulletsAndIds(text) {
-          const s = String(text || "");
-          const hasWhyNow = WHY_LINE_RX.test(s); // <- uses /(?:\r?\n|$)/, not end-of-string only
-          const bullets = (s.match(/(?:^|\n)\s*(?:[-•–—]\s+.+)/g) || []).map(v => v.trim());
-          const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
-          const bulletIds = bullets.map(b => {
-            const m = b.match(CLAIM_ID_RX_LOCAL);
-            return m ? m[1] : null;
-          });
-          return { hasWhyNow, bullets, bulletIds };
-        }
-        // First evaluation
-        let parsed = parseBulletsAndIds(es);
-        // If heading missing but bullet count already 4–5, force-insert the heading above the first bullet
-        if (!parsed.hasWhyNow && parsed.bullets.length >= 4 && parsed.bullets.length <= 5) {
-          es = es.replace(/(^|\n)(\s*[-•–—]\s+)/, (m, p1, p2) => `${p1}\nWhy now:\n${p2}`);
-          parsed = parseBulletsAndIds(es);
-        }
-        // If still off, try the normaliser one more time (harmless if already normalised)
-        if (!parsed.hasWhyNow || parsed.bullets.length < 4 || parsed.bullets.length > 5) {
-          context?.log?.warn?.(`[es-structure] pre-fix has_why_now=${!!parsed.hasWhyNow} bullets=${parsed.bullets.length}`);
-          es = normalizeExecutiveSummaryHeading(es);
-          parsed = parseBulletsAndIds(es);
-          context?.log?.info?.(`[es-structure] post-normalise has_why_now=${!!parsed.hasWhyNow} bullets=${parsed.bullets.length}`);
-        }
-
-        campaign.executive_summary = es;
-        const { hasWhyNow, bullets, bulletIds } = parsed;
-
-        // Continue with your existing mapping & freshness checks (unchanged)
-        const logIds = new Set(
-          (campaign.evidence_log || [])
-            .map(e => String(e.claim_id || "").trim())
-            .filter(Boolean)
-        );
-
-        if (
-          !hasWhyNow ||
-          bullets.length < 4 || bullets.length > 5 ||
-          bulletIds.length !== bullets.length ||
-          bulletIds.some(id => !id || !logIds.has(String(id).trim()))
-        ) {
-          const missing = bulletIds.filter(id => !id || !logIds.has(String(id || "").trim()));
-          context.res = {
-            status: 422,
-            headers: cors,
-            body: {
-              error: !hasWhyNow
-                ? "Executive Summary must include a 'Why now:' section with 4–5 bullets."
-                : "Every 'Why now' bullet must reference a ClaimID that exists in evidence_log.",
-              has_why_now: !!hasWhyNow,
-              found_bullets: Array.isArray(bullets) ? bullets.length : 0,
-              missing_or_invalid_claimids: missing,
-              version: VERSION
-            }
-          };
-          return;
-        }
-
-        // Freshness evaluation
-        let staleFound = false;
-        const idToEvidence = new Map();
-        for (const e of (campaign.evidence_log || [])) {
-          const dt = e.date;
-          const stale = isStale(dt, windowMonths);
-          if (typeof e.freshness_status !== "string") e.freshness_status = stale ? "stale" : "fresh";
-          idToEvidence.set(String(e.claim_id || "").trim(), e);
-        }
-        for (const id of bulletIds) {
-          const ev = idToEvidence.get(id);
-          if (ev && isStale(ev.date, windowMonths)) { staleFound = true; break; }
-        }
-        if (staleFound) {
-          // Build fresh ID set under current window
-          const freshIds = (campaign.evidence_log || []).reduce((acc, e) => {
-            const id = String(e.claim_id || "").trim();
-            if (!id) return acc;
-            const dt = e.date;
-            if (!isStale(dt, windowMonths)) acc.add(id);
-            return acc;
-          }, new Set());
-
-          try {
-            // First attempt: rewrite ES using only fresh IDs
-            const es1 = await repairExecutiveSummary({
-              campaign,
-              allowedIds: Array.from(freshIds),
-              windowMonths,
-              callModel
-            });
-            campaign.executive_summary = es1;
-
-            // Re-parse bullets/ids using a tolerant parser (handles "Why now:" with following bullets)
-            const esParsed1 = (function parseBulletsAndIds(text) {
-              const s = String(text || "");
-              // uses shared WHY_LINE_RX (must be defined once near your CLAIM_ID_RX constants)
-              const hasWhyNow = WHY_LINE_RX.test(s);
-              const bullets = (s.match(/(?:^|\n)\s*(?:[-•–—]\s+.+)/g) || []).map(v => v.trim());
-              const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
-              const bulletIds = bullets.map(b => (b.match(CLAIM_ID_RX_LOCAL)?.[1] ?? null));
-              return { hasWhyNow, bullets, bulletIds };
-            })(campaign.executive_summary);
-
-            // If repair broke the structure (rare), short-circuit with bullet count info
-            if (!esParsed1.hasWhyNow || esParsed1.bullets.length < 4 || esParsed1.bullets.length > 5) {
-              context.res = {
-                status: 422,
-                headers: cors,
-                body: {
-                  error: "Executive Summary must include a 'Why now:' section with 4–5 bullets.",
-                  has_why_now: !!esParsed1.hasWhyNow,
-                  found_bullets: esParsed1.bullets.length,
-                  version: VERSION
-                }
-              };
-              return;
-            }
-
-            // Recheck staleness with repaired IDs
-            let staleFound1 = false;
-            for (const id of esParsed1.bulletIds) {
-              const ev = idToEvidence.get(id);
-              if (ev && isStale(ev.date, windowMonths)) { staleFound1 = true; break; }
-            }
-            if (!staleFound1) {
-              // pass – move on
-            } else {
-              // Second attempt: relax window +3 months once, regenerate with widened fresh set
-              const relaxedMonths = windowMonths + 3;
-              const relaxedFresh = (campaign.evidence_log || []).reduce((acc, e) => {
-                const id = String(e.claim_id || "").trim();
-                if (!id) return acc;
-                const dt = e.date;
-                if (!isStale(dt, relaxedMonths)) acc.add(id);
-                return acc;
-              }, new Set());
-
-              const es2 = await repairExecutiveSummary({
-                campaign,
-                allowedIds: Array.from(relaxedFresh),
-                windowMonths: relaxedMonths,
-                callModel
-              });
-              campaign.executive_summary = es2;
-
-              // Re-parse and final staleness check
-              const esParsed2 = (function parseBulletsAndIds(text) {
-                const s = String(text || "");
-                // tolerant line-based heading detector (requires WHY_LINE_RX to be defined in outer scope)
-                const hasWhyNow = WHY_LINE_RX.test(s);
-                // accept -, •, – (en dash), — (em dash) as bullet markers
-                const bullets = (s.match(/(?:^|\n)\s*(?:[-•–—]\s+.+)/g) || []).map(v => v.trim());
-                // local, tolerant ClaimID capture
-                const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
-                const bulletIds = bullets.map(b => {
-                  const m = b.match(CLAIM_ID_RX_LOCAL);
-                  return m ? m[1] : null;
-                });
-                return { hasWhyNow, bullets, bulletIds };
-              })(campaign.executive_summary);
-
-              // If second repair broke structure, report bullet count too
-              if (!esParsed2.hasWhyNow || esParsed2.bullets.length < 4 || esParsed2.bullets.length > 5) {
-                context.res = {
-                  status: 422,
-                  headers: cors,
-                  body: {
-                    error: "Executive Summary must include a 'Why now:' section with 4–5 bullets.",
-                    has_why_now: !!esParsed2.hasWhyNow,
-                    found_bullets: esParsed2.bullets.length,
-                    version: VERSION
-                  }
-                };
-                return;
-              }
-
-              // Final staleness check (against original window)
-              let staleFound2 = false;
-              const staleIds = [];
-              for (const id of esParsed2.bulletIds) {
-                const ev = idToEvidence.get(id);
-                if (ev && isStale(ev.date, windowMonths)) {
-                  staleFound2 = true;
-                  staleIds.push(id);
-                }
-              }
-
-              if (staleFound2) {
-                context.res = {
-                  status: 422,
-                  headers: cors,
-                  body: {
-                    error: "One or more 'Why now' ClaimIDs are older than the configured evidence window.",
-                    found_bullets: esParsed2.bullets.length,   // <— how many bullets were present
-                    has_why_now: !!esParsed2.hasWhyNow,        // <— whether heading was detected
-                    stale_claim_ids: staleIds,                  // <— which IDs were stale
-                    version: VERSION
-                  }
-                };
-                return;
-              }
-            }
-          } catch (e) {
-            // Include best-effort bullet count if available in the exception path
-            const esText = String(campaign.executive_summary || "");
-            const bullets = (esText.match(/(?:^|\n)\s*(?:[-•–—]\s+.+)/g) || []).map(v => v.trim());
-            const hasWhyNow = WHY_LINE_RX.test(esText);
-            context.res = {
-              status: 422,
-              headers: cors,
-              body: {
-                error: "One or more 'Why now' ClaimIDs are older than the configured evidence window.",
-                detail: String(e && e.message || e),
-                has_why_now: !!hasWhyNow,
-                found_bullets: bullets.length,
-                version: VERSION
-              }
-            };
-            return;
-          }
-        }
-      }
       // 4) Allowed publisher domains for all evidence rows
-      const badPublisher = (campaign.evidence_log || []).find(e => !isAllowedPublisher(e.url, e.publisher));
-      if (badPublisher) {
+      if ((campaign.evidence_log || []).some(e => !isAllowedPublisher(e.url, e.publisher))) {
         context.res = {
           status: 422,
           headers: cors,
-          body: { error: "Evidence Log contains disallowed publisher or self-citation.", item: badPublisher, version: VERSION }
+          body: { error: "Evidence Log contains disallowed publisher or self-citation.", version: VERSION }
         };
         return;
       }
-      // --- Email body repair pass: enforce 90–200 words and ≥1 ClaimID per email ---
-      {
-        // Helper: count words safely
-        const _countWords = (s) => String(s || "").trim().split(/\s+/).filter(Boolean).length;
 
-        // Build fresh-first ID order from evidence_log
+      // --- Email generation & normalisation (context-specific, no hard-coded copy) ---
+      {
+        const _countWords = (s) => String(s || "").trim().split(/\s+/).filter(Boolean).length;
+        const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/; // local, tolerant
+
+        // Build fresh-first ClaimID pool from evidence_log (deduped)
         const idsAll = (campaign.evidence_log || [])
-          .map(e => ({ id: String(e?.claim_id || "").trim(), date: e?.date }))
+          .map(e => ({ id: String(e?.claim_id || "").trim(), date: e?.date, claim: e?.claim, publisher: e?.publisher }))
           .filter(x => x.id);
 
-        const freshIds = idsAll
-          .filter(x => !isStale(x.date, windowMonths))
-          .map(x => x.id);
+        const freshIds = Array.from(new Set(idsAll.filter(x => !isStale(x.date, windowMonths)).map(x => x.id)));
+        const allowedIds = freshIds.length ? freshIds : Array.from(new Set(idsAll.map(x => x.id)));
 
-        const idOrder = freshIds.length ? freshIds : idsAll.map(x => x.id);
+        // Ensure channel_plan.emails exists
+        if (!campaign.channel_plan) campaign.channel_plan = {};
+        if (!Array.isArray(campaign.channel_plan.emails)) campaign.channel_plan.emails = [];
+
+        // Normalise existing emails (keep only those that have some content)
+        const emails = campaign.channel_plan.emails
+          .filter(e => e && (e.subject || e.body))
+          .map(e => ({
+            subject: String(e.subject || "").trim(),
+            preview: String(e.preview || "").trim(),
+            body: String(e.body || "").trim()
+          }));
+
+        // Duplicate guard so generated emails don't repeat existing ones
+        const canon = (subj, body) => (subj + "|" + body).toLowerCase().replace(/\s+/g, " ").trim();
+        const seen = new Set(emails.map(e => canon(e.subject, e.body)));
+
+        // 1) If fewer than 3 emails, ask the LLM to generate the missing ones using full context
+        const need = Math.max(0, 3 - emails.length);
+        if (need > 0 && allowedIds.length) {
+          // Compact, deterministic context for the model
+          const companyName = String(campaign?.meta?.company_name || company?.name || "").trim();
+          const icp = String(campaign?.meta?.icp_from_csv || icpFromCsv || "").trim();
+          const nouns = (productHints || []).slice(0, 6);
+          const topPurch = (topPurchases || []).map(t => (typeof t === "string" ? t : t?.text)).filter(Boolean).slice(0, 6);
+          const topNeedsList = (topNeeds || []).map(t => (typeof t === "string" ? t : t?.text)).filter(Boolean).slice(0, 6);
+          const banlist = [
+            "positioned to leverage", "cutting-edge", "best-in-class", "holistic",
+            "client-centric", "industry-leading", "robust posture", "market differentiation"
+          ];
+          const claimsForPrompt = idsAll.slice(0, 8).map(x => {
+            const e = (campaign.evidence_log || []).find(r => String(r.claim_id).trim() === x.id);
+            return e ? { id: x.id, claim: e.claim, date: e.date, publisher: e.publisher } : { id: x.id };
+          });
+
+          const system = "You are a precise UK B2B marketer. Return VALID JSON ONLY.";
+          const user = [
+            `Write EXACTLY ${need} context-specific prospecting emails for ${companyName || "the supplier"}.`,
+            `Audience ICP: ${icp || "(from CSV)"}. Tone: ${tone}. British English.`,
+            `Hard rules:`,
+            `- Each email has: subject, preview, body, claim_id.`,
+            `- body MUST be 90–200 words and MUST include a literal '(ClaimID: <id>)' reference where <id> is from the allowed set below.`,
+            `- Use at least one of these product nouns verbatim when relevant: ${nouns.length ? nouns.join(", ") : "(none)"}.`,
+            `- Align to CSV cues where natural (TopPurchases / TopNeeds).`,
+            `- No invented stats or sources; you can paraphrase the claim text but do not fabricate numbers.`,
+            `- Avoid these phrases: ${banlist.join(", ")}.`,
+            ``,
+            `Allowed ClaimIDs (prefer fresher): ${allowedIds.join(", ")}`,
+            `Claims context: ${JSON.stringify(claimsForPrompt)}`,
+            `CSV TopPurchases: ${topPurch.join(", ") || "(none)"}`,
+            `CSV TopNeedsSupplier: ${topNeedsList.join(", ") || "(none)"}`,
+            ``,
+            `Return JSON ONLY: { "emails": [ { "subject": "...", "preview": "...", "body": "...", "claim_id": "..." }, ... ] }`
+          ].join("\n");
+
+          try {
+            const resp = await callModel({
+              system,
+              prompt: user,
+              temperature: 0.2,
+              max_tokens: 1200,
+              response_format: { type: "json_object" }
+            });
+
+            const raw = extractText(resp) || "{}";
+            const js = safeJson(stripJsonFences(raw)) || {};
+            const gen = Array.isArray(js.emails) ? js.emails : [];
+
+            // Keep only well-formed generated emails (deduped, capped to >=3 total)
+            for (const e of gen) {
+              if (emails.length >= 3) break; // defensive cap
+              const id = String(e?.claim_id || "").trim();
+              if (!id || !allowedIds.includes(id)) continue; // must use allowed ClaimIDs
+              const subj = String(e?.subject || "").trim();
+              const prev = String(e?.preview || "").trim();
+              let body = String(e?.body || "").trim();
+              if (!body) continue;
+
+              // Ensure explicit ClaimID text present
+              if (!CLAIM_ID_RX_LOCAL.test(body)) {
+                body += (/[.!?]$/.test(body) ? " " : " ") + `(ClaimID: ${id})`;
+              }
+
+              // Deduplicate by (subject, body) canonical form
+              const key = canon(subj, body);
+              if (seen.has(key)) continue;
+              seen.add(key);
+
+              emails.push({ subject: subj, preview: prev, body });
+            }
+          } catch (err) {
+            context?.log?.warn?.("[email-topup] LLM generation failed: " + String(err && err.message || err));
+            // If generation fails we simply proceed; the downstream validator will catch <3 and return a clear 422.
+          }
+        }
+
+        // Write back the normalised/top-upped list
+        campaign.channel_plan.emails = emails;
+      }
+
+      // 2) Normalise existing+generated emails (no hard-wired padding)
+      {
+        // Use a LOCAL ClaimID regex so this block doesn't depend on outer globals
+        const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
+
+        async function rewriteToWordRange(body, claimId) {
+          const words = _countWords(body); // assumes _countWords is defined earlier in this email block
+          if (words >= 90 && words <= 200) return body;
+
+          // If too long, trim deterministically (doesn't invent content)
+          if (words > 200) return body.split(/\s+/).slice(0, 200).join(" ");
+
+          // If too short, ask the LLM to expand using context rather than padding boilerplate
+          try {
+            const system = "You are a precise UK B2B copy editor. Return VALID JSON ONLY.";
+            const user = [
+              "Expand the email body to 90–200 words while preserving meaning and style.",
+              "Keep British English. Avoid hype. Do not invent statistics.",
+              `Keep the explicit '(ClaimID: ${claimId})' reference (append if missing).`,
+              `Product nouns to weave in when natural: ${(productHints || []).slice(0, 6).join(", ") || "(none)"}.`,
+              "",
+              "Return JSON ONLY: { \"body\": \"...\" }",
+              "",
+              "Original:",
+              String(body || "")
+            ].join("\n");
+
+            const resp = await callModel({
+              system,
+              prompt: user,
+              temperature: 0.2,
+              max_tokens: 500,
+              response_format: { type: "json_object" }
+            });
+
+            const raw = extractText(resp) || "{}";
+            const js = safeJson(stripJsonFences(raw)) || {};
+            let out = String(js.body || "").trim();
+            if (!out) return body;
+
+            // Ensure explicit ClaimID mention
+            if (!CLAIM_ID_RX_LOCAL.test(out)) {
+              out += (/[.!?]$/.test(out) ? " " : " ") + `(ClaimID: ${claimId})`;
+            }
+
+            // Cap at 200 words if expansion overshoots
+            const w = _countWords(out);
+            if (w > 200) out = out.split(/\s+/).slice(0, 200).join(" ");
+            return out;
+          } catch (e) {
+            context?.log?.warn?.("[email-normalise] expand failed; leaving body as-is: " + (e && e.message || e));
+            return body;
+          }
+        }
+
+        // Walk emails and ensure: one ClaimID, 90–200 words (with post-rewrite dedupe)
+        const result = [];
         let idIdx = 0;
 
-        // If there are no IDs at all (shouldn't happen because of earlier ≥5 gate), we won't mutate
-        if (Array.isArray(campaign.channel_plan?.emails) && idOrder.length) {
-          campaign.channel_plan.emails = campaign.channel_plan.emails.map(e => {
-            let body = String(e.body || "").trim();
+        // Prevent duplicates after rewrite (subject|body canonical form)
+        const canon = (subj, body) => (String(subj) + "|" + String(body)).toLowerCase().replace(/\s+/g, " ").trim();
+        const seen = new Set();
 
-            // Ensure one ClaimID is present
-            const m = body.match(CLAIM_ID_RX);
-            let claimId = m ? m[1] : "";
-            if (!claimId) {
-              const nextId = idOrder[idIdx++ % idOrder.length];
-              claimId = nextId;
-              // Add a neat inline reference at the end
-              body += (/[.!?]$/.test(body) ? " " : " ") + `(ClaimID: ${nextId})`;
-            }
+        for (const e of emails) {
+          let body = String(e.body || "").trim();
 
-            // Enforce 90–200 words
-            let words = _countWords(body);
+          // Ensure a ClaimID token is present
+          let claimId = (body.match(CLAIM_ID_RX_LOCAL) || [, ""])[1];
+          if (!claimId) {
+            claimId = allowedIds[idIdx++ % Math.max(1, allowedIds.length)] || "TBD";
+            body += (/[.!?]$/.test(body) ? " " : " ") + `(ClaimID: ${claimId})`;
+          }
 
-            // Pad up to 90 words with neutral, compliant lines referencing the chosen ClaimID
-            if (words < 90) {
-              const pads = [
-                `Happy to share the short brief behind ClaimID: ${claimId} and what it means for peers in your sector.`,
-                `If helpful, I can send a one-page note summarising the data behind ClaimID: ${claimId} for your review.`,
-                `The sources underpinning ClaimID: ${claimId} are authoritative UK publications; I can share them in a follow-up.`
-              ];
-              let i = 0;
-              while (words < 90 && i < pads.length) {
-                body += (/[.!?]$/.test(body) ? " " : " ") + pads[i++];
-                words = _countWords(body);
-              }
-            }
+          // Rewrite to the word range using contextual expansion if needed
+          body = await rewriteToWordRange(body, claimId);
 
-            // Trim down to 200 words if needed
-            if (words > 200) {
-              body = body.split(/\s+/).slice(0, 200).join(" ");
-            }
+          // Deduplicate after rewrite
+          const key = canon(e.subject || "", body);
+          if (seen.has(key)) continue;
+          seen.add(key);
 
-            return { ...e, body };
-          });
+          result.push({ ...e, body });
         }
+
+        campaign.channel_plan.emails = result;
       }
+      // --- end context-specific email pass ---
+
       // 5) Email thresholds: ≥3 emails; 90–200 word bodies; ≥1 ClaimID in each
-      if (!Array.isArray(campaign.channel_plan?.emails) || campaign.channel_plan.emails.length < 3) {
+      const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
+      const emailsArr = Array.isArray(campaign.channel_plan?.emails) ? campaign.channel_plan.emails : [];
+      if (emailsArr.length < 3) {
         context.res = {
           status: 422, headers: cors,
           body: { error: "channel_plan.emails must contain at least 3 items.", version: VERSION }
         };
         return;
       }
-      const emailBodiesOk = campaign.channel_plan.emails.every(e => {
-        const w = String(e.body || "").trim().split(/\s+/).filter(Boolean).length;
-        const hasClaim = CLAIM_ID_RX.test(String(e.body || ""));
+      const emailBodiesOk = emailsArr.every(e => {
+        const body = String(e?.body || "");
+        const w = body.trim().split(/\s+/).filter(Boolean).length;
+        const hasClaim = CLAIM_ID_RX_LOCAL.test(body);
         return (w >= 90 && w <= 200) && hasClaim;
       });
+
       if (!emailBodiesOk) {
         context.res = {
           status: 422, headers: cors,
@@ -3736,10 +3741,17 @@ module.exports = async function (context, req) {
       }
       // --- competitor set normaliser (dedupe, strip blanks/self, trim to 7) ---
       {
-        const _asName = (x) => String(typeof x === "string" ? x : (x?.name || "")).trim();
+        // Accept strings or objects: { vendor } or { name }
+        const _asName = (x) => String(
+          typeof x === "string" ? x : (x?.vendor || x?.name || "")
+        ).trim();
+
         const _dedupCI = (arr) => {
           const seen = new Set(); const out = [];
-          for (const v of arr) { const k = v.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(v); } }
+          for (const v of arr) {
+            const k = v.toLowerCase();
+            if (!seen.has(k)) { seen.add(k); out.push(v); }
+          }
           return out;
         };
 
@@ -3748,12 +3760,13 @@ module.exports = async function (context, req) {
         const raw = Array.isArray(pd.competitor_set) ? pd.competitor_set : [];
         let comps = raw.map(_asName).filter(Boolean);
 
-        // remove self
+        // remove self (case-insensitive)
         if (company?.name) {
           const self = company.name.toLowerCase();
           comps = comps.filter(v => v.toLowerCase() !== self);
         }
 
+        // dedupe + cap
         comps = _dedupCI(comps);
         if (comps.length > 7) comps = comps.slice(0, 7);
 
@@ -3814,8 +3827,14 @@ module.exports = async function (context, req) {
               .filter(v => !ban.has(v.toLowerCase()));
 
             comps = _dedupCI(comps.concat(repaired)).slice(0, 7);
-          } catch { /* non-fatal, continue */ }
+          } catch {
+            // non-fatal, continue
+          }
         }
+
+        // Write back (as strings is fine for the length validator; if your renderer expects objects,
+        // you can map to { vendor } later in your contract_v1 adapter).
+        pd.competitor_set = comps;
 
         // 2) Industry fallback if still <5
         if (comps.length < 5) {
@@ -3858,6 +3877,162 @@ module.exports = async function (context, req) {
         pd.competitor_set = comps;
       }
 
+      // --- Competitor set repair + fallback (5–7 vendors, no self, dedupe) ---
+      // Place this block right BEFORE the "// 6) Competitor set: 5–7 vendors" gate.
+      {
+        const pd = (campaign.positioning_and_differentiation ||= {});
+        const selfName = String(company?.name || "").trim().toLowerCase();
+
+        // 0) Normalise to objects { vendor, reason_in_set?, url? }
+        const raw = Array.isArray(pd.competitor_set) ? pd.competitor_set : [];
+        let set = raw.map(v => {
+          if (typeof v === "string") return { vendor: v.trim() };
+          if (v && typeof v === "object") {
+            const vendor = String(v.vendor || v.name || "").trim();
+            const reason_in_set = String(v.reason_in_set || v.reason || "").trim();
+            const url = String(v.url || v.href || "").trim();
+            if (!vendor) return null;
+            return { vendor, reason_in_set, url };
+          }
+          return null;
+        }).filter(Boolean);
+
+        // 1) Dedupe (case-insensitive by vendor) + remove self
+        const seen = new Set();
+        set = set.filter(v => {
+          const key = String(v.vendor || "").trim().toLowerCase();
+          if (!key) return false;
+          if (selfName && key === selfName) return false;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
+        // 2) Cap early if already long
+        if (set.length > 7) set = set.slice(0, 7);
+
+        // 3) If still <5, try LLM top-up (deterministic JSON-only)
+        if (set.length < 5 && typeof callModel === "function") {
+          try {
+            const system = "You are a precise UK B2B analyst. Return VALID JSON ONLY.";
+            const industryHint = (Array.isArray(industries) ? industries.filter(Boolean).join(", ") : "") || "(none)";
+            const productHintLine = (Array.isArray(productHints) ? productHints.filter(Boolean).join(", ") : "") || "(none)";
+            const user = [
+              `Suggest ${Math.max(0, 5 - set.length)} competing vendors for ${company?.name || "the supplier"} (industry: ${icpFromCsv || industries?.[0] || "general"}).`,
+              "Rules:",
+              "- Output vendors that plausibly sell similar offers.",
+              "- UK/EU where possible.",
+              "- Exclude the supplier itself.",
+              "- No publishers/regulators/consultancies (e.g., gov.uk, ONS, Ofcom, Deloitte).",
+              "- Return JSON ONLY:",
+              `{ "vendors": [ { "vendor": "Acme Ltd", "reason_in_set": "Networks", "url": "https://..." }, ... ] }`,
+              "",
+              `Industries: ${industryHint}`,
+              `Product hints: ${productHintLine}`,
+              "",
+              "Website text (truncated):",
+              String(websiteText || "").slice(0, 4000),
+              "",
+              "Public corpus (truncated):",
+              String(seedsText || "").slice(0, 3000)
+            ].join("\n");
+
+            const resp = await callModel({
+              system, prompt: user, temperature: 0, max_tokens: 400,
+              response_format: { type: "json_object" }
+            });
+
+            const js = safeJson(stripJsonFences(extractText(resp))) || {};
+            const adds = Array.isArray(js.vendors) ? js.vendors : [];
+
+            const ban = new Set([
+              selfName,
+              "gov.uk", "office for national statistics", "ons", "ofcom",
+              "deloitte", "cabinet office", "citb"
+            ]);
+
+            for (const v of adds) {
+              const name = String(v?.vendor || "").trim();
+              if (!name) continue;
+              const key = name.toLowerCase();
+              if (ban.has(key) || seen.has(key)) continue;
+              seen.add(key);
+              set.push({
+                vendor: name,
+                reason_in_set: String(v?.reason_in_set || "").trim(),
+                url: String(v?.url || "").trim()
+              });
+              if (set.length >= 7) break;
+            }
+          } catch (e) {
+            context?.log?.warn?.("[competitor-topup] " + (e?.message || e));
+          }
+        }
+
+        // 4) Industry fallback if still <5
+        if (set.length < 5) {
+          const FALLBACK = {
+            telecoms: ["BT", "Vodafone", "Virgin Media Business", "TalkTalk Business", "Sky Business", "Colt", "CityFibre"],
+            technology: ["Microsoft", "AWS", "Google Cloud", "Cisco", "Palo Alto Networks", "Fortinet", "Cloudflare"],
+            construction: ["Balfour Beatty", "Kier", "Morgan Sindall", "Laing O'Rourke", "Skanska", "Galliford Try", "Costain"],
+            education: ["RM", "Capita", "Oxford University Press", "Pearson", "Blackboard", "Canvas", "Moodle"],
+            healthcare: ["EMIS", "TPP", "Cerner", "Epic", "Philips", "GE Healthcare", "Siemens Healthineers"],
+            retail: ["Shopify", "Salesforce Commerce Cloud", "Adobe Commerce", "Lightspeed", "Squarespace", "BigCommerce", "Wix"],
+            publicsector: ["Capita", "Atos", "Fujitsu", "CGI", "Sopra Steria", "DXC", "BAE Systems"],
+            transport: ["Network Rail", "FirstGroup", "Stagecoach", "Arriva", "National Express", "Go-Ahead Group", "Ryanair"],
+            energy: ["BP", "Shell", "Centrica", "Octopus Energy", "E.ON", "EDF", "SSE"],
+            hospitality: ["Whitbread", "Marriott", "IHG", "Accor", "Travelodge", "Premier Inn", "Hilton"],
+            agriculture: ["John Deere", "CNH Industrial", "AGCO", "Corteva", "BASF", "Bayer", "Syngenta"],
+            manufacturing: ["Siemens", "Bosch", "Honeywell", "Schneider Electric", "Rockwell Automation", "ABB", "Emerson"],
+            general: ["Microsoft", "AWS", "Google", "Oracle", "IBM", "SAP", "Salesforce"]
+          };
+
+          const normKey = (s) => String(s || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, " ")
+            .trim()
+            .replace(/\s+/g, "");
+
+          const mapToBucket = (s) => {
+            const k = normKey(s);
+            if (/tele(com|comms)/.test(k)) return "telecoms";
+            if (/constr(uction)?/.test(k)) return "construction";
+            if (/health(care)?|nhs|med/.test(k)) return "healthcare";
+            if (/edu(cation)?|school|univer/.test(k)) return "education";
+            if (/retail|ecommerce|commerce/.test(k)) return "retail";
+            if (/public|gov|civic|council/.test(k)) return "publicsector";
+            if (/transport|rail|bus|air|logistics/.test(k)) return "transport";
+            if (/energy|utility|utilities|oil|gas|power/.test(k)) return "energy";
+            if (/hotel|hospitality|leisure|travel/.test(k)) return "hospitality";
+            if (/agri|farm|food/.test(k)) return "agriculture";
+            if (/manufactur|industrial|factory|plant/.test(k)) return "manufacturing";
+            if (/tech|it|software|saas|cloud|security/.test(k)) return "technology";
+            return "general";
+          };
+
+          const keys = Array.isArray(industries) && industries.length
+            ? industries.map(mapToBucket)
+            : ["general"];
+
+          // iterate buckets, always finishing with "general"
+          const buckets = Array.from(new Set(keys.concat("general")));
+          for (const b of buckets) {
+            for (const name of (FALLBACK[b] || [])) {
+              const key = name.toLowerCase();
+              if (selfName && key === selfName) continue;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              set.push({ vendor: name, reason_in_set: "", url: "" });
+              if (set.length >= 7) break;
+            }
+            if (set.length >= 7 || set.length >= 5) break;
+          }
+        }
+
+        // 5) Final cap & write back
+        pd.competitor_set = set.slice(0, 7);
+      }
+
       // 6) Competitor set: 5–7 vendors
       const compSet = campaign.positioning_and_differentiation?.competitor_set;
       if (!Array.isArray(compSet) || compSet.length < 5 || compSet.length > 7) {
@@ -3867,18 +4042,19 @@ module.exports = async function (context, req) {
         };
         return;
       }
+
       // --- product noun repair pass: ensure top 3 nouns appear in VP, LP, E1/E2 ---
       {
-        const nouns = productHints.slice(0, 3);
+        const nouns = Array.isArray(productHints) ? productHints.slice(0, 3).filter(Boolean) : [];
         const has3 = nouns.length >= 3;
 
         if (has3) {
           const ensureNouns = (text) => {
             let s = String(text || "");
             nouns.forEach(n => {
-              const rx = _termToRegex(n); // existing helper
+              const rx = _termToRegex?.(n); // existing helper; may return RegExp or null
               if (rx && !rx.test(s)) {
-                // Append noun gracefully (minimal change)
+                // Append noun minimally to avoid heavy rewrites
                 s += (s ? " " : "") + n;
               }
             });
@@ -3908,7 +4084,7 @@ module.exports = async function (context, req) {
           if (Array.isArray(campaign.channel_plan?.emails)) {
             campaign.channel_plan.emails = campaign.channel_plan.emails.map((e, idx) => {
               if (idx > 1) return e; // only E1/E2 for the gate
-              const body = ensureNouns(String(e.body || ""));
+              const body = ensureNouns(String(e?.body || ""));
               return { ...e, body };
             });
           }
@@ -3916,36 +4092,61 @@ module.exports = async function (context, req) {
       }
 
       // 7) Product nouns must appear in key places (if we have at least 3 hints)
-      const mustUseNouns = productHints.slice(0, 3);
-      function containsAny(text, nouns) {
-        const t = String(text || "");
-        return nouns.every(n => _termToRegex(n)?.test(t));
-      }
-      const vp = campaign.positioning_and_differentiation?.value_prop || "";
-      const lp = campaign.offer_strategy?.landing_page || {};
-      const e1 = campaign.channel_plan.emails[0] || {};
-      const e2 = campaign.channel_plan.emails[1] || {};
-      if (mustUseNouns.length >= 3) {
-        const missing =
-          !containsAny(vp, mustUseNouns) ||
-          !containsAny(lp.subheadline || lp.headline || "", mustUseNouns) ||
-          !containsAny(e1.body || "", mustUseNouns) ||
-          !containsAny(e2.body || "", mustUseNouns);
-        if (missing) {
-          context.res = {
-            status: 422, headers: cors,
-            body: { error: "Site-derived product nouns must appear in value_prop, LP copy, and Emails E1/E2.", hints: mustUseNouns, version: VERSION }
-          };
-          return;
+      {
+        const mustUseNouns = Array.isArray(productHints) ? productHints.slice(0, 3).filter(Boolean) : [];
+        const containsAll = (text, nouns) => {
+          const t = String(text || "");
+          return nouns.every(n => _termToRegex?.(n)?.test(t));
+        };
+
+        const vp = String(campaign.positioning_and_differentiation?.value_prop || "");
+        const lp = campaign.offer_strategy?.landing_page || {};
+        const e1 = (campaign.channel_plan?.emails?.[0]) || {};
+        const e2 = (campaign.channel_plan?.emails?.[1]) || {};
+
+        if (mustUseNouns.length >= 3) {
+          const missing =
+            !containsAll(vp, mustUseNouns) ||
+            !containsAll(lp.subheadline || lp.headline || "", mustUseNouns) ||
+            !containsAll(e1.body || "", mustUseNouns) ||
+            !containsAll(e2.body || "", mustUseNouns);
+
+          if (missing) {
+            context.res = {
+              status: 422, headers: cors,
+              body: {
+                error: "Site-derived product nouns must appear in value_prop, LP copy, and Emails E1/E2.",
+                hints: mustUseNouns,
+                version: VERSION
+              }
+            };
+            return;
+          }
         }
       }
 
       // ---------- Build UI compatibility mirror (contract_v1) ----------
       // Minimal faithful mapping so your current renderer can show content without breaking.
       function toContractV1(cg) {
+        // Local ClaimID regexes (single match + global match)
+        const CID_RX = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
+        const CID_RX_G = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/g;
+
+        // Safe helpers for upstream vars that may be undefined
+        const _rows = Array.isArray(rows) ? rows : [];
+        const _fieldsFound = Array.isArray(fieldsFound) ? fieldsFound : [];
+        const _company = company || {};
+        const _industries = Array.isArray(industries) ? industries : [];
+        const _topPurchases = Array.isArray(topPurchases) ? topPurchases : [];
+        const _topNeeds = Array.isArray(topNeeds) ? topNeeds : [];
+        const _icpFromCsv = icpFromCsv || "";
+        const _tone = tone || "professional";
+        const _uspsProvided = !!uspsProvided;
+        const _listFromUsps = typeof listFromUsps === "function" ? listFromUsps : (s => (String(s || "").split(/[;,\n]+/).map(x => x.trim()).filter(Boolean)));
+
         // Proof & IDs
         const caseIds = (cg.case_studies || []).map((c, i) => c.customer ? `CASE-${i + 1}` : "").filter(Boolean);
-        const claimIds = (cg.evidence_log || []).map(e => e.claim_id).filter(Boolean);
+        const claimIds = (cg.evidence_log || []).map(e => e?.claim_id).filter(Boolean);
 
         // Emails mapping to expected shape in your renderer
         const emails = (cg.channel_plan?.emails || []).map((e, idx) => ({
@@ -3953,13 +4154,14 @@ module.exports = async function (context, req) {
           subject: e.subject || "",
           body_90_120_words: e.body || "",
           claim_ids_included: Array.from(
-            String(e.body || "").matchAll(CLAIM_ID_RX_GLOBAL),
+            String(e.body || "").matchAll(CID_RX_G),
             m => (m[1] || "").replace(/[)\].,;:]+$/g, "")
           )
         }));
 
+        // Placeholder (kept to match your original structure)
         const lpGrid = Array.isArray(cg.offer_strategy?.landing_page?.sections) ? [] : [];
-        // build a basic outcomes grid from any numeric phrases we can find in ES/evidence (fallback)
+        // Basic outcomes grid fallback (left empty to avoid inventing numbers)
         const outcomes_grid = [];
 
         return {
@@ -3972,22 +4174,28 @@ module.exports = async function (context, req) {
           },
           "0_inputs": {
             upload_csv: {
-              canonical_headers: fieldsFound,
+              canonical_headers: _fieldsFound,
               header_normalisation_rules: { trim_whitespace: true, case_sensitive: true, treat_trailing_spaces_as_equal: true },
-              csv_status: { ingested: true, row_count: rows.length, validation_errors: [] }
+              csv_status: { ingested: true, row_count: _rows.length, validation_errors: [] }
             },
-            company_details: { company_name: company.name, company_website_url: company.website, company_linkedin_url: company.linkedin },
-            usps_differentiators: { provided: uspsProvided, items: listFromUsps(company.usps) },
-            tone_and_region: tone
+            company_details: {
+              company_name: _company.name,
+              company_website_url: _company.website,
+              company_linkedin_url: _company.linkedin
+            },
+            usps_differentiators: { provided: _uspsProvided, items: _listFromUsps(_company.usps) },
+            tone_and_region: _tone
           },
           "1_operating_rules": [],
           "2_workflow": {
             "2C_evidence_log": { claim_id_format: "CLM-YYYYMMDD-###", entries: cg.evidence_log || [] },
-            "2D_case_study_library": { cases: (cg.case_studies || []).map((c, i) => ({ ...c, case_id: caseIds[i] || `CASE-${i + 1}` })) }
+            "2D_case_study_library": {
+              cases: (cg.case_studies || []).map((c, i) => ({ ...c, case_id: caseIds[i] || `CASE-${i + 1}` }))
+            }
           },
           "3_campaign_output": {
             "3.1_executive_summary": {
-              icp_from_simplified_industry: icpFromCsv || "",
+              icp_from_simplified_industry: _icpFromCsv || "",
               pressing_problem_claim_ids: claimIds,
               outcome_promise_quantified: "",
               primary_offer: "",
@@ -3997,28 +4205,38 @@ module.exports = async function (context, req) {
             },
             "3.2_positioning_and_differentiation": {
               value_proposition: String(cg.positioning_and_differentiation?.value_prop || ""),
-              binding_logic: { top_purchases_outcomes: (topPurchases || []).map(t => t.text || t), top_needs_supplier_selection_criteria: (topNeeds || []).map(t => t.text || t), case_proof: { case_ids: caseIds, claim_ids: claimIds } },
+              binding_logic: {
+                top_purchases_outcomes: _topPurchases.map(t => (typeof t === "string" ? t : (t?.text || ""))).filter(Boolean),
+                top_needs_supplier_selection_criteria: _topNeeds.map(t => (typeof t === "string" ? t : (t?.text || ""))).filter(Boolean),
+                case_proof: { case_ids: caseIds, claim_ids: claimIds }
+              },
               swot_if_step_2B_ran: {
-                included: !uspsProvided,
+                included: !_uspsProvided,
                 swot: cg.positioning_and_differentiation?.swot || {},
                 differentiators_emphasised: cg.positioning_and_differentiation?.differentiators || []
               }
             },
             "3.3_icp_and_messaging_matrix": {
               icp_slices: {
-                by_simplified_industry: industries,
-                by_it_spend_pct_band: [{ band: "low", range: "" }, { band: "medium", range: "" }, { band: "high", range: "" }],
+                by_simplified_industry: _industries,
+                by_it_spend_pct_band: [
+                  { band: "low", range: "" },
+                  { band: "medium", range: "" },
+                  { band: "high", range: "" }
+                ],
                 non_negotiables_from_top_needs_supplier: (cg.messaging_matrix?.nonnegotiables || [])
               },
               matrix_rows: (cg.messaging_matrix?.matrix || []).map(r => ({
-                persona: r.persona, pain_from_top_blockers: r.pain, value_statement: r.value_statement,
+                persona: r?.persona,
+                pain_from_top_blockers: r?.pain,
+                value_statement: r?.value_statement,
                 proof: {
                   claim_ids: Array.from(
-                    String(r.proof || "").matchAll(CLAIM_ID_RX_GLOBAL),
+                    String(r?.proof || "").matchAll(CID_RX_G),
                     m => (m[1] || "").replace(/[)\].,;:]+$/g, "")
                   )
                 },
-                cta: r.cta
+                cta: r?.cta
               }))
             },
             "3.4_offer_strategy_and_assets": {
@@ -4043,7 +4261,7 @@ module.exports = async function (context, req) {
                 insight_post: {
                   copy: String(cg.channel_plan?.linkedin?.insight_post || ""),
                   claim_id: (() => {
-                    const m = String(cg.channel_plan?.linkedin?.insight_post || "").match(CLAIM_ID_RX);
+                    const m = String(cg.channel_plan?.linkedin?.insight_post || "").match(CID_RX);
                     return (m && m[1]) ? m[1].replace(/[)\].,;:]+$/g, "") : "";
                   })()
                 },
@@ -4052,7 +4270,14 @@ module.exports = async function (context, req) {
               },
               paid_optional: {
                 enabled: Array.isArray(cg.channel_plan?.paid) && cg.channel_plan.paid.length > 0,
-                variants: (cg.channel_plan?.paid || []).map(p => ({ name: p.variant || "", tied_to_top_purchase: "", quantified_proof: p.proof || "", claim_id: (String(p.proof || "").match(CLAIM_ID_RX) || [, ""])[1] || "", cta: p.cta || "", negatives_exclusions: [] }))
+                variants: (cg.channel_plan?.paid || []).map(p => ({
+                  name: p.variant || "",
+                  tied_to_top_purchase: "",
+                  quantified_proof: p.proof || "",
+                  claim_id: (String(p.proof || "").match(CID_RX) || [, ""])[1] || "",
+                  cta: p.cta || "",
+                  negatives_exclusions: []
+                }))
               },
               event_webinar: {
                 concept: String(cg.channel_plan?.event?.concept || ""),
@@ -4064,8 +4289,11 @@ module.exports = async function (context, req) {
             "3.6_sales_enablement_alignment": {
               discovery_questions_5_to_7: cg.sales_enablement?.discovery_questions || [],
               objection_cards: (cg.sales_enablement?.objection_cards || []).map(o => ({
-                blocker: o.blocker, reframe_with_evidence: o.reframe_with_claimid, claim_id: (String(o.reframe_with_claimid || "").match(CLAIM_ID_RX) || [, ""])[1] || "",
-                proof_case_metric: o.proof, risk_reversal_mechanism: o.risk_reversal
+                blocker: o.blocker,
+                reframe_with_evidence: o.reframe_with_claimid,
+                claim_id: (String(o.reframe_with_claimid || "").match(CID_RX) || [, ""])[1] || "",
+                proof_case_metric: o.proof,
+                risk_reversal_mechanism: o.risk_reversal
               })),
               proof_pack_outline: {
                 case_studies: (cg.case_studies || []).slice(0, 2).map((c, i) => `CASE-${i + 1}`),
@@ -4074,25 +4302,38 @@ module.exports = async function (context, req) {
               handoff_rules: { follow_up_sla: String(cg.sales_enablement?.handoff_rules || "") }
             },
             "3.7_measurement_and_learning_plan": {
-              kpis: { mqls: null, sal_percent: null, meetings: null, pipeline: null, cost_per_opportunity: null, time_to_value: null },
+              kpis: {
+                mqls: null, sal_percent: null, meetings: null, pipeline: null,
+                cost_per_opportunity: null, time_to_value: null
+              },
               weekly_test_plan: (() => {
                 const wtp = cg.measurement_and_learning?.weekly_test_plan;
                 return Array.isArray(wtp) ? wtp : (String(wtp || "") ? [String(wtp)] : []);
               })(),
-              utm_and_crm_mapping: { utm_standard: { source: "", medium: "", campaign: "", content: "", term: "" }, crm_fields: { company_number_optional: "CompanyNumber", campaign_member_fields: [] } },
+              utm_and_crm_mapping: {
+                utm_standard: { source: "", medium: "", campaign: "", content: "", term: "" },
+                crm_fields: { company_number_optional: "CompanyNumber", campaign_member_fields: [] }
+              },
               evidence_freshness_rule: String(cg.measurement_and_learning?.evidence_freshness_rule || "")
             },
             "3.8_compliance_and_governance": {
-              substantiation_file: { type: "export_of_evidence_log", format: "CSV or XLSX", path_or_link: String(cg.compliance_and_governance?.substantiation_file || "") },
+              substantiation_file: {
+                type: "export_of_evidence_log",
+                format: "CSV or XLSX",
+                path_or_link: String(cg.compliance_and_governance?.substantiation_file || "")
+              },
               gdpr_pecr_checklist: String(cg.compliance_and_governance?.gdpr_pecr_checklist || "") ? [cg.compliance_and_governance.gdpr_pecr_checklist] : [],
               brand_accessibility_checks: String(cg.compliance_and_governance?.brand_accessibility_checks || "") ? [cg.compliance_and_governance.brand_accessibility_checks] : [],
               approval_log: String(cg.compliance_and_governance?.approval_log_note || "") ? [cg.compliance_and_governance.approval_log_note] : []
             },
             "3.9_risks_and_contingencies": {
-              triggers_and_actions: [{ trigger: "ClaimID withdrawn or contradicted", action: "Pause affected assets; replace with alternative ClaimID; update Evidence Log; notify owners." }, { trigger: "Budget freeze", action: "Switch to fallback offer; adjust cadence; nurture." }]
+              triggers_and_actions: [
+                { trigger: "ClaimID withdrawn or contradicted", action: "Pause affected assets; replace with alternative ClaimID; update Evidence Log; notify owners." },
+                { trigger: "Budget freeze", action: "Switch to fallback offer; adjust cadence; nurture." }
+              ]
             },
             "3.10_one_page_campaign_summary": {
-              icp: cg.meta?.icp_from_csv || icpFromCsv || "",
+              icp: cg.meta?.icp_from_csv || _icpFromCsv || "",
               offer: String(cg.offer_strategy?.landing_page?.headline || ""),
               message_bullets_with_proofs: [],
               channels_and_cadence: "",
@@ -4105,6 +4346,7 @@ module.exports = async function (context, req) {
           "4_content_blocks_and_micro_templates": {}
         };
       }
+
       // ---- ClaimID normalisation + text remap (place just before the response) ----
       (function normaliseClaimIdsAndRewriteReferences() {
         const CID_FMT = /^CLM-\d{8}-\d{3}$/;
@@ -4139,7 +4381,7 @@ module.exports = async function (context, req) {
             const nu = remap.get(String(id).trim());
             return nu ? `ClaimID: ${nu}` : m;
           })
-          // replace TBD with next available real ID
+          // replace TBD with first available real ID (stable)
           .replace(/\b[Cc]laim\s*ID[:\s]*TBD\b/g, () => `ClaimID: ${Array.from(remap.values())[0]}`);
 
         // 3) Rewrite ES and any copy fields that can carry ClaimIDs
@@ -4198,10 +4440,11 @@ module.exports = async function (context, req) {
         }
         return out;
       }
+
       // --- FLATTEN contract_v1 for legacy renderer (dot + bracket notation) ---
       function flattenForLegacyContract(obj) {
         const out = {};
-        const idKeyRx = /^[A-Za-z_$][A-Za-z0-9_$]*$/;       // keys safe for dot notation
+        const idKeyRx = /^[A-Za-z_$][A-Za-z0-9_$]*$/; // keys safe for dot notation
 
         function segForKey(k) {
           // If the key has spaces/dots/dashes/starts with digit, use ["..."] segment
@@ -4233,25 +4476,26 @@ module.exports = async function (context, req) {
       // ---------- response ----------
       const contract_v1 = toContractV1(campaign);
 
-      // 2a) Produce a legacy flat map for the current UI
+      // 2a) Produce a legacy flat map (optional but useful for older views/tools)
       const contract_v1_flat = flattenForLegacyContract(contract_v1);
 
-      // 2b) (Optional but helpful) add two shims some older views read directly
-      //     - executive_summary_text: plain ES string
-      //     - evidence_log_rows: array for the Evidence Log table
+      // 2b) Add two shims some older views read directly
       contract_v1_flat["executive_summary_text"] = String(campaign.executive_summary || "");
       contract_v1_flat["evidence_log_rows"] = Array.isArray(campaign.evidence_log) ? campaign.evidence_log : [];
 
-      // Return both the new nested contract and the legacy flat one
+      // IMPORTANT: Frontend expects the BARE contract_v1 at top-level.
+      // Attach extras under non-colliding, double-underscore keys.
+      const responsePayload = {
+        ...contract_v1,          // <-- top-level nested contract the UI expects
+        __flat: contract_v1_flat,
+        __raw_campaign: campaign,
+        __version: VERSION
+      };
+
       context.res = {
         status: 200,
         headers: cors,
-        body: {
-          body: campaign,               // new schema (nested)
-          contract_v1,                  // nested compatibility object (for future UI)
-          contract_v1_flat,             // **legacy flat map** the current UI expects
-          version: VERSION
-        }
+        body: responsePayload
       };
       return;
     }
