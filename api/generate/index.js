@@ -3641,21 +3641,126 @@ module.exports = async function (context, req) {
       }
       // --- competitor set normaliser (dedupe, strip blanks/self, trim to 7) ---
       {
-        const csPath = campaign.positioning_and_differentiation || {};
-        const raw = Array.isArray(csPath.competitor_set) ? csPath.competitor_set : [];
-        const cleaned = raw
-          .map(x => String(typeof x === "string" ? x : (x?.name || "")).trim())
-          .filter(Boolean)
-          // remove self
-          .filter(v => !company.name || v.toLowerCase() !== company.name.toLowerCase());
+        const _asName = (x) => String(typeof x === "string" ? x : (x?.name || "")).trim();
+        const _dedupCI = (arr) => {
+          const seen = new Set(); const out = [];
+          for (const v of arr) { const k = v.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(v); } }
+          return out;
+        };
 
-        const dedup = Array.from(new Set(cleaned));
+        // 0) Normalise current list
+        const pd = (campaign.positioning_and_differentiation ||= {});
+        const raw = Array.isArray(pd.competitor_set) ? pd.competitor_set : [];
+        let comps = raw.map(_asName).filter(Boolean);
 
-        // If too many, trim; if too few, leave as-is (the gate will 422 correctly)
-        const fixed = dedup.length > 7 ? dedup.slice(0, 7) : dedup;
+        // remove self
+        if (company?.name) {
+          const self = company.name.toLowerCase();
+          comps = comps.filter(v => v.toLowerCase() !== self);
+        }
 
-        if (!campaign.positioning_and_differentiation) campaign.positioning_and_differentiation = {};
-        campaign.positioning_and_differentiation.competitor_set = fixed;
+        comps = _dedupCI(comps);
+        if (comps.length > 7) comps = comps.slice(0, 7);
+
+        // 1) If still <5, attempt a deterministic JSON-only repair via LLM
+        if (comps.length < 5) {
+          try {
+            const system = [
+              "You output valid JSON only.",
+              "Return exactly: { \"competitors\": [\"Name1\", \"Name2\", ...] }"
+            ].join(" ");
+
+            const industryHint = (Array.isArray(industries) ? industries.filter(Boolean).join(", ") : "") || "(none)";
+            const productHintLine = (Array.isArray(productHints) ? productHints.join(", ") : "") || "(none)";
+
+            const user = [
+              "Task: Propose 5–7 *vendor* competitors operating in the UK for the described company.",
+              "Return JSON only: { \"competitors\": [ ... ] }",
+              "",
+              "Rules:",
+              "- Output company/vendor names only (no descriptors, no locations).",
+              "- Exclude the target company itself.",
+              "- Prefer vendors that plausibly sell similar offers to the product hints.",
+              "- Avoid publishers, regulators, and consultancies such as gov.uk, ONS, Ofcom, Deloitte.",
+              "- Avoid duplicates, ensure 5–7 items.",
+              "",
+              "Context:",
+              `Company: ${company?.name || "(n/a)"} (${company?.website || "(no site)"})`,
+              `Industries: ${industryHint}`,
+              `Product hints: ${productHintLine}`,
+              "",
+              "Website text (truncated):",
+              String(websiteText || "").slice(0, 4000),
+              "",
+              "Public corpus (truncated):",
+              String(seedsText || "").slice(0, 3000)
+            ].join("\n");
+
+            const resp = await callModel({
+              system,
+              prompt: user,
+              temperature: 0,
+              max_tokens: 300,
+              response_format: { type: "json_object" }
+            });
+
+            const obj = safeJson(stripJsonFences(extractText(resp))) || {};
+            const llmList = Array.isArray(obj.competitors) ? obj.competitors : [];
+
+            const ban = new Set([
+              (company?.name || "").toLowerCase(),
+              "gov.uk", "office for national statistics", "ons", "ofcom",
+              "deloitte", "cabinet office", "citb"
+            ]);
+
+            const repaired = llmList
+              .map(_asName)
+              .filter(Boolean)
+              .filter(v => !ban.has(v.toLowerCase()));
+
+            comps = _dedupCI(comps.concat(repaired)).slice(0, 7);
+          } catch { /* non-fatal, continue */ }
+        }
+
+        // 2) Industry fallback if still <5
+        if (comps.length < 5) {
+          const FALLBACK = {
+            telecoms: ["BT", "Vodafone", "Virgin Media Business", "TalkTalk Business", "Sky Business", "Colt", "CityFibre"],
+            technology: ["Microsoft", "AWS", "Google Cloud", "Cisco", "Palo Alto Networks", "Fortinet", "Cloudflare"],
+            construction: ["Balfour Beatty", "Kier", "Morgan Sindall", "Laing O'Rourke", "Skanska", "Galliford Try", "Costain"],
+            education: ["RM", "Capita", "Oxford University Press", "Pearson", "Blackboard", "Canvas", "Moodle"],
+            healthcare: ["EMIS", "TPP", "Cerner", "Epic", "Philips", "GE Healthcare", "Siemens Healthineers"],
+            retail: ["Shopify", "Salesforce Commerce Cloud", "Adobe Commerce", "Lightspeed", "Squarespace", "BigCommerce", "Wix"],
+            publicsector: ["Capita", "Atos", "Fujitsu", "CGI", "Sopra Steria", "DXC", "BAE Systems"],
+            transport: ["Network Rail", "FirstGroup", "Stagecoach", "Arriva", "National Express", "Go-Ahead Group", "Ryanair"],
+            energy: ["BP", "Shell", "Centrica", "Octopus Energy", "E.ON", "EDF", "SSE"],
+            hospitality: ["Whitbread", "Marriott", "IHG", "Accor", "Travelodge", "Premier Inn", "Hilton"],
+            agriculture: ["John Deere", "CNH Industrial", "AGCO", "Corteva", "BASF", "Bayer", "Syngenta"],
+            manufacturing: ["Siemens", "Bosch", "Honeywell", "Schneider Electric", "Rockwell Automation", "ABB", "Emerson"],
+            general: ["Microsoft", "AWS", "Google", "Oracle", "IBM", "SAP", "Salesforce"]
+          };
+          const pick = (inds) => {
+            const keys = Array.isArray(inds) && inds.length ? inds.map(_normIndustry) : ["general"];
+            const seen = new Set(); const out = [];
+            for (const k of keys.concat(["general"])) {
+              for (const v of (FALLBACK[k] || [])) {
+                const vn = v.trim();
+                if (!vn) continue;
+                const low = vn.toLowerCase();
+                if ((company?.name && low === company.name.toLowerCase()) || seen.has(low)) continue;
+                seen.add(low); out.push(vn);
+                if (out.length >= 7) break;
+              }
+              if (out.length >= 7) break;
+            }
+            return out;
+          };
+          const topup = pick(industries);
+          comps = _dedupCI(comps.concat(topup)).slice(0, 7);
+        }
+
+        // write back
+        pd.competitor_set = comps;
       }
 
       // 6) Competitor set: 5–7 vendors
