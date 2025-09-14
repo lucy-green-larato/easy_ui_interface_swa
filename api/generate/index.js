@@ -2326,6 +2326,9 @@ module.exports = async function (context, req) {
     }
 
     if (kind === "campaign") {
+      // Unified ClaimID regexes (added)
+      const CLAIM_ID_RX = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)/;
+      const CLAIM_ID_RX_GLOBAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)/g;
       // === Campaign builder: single-pass JSON-only generation with strict validation & fix pass ===
       // Evidence-backed, UK sources, brand-agnostic product noun lift from the prospect site.
       // Returns:
@@ -2545,7 +2548,7 @@ module.exports = async function (context, req) {
         return Array.from(set).slice(0, 12);
       }
       const securityHint = siteHasCyber || (topNeeds || []).some(t => /\bsec(urity)?|cyber/i.test(String(t.text || t)));
-      const seedUrls = buildSeedUrlsByIndustry(industries, { securityHint });
+      let seedUrls = buildSeedUrlsByIndustry(industries, { securityHint });
 
       // ---- Add company website + LinkedIn seeds (dedup + cap to 12) ----
       try {
@@ -2621,7 +2624,7 @@ module.exports = async function (context, req) {
         const hasWhyNow = /(^|\n)\s*why\s*now\s*:\s*$/i.test(text);
         const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
         const bulletIds = bullets.map(b => {
-          const m = b.match(/\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)/); // tolerate "Claim ID" / "ClaimID"
+          const m = b.match(CLAIM_ID_RX); // tolerate "Claim ID" / "ClaimID"
           return m ? m[1] : null;
         });
         return { hasWhyNow, bullets, bulletIds };
@@ -2990,6 +2993,60 @@ module.exports = async function (context, req) {
       }
 
       // Helpers for claim mapping / freshness
+      // === ES heading + bullet parsing helpers ===
+      function _detectWhyNowHeadingLine(text) {
+        const re = /(^|\n)\s*why\s*now\s*(?:[:\-–—])?\s*$/i;
+        const m = text.match(re);
+        return !!m;
+      }
+
+      function _firstBulletLineIdx(lines) {
+        for (let i = 0; i < lines.length; i++) {
+          if (/^\s*(?:[-•])\s+/.test(lines[i])) return i;
+        }
+        return -1;
+      }
+
+      function normalizeExecutiveSummaryHeading(es) {
+        const s = String(es || "");
+        if (!s.trim()) return s;
+
+        const hasHeading = _detectWhyNowHeadingLine(s);
+        if (hasHeading) return s;
+
+        const bullets = (s.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []);
+        if (bullets.length < 4 || bullets.length > 5) return s;
+
+        const lines = s.split(/\r?\n/);
+        const idx = _firstBulletLineIdx(lines);
+        if (idx === -1) return s;
+
+        const headingLine = "Why now:";
+        const out = [];
+        for (let i = 0; i < lines.length; i++) {
+          if (i === idx) {
+            if (i > 0 && lines[i - 1].trim() !== "") out.push("");
+            out.push(headingLine);
+          }
+          out.push(lines[i]);
+        }
+        return out.join("\n");
+      }
+
+      function parseBulletsAndIdsFromES(text) {
+        const hasWhyNow =
+          /(^|\n)\s*why\s*now\s*:\s*$/i.test(text) ||
+          /(^|\n)\s*why\s*now\s*(?:[\-–—])\s*$/i.test(text) ||
+          /(^|\n)\s*why\s*now\s*$/i.test(text);
+
+        const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
+        const bulletIds = bullets.map(b => {
+          const m = b.match(CLAIM_ID_RX);
+          return m ? m[1] : null;
+        });
+        return { hasWhyNow, bullets, bulletIds };
+      }
+
       function parseIsoDate(s) {
         const m = String(s || "").trim(); const d = new Date(m);
         return isNaN(d.getTime()) ? null : d;
@@ -3005,6 +3062,8 @@ module.exports = async function (context, req) {
           .map(e => String(e.claim_id || "").trim())
           .filter(Boolean));
 
+        // **Normalize heading before first parse**
+        campaign.executive_summary = normalizeExecutiveSummaryHeading(String(campaign.executive_summary || ""));
         let { hasWhyNow, bullets, bulletIds } = parseBulletsAndIdsFromES(String(campaign.executive_summary || ""));
 
         // If any ID is missing/invalid, attempt a single source-aware rewrite using evidence_log
@@ -3051,7 +3110,7 @@ module.exports = async function (context, req) {
           const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
           const bulletIds = [];
           bullets.forEach(b => {
-            const m = b.match(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/);
+            const m = b.match(CLAIM_ID_RX);
             if (m) bulletIds.push(m[1]);
           });
           return { hasWhyNow, bullets, bulletIds };
@@ -3130,7 +3189,7 @@ module.exports = async function (context, req) {
               const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
               const bulletIds = [];
               bullets.forEach(b => {
-                const m = b.match(/\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)/); // <— tolerant regex
+                const m = b.match(CLAIM_ID_RX); // <— tolerant regex
                 if (m) bulletIds.push(m[1]);
               });
               return { hasWhyNow, bullets, bulletIds };
@@ -3184,7 +3243,7 @@ module.exports = async function (context, req) {
                 const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
                 const bulletIds = [];
                 bullets.forEach(b => {
-                  const m = b.match(/\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)/); // <— tolerant regex
+                  const m = b.match(CLAIM_ID_RX); // <— tolerant regex
                   if (m) bulletIds.push(m[1]);
                 });
                 return { hasWhyNow, bullets, bulletIds };
@@ -3271,7 +3330,7 @@ module.exports = async function (context, req) {
       }
       const emailBodiesOk = campaign.channel_plan.emails.every(e => {
         const w = String(e.body || "").trim().split(/\s+/).filter(Boolean).length;
-        const hasClaim = /\b[Cc]laimID[:\s]*[A-Za-z0-9_.-]+/.test(String(e.body || ""));
+        const hasClaim = CLAIM_ID_RX.test(String(e.body || ""));
         return (w >= 90 && w <= 200) && hasClaim;
       });
       if (!emailBodiesOk) {
@@ -3329,7 +3388,7 @@ module.exports = async function (context, req) {
           id: `E${idx + 1}`,
           subject: e.subject || "",
           body_90_120_words: e.body || "",
-          claim_ids_included: (e.body && (e.body.match(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/g) || []).map(m => m.split(/[:\s]/).pop())) || []
+          claim_ids_included: (String(e.body || "").match(CLAIM_ID_RX_GLOBAL) || []).map(m => m.split(/[:\s]/).pop()) || []
         }));
 
         const lpGrid = Array.isArray(cg.offer_strategy?.landing_page?.sections) ? [] : [];
@@ -3386,7 +3445,7 @@ module.exports = async function (context, req) {
               },
               matrix_rows: (cg.messaging_matrix?.matrix || []).map(r => ({
                 persona: r.persona, pain_from_top_blockers: r.pain, value_statement: r.value_statement,
-                proof: { claim_ids: (r.proof.match(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/g) || []).map(m => m.split(/[:\s]/).pop()) },
+                proof: { claim_ids: (String(r.proof || "").match(CLAIM_ID_RX_GLOBAL) || []).map(m => m.split(/[:\s]/).pop()) },
                 cta: r.cta
               }))
             },
@@ -3409,13 +3468,13 @@ module.exports = async function (context, req) {
               email_sequence: emails,
               linkedin: {
                 connect_note: String(cg.channel_plan?.linkedin?.connect_note || ""),
-                insight_post: { copy: String(cg.channel_plan?.linkedin?.insight_post || ""), claim_id: (String(cg.channel_plan?.linkedin?.insight_post || "").match(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/) || [, ""])[1] || "" },
+                insight_post: { copy: String(cg.channel_plan?.linkedin?.insight_post || ""), claim_id: (String(cg.channel_plan?.linkedin?.insight_post || "").match(CLAIM_ID_RX) || [, ""])[1] || "" },
                 dm_with_value_asset: { copy: String(cg.channel_plan?.linkedin?.dm || ""), asset_link: "" },
                 comment_strategy: String(cg.channel_plan?.linkedin?.comment_strategy || "")
               },
               paid_optional: {
                 enabled: Array.isArray(cg.channel_plan?.paid) && cg.channel_plan.paid.length > 0,
-                variants: (cg.channel_plan?.paid || []).map(p => ({ name: p.variant || "", tied_to_top_purchase: "", quantified_proof: p.proof || "", claim_id: (p.proof.match(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/) || [, ""])[1] || "", cta: p.cta || "", negatives_exclusions: [] }))
+                variants: (cg.channel_plan?.paid || []).map(p => ({ name: p.variant || "", tied_to_top_purchase: "", quantified_proof: p.proof || "", claim_id: (String(p.proof || "").match(CLAIM_ID_RX) || [, ""])[1] || "", cta: p.cta || "", negatives_exclusions: [] }))
               },
               event_webinar: {
                 concept: String(cg.channel_plan?.event?.concept || ""),
@@ -3427,7 +3486,7 @@ module.exports = async function (context, req) {
             "3.6_sales_enablement_alignment": {
               discovery_questions_5_to_7: cg.sales_enablement?.discovery_questions || [],
               objection_cards: (cg.sales_enablement?.objection_cards || []).map(o => ({
-                blocker: o.blocker, reframe_with_evidence: o.reframe_with_claimid, claim_id: (o.reframe_with_claimid.match(/\b[Cc]laimID[:\s]*([A-Za-z0-9_.-]+)/) || [, ""])[1] || "",
+                blocker: o.blocker, reframe_with_evidence: o.reframe_with_claimid, claim_id: (String(o.reframe_with_claimid || "").match(CLAIM_ID_RX) || [, ""])[1] || "",
                 proof_case_metric: o.proof, risk_reversal_mechanism: o.risk_reversal
               })),
               proof_pack_outline: {
