@@ -2335,6 +2335,9 @@ module.exports = async function (context, req) {
       //  - body: campaign JSON matching your JSON Schema (write_campaign)
       //  - contract_v1: a compatibility mirror for your current UI renderer (mapped/minimally filled)
 
+      // “Why now” heading must be on its own line (followed by newline OR end of string)
+      const WHY_LINE_RX = /(^|\n)\s*why\s*now\s*(?::|[-–—])?\s*(?:\r?\n|$)/i;
+
       // ---------- inputs ----------
       const csvText = String(body.csv_text || "").trim();
       if (!csvText || csvText.length < 20) {
@@ -3159,8 +3162,6 @@ module.exports = async function (context, req) {
       }
 
       // ---------- validation & quality gate ----------
-      // Tolerant single-line detector: “Why now” on its own line
-      const WHY_LINE_RX = /(^|\n)\s*why\s*now\s*(?::|[-–—])?\s*(?:\r?\n|$)/i;
 
       // Evidence density: require ≥5 (overrides any older min(3))
       if (!Array.isArray(campaign.evidence_log) || campaign.evidence_log.length < 5) {
