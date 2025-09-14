@@ -4105,19 +4105,107 @@ module.exports = async function (context, req) {
           "4_content_blocks_and_micro_templates": {}
         };
       }
+      // ---- ClaimID normalisation + text remap (place just before the response) ----
+      (function normaliseClaimIdsAndRewriteReferences() {
+        const CID_FMT = /^CLM-\d{8}-\d{3}$/;
+        const pad = (n) => String(n).padStart(3, "0");
+        const today = new Date();
+        const y = today.getFullYear();
+        const m = String(today.getMonth() + 1).padStart(2, "0");
+        const d = String(today.getDate()).padStart(2, "0");
+        const ymd = `${y}${m}${d}`;
 
-      // ---------- response ----------
+        // Map old -> new
+        const remap = new Map();
+        let seq = 1;
+
+        // 1) Normalise the evidence_log IDs
+        (campaign.evidence_log || []).forEach(e => {
+          const oldId = String(e.claim_id || "").trim();
+          if (!oldId) return;
+          if (!CID_FMT.test(oldId)) {
+            const nu = `CLM-${ymd}-${pad(seq++)}`;
+            remap.set(oldId, nu);
+            e.claim_id = nu;
+          }
+        });
+
+        if (!remap.size) return;
+
+        // 2) Helper to replace in text blocks
+        const replaceIdsInText = (s) => String(s || "")
+          // numeric or any ClaimID => switch if in remap
+          .replace(/\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/g, (m, id) => {
+            const nu = remap.get(String(id).trim());
+            return nu ? `ClaimID: ${nu}` : m;
+          })
+          // replace TBD with next available real ID
+          .replace(/\b[Cc]laim\s*ID[:\s]*TBD\b/g, () => `ClaimID: ${Array.from(remap.values())[0]}`);
+
+        // 3) Rewrite ES and any copy fields that can carry ClaimIDs
+        campaign.executive_summary = replaceIdsInText(campaign.executive_summary);
+
+        // emails
+        if (Array.isArray(campaign.channel_plan?.emails)) {
+          campaign.channel_plan.emails.forEach(e => { e.body = replaceIdsInText(e.body); });
+        }
+
+        // messaging matrix rows (proof text)
+        if (Array.isArray(campaign.messaging_matrix?.matrix)) {
+          campaign.messaging_matrix.matrix.forEach(r => { if (r.proof) r.proof = replaceIdsInText(r.proof); });
+        }
+
+        // paid variants
+        if (Array.isArray(campaign.channel_plan?.paid)) {
+          campaign.channel_plan.paid.forEach(p => { if (p.proof) p.proof = replaceIdsInText(p.proof); });
+        }
+
+        // objection cards
+        if (Array.isArray(campaign.sales_enablement?.objection_cards)) {
+          campaign.sales_enablement.objection_cards.forEach(o => {
+            if (o.reframe_with_claimid) o.reframe_with_claimid = replaceIdsInText(o.reframe_with_claimid);
+            if (o.proof) o.proof = replaceIdsInText(o.proof);
+          });
+        }
+      })();
+
+      // Flatten nested objects/arrays to bracket-notation keys:
+      // e.g. { a: { b: { c: 1 } }, x: [ { y: 2 } ] }
+      //  -> { "a[b][c]": 1, "x[0][y]": 2 }
+      function flattenToBracketKeys(value, path = "", out = {}) {
+        const isObject = val => Object.prototype.toString.call(val) === "[object Object]";
+        const isArray = Array.isArray;
+
+        if (value === null || value === undefined) {
+          if (path) out[path] = value;
+          return out;
+        }
+        if (!isObject(value) && !isArray(value)) {
+          if (path) out[path] = value;
+          return out;
+        }
+
+        if (isArray(value)) {
+          for (let i = 0; i < value.length; i++) {
+            const next = path ? `${path}[${i}]` : `[${i}]`;
+            flattenToBracketKeys(value[i], next, out);
+          }
+        } else {
+          for (const [k, v] of Object.entries(value)) {
+            const next = path ? `${path}[${k}]` : `${k}`;
+            flattenToBracketKeys(v, next, out);
+          }
+        }
+        return out;
+      }
+
+      // ---------- response (legacy UI expects flat bracket-keys) ----------
       const contract_v1 = toContractV1(campaign);
+      const flat = flattenToBracketKeys(contract_v1);
       context.res = {
         status: 200,
         headers: cors,
-        body: {
-          // Primary payload for your new JSON-only workflow (matches your JSON Schema)
-          body: campaign,
-          // Back-compat for the current UI renderer (bracket-notation dotted keys)
-          contract_v1,
-          version: VERSION
-        }
+        body: flat
       };
       return;
     }
