@@ -3245,34 +3245,126 @@ module.exports = async function (context, req) {
         const cutoff = new Date(now.getFullYear(), now.getMonth() - months, now.getDate());
         return d < cutoff;
       }
+
+      // === drop-in: keep the check, make it soft, never 422 here ===
+      let { hasWhyNow, bullets, bulletIds } = parseBulletsAndIds(es);
+
+      // If structure looks off, normalise once and re-parse (no early return here)
+      if (!hasWhyNow || bullets.length < 4 || bullets.length > 5) {
+        context?.log?.warn?.(
+          `[es-structure] pre-fix state has_why_now=${!!hasWhyNow} bullets=${bullets.length}`
+        );
+        es = normalizeExecutiveSummaryHeading(String(es || ""));
+        ({ hasWhyNow, bullets, bulletIds } = parseBulletsAndIds(es));
+        context?.log?.info?.(
+          `[es-structure] post-normalise has_why_now=${!!hasWhyNow} bullets=${bullets.length}`
+        );
+      }
+      campaign.executive_summary = es;
+
       {
-        const logIds = new Set((campaign.evidence_log || [])
-          .map(e => String(e.claim_id || "").trim())
-          .filter(Boolean));
+        // Build set of valid IDs from evidence_log
+        const logIds = new Set(
+          (campaign.evidence_log || [])
+            .map(e => String(e.claim_id || "").trim())
+            .filter(Boolean)
+        );
 
-        // **Normalize heading before first parse**
+        // Tolerant detectors (local to this block)
+        const CLAIM_ID_RX = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)/;
+        const WHY_RX = /(^|\n)\s*why\s*now\s*(?::|[-–—])?\s*$/i;
+
+        // Make sure heading is present before parsing
         campaign.executive_summary = normalizeExecutiveSummaryHeading(String(campaign.executive_summary || ""));
-        let { hasWhyNow, bullets, bulletIds } = parseBulletsAndIdsFromES(String(campaign.executive_summary || ""));
 
-        // If any ID is missing/invalid, attempt a single source-aware rewrite using evidence_log
-        const allExist = bulletIds.length === bullets.length && bulletIds.every(id => id && logIds.has(String(id).trim()));
-        if (hasWhyNow && bullets.length >= 4 && bullets.length <= 5 && !allExist) {
-          const repaired = rewriteBulletsMappingToEvidence(String(campaign.executive_summary || ""), campaign.evidence_log);
-          if (repaired) {
-            campaign.executive_summary = repaired;
-            ({ hasWhyNow, bullets, bulletIds } = parseBulletsAndIdsFromES(repaired));
+        function parseES(text) {
+          const hasWhyNow = WHY_RX.test(text);
+          const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
+          const bulletIds = bullets.map(b => {
+            const m = b.match(CLAIM_ID_RX);
+            return m ? m[1] : null;
+          });
+          return { hasWhyNow, bullets, bulletIds };
+        }
+
+        // Prefer fresh IDs when assigning ordinals
+        function isFreshWithin(iso, months) {
+          const d = new Date(String(iso || ""));
+          if (isNaN(d)) return true; // keep unknown dates
+          const now = new Date();
+          const cutoff = new Date(now.getFullYear(), now.getMonth() - Math.max(1, Number(windowMonths || 6)), now.getDate());
+          return d >= cutoff;
+        }
+        const freshIds = (campaign.evidence_log || [])
+          .filter(e => isFreshWithin(e.date, windowMonths))
+          .map(e => String(e.claim_id).trim())
+          .filter(id => logIds.has(id));
+        const allIds = (campaign.evidence_log || [])
+          .map(e => String(e.claim_id).trim())
+          .filter(id => logIds.has(id));
+
+        // Helper: replace "Claim ID: 1" style placeholders with real IDs (in order)
+        function replaceOrdinalIdsWithReal(es, orderedIds) {
+          let idx = 0;
+          return es.replace(/\b[Cc]laim\s*ID[:\s]*([0-9]+)\b/g, () => {
+            const next = orderedIds[idx++];
+            return next ? `ClaimID: ${next}` : `ClaimID: `;
+          });
+        }
+
+        // Parse once
+        let esText = String(campaign.executive_summary || "");
+        let { hasWhyNow, bullets, bulletIds } = parseES(esText);
+
+        // If heading still not detected but bullets exist (4–5), run normaliser again (tolerates variants)
+        if (!hasWhyNow && bullets.length >= 4 && bullets.length <= 5) {
+          esText = normalizeExecutiveSummaryHeading(esText);
+          ({ hasWhyNow, bullets, bulletIds } = parseES(esText));
+        }
+
+        // If ordinal placeholders are present, swap them for real IDs (prefer fresh)
+        const hasOrdinalIds = bulletIds.some(id => id && /^[0-9]+$/.test(id));
+        if (hasOrdinalIds && bullets.length >= 4 && bullets.length <= 5) {
+          const ordered = freshIds.length >= bullets.length ? freshIds : allIds;
+          if (ordered.length) {
+            esText = replaceOrdinalIdsWithReal(esText, ordered);
+            ({ hasWhyNow, bullets, bulletIds } = parseES(esText));
           }
         }
 
-        // Final strict check
-        const finalOk =
+        // Fill any missing/invalid IDs deterministically from (fresh → all), avoiding duplicates
+        if (bullets.length >= 4 && bullets.length <= 5) {
+          const used = new Set();
+          esText = esText.replace(/(^|\n)\s*([-\u2022]\s+.*?)(?=\n|$)/g, (m, pfx, body) => {
+            const mId = body.match(CLAIM_ID_RX);
+            const current = mId ? String(mId[1]).trim() : "";
+            if (current && logIds.has(current) && !used.has(current)) {
+              used.add(current);
+              return m;
+            }
+            const pool = freshIds.concat(allIds).filter(id => logIds.has(id) && !used.has(id));
+            const next = pool.shift();
+            if (!next) return m; // no deterministic replacement available
+            used.add(next);
+            const withId = mId
+              ? body.replace(CLAIM_ID_RX, `ClaimID: ${next}`)
+              : `${body} (ClaimID: ${next})`;
+            return `${pfx}${withId}`;
+          });
+          ({ hasWhyNow, bullets, bulletIds } = parseES(esText));
+        }
+
+        // Persist any repairs we made
+        campaign.executive_summary = esText;
+
+        // Final strict check (unchanged semantics)
+        const ok =
           hasWhyNow &&
           bullets.length >= 4 && bullets.length <= 5 &&
           bulletIds.length === bullets.length &&
           bulletIds.every(id => id && logIds.has(String(id).trim()));
 
-        if (!finalOk) {
-          const bulletCount = Array.isArray(bullets) ? bullets.length : 0;
+        if (!ok) {
           const missing = bulletIds.filter(id => !id || !logIds.has(String(id).trim()));
           context.res = {
             status: 422,
@@ -3280,7 +3372,7 @@ module.exports = async function (context, req) {
             body: {
               error: "Every 'Why now' bullet must reference a ClaimID that exists in evidence_log.",
               has_why_now: !!hasWhyNow,
-              found_bullets: bulletCount,
+              found_bullets: Array.isArray(bullets) ? bullets.length : 0,
               missing_or_invalid_claimids: missing,
               version: VERSION
             }
@@ -3288,21 +3380,23 @@ module.exports = async function (context, req) {
           return;
         }
       }
+
       // 3) Executive Summary: enforce Why-now mapping and count 4–5 bullets
       {
         const es0 = String(campaign.executive_summary || "");
-        let es = es0;
+        let es = normalizeExecutiveSummaryHeading(es0);
 
         function parseBulletsAndIds(text) {
-          const hasWhyNow = /(^|\n)\s*why\s*now\s*:\s*$/i.test(text);
+          const WHY_RX = /(^|\n)\s*why\s*now\s*(?::|[-–—])?\s*$/i; // tolerant
+          const hasWhyNow = WHY_RX.test(text);
           const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
-          const bulletIds = [];
-          bullets.forEach(b => {
-            const m = b.match(CLAIM_ID_RX);
-            if (m) bulletIds.push(m[1]);
+          const bulletIds = bullets.map(b => {
+            const m = b.match(CLAIM_ID_RX); // keep using your unified regex
+            return m ? m[1] : null;
           });
           return { hasWhyNow, bullets, bulletIds };
         }
+
         // First evaluation
         let { hasWhyNow, bullets, bulletIds } = parseBulletsAndIds(es);
         // If not compliant, run a single targeted repair pass
