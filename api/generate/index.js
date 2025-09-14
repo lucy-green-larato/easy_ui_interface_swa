@@ -3857,7 +3857,10 @@ module.exports = async function (context, req) {
           id: `E${idx + 1}`,
           subject: e.subject || "",
           body_90_120_words: e.body || "",
-          claim_ids_included: (String(e.body || "").match(CLAIM_ID_RX_GLOBAL) || []).map(m => m.split(/[:\s]/).pop()) || []
+          claim_ids_included: Array.from(
+            String(e.body || "").matchAll(CLAIM_ID_RX_GLOBAL),
+            m => (m[1] || "").replace(/[)\].,;:]+$/g, "")
+          )
         }));
 
         const lpGrid = Array.isArray(cg.offer_strategy?.landing_page?.sections) ? [] : [];
@@ -3914,7 +3917,12 @@ module.exports = async function (context, req) {
               },
               matrix_rows: (cg.messaging_matrix?.matrix || []).map(r => ({
                 persona: r.persona, pain_from_top_blockers: r.pain, value_statement: r.value_statement,
-                proof: { claim_ids: (String(r.proof || "").match(CLAIM_ID_RX_GLOBAL) || []).map(m => m.split(/[:\s]/).pop()) },
+                proof: {
+                  claim_ids: Array.from(
+                    String(r.proof || "").matchAll(CLAIM_ID_RX_GLOBAL),
+                    m => (m[1] || "").replace(/[)\].,;:]+$/g, "")
+                  )
+                },
                 cta: r.cta
               }))
             },
@@ -3937,7 +3945,13 @@ module.exports = async function (context, req) {
               email_sequence: emails,
               linkedin: {
                 connect_note: String(cg.channel_plan?.linkedin?.connect_note || ""),
-                insight_post: { copy: String(cg.channel_plan?.linkedin?.insight_post || ""), claim_id: (String(cg.channel_plan?.linkedin?.insight_post || "").match(CLAIM_ID_RX) || [, ""])[1] || "" },
+                insight_post: {
+                  copy: String(cg.channel_plan?.linkedin?.insight_post || ""),
+                  claim_id: (() => {
+                    const m = String(cg.channel_plan?.linkedin?.insight_post || "").match(CLAIM_ID_RX);
+                    return (m && m[1]) ? m[1].replace(/[)\].,;:]+$/g, "") : "";
+                  })()
+                },
                 dm_with_value_asset: { copy: String(cg.channel_plan?.linkedin?.dm || ""), asset_link: "" },
                 comment_strategy: String(cg.channel_plan?.linkedin?.comment_strategy || "")
               },
@@ -3966,7 +3980,10 @@ module.exports = async function (context, req) {
             },
             "3.7_measurement_and_learning_plan": {
               kpis: { mqls: null, sal_percent: null, meetings: null, pipeline: null, cost_per_opportunity: null, time_to_value: null },
-              weekly_test_plan: (Array.isArray(cg.measurement_and_learning?.weekly_test_plan) ? cg.measurement_and_learning.weekly_test_plan : String(cg.measurement_and_learning?.weekly_test_plan || "") ? [cg.measurement_and_learning.weekly_test_plan] : []),
+              weekly_test_plan: (() => {
+                const wtp = cg.measurement_and_learning?.weekly_test_plan;
+                return Array.isArray(wtp) ? wtp : (String(wtp || "") ? [String(wtp)] : []);
+              })(),
               utm_and_crm_mapping: { utm_standard: { source: "", medium: "", campaign: "", content: "", term: "" }, crm_fields: { company_number_optional: "CompanyNumber", campaign_member_fields: [] } },
               evidence_freshness_rule: String(cg.measurement_and_learning?.evidence_freshness_rule || "")
             },
