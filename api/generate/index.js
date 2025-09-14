@@ -3173,6 +3173,72 @@ module.exports = async function (context, req) {
         return;
       }
 
+      // === ES compliance repair pass (ensure 4–5 bullets with valid ClaimIDs) ===
+      {
+        // Normalise heading first
+        campaign.executive_summary = normalizeExecutiveSummaryHeading(String(campaign.executive_summary || ""));
+
+        // Local, tolerant parser using WHY_LINE_RX and a local ClaimID regex
+        const parseES = (text) => {
+          const s = String(text || "");
+          const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
+          const hasWhyNow = WHY_LINE_RX.test(s);
+          const bullets = (s.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(v => v.trim());
+          const bulletIds = bullets.map(b => (b.match(CLAIM_ID_RX_LOCAL)?.[1] ?? null));
+          return { hasWhyNow, bullets, bulletIds };
+        };
+
+        // Build ID sets from the current evidence_log
+        const logIds = new Set(
+          (campaign.evidence_log || [])
+            .map(e => String(e?.claim_id || "").trim())
+            .filter(Boolean)
+        );
+
+        const isFreshWithin = (iso, months) => {
+          const d = new Date(String(iso || "")); if (isNaN(d)) return true;
+          const now = new Date();
+          const cutoff = new Date(now.getFullYear(), now.getMonth() - Math.max(1, Number(months || 6)), now.getDate());
+          return d >= cutoff;
+        };
+
+        const freshIds = (campaign.evidence_log || [])
+          .filter(e => isFreshWithin(e.date, windowMonths))
+          .map(e => String(e.claim_id).trim())
+          .filter(id => logIds.has(id));
+
+        const allIds = (campaign.evidence_log || [])
+          .map(e => String(e.claim_id).trim())
+          .filter(id => logIds.has(id));
+
+        // Parse current ES
+        let esText = String(campaign.executive_summary || "");
+        let { hasWhyNow, bullets, bulletIds } = parseES(esText);
+
+        // Decide if we need to repair
+        const needsRepair =
+          !hasWhyNow ||
+          bullets.length < 4 || bullets.length > 5 ||
+          bulletIds.length !== bullets.length ||
+          bulletIds.some(id => !id || !logIds.has(String(id).trim()));
+
+        if (needsRepair) {
+          // Prefer fresh IDs; if not enough, fall back to all IDs
+          const allow = freshIds.length >= 4 ? freshIds : allIds;
+          if (allow.length >= 4) {
+            const repaired = await repairExecutiveSummary({
+              campaign,
+              allowedIds: allow,
+              windowMonths,
+              callModel
+            });
+            campaign.executive_summary = normalizeExecutiveSummaryHeading(String(repaired || ""));
+          }
+          // Re-parse after repair (even if we couldn't repair due to too few IDs)
+          ({ hasWhyNow, bullets, bulletIds } = parseES(String(campaign.executive_summary || "")));
+        }
+      }
+
       // Helpers for claim mapping / freshness
       // === ES heading + bullet parsing helpers ===
       function _detectWhyNowHeadingLine(text) {
