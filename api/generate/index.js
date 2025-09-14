@@ -2354,78 +2354,145 @@ module.exports = async function (context, req) {
       const windowMonths = Math.max(1, Number(body.evidenceWindowMonths || 6));
       const uspsProvided = Boolean(company.usps && company.usps.trim().length >= 3);
 
-      // ---------- CSV parsing (quoted) ----------
+      // ---------- CSV parsing (quoted, auto-delimiter, BOM-safe) ----------
       function parseCsv(text) {
-        const rows = []; let i = 0, field = "", row = [], inQuotes = false;
+        if (!text) return [];
+        // Strip BOM if present
+        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
+        // Detect delimiter from first non-empty line
+        const firstLine = (text.split(/\r?\n/).find(l => l.trim().length) || "");
+        const counts = {
+          ",": (firstLine.match(/,/g) || []).length,
+          ";": (firstLine.match(/;/g) || []).length,
+          "\t": (firstLine.match(/\t/g) || []).length
+        };
+        const delim = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || ",";
+
+        const rowsArr = [];
+        let i = 0, field = "", row = [], inQuotes = false;
+
         function pushField() { row.push(field); field = ""; }
-        function pushRow() { rows.push(row); row = []; }
+        function pushRow() {
+          if (row.some(c => String(c).trim() !== "")) rowsArr.push(row);
+          row = [];
+        }
+
         while (i < text.length) {
           const ch = text[i++];
           if (inQuotes) {
-            if (ch === '"') { if (text[i] === '"') { field += '"'; i++; } else inQuotes = false; }
-            else field += ch;
+            if (ch === '"') {
+              if (text[i] === '"') { field += '"'; i++; } else { inQuotes = false; }
+            } else {
+              field += ch;
+            }
           } else {
             if (ch === '"') inQuotes = true;
-            else if (ch === ",") pushField();
+            else if (ch === delim) pushField();
             else if (ch === "\n") { pushField(); pushRow(); }
-            else if (ch === "\r") { /* ignore */ }
+            else if (ch === "\r") { /* ignore CR */ }
             else field += ch;
           }
         }
         if (field.length || row.length) { pushField(); pushRow(); }
-        if (!rows.length) return [];
-        const headers = rows[0].map(h => String(h || "").trim());
-        return rows.slice(1).map(r => {
-          const obj = {}; headers.forEach((h, idx) => { obj[h] = (r[idx] ?? "").trim(); });
+        if (!rowsArr.length) return [];
+
+        const headers = rowsArr[0].map(h => String(h || "").replace(/\uFEFF/g, "").trim().replace(/\s+/g, " "));
+        const dataRows = rowsArr.slice(1);
+
+        return dataRows.map(r => {
+          const obj = {};
+          headers.forEach((h, idx) => { obj[h] = (r[idx] ?? "").trim(); });
           return obj;
         });
       }
+
       const rows = parseCsv(csvText);
-      const get = (r, k) => String(r[k] || "").trim();
-      const uniq = (a) => Array.from(new Set(a.filter(Boolean)));
+
+      // ---------- CSV helpers ----------
+      const uniq = (a) => Array.from(new Set((a || []).filter(Boolean)));
       const splitCsvList = (s) => String(s || "").split(/[;,]/).map(x => x.trim()).filter(Boolean);
-      function topTerms(col) {
-        const m = new Map();
-        rows.forEach(r => splitCsvList(get(r, col)).forEach(t => {
-          const k = t.toLowerCase(); m.set(k, (m.get(k) || 0) + 1);
-        }));
-        return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([text, count]) => ({ text, count }));
-      }
+
+      // Header resolution (case/space/punct insensitive)
+      function _canonHdr(h) { return String(h || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
       const fieldsFound = rows.length ? Object.keys(rows[0]) : [];
-      const industries = uniq(rows.map(r => get(r, "SimplifiedIndustry")));
-      const topPurchases = topTerms("TopPurchases");
-      const topBlockers = topTerms("TopBlockers");
-      const topNeeds = topTerms("TopNeedsSupplier");
+      const canonMap = new Map(fieldsFound.map(h => [_canonHdr(h), h]));
+
+      function resolveHeader(variants) {
+        for (const v of variants) {
+          const hit = canonMap.get(_canonHdr(v));
+          if (hit) return hit;
+        }
+        return null;
+      }
+      function getField(r, hdr) { return String(hdr ? r[hdr] : "" || "").trim(); }
+
+      function topTerms(hdr) {
+        if (!hdr) return [];
+        const m = new Map();
+        rows.forEach(r => splitCsvList(getField(r, hdr)).forEach(t => {
+          const k = t.toLowerCase();
+          m.set(k, (m.get(k) || 0) + 1);
+        }));
+        return [...m.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([text, count]) => ({ text, count }));
+      }
+
+      // Resolve columns (with common synonyms)
+      const hIndustry = resolveHeader(["SimplifiedIndustry", "Industry", "ICP", "Sector"]);
+      const hTopPurch = resolveHeader(["TopPurchases", "Top purchase drivers", "TopPurch"]);
+      const hTopBlockers = resolveHeader(["TopBlockers", "Blockers", "Top blockers"]);
+      const hTopNeeds = resolveHeader(["TopNeedsSupplier", "Top needs (supplier selection)", "TopNeeds"]);
+      const hProdNouns = resolveHeader(["ProductNouns", "Product Hints", "Product Terms", "ProductTerms"]);
+
+      // Extract values
+      const industries = uniq(rows.map(r => getField(r, hIndustry)));
+      const topPurchases = topTerms(hTopPurch);
+      const topBlockers = topTerms(hTopBlockers);
+      const topNeeds = topTerms(hTopNeeds);
       const icpFromCsv = industries[0] || "";
 
-      // ---------- website crawl for product/offer nouns ----------
+      // IMPORTANT: avoid clashing with any existing `productHints`
+      // Use `productHintsCsv`; elsewhere prefer `(productHints?.length ? productHints : productHintsCsv)`
+      const productHintsCsv = uniq(
+        rows.flatMap(r => splitCsvList(getField(r, hProdNouns)))
+      ).slice(0, 20);
+
+      // ---------- Website crawl for product/offer nouns ----------
       let websiteText = "";
       let websiteCites = [];
-      if (company.website) {
-        const site = await crawlSite(company.website, { limit: 6 }, context);
-        websiteText = site.text || "";
-        websiteCites = (site.pages || []).map(p => ({ label: `Website: ${p.label}`, url: p.url }));
+      if (company.website && typeof crawlSite === "function") {
+        try {
+          const site = await crawlSite(company.website, { limit: 6 }, context);
+          websiteText = site?.text || "";
+          websiteCites = Array.isArray(site?.pages) ? site.pages.map(p => ({ label: `Website: ${p.label}`, url: p.url })) : [];
+        } catch (e) {
+          context?.log?.warn?.("[crawlSite] failed: " + (e?.message || e));
+        }
       }
 
-      // brand-agnostic product hint mining (from USPs + CSV + site text)
-      function _escapeRx(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
-      function _termToRegex(term) {
-        const parts = String(term).trim().split(/\s+/).map(_escapeRx).filter(Boolean);
+      // ---------- Local (non-conflicting) helpers for product term mining ----------
+      function _escapeRxTerm(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+      function _termToRegexLocal(term) {
+        const parts = String(term).trim().split(/\s+/).map(_escapeRxTerm).filter(Boolean);
         if (!parts.length) return null;
         return new RegExp("\\b" + parts.join("[\\s-]+") + "\\b", "i");
       }
-      function listFromUsps(usps) {
+      function listFromUspsLocal(usps) {
         return String(usps || "")
           .split(/[;,/]| and /gi)
           .map(s => s.trim())
           .filter(Boolean);
       }
-      function gatherProductCandidates({ company, csvTopPurchases }) {
-        const fromUsps = listFromUsps(company.usps);
+      function gatherProductCandidatesLocal({ company, csvTopPurchases, websiteText }) {
+        const fromUsps = listFromUspsLocal(company.usps);
         const fromCsv = (Array.isArray(csvTopPurchases) ? csvTopPurchases : [])
           .map(v => (typeof v === "string" ? v : v?.text))
           .map(s => String(s || "").trim())
           .filter(Boolean);
+
         const candSet = new Map();
         for (const s of [...fromUsps, ...fromCsv]) {
           const clean = s.replace(/\s+/g, " ").trim();
@@ -2433,23 +2500,28 @@ module.exports = async function (context, req) {
           const key = clean.toLowerCase();
           if (!candSet.has(key)) candSet.set(key, clean);
         }
-        // Also lift high-signal nouns from site headings if present
-        (websiteText.match(/\n\s*(?:h\d|##?|<h\d[^>]*>)(.+?)$/gim) || []).slice(0, 30).forEach(line => {
-          const t = String(line).replace(/<[^>]+>/g, " ").replace(/^[#\s]+/g, "").trim();
-          if (t && t.split(/\s+/).length <= 6) {
-            const key = t.toLowerCase();
-            if (!candSet.has(key)) candSet.set(key, t);
-          }
-        });
+
+        // Lift short headings/phrases from the website (if any)
+        (String(websiteText || "").match(/\n\s*(?:<h\d[^>]*>|#{1,6}\s*)(.+?)$/gim) || [])
+          .slice(0, 30)
+          .forEach(line => {
+            const t = String(line).replace(/<[^>]+>/g, " ").replace(/^[#\s]+/g, "").trim();
+            if (t && t.split(/\s+/).length <= 6) {
+              const key = t.toLowerCase();
+              if (!candSet.has(key)) candSet.set(key, t);
+            }
+          });
+
         return Array.from(candSet.values()).slice(0, 25);
       }
-      const productCandidates = gatherProductCandidates({ company, csvTopPurchases: topPurchases });
-      function mineProductHints(txt, candidates) {
+      const productCandidates = gatherProductCandidatesLocal({ company, csvTopPurchases: topPurchases, websiteText });
+
+      function mineProductHintsLocal(txt, candidates) {
         const t = String(txt || "");
         const out = [];
         const seen = new Set();
         for (const original of candidates) {
-          const rx = _termToRegex(original);
+          const rx = _termToRegexLocal(original);
           if (rx && rx.test(t)) {
             const k = original.toLowerCase();
             if (!seen.has(k)) { seen.add(k); out.push(original); }
@@ -2458,6 +2530,20 @@ module.exports = async function (context, req) {
         }
         return out;
       }
+
+      // NOTE: Downstream, prefer:
+      //   const productHintsEffective = (Array.isArray(productHints) && productHints.length) ? productHints : productHintsCsv;
+      // and then use `productHintsEffective` anywhere you previously used `productHints`.
+
+      // Mine hints from the site text (if any), then pick effective set without clashing with any global
+      const productHintsSite = mineProductHintsLocal(websiteText, productCandidates);
+
+      // Use site > CSV as the default. If elsewhere you already have a variable named `productHints`,
+      // do NOT redefine it here; instead always use `productHintsEffective` below.
+      const productHintsEffective = (Array.isArray(productHintsSite) && productHintsSite.length)
+        ? productHintsSite
+        : productHintsCsv;
+
       // simple site “has cyber” signal used to toggle messaging constraints
       const siteHasCyber =
         /\b(cyber\s*security|cybersecurity)\b/i.test(websiteText) ||
@@ -3550,7 +3636,7 @@ module.exports = async function (context, req) {
           // Compact, deterministic context for the model
           const companyName = String(campaign?.meta?.company_name || company?.name || "").trim();
           const icp = String(campaign?.meta?.icp_from_csv || icpFromCsv || "").trim();
-          const nouns = (productHints || []).slice(0, 6);
+          const nouns = (productHintsEffective ?? productHintsCsv ?? []).slice(0, 6);
           const topPurch = (topPurchases || []).map(t => (typeof t === "string" ? t : t?.text)).filter(Boolean).slice(0, 6);
           const topNeedsList = (topNeeds || []).map(t => (typeof t === "string" ? t : t?.text)).filter(Boolean).slice(0, 6);
           const banlist = [
@@ -3638,7 +3724,7 @@ module.exports = async function (context, req) {
               "Expand the email body to 90–200 words while preserving meaning and style.",
               "Keep British English. Avoid hype. Do not invent statistics.",
               `Keep the explicit '(ClaimID: ${claimId})' reference (append if missing).`,
-              `Product nouns to weave in when natural: ${(productHints || []).slice(0, 6).join(", ") || "(none)"}.`,
+              `Product nouns to weave in when natural: ${(productHintsEffective ?? productHintsCsv ?? []).slice(0, 6).join(", ") || "(none)"}.`,
               "",
               "Return JSON ONLY: { \"body\": \"...\" }",
               "",
@@ -4799,7 +4885,10 @@ module.exports = async function (context, req) {
 
         // Helpers ----------------------------------------------------
         const _txt = (v) => String(v || "").trim();
-        const nouns = (productHints || []).map(_txt).filter(Boolean).slice(0, 6);
+        const nouns = (productHintsEffective ?? productHintsCsv ?? [])
+          .map(_txt)
+          .filter(Boolean)
+          .slice(0, 6);
         const hasNouns = nouns.length > 0;
 
         const sentenceSplit = (s) => _txt(s).split(/(?<=[.!?])\s+/).map(x => x.trim()).filter(Boolean);
