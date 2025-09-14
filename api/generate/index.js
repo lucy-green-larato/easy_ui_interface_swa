@@ -2532,6 +2532,7 @@ module.exports = async function (context, req) {
           "https://www.ons.gov.uk/economy/agricultureandfishing"
         ]
       };
+
       function buildSeedUrlsByIndustry(industriesArr, opts) {
         const set = new Set();
         const add = (u) => { if (u) set.add(String(u)); };
@@ -2547,10 +2548,11 @@ module.exports = async function (context, req) {
         extra.forEach(add);
         return Array.from(set).slice(0, 12);
       }
+
       const securityHint = siteHasCyber || (topNeeds || []).some(t => /\bsec(urity)?|cyber/i.test(String(t.text || t)));
       let seedUrls = buildSeedUrlsByIndustry(industries, { securityHint });
 
-      // ---- Add company website + LinkedIn seeds (dedup + cap to 12) ----
+      //---- Add company website + LinkedIn seeds (dedup + cap to 12) ----
       try {
         const set = new Set(seedUrls);
         const add = (u) => { if (u && typeof u === "string") set.add(u); };
@@ -2567,6 +2569,7 @@ module.exports = async function (context, req) {
         const companyLiRaw =
           (company && company.linkedin) ||
           (campaign?.meta?.company_details?.company_linkedin_url) || "";
+
 
         // Company website: add home and useful sections for positioning/context
         const companyWeb = norm(companyWebRaw);
@@ -2616,6 +2619,151 @@ module.exports = async function (context, req) {
         seedsText = seeds.join("\n\n").slice(0, 80000);
       } catch {
         seedsText = "";
+      }
+
+      // Deterministically harvest evidence from seeds (≥5, freshness-aware)
+      let harvestedEvidence = [];
+      try {
+        harvestedEvidence = await ensureEvidence({
+          seedsText,
+          windowMonths,
+          callModel
+          // If you have it defined here already, you can also pass: allowedPublisherRx
+        });
+        context.log?.info?.("[evidence] harvested:", harvestedEvidence.length);
+      } catch (e) {
+        // Do not 422 here; the writer may still produce ≥5 rows. We'll enforce later.
+        context.log?.warn?.("[evidence] harvest failed:", String((e && e.code) || e));
+      }
+
+      async function extractEvidenceFromSeeds({ seedsText, windowMonths, allowedPublisherRx, callModel }) {
+        const system = "You extract verifiable facts. Return JSON only.";
+        const user = [
+          "From the corpus below, extract 8–12 distinct, *quantified* market claims relevant to UK buyers.",
+          "Each item must include: claim_id (format CLM-YYYYMMDD-###), claim (≤25 words),",
+          "publisher (site or org name), title (≤12 words), date (YYYY-MM-DD), url (canonical page),",
+          "excerpt (≤2 lines copied verbatim), relevance (≤10 words).",
+          "Rules:",
+          "- Only extract claims that clearly appear in the corpus.",
+          `- Prefer items within the last ${windowMonths} months.`,
+          "- Do not include the target company’s own site or social posts.",
+          "- Return a JSON object: { \"evidence_log\": [ … ] }",
+          "",
+          "=== CORPUS START ===",
+          String(seedsText || "").slice(0, 70000),
+          "=== CORPUS END ==="
+        ].join("\n");
+
+        const resp = await callModel({
+          system,
+          prompt: user,
+          temperature: 0,
+          max_tokens: 2000,
+          response_format: { type: "json_object" }
+        });
+
+        const obj = safeJson(stripJsonFences(extractText(resp))) || {};
+        let evidence = Array.isArray(obj.evidence_log) ? obj.evidence_log : [];
+
+        // Deterministic post-filter & dedupe
+        const out = [];
+        const seen = new Set();
+        const now = new Date();
+        const cutoff = new Date(now.getFullYear(), now.getMonth() - Math.max(1, Number(windowMonths || 6)), now.getDate());
+
+        function isFresh(iso) {
+          const d = new Date(String(iso || ""));
+          return !isNaN(d) && d >= cutoff;
+        }
+
+        function host(u) { try { return new URL(u).host.replace(/^www\./, "").toLowerCase(); } catch { return ""; } }
+
+        for (const e of evidence) {
+          const url = String(e?.url || "");
+          const h = host(url);
+          const key = [h, String(e?.title || "").toLowerCase(), String(e?.date || "")].join("|");
+          if (!url || !h || seen.has(key)) continue;
+          if (!isFresh(e?.date)) continue;
+          // If an allowlist was provided here, respect it; otherwise we'll filter later.
+          if (allowedPublisherRx && !allowedPublisherRx.test(h)) continue;
+
+          out.push({
+            claim_id: String(e?.claim_id || "").trim(),
+            claim: String(e?.claim || "").trim(),
+            publisher: String(e?.publisher || "").trim(),
+            title: String(e?.title || "").trim(),
+            date: String(e?.date || "").slice(0, 10),
+            url,
+            excerpt: String(e?.excerpt || "").trim(),
+            relevance: String(e?.relevance || "").trim()
+          });
+          seen.add(key);
+          if (out.length >= 12) break;
+        }
+
+        return out;
+      }
+      // --- Controller to guarantee ≥5 rows (relax window by +3 months once if needed)
+
+      async function ensureEvidence({ seedsText, windowMonths, allowedPublisherRx, callModel, seedUrls, rebuildSeeds }) {
+        // Defaults: keep behaviour predictable without extra args
+        const minTotal = 5;               // need at least this many rows overall
+        const freshEnforceMonths = 12;    // what “fresh” means for Why-now
+        const minFresh = 3;               // require at least this many fresh rows
+
+        // Helpers (scoped here; no global pollution)
+        const keyOf = (e) => {
+          const url = String(e?.url || "");
+          let h = "";
+          try { h = new URL(url).host.replace(/^www\./, "").toLowerCase(); } catch { }
+          return [h, String(e?.title || "").toLowerCase(), String(e?.date || "")].join("|");
+        };
+        const isFreshWithin = (iso, months) => {
+          const d = new Date(String(iso || ""));
+          if (isNaN(d)) return false;
+          const now = new Date();
+          const cutoff = new Date(now.getFullYear(), now.getMonth() - Math.max(1, Number(months || 6)), now.getDate());
+          return d >= cutoff;
+        };
+
+        // Pass 1: strict window
+        const ev1 = await extractEvidenceFromSeeds({ seedsText, windowMonths, callModel, allowedPublisherRx });
+
+        // If we already meet thresholds, return early
+        const fresh1 = ev1.filter(e => isFreshWithin(e.date, freshEnforceMonths)).length;
+        if (ev1.length >= minTotal && fresh1 >= minFresh) return ev1.slice(0, 12);
+
+        // Pass 2: relaxed window (+24 months)
+        const ev2 = await extractEvidenceFromSeeds({ seedsText, windowMonths: windowMonths + 24, callModel, allowedPublisherRx });
+
+        // Merge + dedupe (prefer earlier pass when duplicates)
+        const seen = new Set();
+        const merged = [];
+        for (const e of ev1) { const k = keyOf(e); if (!seen.has(k)) { seen.add(k); merged.push(e); } }
+        for (const e of ev2) { const k = keyOf(e); if (!seen.has(k)) { seen.add(k); merged.push(e); } }
+
+        // Final checks
+        const total = merged.length;
+        const fresh = merged.filter(e => isFreshWithin(e.date, freshEnforceMonths)).length;
+
+        if (total >= minTotal) {
+          if (fresh < minFresh) {
+            // Not fatal; log so you can see when we’re freshness-light
+            context?.log?.warn?.(`[evidence] Freshness shortfall: fresh=${fresh} < minFresh=${minFresh} within ${freshEnforceMonths}m`);
+          }
+          return merged.slice(0, 12); // cap for token budget
+        }
+
+        const debugHints = {
+          attempts: [
+            { windowMonths, count: ev1.length },
+            { windowMonths: windowMonths + 24, count: ev2.length }
+          ],
+          found_total: total
+        };
+
+        throw Object.assign(new Error("Insufficient public evidence in authoritative sources"),
+          { code: "INSUFFICIENT_EVIDENCE", detail: debugHints });
       }
 
       // --- Helpers to map bullets -> evidence rows by publisher/domain/alias ---
@@ -2753,6 +2901,40 @@ module.exports = async function (context, req) {
         ")",
         "i"
       );
+
+      // After you compute seedUrls and seedsText and define allowedPublisherRx…
+      let evidence_log;
+      try {
+        evidence_log = await ensureEvidence({
+          seedsText,
+          windowMonths,
+          allowedPublisherRx,
+          callModel,
+          seedUrls,
+          rebuildSeeds: (urls) => {
+            // deterministically add extra per-industry UK authorities here (no company sites).
+            // e.g., per your _normIndustry mapping, append more gov/ONS/Ofcom collection pages.
+            // Keep ≤20 total to control tokens.
+            return Array.from(new Set([
+              ...urls,
+              // add 6–8 more per industry (omitted here for brevity)
+            ])).slice(0, 20);
+          }
+        });
+      } catch (e) {
+        context.res = {
+          status: 422,
+          headers: cors,
+          body: {
+            error: "Unable to collect ≥5 fresh, allowed evidence rows from authoritative sources.",
+            code: e.code || "HARVEST_ERROR",
+            detail: e.detail || {},
+            version: VERSION
+          }
+        };
+        return;
+      }
+
       function isAllowedPublisher(url, publisher) {
         const d = domainFromUrl(url);
         if (!d) return false;
@@ -2979,6 +3161,12 @@ module.exports = async function (context, req) {
         return;
       }
 
+      // If the writer returned too few, backfill from harvestedEvidence
+      if (!Array.isArray(campaign.evidence_log) || campaign.evidence_log.length < 5) {
+        if (Array.isArray(harvestedEvidence) && harvestedEvidence.length >= 5) {
+          campaign.evidence_log = harvestedEvidence;
+        }
+      }
 
       // ---------- validation & quality gate ----------
 
