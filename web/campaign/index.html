@@ -588,9 +588,9 @@
           const contract =
             data?.contract_v1 ||
             data?.contract_v1_flat ||
-            data?.body?.contract_v1 ||         
+            data?.body?.contract_v1 ||
             data?.body ||
-            data;                                
+            data;
           window.CampaignUI.setContract(contract);
           setStatus("Completed", "ok");
           $("#goBtn").disabled = false;
@@ -895,31 +895,106 @@
         const offer = c?.['3_campaign_output']?.['3.4_offer_strategy_and_assets'] || {};
         const wrap = document.createElement('div');
 
-        const h0 = document.createElement('h3'); h0.textContent = 'Landing Page Wire Copy';
+        // --- Landing Page Wire Copy (hero + CTAs)
+        const h0 = document.createElement('h3');
+        h0.textContent = 'Landing Page Wire Copy';
         wrap.appendChild(h0);
+
         const lp = offer.landing_page_wire_copy || {};
         const lpList = [
           'Outcome header: ' + (lp.outcome_header || ''),
           'Proof line: ' + (lp.proof_line || ''),
-          'CTA: ' + (lp.cta || '')
+          'Primary CTA: ' + (lp.cta || '')
         ];
+        if (lp.cta_secondary) lpList.push('Secondary CTA: ' + lp.cta_secondary);
         wrap.appendChild(makeList(lpList));
-        if (Array.isArray(lp.how_it_works_steps)) {
-          const h1 = document.createElement('h4'); h1.textContent = 'How it works';
-          wrap.appendChild(h1);
+
+        // --- Why it matters (table with links)
+        if (Array.isArray(lp.why_it_matters) && lp.why_it_matters.length) {
+          const h1a = document.createElement('h3');
+          h1a.textContent = 'Why it matters';
+          wrap.appendChild(h1a);
+
+          const headers = ['Insight', 'ClaimID', 'Publisher', 'URL'];
+          const rows = lp.why_it_matters.map(i => [
+            i?.text || '',
+            i?.claim_id || '',
+            i?.publisher || '',
+            i?.url ? { __link: true, href: i.url, text: i.url } : ''
+          ]);
+          wrap.appendChild(makeTable(headers, rows));
+        }
+
+        // --- What you get (bulleted list)
+        if (Array.isArray(lp.what_you_get) && lp.what_you_get.length) {
+          const h1b = document.createElement('h3');
+          h1b.textContent = 'What you get';
+          wrap.appendChild(h1b);
+          wrap.appendChild(makeList(lp.what_you_get));
+        }
+
+        // --- How it works (steps)
+        if (Array.isArray(lp.how_it_works_steps) && lp.how_it_works_steps.length) {
+          const h2 = document.createElement('h3');
+          h2.textContent = 'How it works';
+          wrap.appendChild(h2);
           wrap.appendChild(makeList(lp.how_it_works_steps));
         }
-        if (Array.isArray(offer.asset_checklist)) {
-          const h2 = document.createElement('h3'); h2.textContent = 'Assets Checklist';
-          wrap.appendChild(h2);
-          wrap.appendChild(makeList(offer.asset_checklist));
-        }
-        if (Array.isArray(lp.outcomes_grid)) {
-          const h3 = document.createElement('h3'); h3.textContent = 'Outcomes Grid';
+
+        // --- Outcomes grid (metric → claim IDs)
+        if (Array.isArray(lp.outcomes_grid) && lp.outcomes_grid.length) {
+          const h3 = document.createElement('h3');
+          h3.textContent = 'Outcomes you can measure';
           wrap.appendChild(h3);
+
           const headers = ['Result / Metric', 'ClaimIDs'];
-          const rows = lp.outcomes_grid.map(g => [g.metric || g.result || '', rowsOf(g.claim_ids).join(', ')]);
+          const rows = lp.outcomes_grid.map(g => [
+            g?.metric || g?.result || '',
+            rowsOf(g?.claim_ids).join(', ')
+          ]);
           wrap.appendChild(makeTable(headers, rows));
+        }
+
+        // --- Customer proof (short paragraph)
+        if (lp.customer_proof) {
+          const h4 = document.createElement('h3');
+          h4.textContent = 'Customer proof';
+          wrap.appendChild(h4);
+          wrap.appendChild(makePre(lp.customer_proof));
+        }
+
+        // --- Substantiation & privacy
+        if (lp.substantiation_note || lp.privacy_link) {
+          const h5 = document.createElement('h3');
+          h5.textContent = 'Substantiation & privacy';
+          wrap.appendChild(h5);
+
+          if (lp.substantiation_note) {
+            const p = document.createElement('p');
+            p.className = 'muted';
+            p.textContent = lp.substantiation_note;
+            wrap.appendChild(p);
+          }
+          if (lp.privacy_link) {
+            const p = document.createElement('p');
+            p.className = 'muted';
+            const a = document.createElement('a');
+            a.href = lp.privacy_link;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.textContent = lp.privacy_link;
+            p.appendChild(document.createTextNode('Privacy: '));
+            p.appendChild(a);
+            wrap.appendChild(p);
+          }
+        }
+
+        // --- Assets checklist (unchanged)
+        if (Array.isArray(offer.asset_checklist)) {
+          const h6 = document.createElement('h3');
+          h6.textContent = 'Assets Checklist';
+          wrap.appendChild(h6);
+          wrap.appendChild(makeList(offer.asset_checklist));
         }
 
         setPanelContent(wrap);
