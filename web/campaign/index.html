@@ -584,8 +584,14 @@
           window.CampaignPage.updateStage("QualityGate");
           window.CampaignPage.updateStage("Completed");
 
-          // API now returns the bare contract (no contract_v1 wrapper)
-          window.CampaignUI.setContract(data);
+          // Accept any of the known shapes from the API
+          const contract =
+            data?.contract_v1 ||
+            data?.contract_v1_flat ||
+            data?.body?.contract_v1 ||         
+            data?.body ||
+            data;                                
+          window.CampaignUI.setContract(contract);
           setStatus("Completed", "ok");
           $("#goBtn").disabled = false;
 
