@@ -4198,14 +4198,60 @@ module.exports = async function (context, req) {
         }
         return out;
       }
+      // --- FLATTEN contract_v1 for legacy renderer (dot + bracket notation) ---
+      function flattenForLegacyContract(obj) {
+        const out = {};
+        const idKeyRx = /^[A-Za-z_$][A-Za-z0-9_$]*$/;       // keys safe for dot notation
 
-      // ---------- response (legacy UI expects flat bracket-keys) ----------
+        function segForKey(k) {
+          // If the key has spaces/dots/dashes/starts with digit, use ["..."] segment
+          return idKeyRx.test(k) ? `.${k}` : `["${String(k).replace(/"/g, '\\"')}"]`;
+        }
+
+        function walk(val, path) {
+          if (Array.isArray(val)) {
+            val.forEach((v, i) => walk(v, `${path}[${i}]`));
+            return;
+          }
+          if (val && typeof val === "object") {
+            for (const [k, v] of Object.entries(val)) {
+              walk(v, path + segForKey(k));
+            }
+            return;
+          }
+          // leaf
+          out[path] = val;
+        }
+
+        // start with a rootless path (we'll trim leading dot later)
+        for (const [k, v] of Object.entries(obj || {})) {
+          walk(v, segForKey(k).slice(1));
+        }
+        return out;
+      }
+
+      // ---------- response ----------
       const contract_v1 = toContractV1(campaign);
-      const flat = flattenToBracketKeys(contract_v1);
+
+      // 2a) Produce a legacy flat map for the current UI
+      const contract_v1_flat = flattenForLegacyContract(contract_v1);
+
+      // 2b) (Optional but helpful) add two shims some older views read directly
+      //     - executive_summary_text: plain ES string
+      //     - evidence_log_rows: array for the Evidence Log table
+      contract_v1_flat["executive_summary_text"] = String(campaign.executive_summary || "");
+      contract_v1_flat["evidence_log_rows"] = Array.isArray(campaign.evidence_log) ? campaign.evidence_log : [];
+
+      // Return both the new nested contract and the legacy flat one
       context.res = {
         status: 200,
         headers: cors,
-        body: flat
+        body: {
+          body: campaign,               // new schema (nested)
+          contract_v1,                  // nested compatibility object (for future UI)
+          contract_v1_flat,             // **legacy flat map** the current UI expects
+          version: VERSION
+        }
       };
       return;
     }
