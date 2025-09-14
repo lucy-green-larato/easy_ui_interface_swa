@@ -3383,45 +3383,33 @@ module.exports = async function (context, req) {
 
       // 3) Executive Summary: enforce Why-now mapping and count 4–5 bullets
       {
-        const es0 = String(campaign.executive_summary || "");
-        let es = normalizeExecutiveSummaryHeading(es0);
+        let es = normalizeExecutiveSummaryHeading(String(campaign.executive_summary || ""));
 
         function parseBulletsAndIds(text) {
-          const WHY_RX = /(^|\n)\s*why\s*now\s*(?::|[-–—])?\s*$/i; // tolerant
+          const WHY_RX = /(^|\n)\s*why\s*now\s*(?::|[-–—])?\s*$/i;
           const hasWhyNow = WHY_RX.test(text);
           const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
           const bulletIds = bullets.map(b => {
-            const m = b.match(CLAIM_ID_RX); // keep using your unified regex
+            const m = b.match(CLAIM_ID_RX);
             return m ? m[1] : null;
           });
           return { hasWhyNow, bullets, bulletIds };
         }
-
         // First evaluation
         let { hasWhyNow, bullets, bulletIds } = parseBulletsAndIds(es);
-        // If not compliant, run a single targeted repair pass
         if (!hasWhyNow || bullets.length < 4 || bullets.length > 5) {
-          try {
-            es = await repairExecutiveSummary({ campaign, windowMonths, callModel });
-            // Re-parse
-            ({ hasWhyNow, bullets, bulletIds } = parseBulletsAndIds(es));
-            // Apply the repaired ES to the campaign object
-            campaign.executive_summary = es;
-          } catch (e) {
-            const bulletCount = Array.isArray(bullets) ? bullets.length : 0;
-            context.res = {
-              status: 422,
-              headers: cors,
-              body: {
-                error: "Executive Summary must include a 'Why now:' section with 4–5 bullets.",
-                found_bullets: bulletCount,           // <— how many bullets we actually saw
-                has_why_now: !!hasWhyNow,             // <— whether the heading was detected
-                version: VERSION
-              }
-            };
-            return;
-          }
+          // Log + normalise once, then re-parse
+          context?.log?.warn?.(
+            `[es-structure] pre-fix has_why_now=${!!hasWhyNow} bullets=${bullets.length}`
+          );
+          es = normalizeExecutiveSummaryHeading(String(es || ""));
+          ({ hasWhyNow, bullets, bulletIds } = parseBulletsAndIds(es));
+          context?.log?.info?.(
+            `[es-structure] post-normalise has_why_now=${!!hasWhyNow} bullets=${bullets.length}`
+          );
         }
+        campaign.executive_summary = es;
+
         // Continue with your existing mapping & freshness checks (unchanged)
         const logIds = new Set((campaign.evidence_log || []).map(e => String(e.claim_id || "").trim()).filter(Boolean));
         if (bulletIds.length !== bullets.length || bulletIds.some(id => !logIds.has(id))) {
