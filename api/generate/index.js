@@ -2447,17 +2447,43 @@ module.exports = async function (context, req) {
       const hTopNeeds = resolveHeader(["TopNeedsSupplier", "Top needs (supplier selection)", "TopNeeds"]);
       const hProdNouns = resolveHeader(["ProductNouns", "Product Hints", "Product Terms", "ProductTerms"]);
 
-      // Extract values
-      const industries = uniq(rows.map(r => getField(r, hIndustry)));
-      const topPurchases = topTerms(hTopPurch);
-      const topBlockers = topTerms(hTopBlockers);
-      const topNeeds = topTerms(hTopNeeds);
+      // ---- Local fallbacks so this block never throws even if some helpers were named differently above
+      const __getField = (r, hdr) => String(hdr ? r[hdr] : "").trim();
+      const GET = (r, hdr) => (typeof getField === "function" ? getField(r, hdr) : __getField(r, hdr));
+
+      const _uniq = (arr) =>
+        (typeof uniq === "function" ? uniq(arr) : Array.from(new Set((arr || []).filter(Boolean))));
+
+      const _splitCsvList = (s) =>
+      (typeof splitCsvList === "function"
+        ? splitCsvList(s)
+        : String(s || "").split(/[;,]/).map(x => x.trim()).filter(Boolean));
+
+      const __topTerms = (hdr) => {
+        if (!hdr) return [];
+        const m = new Map();
+        (rows || []).forEach(r => _splitCsvList(GET(r, hdr)).forEach(t => {
+          const k = t.toLowerCase();
+          m.set(k, (m.get(k) || 0) + 1);
+        }));
+        return [...m.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([text, count]) => ({ text, count }));
+      };
+      const TOP = (hdr) => (typeof topTerms === "function" ? topTerms(hdr) : __topTerms(hdr));
+
+      // ---- Extract values
+      const industries = _uniq((rows || []).map(r => GET(r, hIndustry)));
+      const topPurchases = TOP(hTopPurch);
+      const topBlockers = TOP(hTopBlockers);
+      const topNeeds = TOP(hTopNeeds);
       const icpFromCsv = industries[0] || "";
 
       // IMPORTANT: avoid clashing with any existing `productHints`
       // Use `productHintsCsv`; elsewhere prefer `(productHints?.length ? productHints : productHintsCsv)`
-      const productHintsCsv = uniq(
-        rows.flatMap(r => splitCsvList(getField(r, hProdNouns)))
+      const productHintsCsv = _uniq(
+        (rows || []).flatMap(r => _splitCsvList(GET(r, hProdNouns)))
       ).slice(0, 20);
 
       // ---------- Website crawl for product/offer nouns ----------
