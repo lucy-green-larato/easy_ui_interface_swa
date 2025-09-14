@@ -2768,19 +2768,6 @@ module.exports = async function (context, req) {
 
       // --- Helpers to map bullets -> evidence rows by publisher/domain/alias ---
 
-      function parseBulletsAndIdsFromES(text) {
-        const WHY_RX = /(^|\n)\s*why\s*now\s*(?::|[-–—])?\s*$/i;  // tolerant heading
-        const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
-
-        const hasWhyNow = WHY_RX.test(text);
-        const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
-        const bulletIds = bullets.map(b => {
-          const m = b.match(CLAIM_ID_RX_LOCAL);
-          return m ? m[1] : null;
-        });
-        return { hasWhyNow, bullets, bulletIds };
-      }
-
       function hostnameFromUrl(u) {
         try { return new URL(String(u)).hostname.toLowerCase(); } catch { return ""; }
       }
@@ -3248,7 +3235,6 @@ module.exports = async function (context, req) {
         const cutoff = new Date(now.getFullYear(), now.getMonth() - months, now.getDate());
         return d < cutoff;
       }
-      campaign.executive_summary = es;
       {
         // Build set of valid IDs from evidence_log
         const logIds = new Set(
