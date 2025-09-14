@@ -3159,6 +3159,8 @@ module.exports = async function (context, req) {
       }
 
       // ---------- validation & quality gate ----------
+      // Tolerant single-line detector: “Why now” on its own line
+      const WHY_LINE_RX = /(^|\n)\s*why\s*now\s*(?::|[-–—])?\s*(?:\r?\n|$)/i;
 
       // Evidence density: require ≥5 (overrides any older min(3))
       if (!Array.isArray(campaign.evidence_log) || campaign.evidence_log.length < 5) {
@@ -3173,9 +3175,7 @@ module.exports = async function (context, req) {
       // Helpers for claim mapping / freshness
       // === ES heading + bullet parsing helpers ===
       function _detectWhyNowHeadingLine(text) {
-        const re = /(^|\n)\s*why\s*now\s*(?:[:\-–—])?\s*$/i;
-        const m = text.match(re);
-        return !!m;
+        return WHY_LINE_RX.test(String(text || ""));
       }
 
       function _firstBulletLineIdx(lines) {
@@ -3212,14 +3212,12 @@ module.exports = async function (context, req) {
       }
 
       function parseBulletsAndIdsFromES(text) {
-        const hasWhyNow =
-          /(^|\n)\s*why\s*now\s*:\s*$/i.test(text) ||
-          /(^|\n)\s*why\s*now\s*(?:[\-–—])\s*$/i.test(text) ||
-          /(^|\n)\s*why\s*now\s*$/i.test(text);
-
-        const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
+        const s = String(text || "");
+        const hasWhyNow = WHY_LINE_RX.test(s);
+        const bullets = (s.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(v => v.trim());
+        const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
         const bulletIds = bullets.map(b => {
-          const m = b.match(CLAIM_ID_RX);
+          const m = b.match(CLAIM_ID_RX_LOCAL);
           return m ? m[1] : null;
         });
         return { hasWhyNow, bullets, bulletIds };
@@ -3251,10 +3249,12 @@ module.exports = async function (context, req) {
         campaign.executive_summary = normalizeExecutiveSummaryHeading(String(campaign.executive_summary || ""));
 
         function parseES(text) {
-          const hasWhyNow = WHY_RX.test(text);
-          const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
+          const s = String(text || "");
+          const hasWhyNow = WHY_LINE_RX.test(s);
+          const bullets = (s.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(v => v.trim());
+          const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
           const bulletIds = bullets.map(b => {
-            const m = b.match(CLAIM_ID_RX);
+            const m = b.match(CLAIM_ID_RX_LOCAL);
             return m ? m[1] : null;
           });
           return { hasWhyNow, bullets, bulletIds };
@@ -3357,19 +3357,18 @@ module.exports = async function (context, req) {
       // 3) Executive Summary: enforce Why-now mapping and count 4–5 bullets
       {
         let es = normalizeExecutiveSummaryHeading(String(campaign.executive_summary || ""));
-
         function parseBulletsAndIds(text) {
-          const WHY_RX = /(^|\n)\s*why\s*now\s*(?::|[-–—])?\s*$/i;
+          const s = String(text || "");
+          const hasWhyNow = WHY_LINE_RX.test(s);
+          const bullets = (s.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(v => v.trim());
           const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
-
-          const hasWhyNow = WHY_RX.test(text);
-          const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
           const bulletIds = bullets.map(b => {
             const m = b.match(CLAIM_ID_RX_LOCAL);
             return m ? m[1] : null;
           });
           return { hasWhyNow, bullets, bulletIds };
         }
+
         let { hasWhyNow, bullets, bulletIds } = parseBulletsAndIds(es);
 
         if (!hasWhyNow || bullets.length < 4 || bullets.length > 5) {
