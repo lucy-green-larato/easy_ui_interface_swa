@@ -3532,7 +3532,7 @@ module.exports = async function (context, req) {
         if (!Array.isArray(campaign.channel_plan.emails)) campaign.channel_plan.emails = [];
 
         // Normalise existing emails (keep only those that have some content)
-        const emails = campaign.channel_plan.emails
+        let emails = campaign.channel_plan.emails
           .filter(e => e && (e.subject || e.body))
           .map(e => ({
             subject: String(e.subject || "").trim(),
@@ -3541,8 +3541,8 @@ module.exports = async function (context, req) {
           }));
 
         // Duplicate guard so generated emails don't repeat existing ones
-        const canon = (subj, body) => (subj + "|" + body).toLowerCase().replace(/\s+/g, " ").trim();
-        const seen = new Set(emails.map(e => canon(e.subject, e.body)));
+        const canon = (subj, body) => (String(subj) + "|" + String(body)).toLowerCase().replace(/\s+/g, " ").trim();
+        const seenGen = new Set(emails.map(e => canon(e.subject, e.body)));
 
         // 1) If fewer than 3 emails, ask the LLM to generate the missing ones using full context
         const need = Math.max(0, 3 - emails.length);
@@ -3596,13 +3596,13 @@ module.exports = async function (context, req) {
             const gen = Array.isArray(js.emails) ? js.emails : [];
 
             // Keep only well-formed generated emails (deduped, capped to >=3 total)
-            for (const e of gen) {
+            for (const g of gen) {
               if (emails.length >= 3) break; // defensive cap
-              const id = String(e?.claim_id || "").trim();
+              const id = String(g?.claim_id || "").trim();
               if (!id || !allowedIds.includes(id)) continue; // must use allowed ClaimIDs
-              const subj = String(e?.subject || "").trim();
-              const prev = String(e?.preview || "").trim();
-              let body = String(e?.body || "").trim();
+              const subj = String(g?.subject || "").trim();
+              const prev = String(g?.preview || "").trim();
+              let body = String(g?.body || "").trim();
               if (!body) continue;
 
               // Ensure explicit ClaimID text present
@@ -3612,8 +3612,8 @@ module.exports = async function (context, req) {
 
               // Deduplicate by (subject, body) canonical form
               const key = canon(subj, body);
-              if (seen.has(key)) continue;
-              seen.add(key);
+              if (seenGen.has(key)) continue;
+              seenGen.add(key);
 
               emails.push({ subject: subj, preview: prev, body });
             }
@@ -3623,17 +3623,9 @@ module.exports = async function (context, req) {
           }
         }
 
-        // Write back the normalised/top-upped list
-        campaign.channel_plan.emails = emails;
-      }
-
-      // 2) Normalise existing+generated emails (no hard-wired padding)
-      {
-        // Use a LOCAL ClaimID regex so this block doesn't depend on outer globals
-        const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
-
+        // 2) Normalise existing+generated emails (no hard-wired padding)
         async function rewriteToWordRange(body, claimId) {
-          const words = _countWords(body); // assumes _countWords is defined earlier in this email block
+          const words = _countWords(body);
           if (words >= 90 && words <= 200) return body;
 
           // If too long, trim deterministically (doesn't invent content)
@@ -3687,8 +3679,7 @@ module.exports = async function (context, req) {
         let idIdx = 0;
 
         // Prevent duplicates after rewrite (subject|body canonical form)
-        const canon = (subj, body) => (String(subj) + "|" + String(body)).toLowerCase().replace(/\s+/g, " ").trim();
-        const seen = new Set();
+        const seenFinal = new Set();
 
         for (const e of emails) {
           let body = String(e.body || "").trim();
@@ -3705,8 +3696,8 @@ module.exports = async function (context, req) {
 
           // Deduplicate after rewrite
           const key = canon(e.subject || "", body);
-          if (seen.has(key)) continue;
-          seen.add(key);
+          if (seenFinal.has(key)) continue;
+          seenFinal.add(key);
 
           result.push({ ...e, body });
         }
