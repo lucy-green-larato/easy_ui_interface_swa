@@ -2769,10 +2769,13 @@ module.exports = async function (context, req) {
       // --- Helpers to map bullets -> evidence rows by publisher/domain/alias ---
 
       function parseBulletsAndIdsFromES(text) {
-        const hasWhyNow = /(^|\n)\s*why\s*now\s*:\s*$/i.test(text);
+        const WHY_RX = /(^|\n)\s*why\s*now\s*(?::|[-–—])?\s*$/i;  // tolerant heading
+        const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
+
+        const hasWhyNow = WHY_RX.test(text);
         const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
         const bulletIds = bullets.map(b => {
-          const m = b.match(CLAIM_ID_RX); // tolerate "Claim ID" / "ClaimID"
+          const m = b.match(CLAIM_ID_RX_LOCAL);
           return m ? m[1] : null;
         });
         return { hasWhyNow, bullets, bulletIds };
@@ -3245,23 +3248,7 @@ module.exports = async function (context, req) {
         const cutoff = new Date(now.getFullYear(), now.getMonth() - months, now.getDate());
         return d < cutoff;
       }
-
-      // === drop-in: keep the check, make it soft, never 422 here ===
-      let { hasWhyNow, bullets, bulletIds } = parseBulletsAndIds(es);
-
-      // If structure looks off, normalise once and re-parse (no early return here)
-      if (!hasWhyNow || bullets.length < 4 || bullets.length > 5) {
-        context?.log?.warn?.(
-          `[es-structure] pre-fix state has_why_now=${!!hasWhyNow} bullets=${bullets.length}`
-        );
-        es = normalizeExecutiveSummaryHeading(String(es || ""));
-        ({ hasWhyNow, bullets, bulletIds } = parseBulletsAndIds(es));
-        context?.log?.info?.(
-          `[es-structure] post-normalise has_why_now=${!!hasWhyNow} bullets=${bullets.length}`
-        );
-      }
       campaign.executive_summary = es;
-
       {
         // Build set of valid IDs from evidence_log
         const logIds = new Set(
@@ -3387,27 +3374,25 @@ module.exports = async function (context, req) {
 
         function parseBulletsAndIds(text) {
           const WHY_RX = /(^|\n)\s*why\s*now\s*(?::|[-–—])?\s*$/i;
+          const CLAIM_ID_RX_LOCAL = /\b[Cc]laim\s*ID[:\s]*([A-Za-z0-9_.-]+)\b/;
+
           const hasWhyNow = WHY_RX.test(text);
           const bullets = (text.match(/(?:^|\n)\s*(?:[-•]\s+.+)/g) || []).map(s => s.trim());
           const bulletIds = bullets.map(b => {
-            const m = b.match(CLAIM_ID_RX);
+            const m = b.match(CLAIM_ID_RX_LOCAL);
             return m ? m[1] : null;
           });
           return { hasWhyNow, bullets, bulletIds };
         }
-        // First evaluation
         let { hasWhyNow, bullets, bulletIds } = parseBulletsAndIds(es);
+
         if (!hasWhyNow || bullets.length < 4 || bullets.length > 5) {
-          // Log + normalise once, then re-parse
-          context?.log?.warn?.(
-            `[es-structure] pre-fix has_why_now=${!!hasWhyNow} bullets=${bullets.length}`
-          );
+          context?.log?.warn?.(`[es-structure] pre-fix has_why_now=${!!hasWhyNow} bullets=${bullets.length}`);
           es = normalizeExecutiveSummaryHeading(String(es || ""));
           ({ hasWhyNow, bullets, bulletIds } = parseBulletsAndIds(es));
-          context?.log?.info?.(
-            `[es-structure] post-normalise has_why_now=${!!hasWhyNow} bullets=${bullets.length}`
-          );
+          context?.log?.info?.(`[es-structure] post-normalise has_why_now=${!!hasWhyNow} bullets=${bullets.length}`);
         }
+
         campaign.executive_summary = es;
 
         // Continue with your existing mapping & freshness checks (unchanged)
