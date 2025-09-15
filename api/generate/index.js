@@ -4157,8 +4157,10 @@ module.exports = async function (context, req) {
 
       // --- product noun repair pass: ensure top 3 nouns appear in VP, LP, E1/E2 ---
       {
-        const nouns3 = Array.isArray(productHintsEffective) ? productHintsEffective.slice(0, 3).filter(Boolean) : [];
-        const has3 = nouns.length >= 3;
+        const nouns3 = Array.isArray(productHintsEffective)
+          ? productHintsEffective.slice(0, 3).filter(Boolean)
+          : [];
+        const has3 = nouns3.length >= 3;
 
         if (has3) {
           const ensureNouns = (text) => {
@@ -4910,7 +4912,7 @@ module.exports = async function (context, req) {
         const lp = (offer.landing_page ||= {});
 
         // Helpers ----------------------------------------------------
-        const nouns = getNouns(6); 
+        const nouns = getNouns(6);
         const hasNouns = nouns.length > 0;
         const sentenceSplit = (s) => _txt(s).split(/(?<=[.!?])\s+/).map(x => x.trim()).filter(Boolean);
         const clampChars = (s, n) => {
