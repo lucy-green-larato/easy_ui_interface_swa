@@ -2572,6 +2572,14 @@ module.exports = async function (context, req) {
         ? productHintsSite
         : productHintsCsv;
 
+      // ---- Derived noun helper (single source of truth)
+      function getNouns(max = 6) {
+        const arr = (Array.isArray(productHintsEffective) && productHintsEffective.length)
+          ? productHintsEffective
+          : (Array.isArray(productHintsCsv) ? productHintsCsv : []);
+        return arr.map(s => String(s || "").trim()).filter(Boolean).slice(0, max);
+      }
+
       // simple site “has cyber” signal used to toggle messaging constraints
       const siteHasCyber =
         /\b(cyber\s*security|cybersecurity)\b/i.test(websiteText) ||
@@ -3662,7 +3670,7 @@ module.exports = async function (context, req) {
           // Compact, deterministic context for the model
           const companyName = String(campaign?.meta?.company_name || company?.name || "").trim();
           const icp = String(campaign?.meta?.icp_from_csv || icpFromCsv || "").trim();
-          const nouns = (productHintsEffective ?? productHintsCsv ?? []).slice(0, 6);
+          const nouns = getNouns(6);
           const topPurch = (topPurchases || []).map(t => (typeof t === "string" ? t : t?.text)).filter(Boolean).slice(0, 6);
           const topNeedsList = (topNeeds || []).map(t => (typeof t === "string" ? t : t?.text)).filter(Boolean).slice(0, 6);
           const banlist = [
@@ -4902,13 +4910,8 @@ module.exports = async function (context, req) {
         const lp = (offer.landing_page ||= {});
 
         // Helpers ----------------------------------------------------
-        const _txt = (v) => String(v || "").trim();
-        const nouns = (productHintsEffective ?? productHintsCsv ?? [])
-          .map(_txt)
-          .filter(Boolean)
-          .slice(0, 6);
+        const nouns = getNouns(6); 
         const hasNouns = nouns.length > 0;
-
         const sentenceSplit = (s) => _txt(s).split(/(?<=[.!?])\s+/).map(x => x.trim()).filter(Boolean);
         const clampChars = (s, n) => {
           const t = _txt(s);
