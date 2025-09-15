@@ -2480,8 +2480,7 @@ module.exports = async function (context, req) {
       const topNeeds = TOP(hTopNeeds);
       const icpFromCsv = industries[0] || "";
 
-      // IMPORTANT: avoid clashing with any existing `productHints`
-      // Use `productHintsCsv`; elsewhere prefer `(productHints?.length ? productHints : productHintsCsv)`
+      // Use `productHintsCsv`; elsewhere prefer `(productHintsEffective)` which falls back to CSV if site lacks hints.
       const productHintsCsv = _uniq(
         (rows || []).flatMap(r => _splitCsvList(GET(r, hProdNouns)))
       ).slice(0, 20);
@@ -2537,35 +2536,38 @@ module.exports = async function (context, req) {
               if (!candSet.has(key)) candSet.set(key, t);
             }
           });
-
         return Array.from(candSet.values()).slice(0, 25);
       }
       const productCandidates = gatherProductCandidatesLocal({ company, csvTopPurchases: topPurchases, websiteText });
 
-      function mineProductHintsLocal(txt, candidates) {
+      function mineProductHintsLocal(txt, candidates, max = 8) {
         const t = String(txt || "");
+        if (!t.trim() || !Array.isArray(candidates) || candidates.length === 0) return [];
+
         const out = [];
         const seen = new Set();
-        for (const original of candidates) {
+
+        for (const originalRaw of candidates) {
+          const original = String(originalRaw || "").trim();
+          if (!original) continue;
+
           const rx = _termToRegexLocal(original);
           if (rx && rx.test(t)) {
             const k = original.toLowerCase();
-            if (!seen.has(k)) { seen.add(k); out.push(original); }
-            if (out.length >= 8) break;
+            if (!seen.has(k)) {
+              seen.add(k);
+              out.push(original);
+              if (out.length >= max) break;
+            }
           }
         }
         return out;
       }
 
-      // NOTE: Downstream, prefer:
-      //   const productHintsEffective = (Array.isArray(productHints) && productHints.length) ? productHints : productHintsCsv;
-      // and then use `productHintsEffective` anywhere you previously used `productHints`.
-
       // Mine hints from the site text (if any), then pick effective set without clashing with any global
       const productHintsSite = mineProductHintsLocal(websiteText, productCandidates);
 
-      // Use site > CSV as the default. If elsewhere you already have a variable named `productHints`,
-      // do NOT redefine it here; instead always use `productHintsEffective` below.
+      // Single source of truth for downstream use
       const productHintsEffective = (Array.isArray(productHintsSite) && productHintsSite.length)
         ? productHintsSite
         : productHintsCsv;
@@ -3114,9 +3116,7 @@ module.exports = async function (context, req) {
         "Ignore AdopterProfile and Connectivity fields."
       ].join("\n");
 
-      // build compact input context
-      const productHints = mineProductHints(websiteText, productCandidates);
-
+      // ------------------ PROMPT BUILD (uses productHintsEffective) ------------------
       const prompt = [
         "INPUTS",
         `Company: ${company.name || "(n/a)"} ${company.website ? "(" + company.website + ")" : ""} ${company.linkedin ? "| " + company.linkedin : ""}`,
@@ -3135,7 +3135,7 @@ module.exports = async function (context, req) {
         "AUTHORITATIVE SEEDS (UK; cite only if text appears in these pages):",
         seedUrls.length ? seedUrls.map(u => "- " + u).join("\n") : "(none)",
         "",
-        "PRODUCT HINTS (use verbatim if present): " + (productHints.length ? productHints.join(", ") : "(none)"),
+        "PRODUCT HINTS (use verbatim if present): " + ((productHintsEffective || []).length ? productHintsEffective.join(", ") : "(none)"),
         "CONSTRAINTS:",
         "- Use those exact nouns verbatim in Executive Summary, Value Proposition, LP proof line, and Emails E1/E2.",
         (siteHasCyber
@@ -3683,7 +3683,8 @@ module.exports = async function (context, req) {
             `- body MUST be 90–200 words and MUST include a literal '(ClaimID: <id>)' reference where <id> is from the allowed set below.`,
             `- Use at least one of these product nouns verbatim when relevant: ${nouns.length ? nouns.join(", ") : "(none)"}.`,
             `- Align to CSV cues where natural (TopPurchases / TopNeeds).`,
-            `- No invented stats or sources; you can paraphrase the claim text but do not fabricate numbers.`,
+            `Product nouns to weave in when natural: ${nouns.join(", ") || "(none)"}.`
+              `- No invented stats or sources; you can paraphrase the claim text but do not fabricate numbers.`,
             `- Avoid these phrases: ${banlist.join(", ")}.`,
             ``,
             `Allowed ClaimIDs (prefer fresher): ${allowedIds.join(", ")}`,
@@ -3882,7 +3883,7 @@ module.exports = async function (context, req) {
             ].join(" ");
 
             const industryHint = (Array.isArray(industries) ? industries.filter(Boolean).join(", ") : "") || "(none)";
-            const productHintLine = (Array.isArray(productHints) ? productHints.join(", ") : "") || "(none)";
+            const productHintLine = (Array.isArray(productHintsEffective) ? productHintsEffective.filter(Boolean).join(", ") : "") || "(none)";
 
             const user = [
               "Task: Propose 5–7 *vendor* competitors operating in the UK for the described company.",
@@ -4019,7 +4020,7 @@ module.exports = async function (context, req) {
           try {
             const system = "You are a precise UK B2B analyst. Return VALID JSON ONLY.";
             const industryHint = (Array.isArray(industries) ? industries.filter(Boolean).join(", ") : "") || "(none)";
-            const productHintLine = (Array.isArray(productHints) ? productHints.filter(Boolean).join(", ") : "") || "(none)";
+            const productHintLine = (Array.isArray(productHintsEffective) ? productHints.filter(Boolean).join(", ") : "") || "(none)";
             const user = [
               `Suggest ${Math.max(0, 5 - set.length)} competing vendors for ${company?.name || "the supplier"} (industry: ${icpFromCsv || industries?.[0] || "general"}).`,
               "Rules:",
@@ -4148,18 +4149,15 @@ module.exports = async function (context, req) {
 
       // --- product noun repair pass: ensure top 3 nouns appear in VP, LP, E1/E2 ---
       {
-        const nouns = Array.isArray(productHints) ? productHints.slice(0, 3).filter(Boolean) : [];
+        const nouns3 = Array.isArray(productHintsEffective) ? productHintsEffective.slice(0, 3).filter(Boolean) : [];
         const has3 = nouns.length >= 3;
 
         if (has3) {
           const ensureNouns = (text) => {
             let s = String(text || "");
-            nouns.forEach(n => {
-              const rx = _termToRegex?.(n); // existing helper; may return RegExp or null
-              if (rx && !rx.test(s)) {
-                // Append noun minimally to avoid heavy rewrites
-                s += (s ? " " : "") + n;
-              }
+            nouns3.forEach(n => {
+              const rx = _termToRegexLocal(n);
+              if (rx && !rx.test(s)) s += (s ? " " : "") + n;
             });
             return s;
           };
@@ -4175,31 +4173,26 @@ module.exports = async function (context, req) {
           const lp = campaign.offer_strategy.landing_page;
           const basis = lp.subheadline || lp.headline || "";
           const withNouns = ensureNouns(basis);
-          if (lp.subheadline) {
-            lp.subheadline = withNouns;
-          } else if (lp.headline) {
-            lp.headline = withNouns;
-          } else {
-            lp.subheadline = withNouns;
-          }
+          if (lp.subheadline) lp.subheadline = withNouns;
+          else if (lp.headline) lp.headline = withNouns;
+          else lp.subheadline = withNouns;
 
           // Emails E1/E2 (only if present)
           if (Array.isArray(campaign.channel_plan?.emails)) {
             campaign.channel_plan.emails = campaign.channel_plan.emails.map((e, idx) => {
               if (idx > 1) return e; // only E1/E2 for the gate
-              const body = ensureNouns(String(e?.body || ""));
+              const body = ensureNouns(String(e.body || ""));
               return { ...e, body };
             });
           }
         }
       }
-
       // 7) Product nouns must appear in key places (if we have at least 3 hints)
       {
-        const mustUseNouns = Array.isArray(productHints) ? productHints.slice(0, 3).filter(Boolean) : [];
+        const mustUseNouns = Array.isArray(productHintsEffective) ? productHintsEffective.slice(0, 3).filter(Boolean) : [];
         const containsAll = (text, nouns) => {
           const t = String(text || "");
-          return nouns.every(n => _termToRegex?.(n)?.test(t));
+          return nouns.every(n => _termToRegexLocal(n)?.test(t));
         };
 
         const vp = String(campaign.positioning_and_differentiation?.value_prop || "");
@@ -4227,7 +4220,6 @@ module.exports = async function (context, req) {
           }
         }
       }
-
       // ---------- Build UI compatibility mirror (contract_v1) ----------
       // Minimal faithful mapping so your current renderer can show content without breaking.
       function toContractV1(cg) {
