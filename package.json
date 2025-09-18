@@ -1,20 +1,44 @@
 {
-  "name": "inside-track-tools-dev",
+  "name": "swa-api",
+  "version": "1.1.0",
   "private": true,
-  "version": "0.0.0",
-  "scripts": {
-    "dev:azurite": "azurite --location ./.azurite --blobPort 10000 --queuePort 10001 --tablePort 10002 --silent",
-    "dev:api-python": "bash -lc 'cd api-python && pip install -r requirements.txt && npx func start --port 7071 --cors http://localhost:4280 --cors https://*.app.github.dev --cors-credentials'",
-    "dev:api-node": "bash -lc 'cd api && (npm ci --omit=dev --no-fund --silent || npm i --omit=dev --no-fund --silent) && npx func start --port 7072'",
-    "dev:swa": "swa start ./web --port 4280 --host 0.0.0.0 --swa-config-location ./web/staticwebapp.config.local.json --verbose",
-    "dev:up": "concurrently -k -n azurite,py,node,swa --raw \"npm:dev:azurite\" \"npm:dev:api-python\" \"npm:dev:api-node\" \"npm:dev:swa\"",
-    "dev:ports": "bash -lc 'gh codespace ports visibility -c ${CODESPACE_NAME} 4280:public 7071:public 7072:public 10000:private 10001:private 10002:private || true'"
+  "description": "Azure Functions API for Inside Track Tools (lead qualification, call scripts, exports).",
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.18.1"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.7.2",
+    "azure-function-express": "^2.0.0",
+    "@azure/msal-node": "^2.16.3",
+    "axios": "^1.11.0",
+    "busboy": "^1.6.0",
+    "cheerio": "^1.1.2",
+    "express": "^4.19.2",
+    "html-docx-js": "^0.3.1",
+    "multer": "^1.4.5-lts.1",
+    "node-fetch": "^3.3.2",
+    "pdf-parse": "^1.1.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@azure/static-web-apps-cli": "^2.0.6",
-    "azurite": "^3.30.0",
-    "concurrently": "^9.0.0",
-    "azure-functions-core-tools": "^4"
+    "ajv": "^8.17.1",
+    "ajv-cli": "^5.0.0"
+  },
+  "scripts": {
+    "start": "func start",
+    "validate:calllib": "ajv validate -s ./schemas/call-library.schema.json -d './web/content/call-library/v1/**/*.json'"
+  },
+  "keywords": [
+    "azure-functions",
+    "swa",
+    "lead-qualification",
+    "ixbrl",
+    "docx"
+  ],
+  "author": "",
+  "directories": {
+    "lib": "lib"
   }
 }
-
