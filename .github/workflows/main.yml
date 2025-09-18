@@ -1,5 +1,12 @@
 name: Azure Static Web Apps CI/CD
 
+ run: |
+    if [ -z "${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}" ]; then
+      echo "❌ AZURE_STATIC_WEB_APPS_API_TOKEN is EMPTY in this context"; exit 1;
+    else
+      echo "✅ AZURE_STATIC_WEB_APPS_API_TOKEN is present";
+    fi
+
 on:
   push:
     branches: [ main, feat/rebuild ]   # include your feature branch if you want it to deploy
