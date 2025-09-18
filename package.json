@@ -40,5 +40,6 @@
   "author": "",
   "directories": {
     "lib": "lib"
-  }
+  },
+  "license": "UNLICENSED"
 }
