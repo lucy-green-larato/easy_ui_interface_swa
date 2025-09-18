@@ -1,0 +1,49 @@
+name: Deploy SWA
+
+on:
+  push:
+    branches:
+      - main
+      - feat/rebuild
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    if: github.event_name == 'push'      # don't deploy on PRs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Sanity: show the .oryxrc files and folders the runner sees
+      - name: Show important files
+        run: |
+          echo "root .oryxrc:"; cat .oryxrc || true
+          echo "api .oryxrc:"; cat api/.oryxrc || true
+          echo "web .oryxrc:"; cat web/.oryxrc || true
+          ls -la web || true
+          ls -la api || true
+
+      - name: Build & Deploy
+        id: deploy
+        uses: azure/static-web-apps-deploy@v1
+        env:
+          # Force Oryx to use Node 20 for the API build
+          ORYX_NODE_VERSION: '20.18.1'
+          ORYX_PLATFORM_NAME: nodejs
+          ORYX_ENABLE_NODE_DYNAMIC_INSTALL: 'true'
+          NODE_VERSION: '20.18.1'
+          WEBSITE_NODE_DEFAULT_VERSION: '20.18.1'
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_LEMON_MOSS_05D6E4C03 }}
+          action: upload
+
+          # IMPORTANT: repo-relative paths (no leading slash)
+          app_location: "web"            # static site
+          output_location: ""            # no build output dir
+          api_location: "api"            # Functions API root
+
+          # Don’t try to build the static /web
+          skip_app_build: true
+
+          # Print Node version inside Oryx build, then install deps
+          api_build_command: "node -v && npm ci --omit=dev"
