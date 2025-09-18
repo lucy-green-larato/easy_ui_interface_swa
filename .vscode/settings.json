@@ -1,0 +1,4 @@
+{
+  "github-actions.workflows.validate": false,   // turn off the Actions linter
+  "yaml.validate": true                         // keep normal YAML validation
+}
