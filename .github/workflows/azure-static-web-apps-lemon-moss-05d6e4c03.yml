@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - main
+       - feat/rebuild
   pull_request:
     types: [opened, synchronize, reopened, closed]
     branches:
       - main
+       - feat/rebuild
 
 jobs:
   build_and_deploy_job:
@@ -56,3 +58,4 @@ jobs:
         with:
           action: "close"
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_LEMON_MOSS_05D6E4C03 }}
+
