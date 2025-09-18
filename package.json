@@ -3,10 +3,10 @@
   "version": "1.1.0",
   "private": true,
   "description": "Azure Functions API for Inside Track Tools (lead qualification, call scripts, exports).",
-  "license": "MIT",
   "type": "commonjs",
   "engines": {
-    "node": ">=20.18.1"
+    "node": ">=20.18.1",
+    "npm": ">=10"
   },
   "dependencies": {
     "@azure/functions": "^4.7.2",
