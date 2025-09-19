@@ -513,6 +513,7 @@ docxBtn?.addEventListener("click", () => {
       basePrefix,
       variables: collectVariables(),
       html: outputEl?.innerHTML || "",
+       consent: document.querySelector('#consent-telemetry')?.checked === true,
       citations: safeJson(outputEl?.getAttribute("data-citations")) || []
     };
     fetch("/api/generate", {
@@ -834,6 +835,7 @@ form?.addEventListener("submit", (e) => {
     fd.append("variables", JSON.stringify(values));
     fd.append("ixbrlSummary", JSON.stringify(ixbrlSummary || {}));
     fd.append("policy", JSON.stringify(policy));
+    fd.append("consent", telemetryConsent ? "true" : "false");
     files.forEach((f, i) => fd.append("files", f, f?.name || `report-${i + 1}.pdf`));
 
     fetch("/api/generate", { method: "POST", body: fd })

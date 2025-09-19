@@ -24,6 +24,8 @@
     "campaignFetch",
     "campaign-regenerate",
     "runs",
-    "pbi_token"
+    "pbi_token",
+    "lead-qualification",
+    "ch-strategic"
   ]
 }
