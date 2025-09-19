@@ -8,7 +8,7 @@ try {
 
 const { z } = require("zod");
 const DEBUG_PROMPT = process.env.DEBUG_PROMPT === "1";
-const { buildCorsHeaders, rateLimitCheck } = require("./utils/http");
+const { buildCorsHeaders, rateLimitCheck } = require("../utils/http");
 
 
 /* === timeouts / abortable fetch === */
