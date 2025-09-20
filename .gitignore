@@ -25,3 +25,4 @@ env/
 # OS/editor
 .DS_Store
 *.swp
+api-worker/local.settings.json

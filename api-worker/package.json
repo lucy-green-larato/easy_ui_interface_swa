@@ -1,0 +1,10 @@
+{
+  "name": "api-worker",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Background workers for ch-strategic (Queue/Durable)",
+  "main": "index.js",
+  "license": "UNLICENSED",
+  "dependencies": {},
+  "engines": { "node": ">=18" }
+}

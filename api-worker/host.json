@@ -1,0 +1,36 @@
+{
+  "version": "2.0",
+  "functionTimeout": "00:10:00",
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[3.*, 4.0.0)"
+  },
+  "extensions": {
+    "queues": {
+      "maxDequeueCount": 5,
+      "batchSize": 8,
+      "newBatchThreshold": 4,
+      "visibilityTimeout": "00:05:00"
+    },
+    "durableTask": {
+      "hubName": "DurableFunctionsHubWorker",
+      "storageProvider": {
+        "type": "azureStorage",
+        "connectionStringName": "AzureWebJobsStorage"
+      }
+    }
+  },
+  "logging": {
+    "applicationInsights": {
+      "samplingSettings": {
+        "isEnabled": true,
+        "excludedTypes": "Request"
+      }
+    },
+    "logLevel": {
+      "default": "Information",
+      "Function": "Information",
+      "Host.Results": "Information"
+    }
+  }
+}
