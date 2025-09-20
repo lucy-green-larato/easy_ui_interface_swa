@@ -12,13 +12,36 @@ const els = {
   btnExpandPBI: document.getElementById('btnExpandPBI'),
 };
 
-async function getPrincipal() {
+async function fetchPrincipalViaSWA() {
+  const res = await fetch('/.auth/me', { cache: 'no-store' });
+  if (res.status === 404) return { notSupported: true, principal: null };
+  if (!res.ok) return { notSupported: false, principal: null };
+  const json = await res.json();
+  return { notSupported: false, principal: json?.clientPrincipal || null };
+}
+
+async function fetchPrincipalViaShim() {
   try {
-    const r = await fetch('/.auth/me', { cache: 'no-store' });
+    const r = await fetch('/api/auth', { cache: 'no-store' });
     if (!r.ok) return null;
     const j = await r.json();
+    // your shim returns { clientPrincipal } — mirror SWA shape
     return j?.clientPrincipal || null;
   } catch { return null; }
+}
+
+async function getPrincipal() {
+  try {
+    const sw = await fetchPrincipalViaSWA();
+    if (sw.notSupported) {
+      // Local emulator: use the shim
+      return await fetchPrincipalViaShim();
+    }
+    return sw.principal;
+  } catch {
+    // last resort (offline local): try shim
+    return await fetchPrincipalViaShim();
+  }
 }
 
 (function initTheme(){
