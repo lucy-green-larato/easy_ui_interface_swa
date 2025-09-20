@@ -1,3 +1,8 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Local/dev always uses the Functions auth shim; cloud uses SWA /.auth/me.
+// This removes any dependency on the emulator's /.auth endpoints.
+// ─────────────────────────────────────────────────────────────────────────────
+
 const els = {
   welcome: document.getElementById('welcome'),
   dashboard: document.getElementById('dashboard'),
@@ -12,9 +17,16 @@ const els = {
   btnExpandPBI: document.getElementById('btnExpandPBI'),
 };
 
-// ---------- theme ----------
-(function initTheme() {
-  try {
+// Treat localhost, 127.0.0.1 and Codespaces/SWA emulator *.app.github.dev as "dev-like"
+const host = location.hostname || "";
+const isDevLike =
+  host === "localhost" ||
+  host === "127.0.0.1" ||
+  host.endsWith(".app.github.dev"); // SWA emulator in Codespaces
+
+// ───────── Theme ─────────
+(function initTheme(){
+  try{
     const saved = localStorage.getItem('theme');
     if (saved) document.documentElement.setAttribute('data-theme', saved);
     els.themeToggle?.addEventListener('click', () => {
@@ -24,68 +36,80 @@ const els = {
       localStorage.setItem('theme', next);
       els.themeToggle.setAttribute('aria-pressed', String(next === 'dark'));
     });
-  } catch {}
+  }catch{}
 })();
 
-// ---------- auth helpers ----------
-async function getPrincipalFromSWA() {
-  try {
-    const r = await fetch('/.auth/me', { cache: 'no-store' });
-    if (r.status === 404) return { supported: false, principal: null };
-    if (!r.ok) return { supported: true, principal: null };
-    const j = await r.json();
-    return { supported: true, principal: j?.clientPrincipal || null };
-  } catch {
-    return { supported: true, principal: null };
-  }
-}
-
+// ───────── Auth helpers ─────────
 async function getPrincipalFromShim() {
   try {
     let r = await fetch('/api/auth', { cache: 'no-store' });
-    if (r.status === 404) {
-      // some repos expose a dev mode explicitly
-      r = await fetch('/api/auth?dev=1', { cache: 'no-store' });
-    }
+    if (r.status === 404) r = await fetch('/api/auth?dev=1', { cache: 'no-store' });
     if (!r.ok) return null;
     const j = await r.json();
-    // accept either {clientPrincipal} or a direct principal shape
     return j?.clientPrincipal || j?.principal || null;
-  } catch {
-    return null;
+  } catch { return null; }
+}
+
+async function getPrincipalFromSWA() {
+  try {
+    const r = await fetch('/.auth/me', { cache: 'no-store' });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j?.clientPrincipal || null;
+  } catch { return null; }
+}
+
+// Shim-first in dev; SWA-first in cloud
+async function getPrincipal() {
+  if (isDevLike) {
+    // Local/dev: rely solely on the shim (requires AUTH_DEV_ALWAYS=1 in api)
+    return await getPrincipalFromShim();
+  }
+  // Cloud/staging: real SWA auth
+  const p = await getPrincipalFromSWA();
+  return p || null;
+}
+
+// ───────── UI toggles ─────────
+function showSignedOut(){
+  els.welcome?.classList.remove('hide');
+  els.dashboard?.classList.add('hide');
+  els.pbiSection?.classList.add('hide');
+
+  if (isDevLike) {
+    // In dev we don't use SWA login—hide both auth buttons to avoid confusion
+    els.signInBtn?.setAttribute('hidden','true');
+    els.signInPrimary?.setAttribute('hidden','true');
+    els.signOutBtn?.setAttribute('hidden','true');
+  } else {
+    // In cloud, show Sign in; hide Sign out
+    els.signOutBtn?.setAttribute('hidden','true');
+    els.signInBtn?.removeAttribute('hidden');
+    els.signInPrimary?.removeAttribute('hidden');
   }
 }
 
-async function getPrincipal() {
-  const swa = await getPrincipalFromSWA();
-  if (swa.supported && swa.principal) return swa.principal;
-
-  // SWA auth not available locally (404) or no principal – try shim
-  const shim = await getPrincipalFromShim();
-  return shim;
-}
-
-// ---------- UI toggles ----------
-function showSignedOut() {
-  els.welcome?.classList.remove('hide');
-  els.dashboard?.classList.add('hide');
-  els.signOutBtn?.setAttribute('hidden', 'true');
-  els.signInBtn?.removeAttribute('hidden');
-  els.signInPrimary?.removeAttribute('hidden');
-  els.pbiSection?.classList.add('hide');
-}
-
-function showSignedIn(p) {
+function showSignedIn(p){
   const label = p?.userDetails || p?.userId || '';
   if (els.userName) els.userName.textContent = label;
+
   els.welcome?.classList.add('hide');
   els.dashboard?.classList.remove('hide');
-  els.signInBtn?.setAttribute('hidden', 'true');
-  els.signInPrimary?.setAttribute('hidden', 'true');
-  els.signOutBtn?.removeAttribute('hidden');
+
+  if (isDevLike) {
+    // Dev: neither sign-in nor sign-out applies (shim controls identity)
+    els.signInBtn?.setAttribute('hidden','true');
+    els.signInPrimary?.setAttribute('hidden','true');
+    els.signOutBtn?.setAttribute('hidden','true');
+  } else {
+    // Cloud: show Sign out only
+    els.signInBtn?.setAttribute('hidden','true');
+    els.signInPrimary?.setAttribute('hidden','true');
+    els.signOutBtn?.removeAttribute('hidden');
+  }
 }
 
-// ---------- PBI embed ----------
+// ───────── Power BI embed ─────────
 async function tryEmbedPBI() {
   if (!els.pbiSection || !els.reportContainer) return;
   try {
@@ -120,14 +144,10 @@ async function tryEmbedPBI() {
   }
 }
 
-// ---------- boot ----------
-async function boot() {
+// ───────── boot ─────────
+async function boot(){
   const principal = await getPrincipal();
-
-  if (!principal) {
-    showSignedOut();
-    return;
-  }
+  if (!principal) { showSignedOut(); return; }
 
   showSignedIn(principal);
   await tryEmbedPBI();
@@ -140,7 +160,7 @@ async function boot() {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', boot, { once: true });
+  document.addEventListener('DOMContentLoaded', boot, { once:true });
 } else {
   boot();
 }
