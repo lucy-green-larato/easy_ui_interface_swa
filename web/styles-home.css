@@ -2,18 +2,17 @@
 :root {
   --stage: 1240px;
   --rail-gutter: 24px;
-  --brand: #1e40af;
-  --focus: #6366f1;
   --radius: 16px;
   --shadow: 0 8px 24px rgba(2,6,23,.08);
 }
 
-/* Basic utilities */
+/* Utilities */
 .logo--xl { height: 100px; width: auto; display: block; }
 .h2-tight { margin: 0 0 6px 0; }
 .stack-10 { margin-top: 10px; }
+.hide { display: none !important; }
 
-/* Background glows + base text */
+/* Background glows + base text color (bridges to your shared tokens) */
 body {
   background-image:
     radial-gradient(1200px 700px at -200px -200px, rgba(14,165,233,.18) 0%, rgba(14,165,233,.08) 40%, rgba(14,165,233,0) 75%),
@@ -24,7 +23,7 @@ body {
   color: var(--text-1);
 }
 
-/* Unify page rail */
+/* Stage rail */
 header, main, footer, #pbiSection {
   width: min(100% - 48px, var(--stage));
   margin-inline: auto;
@@ -32,14 +31,15 @@ header, main, footer, #pbiSection {
 }
 header { padding-top: 28px; }
 
-/* Nav */
+/* Header / brand */
 .nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .brand { display: flex; align-items: center; gap: 14px; }
 .logo { width: 40px; height: 40px; }
 .title-wrap { display: flex; flex-direction: column; }
 .title-wrap h1 { margin: 0; font-size: clamp(18px, 2.6vw, 24px); font-weight: 700; letter-spacing: .2px; }
+.actions { display: flex; align-items: center; gap: 10px; }
 
-/* Shell cards */
+/* Card shells */
 .hero, .pbi-card {
   position: relative;
   background: var(--card-bg);
@@ -59,25 +59,12 @@ header { padding-top: 28px; }
 
 .section-heading { margin: 24px 0 8px; font-size: 18px; font-weight: 700; letter-spacing: .2px; }
 
-/* Cards grid (uses shared .tool styles in styles.css; these add polish) */
+/* Grid and tiles (your shared /styles.css defines .grid, .tool, .pill) */
 .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-top: 12px; }
 .tool { box-shadow: var(--shadow); }
 
-/* Pills */
-.pill { display:inline-block; font-size:12px; line-height:1; padding:6px 8px; border-radius:999px;
-  background: rgba(14,165,233,.1); color:#0369a1; border:1px solid rgba(14,165,233,.25); margin-top:10px; }
-
 /* Buttons */
-.btn { appearance:none; padding:10px 14px; border-radius:12px; border:1px solid var(--border);
-  background: var(--card-bg); cursor:pointer; font-weight:600;
-  transition: transform .04s ease, background .15s ease, filter .15s ease, box-shadow .15s ease; }
-.btn:hover { background:#f8fafc; color:#173991; }
-:root[data-theme="dark"] .btn:hover { background:#17202a; color:var(--text-1); }
-.btn:active { transform: translateY(1px); }
-.btn:focus-visible { outline: var(--ring-outline); outline-offset: 2px; }
 .btn-ghost.theme-btn { width:36px; height:36px; padding:0; display:grid; place-items:center; border-radius:999px; }
-.btn-primary { background: var(--accent); color:#fff; border-color:transparent; }
-.btn-primary:hover { filter: brightness(1.03); }
 
 /* PBI block */
 #pbiSection { margin-top: 8px; }
@@ -90,13 +77,10 @@ header { padding-top: 28px; }
 /* Footer card */
 .footer-card { background: var(--card-bg); border:1px solid var(--border); border-radius: var(--radius); padding:16px; color:var(--text-2); }
 
-/* Helpers */
-.hide { display:none !important; }
-
 @media (max-width:900px){ #reportContainer { min-height:560px; } }
 @media (max-width:600px){ #reportContainer { min-height:460px; } }
 
-/* Manual dark tokens (bridge to shared tokens already present in styles.css) */
+/* Manual dark tokens bridge (align with your shared palette) */
 :root[data-theme="dark"] {
   --bg: #0f1318;
   --card-bg: #141a1f;
