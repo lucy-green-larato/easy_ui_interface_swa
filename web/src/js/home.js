@@ -1,7 +1,10 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// Local/dev always uses the Functions auth shim; cloud uses SWA /.auth/me.
-// This removes any dependency on the emulator's /.auth endpoints.
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
+// Auth & PBI wiring: dev (emulator/Codespaces) uses the Node shim
+//   - principal:  /api/.auth/me
+//   - pbi token:  /api/pbi-token
+// Cloud/staging uses real SWA auth
+//   - principal:  /.auth/me
+// ──────────────────────────────────────────────────────────────
 
 const els = {
   welcome: document.getElementById('welcome'),
@@ -17,14 +20,14 @@ const els = {
   btnExpandPBI: document.getElementById('btnExpandPBI'),
 };
 
-// Treat localhost, 127.0.0.1 and Codespaces/SWA emulator *.app.github.dev as "dev-like"
+// Treat localhost + *.app.github.dev as emulator/dev
 const host = location.hostname || "";
 const isDevLike =
   host === "localhost" ||
   host === "127.0.0.1" ||
-  host.endsWith(".app.github.dev"); // SWA emulator in Codespaces
+  host.endsWith(".app.github.dev");
 
-// ───────── Theme ─────────
+// ---------------- Theme ----------------
 (function initTheme(){
   try{
     const saved = localStorage.getItem('theme');
@@ -39,18 +42,19 @@ const isDevLike =
   }catch{}
 })();
 
-// ───────── Auth helpers ─────────
-async function getPrincipalFromShim() {
+// ---------------- Auth ----------------
+async function getPrincipalDev() {
+  // Emulator/Codespaces → Node shim
   try {
-    let r = await fetch('/api/auth', { cache: 'no-store' });
-    if (r.status === 404) r = await fetch('/api/auth?dev=1', { cache: 'no-store' });
+    const r = await fetch('/api/.auth/me', { cache: 'no-store' });
     if (!r.ok) return null;
     const j = await r.json();
     return j?.clientPrincipal || j?.principal || null;
   } catch { return null; }
 }
 
-async function getPrincipalFromSWA() {
+async function getPrincipalCloud() {
+  // Deployed SWA → real auth
   try {
     const r = await fetch('/.auth/me', { cache: 'no-store' });
     if (!r.ok) return null;
@@ -59,30 +63,22 @@ async function getPrincipalFromSWA() {
   } catch { return null; }
 }
 
-// Shim-first in dev; SWA-first in cloud
 async function getPrincipal() {
-  if (isDevLike) {
-    // Local/dev: rely solely on the shim (requires AUTH_DEV_ALWAYS=1 in api)
-    return await getPrincipalFromShim();
-  }
-  // Cloud/staging: real SWA auth
-  const p = await getPrincipalFromSWA();
-  return p || null;
+  return isDevLike ? await getPrincipalDev() : await getPrincipalCloud();
 }
 
-// ───────── UI toggles ─────────
+// ---------------- UI toggle ----------------
 function showSignedOut(){
   els.welcome?.classList.remove('hide');
   els.dashboard?.classList.add('hide');
   els.pbiSection?.classList.add('hide');
 
   if (isDevLike) {
-    // In dev we don't use SWA login—hide both auth buttons to avoid confusion
+    // In dev we sign-in via shim; hide auth buttons to avoid confusion
     els.signInBtn?.setAttribute('hidden','true');
     els.signInPrimary?.setAttribute('hidden','true');
     els.signOutBtn?.setAttribute('hidden','true');
   } else {
-    // In cloud, show Sign in; hide Sign out
     els.signOutBtn?.setAttribute('hidden','true');
     els.signInBtn?.removeAttribute('hidden');
     els.signInPrimary?.removeAttribute('hidden');
@@ -97,24 +93,22 @@ function showSignedIn(p){
   els.dashboard?.classList.remove('hide');
 
   if (isDevLike) {
-    // Dev: neither sign-in nor sign-out applies (shim controls identity)
     els.signInBtn?.setAttribute('hidden','true');
     els.signInPrimary?.setAttribute('hidden','true');
     els.signOutBtn?.setAttribute('hidden','true');
   } else {
-    // Cloud: show Sign out only
     els.signInBtn?.setAttribute('hidden','true');
     els.signInPrimary?.setAttribute('hidden','true');
     els.signOutBtn?.removeAttribute('hidden');
   }
 }
 
-// ───────── Power BI embed ─────────
+// ---------------- Power BI ----------------
 async function tryEmbedPBI() {
   if (!els.pbiSection || !els.reportContainer) return;
   try {
-    const r = await fetch('/api/pbi_token', { cache: 'no-store' });
-    if (!r.ok) throw new Error(`pbi_token ${r.status}`);
+    const r = await fetch('/api/pbi-token', { cache: 'no-store' });
+    if (!r.ok) throw new Error(`pbi-token ${r.status}`);
     const { embedUrl, accessToken, reportId } = await r.json();
     if (!embedUrl || !accessToken || !reportId) throw new Error('missing Power BI token details');
 
@@ -144,7 +138,7 @@ async function tryEmbedPBI() {
   }
 }
 
-// ───────── boot ─────────
+// ---------------- boot ----------------
 async function boot(){
   const principal = await getPrincipal();
   if (!principal) { showSignedOut(); return; }
