@@ -6,15 +6,12 @@ const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 
 const chStrategic = require('../generate/kinds/ch-strategic');
-const { error } = require('../lib/http');
-const { getPrincipal } = require('../lib/auth'); // SWA principal helper
+const { error } = require('../lib/http'); // keep this if ../lib/http exists
 
 const app = express();
 app.disable('x-powered-by');
 
-// ---------- Global middleware ----------
-
-// Correlation ID on every request (and response)
+// ---------- Correlation ID on every request ----------
 app.use((req, res, next) => {
   const incoming = req.headers['x-correlation-id'];
   const cid = (typeof incoming === 'string' && incoming.trim()) ? incoming.trim() : uuidv4();
@@ -23,11 +20,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// Parse bodies with sensible limits
+// ---------- Body parsing ----------
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '16kb' }));
 
-// CORS for SWA front end + Functions API
+// ---------- CORS ----------
 app.use((req, res, next) => {
   res.set({
     'Access-Control-Allow-Origin': '*',
@@ -38,21 +35,19 @@ app.use((req, res, next) => {
   next();
 });
 
-// ---------- Config ----------
-
-// OPTIONAL: strict allow-lists for future /pbi-export usage
-// Provide as JSON in env CH_STRATEGIC_PBI_ALLOW, e.g.:
-// {"workspaces":["..."],"reports":["..."],"visuals":["..."]}
-const allowPbi = (() => {
+// ---------- Principal extraction (inline) ----------
+function getPrincipal(req) {
   try {
-    return JSON.parse(process.env.CH_STRATEGIC_PBI_ALLOW || '{}');
+    const b64 = req.headers['x-ms-client-principal'];
+    if (!b64) return null;
+    const json = Buffer.from(b64, 'base64').toString('utf8');
+    return JSON.parse(json);
   } catch {
-    return {};
+    return null;
   }
-})();
+}
 
-// ---------- Polished in-memory rate limiter (global) ----------
-
+// ---------- Global rate limiter ----------
 const RPM = parseInt(process.env.CH_STRATEGIC_RPM || '60', 10);
 const WINDOW_MS = 60_000;
 const buckets = new Map();
@@ -60,13 +55,14 @@ const buckets = new Map();
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of buckets) if (now - v.ts > WINDOW_MS * 2) buckets.delete(k);
-}, WINDOW_MS).unref();
+}).unref();
 
 function rateLimit(req, res, next) {
   const now = Date.now();
-  // Use principal if present, otherwise IP
   const p = getPrincipal(req);
-  const key = p?.userId ? `p:${p.userId}` : `ip:${(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim()}`;
+  const key = p?.userId
+    ? `p:${p.userId}`
+    : `ip:${(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim()}`;
   const b = buckets.get(key) || { ts: now, count: 0 };
   if (now - b.ts > WINDOW_MS) { b.ts = now; b.count = 0; }
   b.count += 1;
@@ -80,33 +76,34 @@ function rateLimit(req, res, next) {
   }
   next();
 }
-
 app.use(rateLimit);
 
-// ---------- Auth gate for ch-strategic routes ----------
-
+// ---------- Auth gate for /ch-strategic ----------
 app.use('/ch-strategic', (req, res, next) => {
   const principal = getPrincipal(req);
   if (!principal) {
-    return error(res, 401, 'Unauthenticated', undefined, req.correlationId);
+    return error
+      ? error(res, 401, 'Unauthenticated', undefined, req.correlationId)
+      : res.status(401).json({ code: 401, message: 'Unauthenticated', correlationId: req.correlationId });
   }
   req.principal = principal;
   next();
 });
 
-// Role guard helper (uses req.principal set above)
+// ---------- Role guard ----------
 function requireRole(role) {
   return (req, res, next) => {
     const roles = req.principal?.userRoles || [];
     if (!roles.includes(role)) {
-      return error(res, 403, `Missing required role: ${role}`, undefined, req.correlationId);
+      return error
+        ? error(res, 403, `Missing required role: ${role}`, undefined, req.correlationId)
+        : res.status(403).json({ code: 403, message: `Missing required role: ${role}`, correlationId: req.correlationId });
     }
     next();
   };
 }
 
-// ---------- Feedback RPM limiter (per minute) ----------
-
+// ---------- Feedback RPM limiter ----------
 const feedbackCounts = new Map();
 const FEEDBACK_RPM = parseInt(process.env.CH_STRATEGIC_FEEDBACK_RPM || '5', 10);
 
@@ -116,9 +113,7 @@ function actorKey(req) {
   const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
   return `ip:${ip || 'unknown'}`;
 }
-
 setInterval(() => { feedbackCounts.clear(); }, 60_000).unref();
-
 function limitFeedback(req, res, next) {
   const k = actorKey(req);
   const n = (feedbackCounts.get(k) || 0) + 1;
@@ -132,35 +127,39 @@ function limitFeedback(req, res, next) {
   }
   next();
 }
-
-// Apply feedback limiter specifically to feedback endpoint path
 app.use('/ch-strategic/feedback', limitFeedback);
 
-// ---------- Mount ch-strategic feature module ----------
-// IMPORTANT: pass the multer **module**, not a preconfigured instance.
+// ---------- Optional allow-list for PBI export ----------
+const allowPbi = (() => {
+  try { return JSON.parse(process.env.CH_STRATEGIC_PBI_ALLOW || '{}'); } catch { return {}; }
+})();
+
+// ---------- Mount feature module ----------
 chStrategic.mount(app, { multer, allowPbi });
 
-// ---------- Optional PBI export (role-gated) ----------
+// ---------- Optional PBI export route ----------
 app.post('/ch-strategic/pbi-export', requireRole('pbi-exporter'), async (req, res) => {
   try {
-    // TODO: your Power BI export logic (respect allowPbi)
+    // TODO: implement Power BI export using allowPbi
     res.json({ ok: true, cid: req.correlationId });
   } catch (err) {
-    return error(res, err.status || 500, err.message || 'Internal error', undefined, req.correlationId);
+    const status = err?.status || 500;
+    const msg = err?.message || 'Internal error';
+    return error
+      ? error(res, status, msg, undefined, req.correlationId)
+      : res.status(status).json({ code: status, message: msg, correlationId: req.correlationId });
   }
 });
 
 // ---------- Health ----------
+app.get('/_health', (req, res) => res.status(200).json({ ok: true }));
 
-app.get('/_health', (req, res) => {
-  res.status(200).json({ ok: true });
-});
-
-// One-response-only safety net
+// ---------- Safety net ----------
 app.use((err, req, res, next) => {
   if (res.headersSent) return;
-  res.status(err?.status || 500).json({
-    code: err?.status || 500,
+  const status = err?.status || 500;
+  res.status(status).json({
+    code: status,
     message: err?.message || 'Internal error',
     correlationId: req.correlationId
   });
