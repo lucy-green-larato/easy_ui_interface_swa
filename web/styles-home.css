@@ -1,6 +1,6 @@
 :root{ --stage:1240px; --radius:16px; --shadow:0 8px 24px rgba(2,6,23,.08) }
 
-/* Global background & base text (bridge to shared tokens) */
+/* Background & base text (bridge to shared tokens) */
 body{
   background-image:
     radial-gradient(1200px 700px at -200px -200px, rgba(14,165,233,.18) 0%, rgba(14,165,233,.08) 40%, rgba(14,165,233,0) 75%),
@@ -20,14 +20,11 @@ header{ padding-top:28px }
 
 /* Header */
 .nav{ display:flex; align-items:center; justify-content:space-between; gap:16px }
-.nav--center{ align-items:flex-start }
 .brand{ display:flex; align-items:center; gap:14px }
-.brand--center{ display:flex; align-items:center; gap:14px }
 .brand-title{ margin:0; font-size:clamp(18px, 2.6vw, 24px); font-weight:700; letter-spacing:.2px }
 .logo{ width:40px; height:40px }
 .logo--xl{ height:100px; width:auto }
 .actions{ display:flex; align-items:center; gap:10px }
-.actions--right{ margin-left:auto }
 
 /* Hero & PBI cards */
 .hero, .pbi-card{
@@ -43,16 +40,23 @@ header{ padding-top:28px }
 .welcome-text, .pbi-card .card-lead{ color:var(--text-2); max-width:72ch }
 .section-heading{ margin:24px 0 8px; font-size:18px; font-weight:700; letter-spacing:.2px }
 
-/* Grid + tiles; visual contract with styles.css */
+/* Grid + tiles */
 .grid{ display:grid; gap:14px; grid-template-columns:repeat(auto-fit, minmax(240px,1fr)); margin-top:12px }
-.tool{ display:block; position:relative; background:var(--card-bg); border:1px solid var(--border);
+.tool{
+  display:block; position:relative; background:var(--card-bg); border:1px solid var(--border);
   border-radius:14px; padding:16px 16px 18px; box-shadow:var(--shadow);
-  transition:transform .06s ease, box-shadow .15s ease, background .15s ease; font-weight:700; color:var(--text-1); text-decoration:none }
+  transition:transform .06s ease, box-shadow .15s ease, background .15s ease; font-weight:700; color:var(--text-1); text-decoration:none
+}
 .tool small{ display:block; font-weight:500; color:var(--text-2); margin-top:6px }
 .tool:hover{ background:#f9fbff; transform:translateY(-1px) }
 .tool:focus-visible{ outline:3px solid #6366f1; outline-offset:2px }
 .tool.disabled{ cursor:not-allowed; color:#475569; background:linear-gradient(180deg,#fff,#fafafa); opacity:.72; box-shadow:none; text-decoration:none }
-.pill{ display:inline-block; font-size:12px; line-height:1; padding:6px 8px; border-radius:999px; background:rgba(14,165,233,.1); color:#0369a1; border:1px solid rgba(14,165,233,.25); margin-top:10px }
+.tool--single{ display:block; margin-top:14px }
+.pill{
+  display:inline-block; font-size:12px; line-height:1; padding:6px 8px; border-radius:999px;
+  background:rgba(14,165,233,.1); color:#0369a1; border:1px solid rgba(14,165,233,.25); margin-top:10px
+}
+.pill--new{ background:rgba(16,185,129,.12); color:#0f766e; border-color:rgba(16,185,129,.28) }
 
 /* Buttons */
 .btn-ghost.theme-btn{ width:36px; height:36px; padding:0; display:grid; place-items:center; border-radius:999px }
@@ -65,7 +69,7 @@ header{ padding-top:28px }
 .pbi-card .actions{ margin-left:auto; display:flex; gap:8px }
 #reportContainer{ width:100%; aspect-ratio:16/9; min-height:640px; background:var(--card-bg) }
 #reportContainer iframe, #reportContainer .powerbi-frame{ width:100% !important; height:100% !important; display:block; border:0 }
-.hide{ display:none !important }
 
+.hide{ display:none !important }
 @media (max-width:900px){ #reportContainer{ min-height:560px } }
 @media (max-width:600px){ #reportContainer{ min-height:460px } }

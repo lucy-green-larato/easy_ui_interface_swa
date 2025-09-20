@@ -5,11 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Inside Track Business Growth Tools</title>
   <meta name="color-scheme" content="light dark" />
-  <link rel="stylesheet" href="/styles.css?v=2025-09-21-1" />
-  <link rel="stylesheet" href="/styles-home.css?v=2025-09-21-1" />
+  <!-- Shared and page styles -->
+  <link rel="stylesheet" href="/styles.css?v=2025-09-21-2" />
+  <link rel="stylesheet" href="/styles-home.css?v=2025-09-21-2" />
+  <!-- Vendor (Power BI) -->
   <script src="/vendor/powerbi.min.js" defer></script>
-  <script type="module" src="/src/js/home.js?v=2025-09-21-1" defer></script>
+  <!-- Page logic -->
+  <script type="module" src="/src/js/home.js?v=2025-09-21-2" defer></script>
 </head>
+
 <body>
   <header class="nav" aria-label="Global">
     <a href="/" class="brand" aria-current="page">
@@ -18,13 +22,30 @@
     </a>
     <div class="actions">
       <button id="themeToggle" class="btn-ghost theme-btn" aria-pressed="false" aria-label="Switch theme">🌙</button>
-      <a id="btnSignOut" class="btn" href="/.auth/logout?post_logout_redirect_uri=/login.html">Sign out</a>
+      <!-- both exist; JS toggles visibility -->
+      <a id="btnSignIn" class="btn" href="/.auth/login/aad?post_login_redirect_uri=/">Sign in</a>
+      <a id="btnSignOut" class="btn" href="/.auth/logout?post_logout_redirect_uri=/" hidden>Sign out</a>
     </div>
   </header>
 
   <main class="hero" aria-labelledby="welcome-heading">
-    <section id="dashboard" aria-live="polite">
-      <h2 id="welcome-heading" class="h2-tight">Welcome, <span id="userName"></span></h2>
+    <!-- Signed OUT -->
+    <section id="welcome" class="welcome" aria-live="polite">
+      <h2 id="welcome-heading" class="h2-tight">Welcome</h2>
+      <p class="welcome-text">
+        These tools will save you time and assure that you deliver the best sales and marketing experience to your
+        prospects. Please sign in to get started.
+      </p>
+      <div class="stack-10">
+        <a id="btnSignInPrimary" class="btn btn-primary" href="/.auth/login/aad?post_login_redirect_uri=/">
+          Sign in with Microsoft
+        </a>
+      </div>
+    </section>
+
+    <!-- Signed IN -->
+    <section id="dashboard" class="hide" aria-live="polite">
+      <h2 class="h2-tight">Welcome, <span id="userName"></span></h2>
       <p class="welcome-text">
         These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects.
       </p>
@@ -44,20 +65,20 @@
         </a>
 
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-           title="Coming soon (October 2025)">
+           title="Coming soon">
           Beat your competitors
           <small>Position your value clearly against alternatives.</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
         </a>
       </div>
 
-      <a class="tool" href="/ch-strategic/" style="margin-top:14px; display:block">
+      <a class="tool tool--single" href="/ch-strategic/">
         Strategic Report matcher
         <small>Upload a CSV and find evidence in Strategic Reports. Large lists run as a background job.</small>
         <span class="pill">New</span>
       </a>
 
-      <h3 class="section-heading" style="margin-top:28px">Tools for marketing</h3>
+      <h3 class="section-heading">Tools for marketing</h3>
       <div class="grid">
         <a class="tool" href="/campaign/">
           Campaign Builder
@@ -80,6 +101,7 @@
     </section>
   </main>
 
+  <!-- Power BI (shown after successful token) -->
   <section id="pbiSection" class="pbi-card hide" aria-live="polite">
     <div class="card-head">
       <div class="card-titleblock">
