@@ -1,4 +1,4 @@
-/* ===== Page tokens (home only) ===== */
+/* ===== Home-only tokens ===== */
 :root {
   --stage: 1240px;
   --rail-gutter: 24px;
@@ -12,7 +12,7 @@
 .stack-10 { margin-top: 10px; }
 .hide { display: none !important; }
 
-/* Background glows + base text color (bridges to your shared tokens) */
+/* Background glows + base text (bridges to shared tokens) */
 body {
   background-image:
     radial-gradient(1200px 700px at -200px -200px, rgba(14,165,233,.18) 0%, rgba(14,165,233,.08) 40%, rgba(14,165,233,0) 75%),
@@ -59,9 +59,8 @@ header { padding-top: 28px; }
 
 .section-heading { margin: 24px 0 8px; font-size: 18px; font-weight: 700; letter-spacing: .2px; }
 
-/* Grid and tiles (your shared /styles.css defines .grid, .tool, .pill) */
+/* Grid and tiles (shared .tool CSS already in /styles.css) */
 .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-top: 12px; }
-.tool { box-shadow: var(--shadow); }
 
 /* Buttons */
 .btn-ghost.theme-btn { width:36px; height:36px; padding:0; display:grid; place-items:center; border-radius:999px; }
@@ -74,8 +73,7 @@ header { padding-top: 28px; }
 #reportContainer { width:100%; aspect-ratio:16/9; min-height:640px; background: var(--card-bg); }
 #reportContainer iframe, #reportContainer .powerbi-frame { width:100% !important; height:100% !important; display:block; border:0; }
 
-/* Footer card */
-.footer-card { background: var(--card-bg); border:1px solid var(--border); border-radius: var(--radius); padding:16px; color:var(--text-2); }
+.footer-card { background: var(--card-bg); border:1px solid var(--border); border-radius: var(--radius); padding:16px; color: var(--text-2); }
 
 @media (max-width:900px){ #reportContainer { min-height:560px; } }
 @media (max-width:600px){ #reportContainer { min-height:460px; } }

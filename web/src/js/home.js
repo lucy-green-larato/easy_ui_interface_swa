@@ -1,4 +1,4 @@
-// Home page boot: CSP-safe auth toggles, theme, and optional Power BI embed
+// Home page boot: CSP-safe auth/dash toggle + optional Power BI embed
 
 const els = {
   welcome: document.getElementById('welcome'),
@@ -63,15 +63,12 @@ function showSignedIn(user) {
 
 async function tryEmbedPBI() {
   if (!els.pbiSection || !els.reportContainer) return;
-  // Ask the API for embed info. Your existing endpoint should return:
-  // { embedUrl, accessToken, reportId }
   try {
     const r = await fetch('/api/pbi_token', { cache: 'no-store' });
     if (!r.ok) throw new Error(`pbi_token ${r.status}`);
     const { embedUrl, accessToken, reportId } = await r.json();
     if (!embedUrl || !accessToken || !reportId) throw new Error('missing Power BI token details');
 
-    // Power BI embed
     const models = window['powerbi-client']?.models || window.powerbi?.models;
     const config = {
       type: 'report',
@@ -92,7 +89,7 @@ async function tryEmbedPBI() {
     els.pbiSection.classList.remove('hide');
     els.pbiHint?.classList.add('hide');
   } catch (e) {
-    // Show the card but hint that embedding failed
+    // Show the card with a hint if embedding fails (keeps UX clear)
     els.pbiSection.classList.remove('hide');
     els.pbiHint?.classList.remove('hide');
     console.warn('Power BI embed skipped:', e);
