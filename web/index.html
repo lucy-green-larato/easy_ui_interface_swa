@@ -1,59 +1,560 @@
 <!doctype html>
 <html lang="en" data-theme="">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Larato | Inside Track Business Growth Tools</title>
-  <meta name="description" content="Inside Track Business Growth Tools by Larato — fast, consistent sales and marketing workflows." />
-  <meta name="color-scheme" content="light dark" />
+  <meta name="description"
+    content="Inside Track Business Growth Tools by Larato — fast, consistent sales and marketing workflows." />
+  <meta name="color-scheme" content="light dark">
 
-  <!-- Shared site styles -->
+  <!-- Shared app styles (multi-tool, includes dark-mode tokens) -->
   <link rel="stylesheet" href="/styles.css?v=2025-08-30-2" />
-  <!-- Home (moved out of inline to satisfy CSP) -->
-  <link rel="stylesheet" href="/styles-home.css?v=2025-09-20" />
 
-  <!-- Vendor + app bootstrap -->
-  <script src="/vendor/powerbi.min.js" defer></script>
-  <script src="/auth-shim.js?v=dev-1" defer></script>
-  <script type="module" src="/src/js/main.js?v=2025-08-30-2" defer></script>
-  <!-- Home page script (moved out of inline to satisfy CSP) -->
-  <script type="module" src="/src/js/home-poll.js?v=2025-09-20" defer></script>
+  <!-- Power BI -->
+  <script src="/vendor/powerbi.min.js"></script>
+  <script src="/auth-shim.js?v=dev-1"></script>
+  <script type="module" defer src="/src/js/main.js?v=2025-08-30-2"></script>
+
+  <style>
+    /* ============ Page tokens (this page only) ============ */
+    :root {
+      --stage: 1240px;
+      /* one rail width for the whole page */
+      --rail-gutter: 24px;
+      /* outer side padding */
+      --bg: #f6f8fb;
+      --surface: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --outline: #e2e8f0;
+      --brand: #1e40af;
+      --focus: #6366f1;
+      --radius: 16px;
+      --shadow: 0 8px 24px rgba(2, 6, 23, .08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans";
+      color: var(--text);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+
+      /* base + soft glows; no visible “hard line” on left */
+      background-color: var(--bg);
+      background-image:
+        radial-gradient(1200px 700px at -200px -200px,
+          rgba(14, 165, 233, .18) 0%, rgba(14, 165, 233, .08) 40%, rgba(14, 165, 233, 0) 75%),
+        radial-gradient(1000px 600px at calc(100% + 200px) -200px,
+          rgba(30, 64, 175, .16) 0%, rgba(30, 64, 175, .06) 42%, rgba(30, 64, 175, 0) 72%);
+      background-repeat: no-repeat, no-repeat;
+      background-position: -200px -200px, calc(100% + 200px) -200px;
+      background-size: 1200px 700px, 1000px 600px;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    img {
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
+
+    /* ===== Unified page rail (fixes alignment perfectly) ===== */
+    header,
+    main,
+    footer,
+    #pbiSection {
+      /* identical outer width & centering for all major sections */
+      width: min(100% - 48px, var(--stage));
+      margin-inline: auto;
+      padding-block: 24px;
+      /* vertical rhythm only; side padding comes from width calc */
+    }
+
+    header {
+      padding-top: 28px;
+    }
+
+    /* ===== Top bar ===== */
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo {
+      width: 40px;
+      height: 40px;
+    }
+
+    .title-wrap {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .title-wrap h1 {
+      margin: 0;
+      font-size: clamp(18px, 2.6vw, 24px);
+      font-weight: 700;
+      letter-spacing: .2px;
+    }
+
+    /* ===== Card shells (Hero + PBI) ===== */
+    .hero,
+    .pbi-card {
+      position: relative;
+      background: #fff;
+      border: 1px solid var(--outline);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 28px;
+      overflow: hidden;
+      background-clip: padding-box;
+    }
+
+    .hero::before,
+    .pbi-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      background: linear-gradient(135deg, #ffffff 0%, #fbfdff 35%, rgba(14, 165, 233, .06) 100%);
+    }
+
+    .hero>*,
+    .pbi-card>* {
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero h2,
+    .pbi-card h2 {
+      margin: 0 0 8px;
+    }
+
+    .welcome p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      max-width: 72ch;
+    }
+
+    .section-heading {
+      margin: 24px 0 8px;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: .2px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      margin-top: 12px;
+    }
+
+    .tool {
+      display: block;
+      position: relative;
+      background: #fff;
+      border: 1px solid var(--outline);
+      border-radius: 14px;
+      padding: 16px 16px 18px;
+      box-shadow: var(--shadow);
+      transition: transform .06s ease, box-shadow .15s ease, background .15s ease;
+      font-weight: 700;
+    }
+
+    .tool small {
+      display: block;
+      font-weight: 500;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    .tool:hover {
+      background: #f9fbff;
+      transform: translateY(-1px);
+    }
+
+    .tool:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .pill {
+      display: inline-block;
+      font-size: 12px;
+      line-height: 1;
+      padding: 6px 8px;
+      border-radius: 999px;
+      background: rgba(14, 165, 233, .1);
+      color: #0369a1;
+      border: 1px solid rgba(14, 165, 233, .25);
+      margin-top: 10px;
+    }
+
+    .tool.disabled {
+      cursor: not-allowed;
+      color: #475569;
+      background: linear-gradient(180deg, #fff, #fafafa);
+      opacity: .72;
+      box-shadow: none;
+    }
+
+    .tool.disabled:hover {
+      transform: none;
+      background: linear-gradient(180deg, #fff, #f6f6f6);
+    }
+
+    .tool.disabled:focus {
+      outline: none;
+    }
+
+    :root {
+      /* override the earlier outline so it follows shared tokens */
+      --outline: var(--border);
+    }
+
+    .hero,
+    .pbi-card,
+    footer .card,
+    .tool {
+      /* pick up light/dark tokens from styles.css */
+      background: var(--card-bg);
+      border-color: var(--border);
+    }
+
+    /* text colors that adapt to tokens */
+    body {
+      color: var(--text-1);
+    }
+
+    .welcome p,
+    .pbi-card .card-lead {
+      color: var(--text-2);
+    }
+
+    /* compact icon button for the header toggle */
+    .btn-ghost.theme-btn {
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      line-height: 1;
+    }
+
+    .btn {
+      appearance: none;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--outline);
+      background: #fff;
+      cursor: pointer;
+      transition: transform .04s ease, background .15s ease, filter .15s ease, box-shadow .15s ease;
+      font-weight: 600;
+    }
+
+    .btn:hover {
+      background: #f8fafc;
+      color: #173991;
+    }
+
+    .btn:active {
+      transform: translateY(1px);
+    }
+
+    .btn:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(180deg, var(--brand), #173991);
+      color: #fff;
+      border-color: transparent;
+      box-shadow: 0 6px 14px rgba(30, 64, 175, .25);
+    }
+
+    .btn-primary:hover {
+      filter: brightness(1.03);
+    }
+
+    .btn-ghost {
+      appearance: none;
+      border: 1px solid var(--outline);
+      background: #fff;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-ghost:hover {
+      background: #f2f6ff;
+      border-color: #dce6ff;
+    }
+
+    /* ===== Inside Track / Power BI ===== */
+    #pbiSection {
+      margin-top: 8px;
+    }
+
+    /* small separation below hero */
+
+    .pbi-card .card-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin: 0 0 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(30, 64, 175, .10);
+    }
+
+    .pbi-card .card-title {
+      margin: 0;
+      font-size: clamp(18px, 2.6vw, 24px);
+      font-weight: 700;
+      letter-spacing: .2px;
+    }
+
+    .pbi-card .card-lead {
+      margin: 6px 0 0;
+      color: var(--muted);
+      max-width: 72ch;
+    }
+
+    .pbi-card .actions {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+    }
+
+    /* ===== Fullscreen PBI ===== */
+    .pbi-fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: var(--bg);
+      padding: 0;
+      /* remove page padding */
+      display: flex;
+      overflow: hidden;
+      /* hide page scrollbars in fallback */
+    }
+
+    .pbi-fullscreen .pbi-card {
+      max-width: none;
+      height: 100%;
+      border-radius: 0;
+      border: 0;
+      box-shadow: none;
+      padding: 0;
+      /* edge-to-edge */
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Put actions (Close) in the top-right, overlaying the report */
+    .pbi-fullscreen .card-head {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      left: 12px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      pointer-events: none;
+      /* let clicks go through except on buttons */
+    }
+
+    .pbi-fullscreen .card-head .actions {
+      pointer-events: all;
+    }
+
+    /* Report fills the entire viewport in fullscreen */
+    .pbi-fullscreen #reportContainer {
+      flex: 1;
+      width: 100%;
+      height: 100vh;
+      /* full viewport height */
+      min-height: 0;
+      aspect-ratio: auto;
+      /* let height rule, not AR */
+    }
+
+    /* Let the PBI section truly fill the viewport when fullscreen */
+    #pbiSection.pbi-fullscreen,
+    #pbiSection.pbi-fullscreen.container {
+      max-width: none !important;
+      /* beat the header/main/footer,.container cap */
+      width: 100vw;
+      height: 100vh;
+      margin: 0;
+      padding: 24px;
+      /* optional breathing room */
+    }
+
+    /* Lock body scroll in CSS-fallback mode */
+    body.fs-lock {
+      overflow: hidden;
+    }
+
+    #reportContainer {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      min-height: 640px;
+      background: #fff;
+    }
+
+    #reportContainer iframe,
+    #reportContainer .powerbi-frame {
+      width: 100% !important;
+      height: 100% !important;
+      display: block;
+      border: 0;
+    }
+
+    /* Optional fullscreen mode (toggled via class on #pbiSection) */
+    .pbi-fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: var(--bg);
+      padding: 24px;
+      display: flex;
+      overflow: hidden;
+    }
+
+    .pbi-fullscreen .pbi-card {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    .pbi-fullscreen #reportContainer {
+      flex: 1;
+      min-height: 0;
+      aspect-ratio: auto;
+    }
+
+    footer .card {
+      background: #fff;
+      border: 1px solid var(--outline);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow);
+      color: var(--muted);
+    }
+
+    .hide {
+      display: none;
+    }
+
+    @media (max-width:900px) {
+      #reportContainer {
+        min-height: 560px;
+      }
+    }
+
+    @media (max-width:600px) {
+      #reportContainer {
+        min-height: 460px;
+      }
+    }
+
+    /* Manual dark tokens when user forces dark */
+    :root[data-theme="dark"] {
+      /* index.html tokens */
+      --bg: #0f1318;
+      --surface: #141a1f;
+      --text: #e6eaf2;
+      --muted: #a9b2c3;
+      --outline: #2a3342;
+      /* styles.css tokens (bridge) */
+      --card-bg: #141a1f;
+      --border: #2a3342;
+      --text-1: #e6eaf2;
+      --text-2: #a9b2c3;
+    }
+
+    /* If OS is dark but user forces light, re-assert light tokens */
+    @media (prefers-color-scheme: dark) {
+      :root[data-theme="light"] {
+        --bg: #f6f8fb;
+        --surface: #ffffff;
+        --text: #0f172a;
+        --muted: #64748b;
+        --outline: #e2e8f0;
+        --card-bg: #ffffff;
+        --border: #e2e5ea;
+        --text-1: #1d2129;
+        --text-2: #4a5160;
+      }
+    }
+  </style>
 </head>
 
 <body>
   <header class="nav" aria-label="Global">
     <a href="/" class="brand" aria-current="page">
-      <img class="logo logo--xl" src="/assets/larato-logo.svg" alt="Larato" />
+      <img class="logo" src="/assets/larato-logo.svg" alt="Larato" style="height:100px;width:auto;display:block">
       <div class="title-wrap">
         <h1>Inside Track Business Growth Tools</h1>
       </div>
     </a>
-
-    <button id="themeToggle" class="btn-ghost theme-btn" aria-pressed="false" aria-label="Switch theme">🌙</button>
+    <button id="themeToggle" class="btn-ghost theme-btn" aria-pressed="false"
+      aria-label="Switch to dark mode">🌙</button>
     <div id="authButtons">
       <button class="btn" id="btnSignIn">Sign in</button>
-      <button class="btn" id="btnSignOut" hidden>Sign out</button>
     </div>
   </header>
 
   <main class="hero" aria-labelledby="welcome-heading">
-    <!-- Signed-out -->
     <section id="welcome" class="welcome" aria-live="polite">
-      <h2 id="welcome-heading" class="h2-tight">Welcome</h2>
+      <h2 id="welcome-heading" style="margin:0 0 6px 0">Welcome</h2>
       <p>These tools will save you time and assure that you deliver the best sales and marketing experience to your
         prospects. Please sign in to get started.</p>
-      <div class="stack-10">
-        <button class="btn btn-primary" id="btnSignInPrimary" aria-label="Sign in with Microsoft">
-          Sign in with Microsoft
-        </button>
+      <div style="margin-top:10px">
+        <button class="btn btn-primary" id="btnSignInPrimary" aria-label="Sign in with Microsoft">Sign in with
+          Microsoft</button>
       </div>
     </section>
 
-    <!-- Signed-in -->
     <section id="dashboard" class="hide" aria-live="polite">
-      <h2 class="h2-tight">Welcome <span id="userName"></span></h2>
-      <p class="welcome-text">
-        These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects.
+      <h2 style="margin:0 0 6px 0">Welcome<span id="userName"></span></h2>
+      <p class="welcome-text" style="color:var(--muted); max-width:72ch; margin:8px 0 0 0">
+        These tools will save you time and assure that you deliver the best sales and marketing experience to your
+        prospects.
       </p>
 
       <h3 class="section-heading">Tools for sales</h3>
@@ -71,36 +572,31 @@
         </a>
 
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-           title="Coming soon (October 2025). This will help you to differentiate against your competition">
+          title="Coming soon (October 2025). This will help you to differentiate against your competition"
+          data-tip="Coming soon (October 2025). This will help you to differentiate against your competition">
           Beat your competitors
           <small>Position your value clearly against alternatives.</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
         </a>
       </div>
 
-      <!-- Strategic Report matcher (valid anchor card) -->
-      <a class="tool" href="/ch-strategic/">
-        Strategic Report matcher
-        <small>Upload a CSV and find evidence in Strategic Reports. Large lists run as a background job.</small>
-        <span class="pill">New</span>
-      </a>
-
       <h3 class="section-heading" style="margin-top:28px">Tools for marketing</h3>
-      <a class="tool" href="/campaign/" title="Open Campaign Builder">
+      <a class="tool" href="/campaign/" title="Open Campaign Builder" data-tip="Open the Campaign Builder">
         Campaign Builder
         <small>Create evidence-first B2B campaigns</small>
         <span class="pill pill--new" aria-hidden="true">New</span>
       </a>
 
       <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-         title="Coming soon. Prove why your offer is better">
+        title="Coming soon. Prove why your offer is better" data-tip="Coming soon. Prove why your offer is better">
         Differentiation
         <small>Evidence why your offer is better</small>
         <span class="pill" aria-hidden="true">Coming soon</span>
       </a>
 
       <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-         title="Coming soon. Create data-backed, personalised messaging">
+        title="Coming soon. Create data-backed, personalised messaging"
+        data-tip="Coming soon. Create data-backed, personalised messaging">
         Market beating messaging
         <small>Data-backed, personalised, messaging</small>
         <span class="pill" aria-hidden="true">Coming soon</span>
@@ -108,23 +604,117 @@
     </section>
   </main>
 
-  <section id="pbiSection" class="pbi-card hide" aria-live="polite">
-    <div class="card-head">
-      <div class="card-titleblock">
-        <h2 class="card-title">Inside Track market intelligence</h2>
-        <p class="card-lead">These insights update continuously to support your sales and marketing decisions.</p>
+  <section id="pbiSection" class="hide">
+    <div class="pbi-card">
+      <div class="card-head">
+        <div class="card-titleblock">
+          <h2 class="card-title">Inside Track market intelligence</h2>
+          <p class="card-lead">These insights update continuously to support your sales and marketing decisions.</p>
+        </div>
+        <div class="actions">
+          <button id="btnExpandPBI" class="btn-ghost" aria-pressed="false">Expand</button>
+        </div>
       </div>
-      <div class="actions">
-        <button id="btnExpandPBI" class="btn-ghost" aria-pressed="false">Expand</button>
-      </div>
+      <div id="reportContainer" aria-label="Power BI report host"></div>
     </div>
-    <div id="reportContainer" aria-label="Power BI report host" aria-busy="false"></div>
   </section>
 
-  <footer aria-label="Footer">
-    <div class="card footer-card">
-      © Larato Limited. Company Registration Number 5451360. Registered in the UK.
-    </div>
+  <footer>
+    <div class="card">© Larato Limited. Company Registration Number 5451360. Registered in the UK.</div>
   </footer>
+  <script>
+    // Minimal status poller that plugs into CampaignPage & CampaignUI.
+    // Call startCampaignStatusPoll(runId) whenever you have a runId.
+
+    (function () {
+      let activeController = null;
+      const rendered = new Set();
+
+      function sleep(ms) {
+        return new Promise(r => setTimeout(r, ms));
+      }
+
+      async function pollOnce(runId, signal) {
+        const res = await fetch(`/api/campaign/status?runId=${encodeURIComponent(runId)}`, { signal });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const status = await res.json();
+
+        // Update the stage UI and run badge
+        if (window.CampaignPage) {
+          window.CampaignPage.setRunId(runId);
+          window.CampaignPage.updateStage(status.state);
+        }
+
+        // When Completed, render campaign content exactly once per runId
+        if (status.state === "Completed" && !rendered.has(runId) && window.CampaignUI) {
+          rendered.add(runId);
+          await window.CampaignUI.handleCompleted(runId);
+        }
+
+        return status.state;
+      }
+
+      async function loop(runId, controller) {
+        // Poll fast initially, then back off slightly
+        let delay = 1200;
+        for (; ;) {
+          if (controller.signal.aborted) return;
+          try {
+            const state = await pollOnce(runId, controller.signal);
+            // Stop polling on terminal states
+            if (state === "Completed" || state === "Failed") return;
+            await sleep(delay);
+            if (delay < 2000) delay += 200; // gentle backoff up to 2s
+          } catch (err) {
+            if (controller.signal.aborted) return;
+            console.warn("status poll error:", err);
+            await sleep(2500); // retry slower on errors
+          }
+        }
+      }
+
+      // Public API you can call from your existing shell code:
+      window.startCampaignStatusPoll = function startCampaignStatusPoll(runId) {
+        // Cancel any previous poll
+        if (activeController) activeController.abort();
+        const controller = new AbortController();
+        activeController = controller;
+
+        // Show the run id immediately
+        if (window.CampaignPage) window.CampaignPage.setRunId(runId);
+
+        // kick off loop
+        loop(runId, controller);
+
+        // Return a stop handle if you need to cancel later
+        return () => controller.abort();
+      };
+
+      // Helper: start a new run and begin polling (optional convenience)
+      window.startNewCampaignRun = async function startNewCampaignRun(body = {}) {
+        const res = await fetch("/api/campaign/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const json = await res.json();
+        const runId = json.runId;
+        if (!runId) throw new Error("No runId returned from /api/campaign/start");
+        // Begin polling this run
+        window.startCampaignStatusPoll(runId);
+        return runId;
+      };
+
+      // Example button wiring (use if you like):
+      const newRunBtn = document.getElementById("newRunBtn");
+      if (newRunBtn) {
+        newRunBtn.addEventListener("click", async () => {
+          // Customize the body as needed; keep it minimal here
+          await window.startNewCampaignRun({ page: "leadgen", rowCount: 0 });
+        });
+      }
+    })();
+  </script>
 </body>
+
 </html>
