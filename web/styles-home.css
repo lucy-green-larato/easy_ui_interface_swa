@@ -1,0 +1,128 @@
+/* ========= Home page tokens (page-only) ========= */
+:root {
+  --stage: 1240px;         /* content max width */
+  --rail-gutter: 24px;     /* outer padding */
+  --brand: #1e40af;
+  --focus: #6366f1;
+  --radius: 16px;
+  --outline: var(--border); /* follow shared tokens */
+  --shadow: 0 8px 24px rgba(2, 6, 23, .08);
+}
+
+/* ========== Resets specific to this page ========== */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+a { color: inherit; text-decoration: none; }
+img { display: block; max-width: 100%; height: auto; }
+
+/* Base background (soft glows) */
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(1200px 700px at -200px -200px,
+      rgba(14,165,233,.18) 0%, rgba(14,165,233,.08) 40%, rgba(14,165,233,0) 75%),
+    radial-gradient(1000px 600px at calc(100% + 200px) -200px,
+      rgba(30,64,175,.16) 0%, rgba(30,64,175,.06) 42%, rgba(30,64,175,0) 72%);
+  background-repeat: no-repeat, no-repeat;
+  background-position: -200px -200px, calc(100% + 200px) -200px;
+  background-size: 1200px 700px, 1000px 600px;
+  color: var(--text-1);
+}
+
+/* ===== Unified page rail (header/main/footer) ===== */
+header, main, footer, #pbiSection {
+  width: min(100% - 48px, var(--stage));
+  margin-inline: auto;
+  padding-block: 24px;
+}
+header { padding-top: 28px; }
+
+/* ===== Top bar ===== */
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.brand { display: flex; align-items: center; gap: 14px; }
+.logo { width: 40px; height: 40px; }
+.logo--xl { height: 100px; width: auto; display: block; }
+.title-wrap { display: flex; flex-direction: column; }
+.title-wrap h1 { margin: 0; font-size: clamp(18px, 2.6vw, 24px); font-weight: 700; letter-spacing: .2px; }
+
+/* ===== Card shells (Hero + PBI) ===== */
+.hero, .pbi-card {
+  position: relative;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 28px;
+  overflow: hidden;
+  background-clip: padding-box;
+}
+.hero::before, .pbi-card::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(135deg, #ffffff 0%, #fbfdff 35%, rgba(14,165,233,.06) 100%);
+}
+.hero > *, .pbi-card > * { position: relative; z-index: 1; }
+
+.h2-tight { margin: 0 0 6px 0; }
+
+.welcome p,
+.pbi-card .card-lead { color: var(--text-2); }
+.welcome-text { color: var(--text-2); max-width: 72ch; margin: 8px 0 0 0; }
+
+/* Sections and grid (cards use shared .grid/.tool styles in /styles.css) */
+.section-heading { margin: 24px 0 8px; font-size: 18px; font-weight: 700; letter-spacing: .2px; }
+
+/* Compact icon button for the header toggle */
+.btn-ghost.theme-btn {
+  width: 36px; height: 36px; padding: 0; display: grid; place-items: center;
+  border-radius: 999px; line-height: 1;
+}
+
+/* Buttons (blend with shared tokens) */
+.btn {
+  appearance: none; padding: 10px 14px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--card-bg);
+  cursor: pointer; font-weight: 600;
+  transition: transform .04s ease, background .15s ease, filter .15s ease, box-shadow .15s ease;
+}
+.btn:hover { background: #f8fafc; color: #173991; }
+:root[data-theme="dark"] .btn:hover { background: #17202a; color: var(--text-1); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: var(--ring-outline); outline-offset: 2px; }
+
+/* Primary button (align to shared accent) */
+.btn-primary { background: var(--accent); color: #fff; border-color: transparent; }
+.btn-primary:hover { background: var(--accent-pressed); }
+
+/* Responsive tweak from old page */
+@media (max-width: 600px) {
+  #reportContainer { min-height: 460px; }
+}
+
+/* ===== Manual dark tokens bridge when user forces dark ===== */
+:root[data-theme="dark"] {
+  /* bridge to shared tokens already defined in /styles.css */
+  --bg: #0f1318;
+  --card-bg: #141a1f;
+  --border: #2a3342;
+  --text-1: #e6eaf2;
+  --text-2: #a9b2c3;
+}
+
+/* If OS is dark but user forces light, re-assert light tokens */
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="light"] {
+    --bg: #f6f7fb;
+    --card-bg: #ffffff;
+    --border: #e2e5ea;
+    --text-1: #1d2129;
+    --text-2: #4a5160;
+  }
+}
