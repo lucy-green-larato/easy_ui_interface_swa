@@ -1,15 +1,14 @@
 {
   "version": "2.0",
-  "extensionBundle": {
-    "id": "Microsoft.Azure.Functions.ExtensionBundle",
-    "version": "[4.*, 5.0.0)"
-  },
-  "logging": {
-    "logLevel": {
-      "Host.Results": "Information",
-      "Function": "Information",
-      "Host.Startup": "Information",
-      "Worker": "Information"
+  "extensionBundle": { "id": "Microsoft.Azure.Functions.ExtensionBundle", "version": "[4.*, 5.0.0)" },
+  "extensions": {
+    "durableTask": {
+      "hubName": "DurableFunctionsHubPy",
+      "storageProvider": {
+        "type": "azureStorage",
+        "connectionStringName": "AzureWebJobsStorage"
+      }
     }
-  }
+  },
+  "logging": { "logLevel": { "Host.Results": "Information", "Function": "Information", "Host.Startup": "Information", "Worker": "Information" } }
 }
