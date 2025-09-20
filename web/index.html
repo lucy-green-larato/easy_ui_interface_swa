@@ -4,33 +4,35 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Larato | Inside Track Business Growth Tools</title>
-  <meta name="description"
-        content="Inside Track Business Growth Tools by Larato — fast, consistent sales and marketing workflows." />
-  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Inside Track Business Growth Tools by Larato — fast, consistent sales and marketing workflows." />
+  <meta name="color-scheme" content="light dark" />
 
-  <!-- Shared app styles (multi-tool, includes dark-mode tokens) -->
+  <!-- Shared site styles -->
   <link rel="stylesheet" href="/styles.css?v=2025-08-30-2" />
-  <!-- Home page styles (moved out of inline to satisfy CSP) -->
+  <!-- Home (moved out of inline to satisfy CSP) -->
   <link rel="stylesheet" href="/styles-home.css?v=2025-09-20" />
 
-  <!-- Power BI + app boot -->
-  <script src="/vendor/powerbi.min.js"></script>
-  <script src="/auth-shim.js?v=dev-1"></script>
-  <script type="module" defer src="/src/js/main.js?v=2025-08-30-2"></script>
+  <!-- Vendor + app bootstrap -->
+  <script src="/vendor/powerbi.min.js" defer></script>
+  <script src="/auth-shim.js?v=dev-1" defer></script>
+  <script type="module" src="/src/js/main.js?v=2025-08-30-2" defer></script>
+  <!-- Home page script (moved out of inline to satisfy CSP) -->
+  <script type="module" src="/src/js/home-poll.js?v=2025-09-20" defer></script>
 </head>
 
 <body>
   <header class="nav" aria-label="Global">
     <a href="/" class="brand" aria-current="page">
-      <img class="logo logo--xl" src="/assets/larato-logo.svg" alt="Larato">
+      <img class="logo logo--xl" src="/assets/larato-logo.svg" alt="Larato" />
       <div class="title-wrap">
         <h1>Inside Track Business Growth Tools</h1>
       </div>
     </a>
-    <button id="themeToggle" class="btn-ghost theme-btn" aria-pressed="false"
-      aria-label="Switch to dark mode">🌙</button>
+
+    <button id="themeToggle" class="btn-ghost theme-btn" aria-pressed="false" aria-label="Switch theme">🌙</button>
     <div id="authButtons">
       <button class="btn" id="btnSignIn">Sign in</button>
+      <button class="btn" id="btnSignOut" hidden>Sign out</button>
     </div>
   </header>
 
@@ -40,18 +42,18 @@
       <h2 id="welcome-heading" class="h2-tight">Welcome</h2>
       <p>These tools will save you time and assure that you deliver the best sales and marketing experience to your
         prospects. Please sign in to get started.</p>
-      <div style="margin-top:10px">
-        <button class="btn btn-primary" id="btnSignInPrimary" aria-label="Sign in with Microsoft">Sign in with
-          Microsoft</button>
+      <div class="stack-10">
+        <button class="btn btn-primary" id="btnSignInPrimary" aria-label="Sign in with Microsoft">
+          Sign in with Microsoft
+        </button>
       </div>
     </section>
 
-    <!-- Signed-in dashboard -->
+    <!-- Signed-in -->
     <section id="dashboard" class="hide" aria-live="polite">
-      <h2 class="h2-tight">Welcome<span id="userName"></span></h2>
+      <h2 class="h2-tight">Welcome <span id="userName"></span></h2>
       <p class="welcome-text">
-        These tools will save you time and assure that you deliver the best sales and marketing experience to your
-        prospects.
+        These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects.
       </p>
 
       <h3 class="section-heading">Tools for sales</h3>
@@ -69,15 +71,14 @@
         </a>
 
         <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-          title="Coming soon (October 2025). This will help you to differentiate against your competition"
-          data-tip="Coming soon (October 2025). This will help you to differentiate against your competition">
+           title="Coming soon (October 2025). This will help you to differentiate against your competition">
           Beat your competitors
           <small>Position your value clearly against alternatives.</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
         </a>
       </div>
 
-      <!-- Strategic Report matcher card (fixed to valid markup) -->
+      <!-- Strategic Report matcher (valid anchor card) -->
       <a class="tool" href="/ch-strategic/">
         Strategic Report matcher
         <small>Upload a CSV and find evidence in Strategic Reports. Large lists run as a background job.</small>
@@ -85,37 +86,44 @@
       </a>
 
       <h3 class="section-heading" style="margin-top:28px">Tools for marketing</h3>
-      <a class="tool" href="/campaign/" title="Open Campaign Builder" data-tip="Open the Campaign Builder">
+      <a class="tool" href="/campaign/" title="Open Campaign Builder">
         Campaign Builder
         <small>Create evidence-first B2B campaigns</small>
         <span class="pill pill--new" aria-hidden="true">New</span>
       </a>
 
       <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-        title="Coming soon. Prove why your offer is better" data-tip="Coming soon. Prove why your offer is better">
+         title="Coming soon. Prove why your offer is better">
         Differentiation
         <small>Evidence why your offer is better</small>
         <span class="pill" aria-hidden="true">Coming soon</span>
       </a>
 
       <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-        title="Coming soon. Craft market-beating messaging" data-tip="Coming soon. Craft market-beating messaging">
+         title="Coming soon. Create data-backed, personalised messaging">
         Market beating messaging
-        <small>Stand out with sharp, confident copy</small>
+        <small>Data-backed, personalised, messaging</small>
         <span class="pill" aria-hidden="true">Coming soon</span>
       </a>
     </section>
   </main>
 
   <section id="pbiSection" class="pbi-card hide" aria-live="polite">
-    <h2 class="h2-tight">Reports</h2>
-    <p class="card-lead">Open relevant Power BI reports here.</p>
-    <div id="reportContainer" aria-busy="false" aria-live="polite"></div>
+    <div class="card-head">
+      <div class="card-titleblock">
+        <h2 class="card-title">Inside Track market intelligence</h2>
+        <p class="card-lead">These insights update continuously to support your sales and marketing decisions.</p>
+      </div>
+      <div class="actions">
+        <button id="btnExpandPBI" class="btn-ghost" aria-pressed="false">Expand</button>
+      </div>
+    </div>
+    <div id="reportContainer" aria-label="Power BI report host" aria-busy="false"></div>
   </section>
 
   <footer aria-label="Footer">
-    <div class="card" style="padding:16px;border-radius:var(--radius);border:1px solid var(--border);background:var(--card-bg)">
-      <p style="margin:0;color:var(--text-2)">© Larato</p>
+    <div class="card footer-card">
+      © Larato Limited. Company Registration Number 5451360. Registered in the UK.
     </div>
   </footer>
 </body>
