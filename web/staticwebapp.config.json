@@ -57,11 +57,17 @@
     },
     {
       "route": "/ch-strategic",
-      "rewrite": "/ch-strategic/index.html"
+      "rewrite": "/ch-strategic/index.html",
+      "headers": {"cache-control":"no-store"}
+    },
+    {
+      "route": "/src/js/ch-strategic.js",
+      "headers": {"cache-control":"no-store"}
     },
     {
       "route": "/ch-strategic/*",
-      "rewrite": "/ch-strategic/index.html"
+      "rewrite": "/ch-strategic/index.html",
+      "headers": {"cache-control":"no-store"}
     },
     {
       "route": "/campaign",
@@ -90,20 +96,7 @@
       "statusCode": 302
     }
   },
-  "roleAssignments": {
-    "admin": [
-      "/admin/*"
-    ],
-    "campaignmanager": [
-      "/campaign/*"
-    ],
-    "salesleader": [
-      "/leader/*"
-    ],
-    "salesuser": [
-      "/user/*"
-    ]
-  },
+ 
   "globalHeaders": {
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Content-Type-Options": "nosniff",
