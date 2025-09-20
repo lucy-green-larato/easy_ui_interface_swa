@@ -1,23 +1,23 @@
-// Home page boot: CSP-safe auth/dash toggle + optional Power BI embed
-
 const els = {
-  welcome: document.getElementById('welcome'),
-  dashboard: document.getElementById('dashboard'),
   userName: document.getElementById('userName'),
-  signInBtn: document.getElementById('btnSignIn'),
-  signInPrimary: document.getElementById('btnSignInPrimary'),
-  signOutBtn: document.getElementById('btnSignOut'),
-  themeToggle: document.getElementById('themeToggle'),
-
   pbiSection: document.getElementById('pbiSection'),
   reportContainer: document.getElementById('reportContainer'),
   pbiHint: document.getElementById('pbiHint'),
   btnExpandPBI: document.getElementById('btnExpandPBI'),
+  themeToggle: document.getElementById('themeToggle'),
 };
 
-// ---------- Theme ----------
-(function initTheme() {
+async function getPrincipal() {
   try {
+    const r = await fetch('/.auth/me', { cache: 'no-store' });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j?.clientPrincipal || null;
+  } catch { return null; }
+}
+
+(function initTheme(){
+  try{
     const saved = localStorage.getItem('theme');
     if (saved) document.documentElement.setAttribute('data-theme', saved);
     els.themeToggle?.addEventListener('click', () => {
@@ -27,39 +27,8 @@ const els = {
       localStorage.setItem('theme', next);
       els.themeToggle.setAttribute('aria-pressed', String(next === 'dark'));
     });
-  } catch {}
+  }catch{}
 })();
-
-// ---------- Auth + UI state ----------
-async function getPrincipal() {
-  try {
-    const res = await fetch('/.auth/me', { cache: 'no-store' });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data?.clientPrincipal || null;
-  } catch {
-    return null;
-  }
-}
-
-function showSignedOut() {
-  els.welcome?.classList.remove('hide');
-  els.dashboard?.classList.add('hide');
-  els.signOutBtn?.setAttribute('hidden', 'true');
-  els.signInBtn?.removeAttribute('hidden');
-  els.signInPrimary?.removeAttribute('hidden');
-  if (els.pbiSection) els.pbiSection.classList.add('hide');
-}
-
-function showSignedIn(user) {
-  const label = user?.userDetails || user?.userId || '';
-  if (els.userName) els.userName.textContent = label ? ` ${label}` : '';
-  els.welcome?.classList.add('hide');
-  els.dashboard?.classList.remove('hide');
-  els.signInBtn?.setAttribute('hidden', 'true');
-  els.signInPrimary?.setAttribute('hidden', 'true');
-  els.signOutBtn?.removeAttribute('hidden');
-}
 
 async function tryEmbedPBI() {
   if (!els.pbiSection || !els.reportContainer) return;
@@ -85,29 +54,30 @@ async function tryEmbedPBI() {
     const powerbi = window.powerbi;
     powerbi.reset(els.reportContainer);
     powerbi.embed(els.reportContainer, config);
-
     els.pbiSection.classList.remove('hide');
     els.pbiHint?.classList.add('hide');
   } catch (e) {
-    // Show the card with a hint if embedding fails (keeps UX clear)
+    // Show card but hint if token missing; avoids “empty page” confusion
     els.pbiSection.classList.remove('hide');
     els.pbiHint?.classList.remove('hide');
-    console.warn('Power BI embed skipped:', e);
+    console.warn('PBI embed skipped:', e);
   }
 }
 
 async function boot() {
   const principal = await getPrincipal();
-
   if (!principal) {
-    showSignedOut();
+    // Not signed in → send to dedicated login page
+    window.location.replace('/login.html');
     return;
   }
 
-  showSignedIn(principal);
+  // Signed in UI
+  const label = principal.userDetails || principal.userId || '';
+  if (els.userName) els.userName.textContent = label;
+
   await tryEmbedPBI();
 
-  // Expand/collapse PBI height (optional)
   els.btnExpandPBI?.addEventListener('click', () => {
     const expanded = els.btnExpandPBI.getAttribute('aria-pressed') === 'true';
     els.btnExpandPBI.setAttribute('aria-pressed', String(!expanded));
