@@ -1,250 +1,400 @@
-<!doctype html>
-<html lang="en" data-app="inside-track-tools">
+// /src/js/ch-strategic.js
+// Inside Track · Strategic review evidence — client module
+// Wires form, validates inputs, calls API, handles progress/download/diagnostics.
 
-<head>
-  <base href="/" />
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Inside Track Tools · Strategic review evidence</title>
-  <link rel="stylesheet" href="/styles.css?v=2025-08-24-1" />
-</head>
+const API_BASE = '/api/ch-strategic';
 
-<body>
-  <!-- App header (shared shell) -->
-  <header class="app-header" role="banner">
-    <div class="header-left">
-      <img class="logo" src="/assets/larato-logo-bullet.svg" alt="Larato Inside Track Sales Tools" />
-      <div class="brand-text">
-        <h1 class="app-title">Inside Track Tools</h1>
-        <p class="kicker">Strategic review evidence</p>
-      </div>
-    </div>
+// ---------- DOM ----------
+const els = {
+  form: document.getElementById('ch-strategic-form'),
+  callType: document.getElementById('call_type'),
+  rememberCallType: document.getElementById('remember_call_type'),
+  mapLabel: document.getElementById('map-label'),
 
-    <div class="header-right">
-      <!-- Sales model mini (retained for consistency across tools) -->
-      <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
-        <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
-        <select id="call_type" name="call_type" form="ch-strategic-form" required aria-describedby="call_type_error">
-          <option value="">Select…</option>
-          <option>Direct</option>
-          <option>Partner</option>
-        </select>
-        <label class="remember">
-          <input type="checkbox" id="remember_call_type" form="ch-strategic-form" /> Remember
-        </label>
-        <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
-      </div>
+  evidenceTag: document.getElementById('evidence_tag'),
+  evidenceErr: document.getElementById('evidence_error'),
 
-      <span class="model-note">
-        <span class="label">Sales model in use:</span>
-        <strong id="map-label">Direct</strong>
-      </span>
+  file: document.getElementById('csv_file'),
+  fileErr: document.getElementById('csv_error'),
 
-      <button id="help" class="btn inline" type="button" title="About this tool">Help</button>
+  analyzeBtn: document.getElementById('analyzeBtn'),
+  startLargeBtn: document.getElementById('startLargeBtn'),
+  resetBtn: document.getElementById('resetBtn'),
 
-      <span id="user-badge" class="badge is-hidden" aria-live="polite" aria-atomic="true">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="7" r="4"></circle>
-          <path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path>
-        </svg>
-        <span id="user-email">Loading…</span>
-      </span>
-    </div>
-  </header>
+  status: document.getElementById('status'),
+  diagWrap: document.getElementById('diagnostics'),
+  diag: document.getElementById('diag-json'),
 
-  <main id="main" class="layout" role="main">
-    <!-- LEFT PANEL :: Form -->
-    <section class="panel left" aria-label="Form">
-      <form id="ch-strategic-form" novalidate>
-        <!-- 1. Evidence tag -->
-        <fieldset class="card" aria-labelledby="legend-evidence">
-          <legend id="legend-evidence">1. Evidence tag</legend>
-          <div class="grid-2">
-            <div class="field">
-              <label for="evidence_tag">Keyword or phrase <span aria-hidden="true" class="req">*</span></label>
-              <input id="evidence_tag" name="evidence_tag" maxlength="80" placeholder="e.g., international" required
-                autocomplete="off" spellcheck="false" aria-describedby="evidence_help evidence_error" />
-              <p id="evidence_help" class="muted">
-                Looks only in the Strategic Report. Literal match with smart tolerance for OCR and common variants.
-              </p>
-              <span id="evidence_error" class="error-inline" role="alert" aria-live="polite"></span>
-            </div>
-          </div>
-        </fieldset>
+  progress: document.getElementById('progress'),
+  progressFill: document.getElementById('progressFill'),
 
-        <!-- 2. Companies -->
-        <fieldset class="card" aria-labelledby="legend-companies">
-          <legend id="legend-companies">2. Companies</legend>
-          <div class="grid-2">
-            <div class="field">
-              <label for="csv_file">Upload CSV <span aria-hidden="true" class="req">*</span></label>
-              <input id="csv_file" name="csv_file" type="file" accept=".csv" required
-                aria-describedby="csv_help csv_error" />
-              <p id="csv_help" class="muted">
-                CSV must include headers <code>Company Name</code> and <code>Company Number</code>. Other columns are
-                ignored.
-              </p>
-              <span id="csv_error" class="error-inline" role="alert" aria-live="polite"></span>
-            </div>
+  counters: {
+    total: document.getElementById('count-total'),
+    processed: document.getElementById('count-processed'),
+    matched: document.getElementById('count-matched'),
+    skipped: document.getElementById('count-skipped')
+  },
 
-            <div class="field">
-              <label for="importPbiBtn">Or import from Power BI</label>
-              <button id="importPbiBtn" class="btn inline" type="button" aria-haspopup="dialog"
-                aria-controls="pbi-dialog">Import current selection</button>
-              <p class="muted">
-                Reuses the main report wiring to pull <strong>Company Name</strong> and <strong>Company Number</strong>.
-              </p>
-            </div>
-          </div>
-        </fieldset>
+  results: document.getElementById('results'),
+  downloadContainer: document.getElementById('downloadContainer'),
 
-        <!-- 3. Actions -->
-        <fieldset class="card" aria-labelledby="legend-actions">
-          <legend id="legend-actions">3. Actions</legend>
-          <div class="actions">
-            <button id="analyzeBtn" class="btn primary" type="button" disabled>
-              <span class="btn-label">Analyze</span>
-              <span class="spinner" aria-hidden="true"></span>
-            </button>
-            <button id="startLargeBtn" class="btn" type="button" hidden>Start large run</button>
-            <button id="resetBtn" type="reset" class="btn small">Reset</button>
-          </div>
-          <p class="muted">
-            Lists ≤ 50 run immediately. Larger lists (up to 5,000) run as a background job and stream matches into a
-            downloadable CSV.
-          </p>
-        </fieldset>
+  helpBtn: document.getElementById('help'),
+  userBadge: document.getElementById('user-badge'),
+  userEmail: document.getElementById('user-email'),
 
-        <!-- Live status for validation/upload/API messages -->
-        <div id="status" class="status" role="status" aria-live="polite"></div>
+  pbi: {
+    dialog: document.getElementById('pbi-dialog'),
+    form: document.getElementById('pbi-form'),
+    openBtn: document.getElementById('importPbiBtn'),
+    status: document.getElementById('pbi-status')
+  },
 
-        <!-- Diagnostics (collapsible) -->
-        <details id="diagnostics" class="diag card" style="margin-top:var(--s-5)">
-          <summary>Diagnostics</summary>
-          <pre id="diag-json" tabindex="0" aria-label="Diagnostics JSON"></pre>
-          <p class="muted">If you see a 401 unauthorised error, please <a href="/.auth/login/aad">sign in again</a>.</p>
-        </details>
-      </form>
-    </section>
+  toggles: {
+    intel: document.getElementById('toggle-intel')
+  }
+};
 
-    <!-- MIDDLE PANEL :: Results -->
-    <section class="panel middle">
-      <div class="row-between output-head">
-        <h2 id="output-title">Results</h2>
-        <div id="downloadContainer" aria-live="polite"></div>
-      </div>
+// ---------- Utilities ----------
+function cid() {
+  return (crypto.randomUUID && crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
-      <!-- Progress bar -->
-      <div id="progress" class="progress" hidden aria-hidden="true" aria-label="Processing progress">
-        <div id="progressFill" class="progress__fill" style="width:0%"></div>
-      </div>
+async function fetchJson(url, opts = {}) {
+  const correlationId = cid();
+  const res = await fetch(url, {
+    ...opts,
+    headers: {
+      ...(opts.headers || {}),
+      'X-Correlation-Id': correlationId
+    }
+  });
+  let body;
+  try { body = await res.json(); } catch { body = await res.text(); }
+  const resCid = res.headers.get('X-Correlation-Id') || correlationId;
 
-      <!-- Counters -->
-      <div id="counters" class="muted" aria-live="polite" style="margin-top:var(--s-3)">
-        <span id="count-total" data-count="0">Total: 0</span> ·
-        <span id="count-processed" data-count="0">Processed: 0</span> ·
-        <span id="count-matched" data-count="0">Matches: 0</span> ·
-        <span id="count-skipped" data-count="0">Skipped: 0</span>
-      </div>
+  return { ok: res.ok, status: res.status, body, cid: resCid, res };
+}
 
-      <!-- Skipped & errors -->
-      <section style="margin-top:var(--s-4)">
-        <h3>Skipped &amp; errors</h3>
-        <div id="results" class="results" aria-live="polite"></div>
-      </section>
-    </section>
+function setStatus(msg, level = 'info') {
+  if (!els.status) return;
+  els.status.textContent = msg || '';
+  els.status.className = `status ${level}`;
+}
 
-    <!-- RIGHT PANEL :: Helpers -->
-    <section class="panel right" aria-labelledby="helpers-title">
-      <div class="row-between output-head">
-        <h2 id="helpers-title">Helpers</h2>
-      </div>
+function setDiag(obj) {
+  if (!els.diag) return;
+  els.diag.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+  if (els.diagWrap && !els.diagWrap.open) els.diagWrap.open = true;
+}
 
-      <aside class="intel card">
-        <div class="intel-head">
-          <h2 id="intel-title">Buyer needs</h2>
-          <button id="toggle-intel" class="btn small" type="button" aria-expanded="false"
-            aria-controls="intel-body">More</button>
-        </div>
-        <div id="intel-body" hidden>
-          <div class="intel-grid">
-            <section>
-              <h3>1) Buyer priorities</h3>
-              <ul>
-                <li>Clarity on geographic activities</li>
-                <li>Evidence tags map to strategic themes</li>
-                <li>Quick export for downstream use</li>
-              </ul>
-            </section>
-            <section>
-              <h3>2) Triggers</h3>
-              <ul>
-                <li>Mentions of overseas/global expansion</li>
-                <li>New market entries by region</li>
-                <li>Export growth statements</li>
-              </ul>
-            </section>
-          </div>
-        </div>
-      </aside>
+function setProgress(pct = 0) {
+  if (!els.progress || !els.progressFill) return;
+  const clamped = Math.max(0, Math.min(100, pct));
+  els.progress.hidden = clamped === 0 || clamped === 100 ? false : false; // keep visible during run
+  els.progress.setAttribute('aria-hidden', 'false');
+  els.progressFill.style.width = `${clamped}%`;
+}
 
-      <aside class="intel card" style="margin-top:var(--s-4)">
-        <div class="intel-head">
-          <h2>Call opener ideas</h2>
-          <button class="btn small" type="button" aria-expanded="false" aria-controls="openers-body">More</button>
-        </div>
-        <div id="openers-body" hidden>
-          <ul>
-            <li>“I noticed your strategic report references overseas expansion…”</li>
-            <li>“You mentioned growth in specific regions—how are you approaching those geographies?”</li>
-          </ul>
-        </div>
-      </aside>
+function setCounts({ total = 0, processed = 0, matched = 0, skipped = 0 } = {}) {
+  const upd = (el, label, val) => { if (el) { el.dataset.count = String(val); el.textContent = `${label}: ${val}`; } };
+  upd(els.counters.total, 'Total', total);
+  upd(els.counters.processed, 'Processed', processed);
+  upd(els.counters.matched, 'Matches', matched);
+  upd(els.counters.skipped, 'Skipped', skipped);
+}
 
-      <aside class="intel card" style="margin-top:var(--s-4)">
-        <div class="intel-head">
-          <h2>Helpful tips</h2>
-          <button class="btn small" type="button" aria-expanded="false" aria-controls="tips-body">More</button>
-        </div>
-        <div id="tips-body" hidden>
-          <ul>
-            <li>This tool scans only the <em>Strategic Report</em> section of the filing.</li>
-            <li><strong>Evidence tag</strong> is a flexible keyword match (case-insensitive; tolerates common OCR typos
-              and curated synonyms).</li>
-            <li>Only <code>Company Name</code> and <code>Company Number</code> are used from CSV or Power BI export.
-            </li>
-            <li>Not all filings include a Strategic Report — those will be skipped.</li>
-            <li>Large jobs (up to 5,000 companies) may take hours; results stream into the CSV as they’re found.</li>
-          </ul>
-        </div>
-      </aside>
-    </section>
-  </main>
+function enableAnalyze(enabled) {
+  if (!els.analyzeBtn) return;
+  els.analyzeBtn.disabled = !enabled;
+  els.analyzeBtn.classList.toggle('is-busy', false);
+}
 
-  <!-- Power BI Import Dialog -->
-  <dialog id="pbi-dialog" aria-labelledby="pbi-title" aria-describedby="pbi-desc">
-    <form method="dialog" class="card" id="pbi-form">
-      <h3 id="pbi-title">Import from Power BI</h3>
-      <p id="pbi-desc" class="muted">Pull the current selection and trim to <em>Company Name</em> and <em>Company
-          Number</em>.</p>
-      <div class="field">
-        <label for="pbi-report-id">Report Id</label>
-        <input id="pbi-report-id" name="pbi-report-id" autocomplete="off" />
-      </div>
-      <div class="field">
-        <label for="pbi-visual">Visual name or DAX</label>
-        <input id="pbi-visual" name="pbi-visual" autocomplete="off" />
-      </div>
-      <div class="actions">
-        <button id="pbi-import" class="btn primary" type="submit" value="import">Import</button>
-        <button class="btn" value="cancel">Cancel</button>
-      </div>
-      <p id="pbi-status" class="status" role="status" aria-live="polite"></p>
-    </form>
-  </dialog>
+function showDownloadLink(href, text = 'Download CSV') {
+  if (!els.downloadContainer) return;
+  els.downloadContainer.innerHTML = '';
+  const a = document.createElement('a');
+  a.href = href;
+  a.className = 'btn';
+  a.textContent = text;
+  a.setAttribute('download', '');
+  els.downloadContainer.appendChild(a);
+}
 
-  <!-- JS module (handles validation, API calls, progress, download, PBI import) -->
-  <script type="module" src="/src/js/ch-strategic.js?v=2025-08-24-1"></script>
-</body>
+function clearDownload() {
+  if (els.downloadContainer) els.downloadContainer.innerHTML = '';
+}
 
-</html>
+function clearResults() {
+  setCounts({ total: 0, processed: 0, matched: 0, skipped: 0 });
+  setProgress(0);
+  if (els.results) els.results.innerHTML = '';
+  clearDownload();
+  setStatus('');
+  setDiag('');
+}
+
+// Quick CSV row counter (client-side) to decide small vs large run
+async function countCsvRows(file) {
+  const text = await file.text();
+  // Count non-empty lines minus header
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+  return Math.max(0, lines.length - 1);
+}
+
+// ---------- Validation / state ----------
+function validate() {
+  let ok = true;
+  if (els.evidenceTag && !els.evidenceTag.value.trim()) {
+    ok = false;
+    if (els.evidenceErr) els.evidenceErr.textContent = 'Please enter an evidence tag.';
+  } else if (els.evidenceErr) {
+    els.evidenceErr.textContent = '';
+  }
+
+  if (!els.file || !els.file.files || !els.file.files[0]) {
+    ok = false;
+    if (els.fileErr) els.fileErr.textContent = 'Please choose a CSV file.';
+  } else if (els.fileErr) {
+    els.fileErr.textContent = '';
+  }
+
+  enableAnalyze(ok);
+  return ok;
+}
+
+async function updateAnalyzeState() {
+  const ok = validate();
+  if (!ok || !els.file?.files?.[0]) return;
+
+  try {
+    const rows = await countCsvRows(els.file.files[0]);
+    // Small run: ≤ 50 rows; otherwise large
+    if (rows > 50) {
+      els.startLargeBtn?.removeAttribute('hidden');
+      els.analyzeBtn?.setAttribute('disabled', 'true');
+    } else {
+      els.startLargeBtn?.setAttribute('hidden', 'true');
+      enableAnalyze(true);
+    }
+    // Update total counter in UI
+    setCounts({ total: rows, processed: 0, matched: 0, skipped: 0 });
+  } catch {
+    // If counting fails, keep defaults
+  }
+}
+
+// ---------- Call type remember ----------
+function loadCallType() {
+  try {
+    const saved = localStorage.getItem('ch.callType');
+    if (saved && els.callType) els.callType.value = saved;
+  } catch {}
+  if (els.mapLabel) els.mapLabel.textContent = (els.callType?.value || 'Direct');
+}
+
+function persistCallTypeIfWanted() {
+  if (!els.rememberCallType) return;
+  try {
+    if (els.rememberCallType.checked && els.callType?.value) {
+      localStorage.setItem('ch.callType', els.callType.value);
+    }
+  } catch {}
+}
+
+// ---------- API flows ----------
+async function runSmall() {
+  if (!validate()) return;
+
+  const fd = new FormData();
+  fd.append('file', els.file.files[0]);
+  fd.append('evidenceTag', els.evidenceTag.value.trim());
+  fd.append('callType', els.callType?.value || '');
+
+  clearResults();
+  setStatus('Analyzing…');
+  setProgress(5);
+  els.analyzeBtn?.classList.add('is-busy');
+
+  const { ok, status, body, cid } = await fetchJson(API_BASE, { method: 'POST', body: fd });
+
+  els.analyzeBtn?.classList.remove('is-busy');
+
+  if (!ok) {
+    setStatus(`Analyze failed (${status}). CID=${cid}`, 'error');
+    setDiag(body);
+    console.error('Analyze failed', { status, body, cid });
+    return;
+  }
+
+  // Expect either {counts, downloadUrl?} or a blob that triggers DL server-side
+  try {
+    if (body?.counts) {
+      const { total = 0, processed = 0, matched = 0, skipped = 0 } = body.counts;
+      setCounts({ total, processed, matched, skipped });
+    }
+    if (body?.downloadUrl) {
+      showDownloadLink(body.downloadUrl);
+    }
+    setProgress(100);
+    setStatus('Analyze complete');
+    setDiag({ ok: true, cid, body });
+  } catch (e) {
+    setProgress(100);
+    setStatus('Analyze complete (no extra details)');
+    setDiag({ cid, note: 'Response parsed', error: String(e) });
+  }
+}
+
+async function startLarge() {
+  if (!validate()) return;
+
+  const fd = new FormData();
+  fd.append('file', els.file.files[0]);
+  fd.append('evidenceTag', els.evidenceTag.value.trim());
+  fd.append('callType', els.callType?.value || '');
+
+  clearResults();
+  setStatus('Starting large run…');
+  setProgress(3);
+
+  const { ok, status, body, cid } = await fetchJson(`${API_BASE}/start`, { method: 'POST', body: fd });
+
+  if (!ok || !body?.jobId) {
+    setStatus(`Start large run failed (${status}). CID=${cid}`, 'error');
+    setDiag(body);
+    console.error('Start large run failed', { status, body, cid });
+    return;
+  }
+
+  const jobId = body.jobId;
+  setStatus(`Job started: ${jobId}`);
+  setDiag({ jobId, cid });
+
+  // Poll status
+  const started = Date.now();
+  const poll = async () => {
+    const { ok: okS, status: stS, body: bs, cid: scid } =
+      await fetchJson(`${API_BASE}/status/${encodeURIComponent(jobId)}`);
+
+    if (!okS) {
+      setStatus(`Status error (${stS}). CID=${scid}`, 'error');
+      setDiag(bs);
+      return false; // stop on explicit error
+    }
+
+    // Expected status JSON: { state, progress, counts, downloadReady }
+    if (typeof bs?.progress === 'number') setProgress(bs.progress);
+    if (bs?.counts) {
+      const { total = 0, processed = 0, matched = 0, skipped = 0 } = bs.counts;
+      setCounts({ total, processed, matched, skipped });
+    }
+    if (bs?.state) setStatus(`Job ${jobId}: ${bs.state}`);
+
+    if (bs?.downloadReady) {
+      showDownloadLink(`${API_BASE}/download/${encodeURIComponent(jobId)}`);
+      setStatus(`Job ${jobId}: ready`);
+      setProgress(100);
+      setDiag({ jobId, last: bs, cid: scid });
+      return true; // done
+    }
+
+    // Soft timeout for dev (10 minutes)
+    if (Date.now() - started > 10 * 60 * 1000) {
+      setStatus(`Polling timed out for ${jobId}`, 'error');
+      return true; // stop
+    }
+
+    return false; // continue
+  };
+
+  // initial poll immediately, then interval
+  if (await poll()) return;
+  const timer = setInterval(async () => {
+    const done = await poll();
+    if (done) clearInterval(timer);
+  }, 1500);
+}
+
+// ---------- Wiring ----------
+function wireForm() {
+  if (!els.form) return;
+
+  // Input listeners
+  els.evidenceTag?.addEventListener('input', updateAnalyzeState);
+  els.file?.addEventListener('change', updateAnalyzeState);
+  els.callType?.addEventListener('change', () => {
+    if (els.mapLabel) els.mapLabel.textContent = els.callType.value || 'Direct';
+  });
+
+  // Remember call type
+  els.rememberCallType?.addEventListener('change', persistCallTypeIfWanted);
+
+  // Buttons
+  els.analyzeBtn?.addEventListener('click', (e) => { e.preventDefault(); runSmall().catch(console.error); });
+  els.startLargeBtn?.addEventListener('click', (e) => { e.preventDefault(); startLarge().catch(console.error); });
+  els.resetBtn?.addEventListener('click', () => {
+    clearResults();
+    enableAnalyze(false);
+    els.startLargeBtn?.setAttribute('hidden', 'true');
+    if (els.status) els.status.textContent = '';
+    if (els.evidenceErr) els.evidenceErr.textContent = '';
+    if (els.fileErr) els.fileErr.textContent = '';
+  });
+
+  // Initial disabled state until valid inputs
+  enableAnalyze(false);
+}
+
+function wireHelp() {
+  els.helpBtn?.addEventListener('click', () => {
+    alert('This tool searches the Strategic Report for your evidence tag and returns matches. Upload a CSV, set a tag, then click Analyze or Start large run.');
+  });
+}
+
+function wireToggles() {
+  const { intel } = els.toggles;
+  if (intel) {
+    intel.addEventListener('click', () => {
+      const body = document.getElementById('intel-body');
+      const expanded = intel.getAttribute('aria-expanded') === 'true';
+      intel.setAttribute('aria-expanded', String(!expanded));
+      if (body) body.hidden = expanded;
+    });
+  }
+}
+
+async function loadUserBadge() {
+  try {
+    const r = await fetch('/.auth/me', { cache: 'no-store' });
+    if (!r.ok) return;
+    const data = await r.json();
+    const email = data?.clientPrincipal?.userDetails || '';
+    if (email && els.userBadge && els.userEmail) {
+      els.userEmail.textContent = email;
+      els.userBadge.classList.remove('is-hidden');
+    }
+  } catch {
+    // ignore in local dev
+  }
+}
+
+// ---------- Init ----------
+function init() {
+  loadCallType();
+  wireForm();
+  wireHelp();
+  wireToggles();
+  loadUserBadge();
+
+  // Accessibility for status live region
+  if (els.status) {
+    els.status.setAttribute('aria-live', 'polite');
+    els.status.setAttribute('aria-atomic', 'true');
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init, { once: true });
+} else {
+  init();
+}
