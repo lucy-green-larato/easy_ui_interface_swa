@@ -77,6 +77,85 @@ function rateLimit(req, res, next) {
   next();
 }
 app.use(rateLimit);
+// ---------- Defensive small-run POST (multipart) ----------
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+});
+
+app.post('/', upload.single('file'), async (req, res) => {
+  try {
+    // Correlation already set by middleware
+    // Basic header sanity
+    const ctype = req.headers['content-type'] || req.headers['Content-Type'] || '';
+    if (!ctype.includes('multipart/form-data')) {
+      return res.status(400).json({
+        code: 400,
+        message: 'Expected multipart/form-data',
+        correlationId: req.correlationId,
+      });
+    }
+
+    // Validate inputs
+    const evidence = (req.body?.evidence || '').trim();
+    if (!evidence) {
+      return res.status(400).json({
+        code: 400,
+        message: 'Missing evidence',
+        correlationId: req.correlationId,
+      });
+    }
+    if (!req.file) {
+      return res.status(400).json({
+        code: 400,
+        message: 'Missing file',
+        correlationId: req.correlationId,
+      });
+    }
+
+    // Light CSV sanity (don’t crash if text decode fails)
+    let csvText = '';
+    try { csvText = req.file.buffer?.toString('utf8') ?? ''; } catch { }
+    // Very light row count (ignore blank last line)
+    const lines = csvText ? csvText.split(/\r?\n/) : [];
+    const rowCount = Math.max(0, lines.length - 1);
+
+    // TODO: replace with your real small-run implementation, e.g.:
+    // const result = await chStrategic.smallRun({ csv: req.file.buffer, evidence, cid: req.correlationId });
+    // return res.status(200).json({ ...result, correlationId: req.correlationId });
+
+    // Temporary success stub so the UI can proceed
+    return res.status(200).json({
+      ok: true,
+      mode: 'small',
+      evidence,
+      rows: rowCount,
+      correlationId: req.correlationId,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      code: 500,
+      message: String(err?.message || err),
+      correlationId: req.correlationId,
+    });
+  }
+});
+
+// ---------- Health (keeps UI check happy) ----------
+app.get('/_health', (_req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+// ---------- Final JSON error fence (no blank 500s) ----------
+app.use((err, req, res, _next) => {
+  // Ensure we never emit an empty 500
+  try { console.error('[api/ch-strategic] unhandled', err); } catch { }
+  res.status(500).json({
+    code: 500,
+    message: String(err?.message || err),
+    correlationId: req?.correlationId || 'unknown',
+  });
+});
 
 // ---------- Auth gate for /ch-strategic ----------
 app.use('/ch-strategic', (req, res, next) => {
