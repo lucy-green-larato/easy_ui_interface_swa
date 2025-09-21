@@ -203,11 +203,20 @@ app.post('/', upload.single('file'), async (req, res) => {
     }
 
     // Light CSV sanity (don’t crash if text decode fails)
-    let csvText = '';
-    try { csvText = req.file.buffer?.toString('utf8') ?? ''; } catch { }
-    // Very light row count (ignore blank last line)
-    const lines = csvText ? csvText.split(/\r?\n/) : [];
-    const rowCount = Math.max(0, lines.length - 1);
+    // Robust CSV row counting (never throws)
+    let rowCount = 0;
+    try {
+      const buf = req.file && req.file.buffer;
+      if (buf && typeof buf.toString === 'function') {
+        const csvText = buf.toString('utf8') || '';
+        if (csvText) {
+          const lines = csvText.split(/\r?\n/);
+          // ignore empty lines and header-only
+          const nonEmpty = Array.isArray(lines) ? lines.filter(l => l && l.trim().length > 0) : [];
+          rowCount = Math.max(0, nonEmpty.length - 1);
+        }
+      }
+    } catch { rowCount = 0; }
 
     // TODO: replace with your real small-run implementation, e.g.:
     // const result = await chStrategic.smallRun({ csv: req.file.buffer, evidence, cid: req.correlationId });
