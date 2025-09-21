@@ -766,6 +766,86 @@
     }
   });
 
+  function wireForm() {
+  // 1) Call type + remember
+  el.callType?.addEventListener("change", () => {
+    state.callType = el.callType.value;
+    text(el.mapLabel, state.callType);
+    persistCallType();
+  });
+  el.remember?.addEventListener("change", persistCallType);
+
+  // 2) Evidence + CSV inputs
+  el.evidence?.addEventListener("input", () => {
+    state.evidence = (el.evidence.value || "").trim();
+    updateAnalyzeState();
+  });
+  el.csv?.addEventListener("change", () => {
+    state.csvFile = el.csv.files?.[0] || null;
+    updateAnalyzeState();
+  });
+
+  // 3) Analyze (small run, with server-side upgrade if >50)
+  el.analyze?.addEventListener("click", async (evt) => {
+    evt.preventDefault();
+    clearResults();
+
+    const { ok } = validateClientInputs(state.csvFile, state.evidence);
+    if (!ok) return;
+
+    setStartsDisabled(true);
+    try {
+      const res = await handleSmallOrUpgrade({ file: state.csvFile, evidence: state.evidence });
+      if (res?.upgraded) {
+        await handleLargeRun({ file: state.csvFile, evidence: state.evidence });
+      }
+    } catch (err) {
+      renderStatus("Request failed.", "error");
+      appendResultItem(`Error: ${err.message || err}`);
+    } finally {
+      setStartsDisabled(false);
+    }
+  });
+
+  // 4) Start large run explicitly
+  el.startLarge?.addEventListener("click", async (evt) => {
+    evt.preventDefault();
+    clearResults();
+
+    const { ok } = validateClientInputs(state.csvFile, state.evidence);
+    if (!ok) return;
+
+    setStartsDisabled(true);
+    try {
+      await handleLargeRun({ file: state.csvFile, evidence: state.evidence });
+    } catch (err) {
+      renderStatus("Start failed.", "error");
+      appendResultItem(`Error: ${err.message || err}`);
+    } finally {
+      setStartsDisabled(false);
+    }
+  });
+
+  // 5) Reset
+  el.reset?.addEventListener("click", (evt) => {
+    evt.preventDefault();
+    el.form?.reset?.();
+    state.csvFile = null;
+    state.evidence = "";
+    clearResults();
+    updateAnalyzeState();
+    setStartsDisabled(false);
+  });
+
+  // Optional: Enter key on evidence triggers Analyze
+  el.evidence?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !el.analyze?.disabled) el.analyze.click();
+  });
+
+  // Keep our primary start alias synced
+  btnStart = el.analyze || btnStart;
+}
+  
   // ---------- Init ----------
   function init() {
     // status region accessibility
