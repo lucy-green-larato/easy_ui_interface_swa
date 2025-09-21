@@ -106,7 +106,9 @@ app.post(smallRunPaths, upload.single('file'), async (req, res) => {
       });
     }
 
-    const evidence = (req.body?.evidence || '').trim();
+    // Inputs
+    const evidenceRaw = (req.body && (req.body.evidence ?? req.body.evidenceTag)) ?? '';
+    const evidence = (typeof evidenceRaw === 'string') ? evidenceRaw.trim() : '';
     if (!evidence) {
       return res.status(400).json({
         code: 400,
@@ -114,7 +116,7 @@ app.post(smallRunPaths, upload.single('file'), async (req, res) => {
         correlationId: req.correlationId,
       });
     }
-    if (!req.file) {
+    if (!req.file || !req.file.buffer) {
       return res.status(400).json({
         code: 400,
         message: 'Missing file',
@@ -122,26 +124,65 @@ app.post(smallRunPaths, upload.single('file'), async (req, res) => {
       });
     }
 
-    let csvText = '';
-    try { csvText = req.file.buffer?.toString('utf8') ?? ''; } catch { }
-    const lines = csvText ? csvText.split(/\r?\n/) : [];
-    const rowCount = Math.max(0, lines.length - 1);
-
-    // TEMP stub — replace with real chStrategic.smallRun(...) later
+    // Don’t compute rows at all (avoid any `.length` paths)
+    // Just prove end-to-end flow and return a stub.
     return res.status(200).json({
       ok: true,
       mode: 'small',
       evidence,
-      rows: rowCount,
+      // echo basic file metadata safely
+      file: {
+        fieldname: req.file.fieldname || 'file',
+        originalname: req.file.originalname || 'upload.csv',
+        mimetype: req.file.mimetype || 'text/csv'
+      },
       correlationId: req.correlationId,
     });
   } catch (err) {
     return res.status(500).json({
       code: 500,
-      message: String(err?.message || err),
+      message: String(err && err.message || err),
       correlationId: req.correlationId,
     });
   }
+});
+
+const evidence = (req.body?.evidence || '').trim();
+if (!evidence) {
+  return res.status(400).json({
+    code: 400,
+    message: 'Missing evidence',
+    correlationId: req.correlationId,
+  });
+}
+if (!req.file) {
+  return res.status(400).json({
+    code: 400,
+    message: 'Missing file',
+    correlationId: req.correlationId,
+  });
+}
+
+let csvText = '';
+try { csvText = req.file.buffer?.toString('utf8') ?? ''; } catch { }
+const lines = csvText ? csvText.split(/\r?\n/) : [];
+const rowCount = Math.max(0, lines.length - 1);
+
+// TEMP stub — replace with real chStrategic.smallRun(...) later
+return res.status(200).json({
+  ok: true,
+  mode: 'small',
+  evidence,
+  rows: rowCount,
+  correlationId: req.correlationId,
+});
+  } catch (err) {
+  return res.status(500).json({
+    code: 500,
+    message: String(err?.message || err),
+    correlationId: req.correlationId,
+  });
+}
 });
 
 // ---------- Health ----------
