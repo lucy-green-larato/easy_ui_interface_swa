@@ -77,7 +77,7 @@ function rateLimit(req, res, next) {
   next();
 }
 app.use(rateLimit);
-// ---------- Defensive small-run POST (multipart) ----------
+
 // ---------- Defensive small-run POST (multipart) ----------
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -85,10 +85,18 @@ const upload = multer({
 });
 
 // Accepts: multipart/form-data with fields: file (csv), evidence (string)
-const smallRunPaths = ['/', '/ch-strategic', '/ch-strategic/', '/ch-strategic/*'];
+const smallRunPaths = [
+  '/',                          // some hosts strip the route prefix
+  '/ch-strategic',              // direct route
+  '/ch-strategic/',             // trailing slash
+  '/api/ch-strategic',          // SWA/Functions keeps /api prefix
+  '/api/ch-strategic/',         // trailing slash with /api
+  /^\/ch-strategic(\/.*)?$/,    // any subpath under ch-strategic
+  /^\/api\/ch-strategic(\/.*)?$/ // any subpath under /api/ch-strategic
+];
+
 app.post(smallRunPaths, upload.single('file'), async (req, res) => {
   try {
-    // Correlation already set by middleware
     const ctype = req.headers['content-type'] || req.headers['Content-Type'] || '';
     if (!ctype.includes('multipart/form-data')) {
       return res.status(400).json({
@@ -114,13 +122,12 @@ app.post(smallRunPaths, upload.single('file'), async (req, res) => {
       });
     }
 
-    // Light CSV sanity
     let csvText = '';
     try { csvText = req.file.buffer?.toString('utf8') ?? ''; } catch { }
     const lines = csvText ? csvText.split(/\r?\n/) : [];
     const rowCount = Math.max(0, lines.length - 1);
 
-    // TEMP stub — replace with real chStrategic.smallRun(...)
+    // TEMP stub — replace with real chStrategic.smallRun(...) later
     return res.status(200).json({
       ok: true,
       mode: 'small',
@@ -135,6 +142,20 @@ app.post(smallRunPaths, upload.single('file'), async (req, res) => {
       correlationId: req.correlationId,
     });
   }
+});
+
+// ---------- Health ----------
+app.get(['/_health', '/ch-strategic/_health', '/api/ch-strategic/_health'], (_req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+// ---------- Final JSON 404 so we never hang ----------
+app.all('*', (req, res) => {
+  res.status(404).json({
+    code: 404,
+    message: `No route for ${req.method} ${req.originalUrl || req.url}`,
+    correlationId: req.correlationId || 'unknown',
+  });
 });
 
 // Health (optional)
