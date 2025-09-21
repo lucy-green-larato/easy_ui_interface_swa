@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en" data-theme="">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -16,10 +17,10 @@
 
 <body>
   <header class="nav" aria-label="Global">
-    <a href="/" class="brand" aria-current="page">
+    <div class="brand">
       <img class="logo logo--xl" src="/assets/larato-logo.svg" alt="Larato" />
       <h1 class="brand-title">Inside Track Business Growth Tools</h1>
-    </a>
+    </div>
     <div class="actions">
       <button id="themeToggle" class="btn-ghost theme-btn" aria-pressed="false" aria-label="Switch theme">🌙</button>
       <!-- both exist; JS toggles visibility -->
@@ -27,6 +28,7 @@
       <a id="btnSignOut" class="btn" href="/.auth/logout?post_logout_redirect_uri=/" hidden>Sign out</a>
     </div>
   </header>
+
 
   <main class="hero" aria-labelledby="welcome-heading">
     <!-- Signed OUT -->
@@ -47,7 +49,8 @@
     <section id="dashboard" class="hide" aria-live="polite">
       <h2 class="h2-tight">Welcome, <span id="userName"></span></h2>
       <p class="welcome-text">
-        These tools will save you time and assure that you deliver the best sales and marketing experience to your prospects.
+        These tools will save you time and assure that you deliver the best sales and marketing experience to your
+        prospects.
       </p>
 
       <h3 class="section-heading">Tools for sales</h3>
@@ -64,8 +67,7 @@
           <span class="pill">Available</span>
         </a>
 
-        <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1"
-           title="Coming soon">
+        <a class="tool disabled" href="#" aria-disabled="true" tabindex="-1" title="Coming soon">
           Beat your competitors
           <small>Position your value clearly against alternatives.</small>
           <span class="pill" aria-hidden="true">Coming soon</span>
@@ -122,4 +124,5 @@
     </div>
   </footer>
 </body>
+
 </html>

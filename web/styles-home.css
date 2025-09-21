@@ -27,6 +27,8 @@ header{ padding-top:28px }
 .actions{ display:flex; align-items:center; gap:10px }
 
 /* Hero & PBI cards */
+#reportContainer { min-height: 560px; }
+
 .hero, .pbi-card{
   position:relative; background:var(--card-bg); border:1px solid var(--border);
   border-radius:var(--radius); box-shadow:var(--shadow); padding:28px; overflow:hidden; background-clip:padding-box;

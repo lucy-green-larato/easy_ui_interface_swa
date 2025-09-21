@@ -105,35 +105,55 @@ function showSignedIn(p){
 
 // ---------------- Power BI ----------------
 async function tryEmbedPBI() {
-  if (!els.pbiSection || !els.reportContainer) return;
+  const section = document.getElementById('pbiSection');
+  const host = document.getElementById('reportContainer');
+  const hint = document.getElementById('pbiHint');
+
+  if (!section || !host) return;
+
+  // Don’t show the card until we know we can embed
+  section.classList.add('hide');
+
   try {
+    // 1) Get embed details from our API
     const r = await fetch('/api/pbi-token', { cache: 'no-store' });
     if (!r.ok) throw new Error(`pbi-token ${r.status}`);
     const { embedUrl, accessToken, reportId } = await r.json();
-    if (!embedUrl || !accessToken || !reportId) throw new Error('missing Power BI token details');
+    if (!embedUrl || !accessToken || !reportId)
+      throw new Error('pbi-token: missing fields');
 
-    const models = window['powerbi-client']?.models || window.powerbi?.models;
+    // 2) Ensure Power BI SDK is available
+    const pbi = window.powerbi;
+    const models = window['powerbi-client']?.models || pbi?.models;
+    if (!pbi || !models) throw new Error('powerbi client not loaded');
+
+    // 3) Embed
     const config = {
       type: 'report',
-      tokenType: models?.TokenType?.Embed ?? 1,
+      tokenType: models.TokenType.Embed,
       accessToken,
       embedUrl,
       id: reportId,
       settings: {
         panes: { filters: { visible: false }, pageNavigation: { visible: false } },
-        navContentPaneEnabled: false,
-        layoutType: models?.LayoutType?.Custom ?? 1
+        navContentPaneEnabled: false
       }
     };
-    const powerbi = window.powerbi;
-    powerbi.reset(els.reportContainer);
-    powerbi.embed(els.reportContainer, config);
 
-    els.pbiSection.classList.remove('hide');
-    els.pbiHint?.classList.add('hide');
+    // Ensure visible height
+    if (!host.style.minHeight) host.style.minHeight = '560px';
+
+    pbi.reset(host);
+    pbi.embed(host, config);
+
+    // 4) Reveal the card and hide the hint
+    section.classList.remove('hide');
+    hint?.classList.add('hide');
   } catch (e) {
-    els.pbiSection.classList.remove('hide');
-    els.pbiHint?.classList.remove('hide');
+    // Show the card with a helpful hint if we can’t embed
+    section.classList.remove('hide');
+    host.setAttribute('aria-busy', 'false');
+    hint?.classList.remove('hide');
     console.warn('Power BI embed skipped:', e);
   }
 }
