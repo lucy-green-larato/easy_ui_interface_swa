@@ -78,9 +78,77 @@ function rateLimit(req, res, next) {
 }
 app.use(rateLimit);
 // ---------- Defensive small-run POST (multipart) ----------
+// ---------- Defensive small-run POST (multipart) ----------
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+});
+
+// Accepts: multipart/form-data with fields: file (csv), evidence (string)
+const smallRunPaths = ['/', '/ch-strategic', '/ch-strategic/', '/ch-strategic/*'];
+app.post(smallRunPaths, upload.single('file'), async (req, res) => {
+  try {
+    // Correlation already set by middleware
+    const ctype = req.headers['content-type'] || req.headers['Content-Type'] || '';
+    if (!ctype.includes('multipart/form-data')) {
+      return res.status(400).json({
+        code: 400,
+        message: 'Expected multipart/form-data',
+        correlationId: req.correlationId,
+      });
+    }
+
+    const evidence = (req.body?.evidence || '').trim();
+    if (!evidence) {
+      return res.status(400).json({
+        code: 400,
+        message: 'Missing evidence',
+        correlationId: req.correlationId,
+      });
+    }
+    if (!req.file) {
+      return res.status(400).json({
+        code: 400,
+        message: 'Missing file',
+        correlationId: req.correlationId,
+      });
+    }
+
+    // Light CSV sanity
+    let csvText = '';
+    try { csvText = req.file.buffer?.toString('utf8') ?? ''; } catch { }
+    const lines = csvText ? csvText.split(/\r?\n/) : [];
+    const rowCount = Math.max(0, lines.length - 1);
+
+    // TEMP stub — replace with real chStrategic.smallRun(...)
+    return res.status(200).json({
+      ok: true,
+      mode: 'small',
+      evidence,
+      rows: rowCount,
+      correlationId: req.correlationId,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      code: 500,
+      message: String(err?.message || err),
+      correlationId: req.correlationId,
+    });
+  }
+});
+
+// Health (optional)
+app.get(['/_health', '/ch-strategic/_health'], (_req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+// ---------- Final JSON 404 so we never hang ----------
+app.all('*', (req, res) => {
+  res.status(404).json({
+    code: 404,
+    message: `No route for ${req.method} ${req.originalUrl || req.url}`,
+    correlationId: req.correlationId || 'unknown',
+  });
 });
 
 app.post('/', upload.single('file'), async (req, res) => {
