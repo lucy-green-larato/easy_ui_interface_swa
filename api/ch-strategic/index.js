@@ -212,7 +212,7 @@ app.post('/ch-strategic/pbi-export', requireRole('pbi-exporter'), async (req, re
   } catch (err) {
     const status = err?.status || 500;
     const msg = err?.message || 'Internal error';
-    return sendError(res, status, msg, req.correlationId);
+    return error(res, status, msg, undefined, req.correlationId);
   }
 });
 
