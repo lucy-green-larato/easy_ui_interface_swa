@@ -2,109 +2,74 @@
   "routes": [
     {
       "route": "/",
-      "headers": {
-        "Cache-Control": "no-store",
-        "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.openai.com https://*.openai.azure.com; frame-src https://app.powerbi.com; child-src https://app.powerbi.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
-      }
+      "rewrite": "/index.html",
+      "allowedRoles": ["authenticated"],
+      "headers": { "Cache-Control": "no-store" }
     },
     {
-      "route": "/.auth/me",
-      "rewrite": "/api/.auth/me"
+      "route": "/index.html",
+      "allowedRoles": ["authenticated"],
+      "headers": { "Cache-Control": "no-store" }
     },
     {
-      "route": "/reports",
-      "rewrite": "/reports.html"
+      "route": "/.auth/*",
+      "headers": { "Cache-Control": "no-store" }
     },
-    {
-      "route": "/reports/*",
-      "rewrite": "/reports.html"
-    },
-    {
-      "route": "/engagement",
-      "rewrite": "/engagement/index.html"
-    },
-    {
-      "route": "/engagement/*",
-      "rewrite": "/engagement/index.html"
-    },
-    {
-      "route": "/first-call-script-v2",
-      "redirect": "/engagement",
-      "statusCode": 301
-    },
-    {
-      "route": "/first-call-script-v2/*",
-      "redirect": "/engagement",
-      "statusCode": 301
-    },
-    {
-      "route": "/qualification",
-      "rewrite": "/qualification/index.html"
-    },
-    {
-      "route": "/qualification/*",
-      "rewrite": "/qualification/index.html"
-    },
-    {
-      "route": "/lead-qualification",
-      "redirect": "/qualification",
-      "statusCode": 301
-    },
-    {
-      "route": "/lead-qualification/*",
-      "redirect": "/qualification",
-      "statusCode": 301
-    },
+    { "route": "/reports",   "rewrite": "/reports.html" },
+    { "route": "/reports/*", "rewrite": "/reports.html" },
+    { "route": "/engagement",   "rewrite": "/engagement/index.html" },
+    { "route": "/engagement/*", "rewrite": "/engagement/index.html" },
+    { "route": "/first-call-script-v2",   "redirect": "/engagement", "statusCode": 301 },
+    { "route": "/first-call-script-v2/*", "redirect": "/engagement", "statusCode": 301 },
+    { "route": "/qualification",   "rewrite": "/qualification/index.html" },
+    { "route": "/qualification/*", "rewrite": "/qualification/index.html" },
+    { "route": "/lead-qualification",   "redirect": "/qualification", "statusCode": 301 },
+    { "route": "/lead-qualification/*", "redirect": "/qualification", "statusCode": 301 },
     {
       "route": "/ch-strategic",
       "rewrite": "/ch-strategic/index.html",
-      "headers": {"cache-control":"no-store"}
-    },
-    {
-      "route": "/src/js/ch-strategic.js",
-      "headers": {"cache-control":"no-store"}
+      "headers": { "Cache-Control": "no-store" }
     },
     {
       "route": "/ch-strategic/*",
       "rewrite": "/ch-strategic/index.html",
-      "headers": {"cache-control":"no-store"}
+      "headers": { "Cache-Control": "no-store" }
+    },
+    {
+      "route": "/src/js/ch-strategic.js",
+      "headers": { "Cache-Control": "no-store" }
     },
     {
       "route": "/campaign",
       "rewrite": "/campaign/index.html",
-      "headers": {
-        "cache-control": "no-cache, no-store, must-revalidate"
-      }
+      "headers": { "Cache-Control": "no-cache, no-store, must-revalidate" }
     },
     {
       "route": "/campaign/*",
       "rewrite": "/campaign/index.html",
-      "headers": {
-        "cache-control": "no-cache, no-store, must-revalidate"
-      }
+      "headers": { "Cache-Control": "no-cache, no-store, must-revalidate" }
     },
     {
       "route": "/content/call-library/*",
-      "headers": {
-        "cache-control": "no-store"
-      }
+      "headers": { "Cache-Control": "no-store" }
     }
   ],
+
   "responseOverrides": {
     "401": {
-      "rewrite": "/index.html",
+      "rewrite": "/.auth/login/aad?post_login_redirect_uri=/",
       "statusCode": 302
     }
   },
- 
+
   "globalHeaders": {
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Content-Type-Options": "nosniff",
     "Cross-Origin-Opener-Policy": "same-origin",
-    "Cross-Origin-Embedder-Policy": "require-corp",
-    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.openai.com https://*.openai.azure.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.openai.com https://*.openai.azure.com; frame-src https://app.powerbi.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
     "Cache-Control": "public, max-age=31536000, immutable"
   },
+
   "mimeTypes": {
     ".md": "text/markdown; charset=utf-8",
     ".mdx": "text/markdown; charset=utf-8",
@@ -112,5 +77,10 @@
     ".mjs": "application/javascript; charset=utf-8",
     ".json": "application/json; charset=utf-8",
     ".html": "text/html; charset=utf-8"
+  },
+
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/api/*", "/.auth/*", "/assets/*", "/src/*"]
   }
 }
