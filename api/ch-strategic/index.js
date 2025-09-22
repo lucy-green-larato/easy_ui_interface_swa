@@ -214,18 +214,22 @@ async function summarizeCsv(buffer) {
   return { rows, matched, skipped, errorsByReason, headers, itemsSample };
 }
 
-async function buildOutputCsv(buffer) {
-  const { recs, headers } = parseCsvFlexible(buffer);
+
+async function buildOutputCsv(buffer, evidenceTag) {
+  const { recs, headers } = parseCsvFlexible(buffer); // if you don't have parseCsvFlexible, use your current parseSync(...) pattern
   const nameKey = findHeader(headers, 'Company Name');
   const numKey = findHeader(headers, 'Company Number');
 
-  const out = [];
+  const rows = [];
   for (const r of recs) {
     const name = String(nameKey ? r[nameKey] : '').trim();
     const num = String(numKey ? r[numKey] : '').trim();
-    if (name && num) out.push(`${num},${csvEscape(name)}`);
+    if (name && num) {
+      rows.push(`${num},${csvEscape(name)},${csvEscape(evidenceTag || '')}`);
+    }
   }
-  return Buffer.from(`Company Number,Company Name\n${out.join('\n')}\n`, 'utf8');
+  const header = 'Company Number,Company Name,Evidence';
+  return Buffer.from(`${header}\n${rows.join('\n')}\n`, 'utf8');
 }
 
 // ------------------------------- Multipart (Busboy v1.6.0, Azure Functions classic req) -------------------------------
@@ -424,7 +428,7 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const outBuffer = await buildOutputCsv(file.buffer);
+      const outBuffer = await buildOutputCsv(file.buffer, evidenceTag);
       await putCsv(CONTAINERS.out, outName, outBuffer);
 
       await putJson(CONTAINERS.status, statusName, {
