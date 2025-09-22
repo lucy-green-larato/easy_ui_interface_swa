@@ -1,6 +1,7 @@
+/** api-worker/ch-strategic-worker/index.js Sept 22 2025 v1 */
 'use strict';
 
-/**
+/** 
  * Queue-triggered worker:
  * - Message shape: { jobId, chunkIndex, chunkBlobPath, totalChunks }
  * - Reads chunk from "ch-strategic-cache"
@@ -16,11 +17,19 @@ const STATUS_CONTAINER = 'ch-strategic-status';
 const CACHE_CONTAINER = 'ch-strategic-cache';
 const OUT_CONTAINER = 'ch-strategic-out';
 
-const blob = BlobServiceClient.fromConnectionString(AZURE_STORAGE);
+let _blob;
+function getBlob() {
+  const conn = process.env.AzureWebJobsStorage;
+  if (!_blob) {
+    if (!conn) throw new Error('AzureWebJobsStorage is not configured');
+    _blob = BlobServiceClient.fromConnectionString(conn);
+  }
+  return _blob;
+}
 
 async function readJson(container, name) {
+  const blob = getBlob();
   const c = blob.getContainerClient(container);
-  const b = c.getBlobClient(name);
   if (!(await b.exists())) return null;
   const downloaded = await (await b.download()).readableStreamBody;
   const chunks = [];
@@ -29,14 +38,19 @@ async function readJson(container, name) {
 }
 
 async function writeJson(container, name, data) {
+  const blob = getBlob(); // lazy-get the BlobServiceClient (see getBlob() helper)
   const c = blob.getContainerClient(container);
   await c.createIfNotExists();
   const b = c.getBlockBlobClient(name);
-  const body = Buffer.from(JSON.stringify(data));
-  await b.upload(body, body.length, { blobHTTPHeaders: { blobContentType: 'application/json' } });
+  const json = JSON.stringify(data);
+
+  await b.upload(json, Buffer.byteLength(json), {
+    blobHTTPHeaders: { blobContentType: 'application/json; charset=utf-8' }
+  });
 }
 
 async function appendCsvLine(container, name, text) {
+  const blob = getBlob();
   const c = blob.getContainerClient(container);
   await c.createIfNotExists();
   const a = c.getAppendBlobClient(name);

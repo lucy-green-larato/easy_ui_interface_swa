@@ -4,7 +4,14 @@ const crypto = require('crypto');
 const { BlobServiceClient } = require('@azure/storage-blob');
 const { QueueClient } = require('@azure/storage-queue');
 const parse = require('csv-parse');
-const { error, ok, uuid } = require('../../lib/http');
+const express = require('express');
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+function ok(res, payload, code = 200) { res.status(code).json(payload); }
+function error(res, status, message, data, cid) {
+  const body = { code: status, message, correlationId: cid };
+  if (data != null) body.data = data;
+  return res.status(status).json(body);
+}
 
 const STATUS_CONTAINER = 'ch-strategic-status';
 const CACHE_CONTAINER = 'ch-strategic-cache';
@@ -160,7 +167,7 @@ exports.mount = function mount(app, { multer, allowPbi = {} }) {
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_SIZE } });
 
   // --- /start ---
-  app.post('/ch-strategic/start', upload.single('file'), async (req, res) => {
+  app.post('/start', upload.single('file'), async (req, res) => {
     const cid = req.correlationId || uuid(); // correlationId from middleware
     try {
       if (!req.file || !req.file.buffer) {
@@ -183,7 +190,7 @@ exports.mount = function mount(app, { multer, allowPbi = {} }) {
       const { blob, queue } = createAzureClients();
 
       // --- /feedback (capture user feedback for learning loop) ---
-      app.post('/ch-strategic/feedback', express.json({ limit: '8kb' }), async (req, res) => {
+      app.post('/feedback', express.json({ limit: '8kb' }), async (req, res) => {
         const cid = req.correlationId || uuid();
         try {
           // Basic authz: must be signed in (index middleware ensures req.principal)
@@ -305,7 +312,7 @@ exports.mount = function mount(app, { multer, allowPbi = {} }) {
   });
 
   // --- /status/:jobId ---
-  app.get('/ch-strategic/status/:jobId', async (req, res) => {
+  app.get('/status/:jobId', async (req, res) => {
     const cid = req.correlationId || uuid();
     try {
       const { jobId } = req.params;
@@ -323,7 +330,7 @@ exports.mount = function mount(app, { multer, allowPbi = {} }) {
   });
 
   // --- /download/:jobId ---
-  app.get('/ch-strategic/download/:jobId', async (req, res) => {
+  app.get('/download/:jobId', async (req, res) => {
     const cid = req.correlationId || uuid();
     try {
       const { jobId } = req.params;
