@@ -7,7 +7,6 @@ const { QueueClient } = require('@azure/storage-queue');
 const parse = require('csv-parse');
 const express = require('express');
 const { error, ok, uuid } = require('../../lib/http');
-function ok(res, payload, code = 200) { res.status(code).json(payload); }
 function error(res, status, message, data, cid) {
   const body = { code: status, message, correlationId: cid };
   if (data != null) body.data = data;
