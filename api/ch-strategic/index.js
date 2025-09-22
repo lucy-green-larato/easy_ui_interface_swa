@@ -332,7 +332,7 @@ function csvEscape(s) {
 // ----------------------------------------------------------------------------
 // Health
 // ----------------------------------------------------------------------------
-app.get('/ch-strategic/healthz', async (req, res) => {
+app.get('/healthz', async (req, res) => {
   const meta = {
     ok: true,
     name: 'ch-strategic',
@@ -351,7 +351,7 @@ app.get('/ch-strategic/healthz', async (req, res) => {
 // ----------------------------------------------------------------------------
 // Small run (multipart)
 // ----------------------------------------------------------------------------
-app.post('/ch-strategic', upload.single('file'), async (req, res) => {
+app.post('/', upload.single('file'), async (req, res) => {
   try {
     if (!req.file?.buffer) return err(res, 'Missing file', 400, req.correlationId);
     const evidenceTag = (req.body?.evidenceTag || '').trim();
@@ -380,7 +380,7 @@ app.post('/ch-strategic', upload.single('file'), async (req, res) => {
 // ----------------------------------------------------------------------------
 // "Large" run (processed synchronously here, with blob status/output)
 // ----------------------------------------------------------------------------
-app.post('/ch-strategic/start', upload.single('file'), async (req, res) => {
+app.post('/start', upload.single('file'), async (req, res) => {
   try {
     if (!req.file?.buffer) return err(res, 'Missing file', 400, req.correlationId);
     if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
@@ -444,7 +444,7 @@ app.post('/ch-strategic/start', upload.single('file'), async (req, res) => {
 // ----------------------------------------------------------------------------
 // Status (reads from blob)
 // ----------------------------------------------------------------------------
-app.get('/ch-strategic/status/:id', async (req, res) => {
+app.get('/status/:id', async (req, res) => {
   try {
     if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
     const id = String(req.params.id || '').trim();
@@ -460,7 +460,7 @@ app.get('/ch-strategic/status/:id', async (req, res) => {
 // ----------------------------------------------------------------------------
 // Download (streams CSV)
 // ----------------------------------------------------------------------------
-app.get('/ch-strategic/download/:id', async (req, res) => {
+app.get('/download/:id', async (req, res) => {
   try {
     if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
     const id = String(req.params.id || '').trim();
@@ -482,7 +482,7 @@ app.get('/ch-strategic/download/:id', async (req, res) => {
 // ----------------------------------------------------------------------------
 // Feedback
 // ----------------------------------------------------------------------------
-app.post('/ch-strategic/feedback', async (req, res) => {
+app.post('/feedback', async (req, res) => {
   try {
     if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
     await ensureContainers();
@@ -505,7 +505,7 @@ app.post('/ch-strategic/feedback', async (req, res) => {
 // ----------------------------------------------------------------------------
 // Optional: PBI Export (role gated). Here we emit a trivial CSV from the payload.
 // ----------------------------------------------------------------------------
-app.post('/ch-strategic/pbi-export',
+app.post('/pbi-export',
   requireRole(process.env.CH_STRATEGIC_PBI_ROLE || 'pbi-exporter'),
   async (req, res) => {
     try {
@@ -532,7 +532,7 @@ function toCsv(rows) {
 // ----------------------------------------------------------------------------
 // 404 and error guard
 // ----------------------------------------------------------------------------
-app.all('/ch-strategic*', (req, res) => err(res, `Not found: ${req.method} ${req.path}`, 404, req.correlationId));
+app.all('*', (req, res) => err(res, `Not found: ${req.method} ${req.path}`, 404, req.correlationId));
 
 app.use((e, req, res, _next) => {
   const code = Number(e?.statusCode || e?.status || 500);
