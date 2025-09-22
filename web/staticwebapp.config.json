@@ -1,39 +1,37 @@
 {
   "routes": [
-    { "route": "/", "rewrite": "/index.html", "allowedRoles": ["authenticated"], "headers": { "Cache-Control": "no-store" } },
-    { "route": "/index.html", "allowedRoles": ["authenticated"], "headers": { "Cache-Control": "no-store" } },
+    { "route": "/",               "rewrite": "/index.html", "headers": { "Cache-Control": "no-store" } },
+    { "route": "/index.html",     "headers": { "Cache-Control": "no-store" } },
 
-    { "route": "/.auth/*", "headers": { "Cache-Control": "no-store" } },
+    { "route": "/reports",        "rewrite": "/reports.html" },
+    { "route": "/reports/*",      "rewrite": "/reports.html" },
 
-    { "route": "/reports", "rewrite": "/reports.html" },
-    { "route": "/reports/*", "rewrite": "/reports.html" },
+    { "route": "/engagement",     "rewrite": "/engagement/index.html" },
+    { "route": "/engagement/*",   "rewrite": "/engagement/index.html" },
+    { "route": "/first-call-script-v2",   "redirect": "/engagement",     "statusCode": 301 },
+    { "route": "/first-call-script-v2/*", "redirect": "/engagement",     "statusCode": 301 },
 
-    { "route": "/engagement", "rewrite": "/engagement/index.html" },
-    { "route": "/engagement/*", "rewrite": "/engagement/index.html" },
-    { "route": "/first-call-script-v2", "redirect": "/engagement", "statusCode": 301 },
-    { "route": "/first-call-script-v2/*", "redirect": "/engagement", "statusCode": 301 },
+    { "route": "/qualification",  "rewrite": "/qualification/index.html" },
+    { "route": "/qualification/*","rewrite": "/qualification/index.html" },
+    { "route": "/lead-qualification",   "redirect": "/qualification",    "statusCode": 301 },
+    { "route": "/lead-qualification/*", "redirect": "/qualification",    "statusCode": 301 },
 
-    { "route": "/qualification", "rewrite": "/qualification/index.html" },
-    { "route": "/qualification/*", "rewrite": "/qualification/index.html" },
-    { "route": "/lead-qualification", "redirect": "/qualification", "statusCode": 301 },
-    { "route": "/lead-qualification/*", "redirect": "/qualification", "statusCode": 301 },
-
-    { "route": "/ch-strategic", "rewrite": "/ch-strategic/index.html", "headers": { "Cache-Control": "no-store" } },
+    { "route": "/ch-strategic",   "rewrite": "/ch-strategic/index.html", "headers": { "Cache-Control": "no-store" } },
     { "route": "/ch-strategic/*", "rewrite": "/ch-strategic/index.html", "headers": { "Cache-Control": "no-store" } },
 
-    { "route": "/campaign", "rewrite": "/campaign/index.html", "headers": { "Cache-Control": "no-cache, no-store, must-revalidate" } },
-    { "route": "/campaign/*", "rewrite": "/campaign/index.html", "headers": { "Cache-Control": "no-cache, no-store, must-revalidate" } },
+    { "route": "/campaign",       "rewrite": "/campaign/index.html",     "headers": { "Cache-Control": "no-cache, no-store, must-revalidate" } },
+    { "route": "/campaign/*",     "rewrite": "/campaign/index.html",     "headers": { "Cache-Control": "no-cache, no-store, must-revalidate" } },
 
-    { "route": "/src/*", "headers": { "Cache-Control": "no-store" } },
-    { "route": "/assets/*", "headers": { "Cache-Control": "public, max-age=31536000, immutable" } },
-    { "route": "/favicon.ico", "headers": { "Cache-Control": "public, max-age=31536000, immutable" } },
+    { "route": "/.auth/*",        "headers": { "Cache-Control": "no-store" } },
+
+    { "route": "/src/*",          "headers": { "Cache-Control": "no-store" } },
+    { "route": "/assets/*",       "headers": { "Cache-Control": "public, max-age=31536000, immutable" } },
+    { "route": "/favicon.ico",    "headers": { "Cache-Control": "public, max-age=31536000, immutable" } },
     { "route": "/content/call-library/*", "headers": { "Cache-Control": "no-store" } }
   ],
-
   "responseOverrides": {
     "401": { "rewrite": "/.auth/login/aad?post_login_redirect_uri=/", "statusCode": 302 }
   },
-
   "globalHeaders": {
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Content-Type-Options": "nosniff",
@@ -41,7 +39,6 @@
     "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'self'; img-src 'self' data:; connect-src 'self' https:; frame-ancestors 'none'",
     "Cache-Control": "public, max-age=31536000, immutable"
   },
-
   "mimeTypes": {
     ".md": "text/markdown; charset=utf-8",
     ".mdx": "text/markdown; charset=utf-8",
@@ -50,7 +47,6 @@
     ".json": "application/json; charset=utf-8",
     ".html": "text/html; charset=utf-8"
   },
-
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": ["/api/*", "/.auth/*"]
