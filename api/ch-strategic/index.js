@@ -171,14 +171,26 @@ async function buildOutputCsv(buffer) {
 }
 
 // ------------------------------- Multipart (Busboy v1.6.0) -------------------------------
+// ------------------------------- Multipart (Busboy v1.6.0, Azure Functions classic req) -------------------------------
 async function readMultipart(req) {
+  // Azure Functions (v4, classic programming model) gives:
+  //   - req.headers (must include Content-Type with boundary)
+  //   - req.rawBody   (Buffer | string)  <-- we use this instead of req.pipe(...)
+  // There is NO req.pipe here.
   const ct = req.headers?.['content-type'] || '';
   if (!/^multipart\/form-data/i.test(ct)) return { error: 'Expected multipart/form-data' };
 
-  const bb = new Busboy({
-    headers: req.headers,
+  // Ensure we have bytes to parse
+  const hasRaw = req.rawBody != null;
+  if (!hasRaw) return { error: 'Missing rawBody for multipart parsing' };
+
+  const bodyBuf = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody);
+
+  // NOTE: Busboy v1.x usage — call as a function (no `new`)
+  const bb = require('busboy')({
+    headers: { 'content-type': ct },             // make sure boundary is passed
     limits: {
-      fileSize: UPLOAD_LIMIT_BYTES, // enforce upload size
+      fileSize: Number(process.env.CH_STRATEGIC_UPLOAD_LIMIT_BYTES || 20 * 1024 * 1024), // 20MB default
       files: 1,
       fields: 10
     }
@@ -191,8 +203,9 @@ async function readMultipart(req) {
   const p = new Promise((resolve, reject) => {
     bb.on('field', (name, val) => { fields[name] = val; });
 
+    // v1 signature: (fieldname, fileStream, filename, encoding, mimetype)
     bb.on('file', (name, stream, filename, encoding, mimetype) => {
-      if (++fileCount > 1) { stream.resume(); return; } // ignore extras
+      if (++fileCount > 1) { stream.resume(); return; } // ignore extras defensively
       const chunks = [];
       stream.on('data', d => chunks.push(d));
       stream.on('end', () => {
@@ -203,17 +216,20 @@ async function readMultipart(req) {
       stream.on('error', reject);
     });
 
+    // Limits → convert to user-facing errors
     bb.on('partsLimit', () => reject(new Error('Too many parts')));
     bb.on('filesLimit', () => reject(new Error('Too many files')));
     bb.on('fieldsLimit', () => reject(new Error('Too many fields')));
 
     bb.on('error', reject);
-    bb.on('finish', () => resolve({ fields, file }));
+    bb.on('finish', () => resolve({ fields, file }));   // v1 uses 'finish'
   });
 
-  req.pipe(bb);
+  // IMPORTANT: In Functions classic, push the whole raw body into Busboy
+  bb.end(bodyBuf);
   return p;
 }
+
 
 // ------------------------------- Route helpers -------------------------------
 function normalizePath(context) {
