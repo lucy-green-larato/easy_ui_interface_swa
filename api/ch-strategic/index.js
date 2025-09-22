@@ -78,13 +78,6 @@ function err(res, e, code = 500, cid) {
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', true);
-
-app.use((req, res, next) => { if (preflight(req, res)) return; next(); });
-app.use((req, res, next) => { Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v)); next(); });
-
-app.use(express.json({ limit: process.env.CH_STRATEGIC_JSON_LIMIT || '2mb' }));
-app.use(express.urlencoded({ extended: true, limit: process.env.CH_STRATEGIC_URLENC_LIMIT || '64kb' }));
-
 app.use((req, res, next) => {
   // Correlation ID passthrough or generate a new one
   const hdr = req.headers['x-correlation-id'];
@@ -100,6 +93,14 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+app.use((req, res, next) => { if (preflight(req, res)) return; next(); });
+app.use((req, res, next) => { Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v)); next(); });
+
+app.use(express.json({ limit: process.env.CH_STRATEGIC_JSON_LIMIT || '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: process.env.CH_STRATEGIC_URLENC_LIMIT || '64kb' }));
+
+
 
 // ----------------------------------------------------------------------------
 // SWA principal & role helpers
