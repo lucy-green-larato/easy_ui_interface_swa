@@ -92,6 +92,7 @@ app.use((req, res, next) => {
   } else if (req.url.startsWith('/ch-strategic')) {
     req.url = req.url.replace(/^\/ch-strategic(?=\/|$)/, '') || '/';
   }
+  console.log('→', req.method, req.originalUrl, '=>', req.url);
   next();
 });
 
