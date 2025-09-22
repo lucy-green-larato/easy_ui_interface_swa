@@ -156,7 +156,7 @@ async function summarizeCsv(buffer) {
 
   // Resolve actual column keys to read (robust match)
   const nameKey = findHeader(headers, 'Company Name');
-  const numKey  = findHeader(headers, 'Company Number');
+  const numKey = findHeader(headers, 'Company Number');
 
   let rows = 0, matched = 0, skipped = 0;
   const errorsByReason = {};
@@ -165,7 +165,7 @@ async function summarizeCsv(buffer) {
   for (const r of recs) {
     rows += 1;
     const name = String(nameKey ? r[nameKey] : '').trim();
-    const num  = String(numKey  ? r[numKey]  : '').trim();
+    const num = String(numKey ? r[numKey] : '').trim();
 
     if (name && num) {
       matched += 1;
@@ -189,12 +189,20 @@ async function buildOutputCsv(buffer) {
     trim: true
   });
 
+  // Collect & resolve keys
+  const headersSet = new Set();
+  for (const r of recs) Object.keys(r).forEach(h => headersSet.add(String(h)));
+  const headers = Array.from(headersSet);
+  const nameKey = findHeader(headers, 'Company Name');
+  const numKey = findHeader(headers, 'Company Number');
+
   const out = [];
   for (const r of recs) {
-    const name = String(r['Company Name'] ?? '').trim();
-    const num = String(r['Company Number'] ?? '').trim();
+    const name = String(nameKey ? r[nameKey] : '').trim();
+    const num = String(numKey ? r[numKey] : '').trim();
     if (name && num) out.push(`${num},${csvEscape(name)}`);
   }
+
   return Buffer.from(`Company Number,Company Name\n${out.join('\n')}\n`, 'utf8');
 }
 
@@ -326,7 +334,7 @@ module.exports = async function (context, req) {
 
       // Required headers
       const required = ['Company Name', 'Company Number'];
-      const missing = required.filter(h => !summary.headers.includes(h));
+      const missing = validateRequired(summary.headers);
       if (missing.length) { context.res = err(400, `Missing required column(s): ${missing.join(', ')}`, cid); return; }
 
       // Row cap
@@ -383,8 +391,7 @@ module.exports = async function (context, req) {
       const analysis = await summarizeCsv(file.buffer);
 
       // Required headers
-      const required = ['Company Name', 'Company Number'];
-      const missing = required.filter(h => !analysis.headers.includes(h));
+      const missing = validateRequired(analysis.headers);
       if (missing.length) {
         await putJson(CONTAINERS.status, statusName, {
           state: 'error',
