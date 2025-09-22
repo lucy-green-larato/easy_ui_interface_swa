@@ -86,9 +86,18 @@ app.use(express.json({ limit: process.env.CH_STRATEGIC_JSON_LIMIT || '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: process.env.CH_STRATEGIC_URLENC_LIMIT || '64kb' }));
 
 app.use((req, res, next) => {
+  // Correlation ID passthrough or generate a new one
   const hdr = req.headers['x-correlation-id'];
   req.correlationId = (typeof hdr === 'string' && hdr.trim()) || uuid();
   res.setHeader('X-Correlation-Id', req.correlationId);
+
+  // Normalize base path so Express sees bare routes regardless of host shape
+  // Keep querystrings intact by rewriting req.url (not req.path).
+  if (req.url.startsWith('/api/ch-strategic')) {
+    req.url = req.url.replace(/^\/api\/ch-strategic(?=\/|$)/, '') || '/';
+  } else if (req.url.startsWith('/ch-strategic')) {
+    req.url = req.url.replace(/^\/ch-strategic(?=\/|$)/, '') || '/';
+  }
   next();
 });
 
@@ -332,7 +341,7 @@ function csvEscape(s) {
 // ----------------------------------------------------------------------------
 // Health
 // ----------------------------------------------------------------------------
-app.get(['/healthz', '/ch-strategic/healthz', '/api/ch-strategic/healthz'], async (req, res) => {
+app.get('/healthz', async (req, res) => {
   const meta = {
     ok: true,
     name: 'ch-strategic',
@@ -351,7 +360,7 @@ app.get(['/healthz', '/ch-strategic/healthz', '/api/ch-strategic/healthz'], asyn
 // ----------------------------------------------------------------------------
 // Small run (multipart)
 // ----------------------------------------------------------------------------
-app.post(['/', '/ch-strategic', '/ch-strategic/', '/api/ch-strategic', '/api/ch-strategic/'], upload.single('csv_file'), async (req, res) => {
+app.post('/', upload.single('csv_file'), async (req, res) => {
   try {
     if (!req.file?.buffer) return err(res, 'Missing file', 400, req.correlationId);
     const evidenceTag = (req.body?.evidenceTag || '').trim();
@@ -380,7 +389,7 @@ app.post(['/', '/ch-strategic', '/ch-strategic/', '/api/ch-strategic', '/api/ch-
 // ----------------------------------------------------------------------------
 // "Large" run (processed synchronously here, with blob status/output)
 // ----------------------------------------------------------------------------
-app.post(['/start', '/ch-strategic/start', '/api/ch-strategic/start'], upload.single('csv_file'), async (req, res) => {
+app.post('/start', upload.single('csv_file'), async (req, res) => {
   try {
     if (!req.file?.buffer) return err(res, 'Missing file', 400, req.correlationId);
     if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
@@ -444,7 +453,7 @@ app.post(['/start', '/ch-strategic/start', '/api/ch-strategic/start'], upload.si
 // ----------------------------------------------------------------------------
 // Status (reads from blob)
 // ----------------------------------------------------------------------------
-app.get(['/status/:id', '/ch-strategic/status/:id', '/api/ch-strategic/status/:id'], async (req, res) => {
+app.get('/status/:id', async (req, res) => {
   try {
     if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
     const id = String(req.params.id || '').trim();
@@ -460,7 +469,7 @@ app.get(['/status/:id', '/ch-strategic/status/:id', '/api/ch-strategic/status/:i
 // ----------------------------------------------------------------------------
 // Download (streams CSV)
 // ----------------------------------------------------------------------------
-app.get(['/download/:id', '/ch-strategic/download/:id', '/api/ch-strategic/download/:id'], async (req, res) => {
+app.get('/download/:id', async (req, res) => {
   try {
     if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
     const id = String(req.params.id || '').trim();
@@ -482,7 +491,7 @@ app.get(['/download/:id', '/ch-strategic/download/:id', '/api/ch-strategic/downl
 // ----------------------------------------------------------------------------
 // Feedback
 // ----------------------------------------------------------------------------
-app.post(['/feedback', '/ch-strategic/feedback', '/api/ch-strategic/feedback'], async (req, res) => {
+app.post('/feedback', async (req, res) => {
   try {
     if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
     await ensureContainers();
@@ -505,8 +514,7 @@ app.post(['/feedback', '/ch-strategic/feedback', '/api/ch-strategic/feedback'], 
 // ----------------------------------------------------------------------------
 // Optional: PBI Export (role gated). Here we emit a trivial CSV from the payload.
 // ----------------------------------------------------------------------------
-app.post(['/pbi-export', '/ch-strategic/pbi-export', '/api/ch-strategic/pbi-export'],
-  requireRole(process.env.CH_STRATEGIC_PBI_ROLE || 'pbi-exporter'),
+app.post('/pbi-export', requireRole(process.env.CH_STRATEGIC_PBI_ROLE || 'pbi-exporter'),
   async (req, res) => {
     try {
       const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
