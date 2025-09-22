@@ -1,222 +1,266 @@
-/** api-worker/ch-strategic-worker/index.js Sept 22 2025 v1 */
+/** api-worker/ch-strategic-worker/index.js Sept 22 2025 v2 */
 'use strict';
 
-/** 
- * Queue-triggered worker:
+/**
+ * Queue-triggered worker (large-run):
  * - Message shape: { jobId, chunkIndex, chunkBlobPath, totalChunks }
- * - Reads chunk from "ch-strategic-cache"
- * - Runs scanOneCompany(row) via shared module
- * - Appends CSV lines to "ch-strategic-out/{jobId}.csv" (Append Blob)
- * - Updates status in "ch-strategic-status/{jobId}.json"
+ * - Reads chunk CSV from CACHE container (line-oriented; header on first line)
+ * - Appends output rows to OUT container as Append Blob: "<jobId>.csv"
+ * - Updates STATUS container "<jobId>.json"
+ * - Cancellation: presence of "<jobId>.cancel" blob in STATUS container
  */
 
 const { BlobServiceClient } = require('@azure/storage-blob');
+const readline = require('readline');
 
-const AZURE_STORAGE = process.env.AzureWebJobsStorage;
-const STATUS_CONTAINER = 'ch-strategic-status';
-const CACHE_CONTAINER = 'ch-strategic-cache';
-const OUT_CONTAINER = 'ch-strategic-out';
+// ---- Containers (align with your /start chunker) -----------------------------
+const STATUS_CONTAINER = process.env.CH_STATUS_CONTAINER   || 'ch-strategic-status';
+const CACHE_CONTAINER  = process.env.CH_CACHE_CONTAINER    || 'ch-strategic-cache';
+const OUT_CONTAINER    = process.env.CH_OUT_CONTAINER      || 'ch-strategic-out';
 
-let _blob;
-function getBlob() {
+// ---- Output CSV header (adjust as needed) ------------------------------------
+const OUTPUT_HEADER = (process.env.CH_OUTPUT_HEADER || 'Company Name,Domain,Match,Evidence,Confidence')
+  .split(',').map(s => s.trim());
+
+// ---- Blob Service singleton ---------------------------------------------------
+let _blobSvc;
+function getBlobSvc() {
+  if (_blobSvc) return _blobSvc;
   const conn = process.env.AzureWebJobsStorage;
-  if (!_blob) {
-    if (!conn) throw new Error('AzureWebJobsStorage is not configured');
-    _blob = BlobServiceClient.fromConnectionString(conn);
-  }
-  return _blob;
+  if (!conn) throw new Error('AzureWebJobsStorage is not configured');
+  _blobSvc = BlobServiceClient.fromConnectionString(conn);
+  return _blobSvc;
+}
+
+// ---- Small helpers ------------------------------------------------------------
+async function downloadToBuffer(blobClient) {
+  const resp = await blobClient.download();
+  const chunks = [];
+  for await (const ch of resp.readableStreamBody) chunks.push(ch);
+  return Buffer.concat(chunks);
+}
+
+async function streamExists(containerClient, blobName) {
+  return await containerClient.getBlobClient(blobName).exists();
 }
 
 async function readJson(container, name) {
-  const blob = getBlob();
-  const c = blob.getContainerClient(container);
+  const svc = getBlobSvc();
+  const c = svc.getContainerClient(container);
+  const b = c.getBlockBlobClient(name);
   if (!(await b.exists())) return null;
-  const downloaded = await (await b.download()).readableStreamBody;
-  const chunks = [];
-  for await (const ch of downloaded) chunks.push(ch);
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  const resp = await b.download();
+  const buf = await (async () => {
+    const chunks = [];
+    for await (const ch of resp.readableStreamBody) chunks.push(ch);
+    return Buffer.concat(chunks);
+  })();
+  return JSON.parse(buf.toString('utf8'));
 }
 
 async function writeJson(container, name, data) {
-  const blob = getBlob(); // lazy-get the BlobServiceClient (see getBlob() helper)
-  const c = blob.getContainerClient(container);
+  const svc = getBlobSvc();
+  const c = svc.getContainerClient(container);
   await c.createIfNotExists();
   const b = c.getBlockBlobClient(name);
-  const json = JSON.stringify(data);
-
-  await b.upload(json, Buffer.byteLength(json), {
+  const json = Buffer.from(JSON.stringify(data));
+  await b.upload(json, json.length, {
     blobHTTPHeaders: { blobContentType: 'application/json; charset=utf-8' }
   });
 }
 
-async function appendCsvLine(container, name, text) {
-  const blob = getBlob();
-  const c = blob.getContainerClient(container);
+async function ensureAppendBlobWithHeader(container, name, headerArray) {
+  const svc = getBlobSvc();
+  const c = svc.getContainerClient(container);
   await c.createIfNotExists();
   const a = c.getAppendBlobClient(name);
-  if (!(await a.exists())) {
-    await a.create({ blobHTTPHeaders: { blobContentType: 'text/csv; charset=utf-8' } });
+  const exists = await a.exists();
+  if (!exists) {
+    // Create and write header line atomically-ish; tolerate race on create
+    try {
+      await a.create({
+        blobHTTPHeaders: { blobContentType: 'text/csv; charset=utf-8' }
+      });
+    } catch (e) {
+      // If another worker just created it, continue
+      // eslint-disable-next-line no-empty
+    }
+    const headerLine = toCsvRow(headerArray) + '\r\n';
+    // If another worker already wrote header, this just appends another header.
+    // To avoid duplicate headers, check size; if size==0, write header.
+    try {
+      const props = await a.getProperties();
+      if ((props.contentLength || 0) === 0) {
+        await a.appendBlock(Buffer.from(headerLine, 'utf8'), Buffer.byteLength(headerLine));
+      }
+    } catch {
+      // Best-effort; if props fail, append header anyway
+      await a.appendBlock(Buffer.from(headerLine, 'utf8'), Buffer.byteLength(headerLine));
+    }
   }
-  await a.appendBlock(Buffer.from(text, 'utf8'), Buffer.byteLength(text));
+  return a;
+}
+
+// Robust-enough CSV line splitter for simple fields (handles quoted commas & "")
+function splitCsvLine(line) {
+  const out = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; } // escaped quote
+        else { inQ = false; }
+      } else {
+        cur += ch;
+      }
+    } else {
+      if (ch === ',') { out.push(cur); cur = ''; }
+      else if (ch === '"') { inQ = true; }
+      else { cur += ch; }
+    }
+  }
+  out.push(cur);
+  return out;
 }
 
 function toCsvRow(values) {
-  // very small safe CSV joiner; quote if needed
   const esc = (v) => {
     const s = (v == null) ? '' : String(v);
-    return (/["\n,]/.test(s)) ? `"${s.replace(/"/g, '""')}"` : s;
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  return values.map(esc).join(',') + '\n';
+  return values.map(esc).join(',');
 }
 
-async function processChunk({ jobId, chunkIndex, chunkBlobPath, totalChunks }, log) {
+// ---- Core worker --------------------------------------------------------------
+async function processChunk(msg, log) {
+  const { jobId, chunkIndex, chunkBlobPath, totalChunks } = msg;
+
+  const svc = getBlobSvc();
+  const cacheC  = svc.getContainerClient(CACHE_CONTAINER);
+  const statusC = svc.getContainerClient(STATUS_CONTAINER);
+
   const statusName = `${jobId}.json`;
   const cancelName = `${jobId}.cancel`;
-  const statusC = blob.getContainerClient(STATUS_CONTAINER);
+  const outName    = `${jobId}.csv`;
 
-  // Helper to read cancel flag fast
-  async function isCancelled() {
-    return await statusC.getBlobClient(cancelName).exists();
-  }
-
-  // Early cancel before any work
+  // Fast cancel check
+  const isCancelled = async () => await streamExists(statusC, cancelName);
   if (await isCancelled()) {
     const now = new Date().toISOString();
-    const s = (await readJson(STATUS_CONTAINER, statusName)) || {};
-    await writeJson(STATUS_CONTAINER, statusName, { ...s, state: 'cancelled', updatedAt: now, cancelledAt: now });
+    const cur = (await readJson(STATUS_CONTAINER, statusName)) || {};
+    await writeJson(STATUS_CONTAINER, statusName, {
+      ...cur,
+      state: 'cancelled',
+      updatedAt: now,
+      cancelledAt: now
+    });
+    log(`job ${jobId} chunk ${chunkIndex}: cancelled before start`);
     return;
   }
 
-  // 1) Stream & parse chunk
-  const chunkBlob = blob.getContainerClient(CACHE_CONTAINER).getBlobClient(chunkBlobPath);
-  if (!(await chunkBlob.exists())) throw new Error(`Chunk not found: ${chunkBlobPath}`);
-  const stream = (await chunkBlob.download()).readableStreamBody;
-  const readline = require('readline');
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-
-  const headerOut = ['Company Name', 'Domain', 'Match', 'Evidence', 'Confidence'];
-  const outName = `${jobId}.csv`;
-  if (chunkIndex === 0) {
-    await appendCsvLine(OUT_CONTAINER, outName, toCsvRow(headerOut));
+  // Ensure chunk exists
+  const chunkBlob = cacheC.getBlobClient(chunkBlobPath);
+  if (!(await chunkBlob.exists())) {
+    // Count as error but keep progress moving
+    const now = new Date().toISOString();
+    const cur = (await readJson(STATUS_CONTAINER, statusName)) || {};
+    await writeJson(STATUS_CONTAINER, statusName, {
+      ...cur,
+      state: (cur.completedChunks + 1 >= totalChunks) ? 'done' : 'running',
+      errors: (cur.errors || 0) + 1,
+      completedChunks: Math.min((cur.completedChunks || 0) + 1, totalChunks),
+      totalChunks,
+      outputBlob: `${OUT_CONTAINER}/${outName}`,
+      updatedAt: now,
+      finishedAt: (cur.completedChunks + 1 >= totalChunks) ? now : undefined
+    });
+    throw new Error(`Chunk not found: ${chunkBlobPath}`);
   }
 
+  // Stream the chunk
+  const resp = await chunkBlob.download();
+  const rl = readline.createInterface({ input: resp.readableStreamBody, crlfDelay: Infinity });
+
+  // Ensure output blob + header exists
+  const outAppend = await ensureAppendBlobWithHeader(OUT_CONTAINER, outName, OUTPUT_HEADER);
+
+  // Iterate lines
   let rowIndex = -1;
   let processedSinceCheck = 0;
 
   for await (const line of rl) {
     rowIndex++;
-    if (rowIndex === 0) continue; // skip chunk header
-    if (!line.trim()) continue;
+    if (rowIndex === 0) continue;           // skip header in chunk
+    if (!line || !line.trim()) continue;
 
-    // Mid-loop cancel check (cheap): every ~200 rows
+    // Periodic cancel check
     if (++processedSinceCheck >= 200) {
       processedSinceCheck = 0;
       if (await isCancelled()) {
         const now = new Date().toISOString();
-        const s = (await readJson(STATUS_CONTAINER, statusName)) || {};
-        await writeJson(STATUS_CONTAINER, statusName, { ...s, state: 'cancelled', updatedAt: now, cancelledAt: now });
+        const cur = (await readJson(STATUS_CONTAINER, statusName)) || {};
+        await writeJson(STATUS_CONTAINER, statusName, {
+          ...cur,
+          state: 'cancelled',
+          updatedAt: now,
+          cancelledAt: now
+        });
+        log(`job ${jobId} chunk ${chunkIndex}: cancelled during processing`);
         return;
       }
     }
 
-    const cols = line.split(',');
-    const name = (cols[0] || '').trim();
-    const domain = (cols[1] || '').trim();
+    // Parse columns (the chunker should avoid embedded newlines; commas in quotes are handled)
+    const cols = splitCsvLine(line);
+    const name    = (cols[0] || '').trim();
+    const domain  = (cols[1] || '').trim();
 
-    // Placeholder matcher (replace later)
+    // TODO: replace with your real matcher
     const match = false;
     const evidence = '';
     const confidence = 0;
 
-    await appendCsvLine(OUT_CONTAINER, outName, toCsvRow([name, domain, match ? 'TRUE' : 'FALSE', evidence, confidence]));
+    const row = [name, domain, match ? 'TRUE' : 'FALSE', evidence, confidence];
+    const text = toCsvRow(row) + '\r\n';
+    await outAppend.appendBlock(Buffer.from(text, 'utf8'), Buffer.byteLength(text));
   }
 
-  // 3) Update status (running/done)
+  // Update status
   const now = new Date().toISOString();
   const fresh = (await readJson(STATUS_CONTAINER, statusName)) || {};
-  if (fresh.state === 'cancelled') return; // another worker cancelled
-
   const completed = Math.min((fresh.completedChunks || 0) + 1, totalChunks);
-  const nextState = (completed >= totalChunks) ? 'done' : 'running';
+  const done = completed >= totalChunks;
   const updated = {
     ...fresh,
-    state: nextState,
+    state: done ? 'done' : 'running',
     completedChunks: completed,
     totalChunks,
     outputBlob: `${OUT_CONTAINER}/${outName}`,
     updatedAt: now,
-    finishedAt: nextState === 'done' ? now : undefined
+    finishedAt: done ? now : undefined
   };
   await writeJson(STATUS_CONTAINER, statusName, updated);
+  log(`job ${jobId} chunk ${chunkIndex}: completed ${completed}/${totalChunks}`);
 }
 
-// 2) Stream & parse chunk
-const chunkBlob = blob.getContainerClient(CACHE_CONTAINER).getBlobClient(chunkBlobPath);
-if (!(await chunkBlob.exists())) {
-  throw new Error(`Chunk not found: ${chunkBlobPath}`);
-}
-const stream = (await chunkBlob.download()).readableStreamBody;
-
-// The row format we expect was written by the /start chunker: CSV with header.
-// We'll implement the scan inline here to avoid importing server-only deps.
-// If you already have a "scanOneCompany" function, you can factor it out and require it here.
-const readline = require('readline');
-const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-
-let header = null;
-const headerOut = ['Company Name', 'Domain', 'Match', 'Evidence', 'Confidence'];
-// If this is the first chunk, create the output and write header.
-const outName = `${jobId}.csv`;
-const outClient = blob.getContainerClient(OUT_CONTAINER);
-if (chunkIndex === 0) {
-  await appendCsvLine(OUT_CONTAINER, outName, toCsvRow(headerOut));
-}
-
-let rowIndex = -1;
-for await (const line of rl) {
-  rowIndex++;
-  if (rowIndex === 0) { header = line.split(','); continue; } // skip header from chunk
-  if (!line.trim()) continue;
-  // naive CSV split for the common case (the chunker avoids embedded newlines)
-  const cols = line.split(',');
-  const name = (cols[0] || '').trim();
-  const domain = (cols[1] || '').trim();
-
-  // Very simple placeholder matcher; replace with your real one when ready
-  const match = false;
-  const evidence = '';
-  const confidence = 0;
-
-  const outRow = [name, domain, match ? 'TRUE' : 'FALSE', evidence, confidence];
-  await appendCsvLine(OUT_CONTAINER, outName, toCsvRow(outRow));
-}
-
-// 3) Update status
-const now = new Date().toISOString();
-const fresh = (await readJson(STATUS_CONTAINER, statusName)) || {};
-const completed = Math.min((fresh.completedChunks || 0) + 1, totalChunks);
-const nextState = (completed >= totalChunks) ? 'done' : 'running';
-const updated = {
-  ...fresh,
-  state: nextState,
-  completedChunks: completed,
-  totalChunks,
-  outputBlob: `${OUT_CONTAINER}/${outName}`,
-  updatedAt: now,
-  finishedAt: nextState === 'done' ? now : undefined
-};
-await writeJson(STATUS_CONTAINER, statusName, updated);
-
+// ---- Azure Functions entrypoint ----------------------------------------------
 module.exports = async function (context, queueItem) {
-  const log = context.log;
   try {
-    const msg = (typeof queueItem === 'string') ? JSON.parse(queueItem) : queueItem;
-    if (!msg || !msg.jobId || typeof msg.chunkIndex !== 'number' || !msg.chunkBlobPath || !msg.totalChunks) {
-      throw new Error('Invalid queue message shape');
+    const msg = (typeof queueItem === 'string')
+      ? JSON.parse(queueItem)
+      : (Buffer.isBuffer(queueItem) ? JSON.parse(queueItem.toString('utf8')) : queueItem);
+
+    // Basic validation
+    if (!msg || !msg.jobId || typeof msg.chunkIndex !== 'number' || !msg.chunkBlobPath || typeof msg.totalChunks !== 'number') {
+      throw new Error('Invalid queue message shape. Expect { jobId, chunkIndex:number, chunkBlobPath, totalChunks:number }');
     }
-    await processChunk(msg, log);
+
+    await processChunk(msg, context.log);
   } catch (err) {
-    context.log.error('Worker error', err && err.stack || err);
-    throw err; // let Azure Functions handle retry for transient errors
+    context.log.error('ch-strategic-worker error:', err?.message || err, err?.stack);
+    // Re-throw so Functions can retry and/or send to poison queue
+    throw err;
   }
 };
