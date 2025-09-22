@@ -79,6 +79,28 @@ const app = express();
 const router = express.Router();
 app.disable('x-powered-by');
 app.set('trust proxy', true);
+// EARLY healthz: short-circuit before any body parsers/streams
+app.get(['/api/ch-strategic/healthz', '/ch-strategic/healthz', '/healthz'], (req, res) => {
+  // Try to keep the same correlation id if your normalizer ran, otherwise synthesize one
+  const cid = req?.correlationId || (typeof uuid === 'function' ? uuid() : undefined);
+  res
+    .status(200)
+    .set({
+      ...CORS,
+      'Content-Type': 'application/json; charset=utf-8',
+      ...(cid ? { 'X-Correlation-Id': cid } : {})
+    })
+    .end(JSON.stringify({
+      ok: true,
+      name: 'ch-strategic',
+      version: process.env.CH_STRATEGIC_VERSION || 'dev',
+      node: process.version,
+      storageConfigured: !!process.env.AzureWebJobsStorage,
+      time: new Date().toISOString(),
+      cid
+    }));
+});
+
 app.use((req, res, next) => {
   // Correlation ID passthrough or generate a new one
   const hdr = req.headers['x-correlation-id'];
