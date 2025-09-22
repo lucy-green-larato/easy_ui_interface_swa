@@ -10,12 +10,12 @@ const { webcrypto } = require('crypto');
 const _crypto = globalThis.crypto ?? webcrypto;
 
 function newCorrelationId() {
-  return [...crypto.getRandomValues(new Uint8Array(16))]
+  return [..._crypto.getRandomValues(new Uint8Array(16))]
     .map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
 // Fall back if crypto.randomUUID not available in this worker
-const uuid = () => (globalThis.crypto?.randomUUID?.() ?? newCorrelationId());
+const uuid = () => (_crypto?.randomUUID?.() ?? newCorrelationId());
 
 function error(res, code, message, details, cid) {
   const payload = { code, message, correlationId: cid || uuid() };
