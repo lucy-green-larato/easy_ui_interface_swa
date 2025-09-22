@@ -62,8 +62,8 @@
           <legend id="legend-companies">2. Companies</legend>
           <div class="grid-2">
             <div class="field">
-              <label for="file">Upload CSV <span aria-hidden="true" class="req">*</span></label>
-              <input id="file" name="file" type="file" accept=".csv,text/csv" required aria-describedby="csv_help csv_error" hidden>
+              <label for="csv_file">Upload CSV <span aria-hidden="true" class="req">*</span></label>
+              <input id="csv_file" name="file" type="file" accept=".csv,text/csv" required aria-describedby="csv_help csv_error" hidden>
               <div class="row">
                 <button id="pick-file" class="btn inline" type="button" aria-describedby="csv_help">Choose CSV…</button>
                 <span id="chosen-file" class="muted" aria-live="polite"></span>
@@ -202,6 +202,7 @@
     </form>
   </dialog>
 
+  <script type="module" src="/src/js/ch-strategic-picker.js?v=2025-08-24-1"></script>
   <script type="module" src="/src/js/ch-strategic.js?v=2025-08-24-1"></script>
 </body>
 </html>
