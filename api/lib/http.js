@@ -6,6 +6,9 @@ const cors = {
   'Access-Control-Allow-Headers': 'authorization, content-type, x-ms-client-principal'
 };
 
+const { webcrypto } = require('crypto');
+const _crypto = globalThis.crypto ?? webcrypto;
+
 function newCorrelationId() {
   return [...crypto.getRandomValues(new Uint8Array(16))]
     .map(b => b.toString(16).padStart(2,'0')).join('');
