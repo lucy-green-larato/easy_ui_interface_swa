@@ -7,14 +7,10 @@ const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 
 const chStrategic = require('../generate/kinds/ch-strategic');
-const { error } = null;
+const { error, ok, uuid } = require('../lib/http');
 
 const app = express();
 app.disable('x-powered-by');
-function sendError(res, status, msg, cid) {
-  return res.status(status).json({ code: status, message: msg, correlationId: cid });
-}
-
 
 // ---------- Correlation ID on every request ----------
 app.use((req, res, next) => {
