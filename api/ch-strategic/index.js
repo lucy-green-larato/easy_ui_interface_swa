@@ -77,6 +77,10 @@ function err(res, e, code = 500, cid) {
 // ----------------------------------------------------------------------------
 const app = express();
 const router = express.Router();
+router.use((req, _res, next) => {
+  console.log('→ ROUTER', req.method, req.url);
+  next();
+});
 app.disable('x-powered-by');
 app.set('trust proxy', true);
 // EARLY healthz: short-circuit before any body parsers/streams
@@ -118,12 +122,25 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use((req, _res, next) => {
+  console.log('→ APP', req.method, req.originalUrl, '=>', req.url);
+  next();
+});
+
 app.use((req, res, next) => { if (preflight(req, res)) return; next(); });
 app.use((req, res, next) => { Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v)); next(); });
 
-app.use(express.json({ limit: process.env.CH_STRATEGIC_JSON_LIMIT || '2mb' }));
-app.use(express.urlencoded({ extended: true, limit: process.env.CH_STRATEGIC_URLENC_LIMIT || '64kb' }));
-
+{
+  const jsonParser = express.json({ limit: process.env.CH_STRATEGIC_JSON_LIMIT || '2mb' });
+  const urlencParser = express.urlencoded({ extended: true, limit: process.env.CH_STRATEGIC_URLENC_LIMIT || '64kb' });
+  app.use((req, res, next) => {
+    // If it's multipart, skip body parsers so Multer can own the stream
+    const ct = req.headers['content-type'] || '';
+    if (ct.startsWith('multipart/form-data')) return next();
+    // Otherwise apply JSON → urlencoded parsers
+    jsonParser(req, res, () => urlencParser(req, res, next));
+  });
+}
 
 
 // ----------------------------------------------------------------------------
