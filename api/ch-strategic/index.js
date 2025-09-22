@@ -49,8 +49,8 @@ const CORS = {
 
 function uuid() {
   return crypto.randomUUID ? crypto.randomUUID()
-    : ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
-        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+    : ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+      (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
 }
 
 function preflight(req, res) {
@@ -76,6 +76,7 @@ function err(res, e, code = 500, cid) {
 // Express app setup
 // ----------------------------------------------------------------------------
 const app = express();
+const router = express.Router();
 app.disable('x-powered-by');
 app.set('trust proxy', true);
 app.use((req, res, next) => {
@@ -265,9 +266,9 @@ async function summarizeCsv(buffer) {
         rows += 1;
         if (headers) headers.forEach(h => headerSeen.add(h));
         const nameIdx = colIndex('Company Name');
-        const numIdx  = colIndex('Company Number');
+        const numIdx = colIndex('Company Number');
         const hasName = nameIdx >= 0 && String(rec[nameIdx] ?? '').trim().length > 0;
-        const hasNum  = numIdx  >= 0 && String(rec[numIdx]  ?? '').trim().length > 0;
+        const hasNum = numIdx >= 0 && String(rec[numIdx] ?? '').trim().length > 0;
 
         if (hasName && hasNum) {
           matched += 1;
@@ -311,9 +312,9 @@ async function buildOutputCsv(buffer) {
       let rec;
       while ((rec = parser.read()) !== null) {
         const nameIdx = colIndex('Company Name');
-        const numIdx  = colIndex('Company Number');
+        const numIdx = colIndex('Company Number');
         const hasName = nameIdx >= 0 && String(rec[nameIdx] ?? '').trim().length > 0;
-        const hasNum  = numIdx  >= 0 && String(rec[numIdx]  ?? '').trim().length > 0;
+        const hasNum = numIdx >= 0 && String(rec[numIdx] ?? '').trim().length > 0;
         if (hasName && hasNum) {
           out.push(`${String(rec[numIdx]).trim()},${csvEscape(String(rec[nameIdx]).trim())}`);
         }
@@ -342,7 +343,7 @@ function csvEscape(s) {
 // ----------------------------------------------------------------------------
 // Health
 // ----------------------------------------------------------------------------
-app.get('/healthz', async (req, res) => {
+router.get('/healthz', async (req, res) => {
   const meta = {
     ok: true,
     name: 'ch-strategic',
@@ -358,19 +359,16 @@ app.get('/healthz', async (req, res) => {
   return ok(res, meta, 200, req.correlationId);
 });
 
-// ----------------------------------------------------------------------------
 // Small run (multipart)
-// ----------------------------------------------------------------------------
-app.post('/', upload.single('csv_file'), async (req, res) => {
+router.post('/', upload.single('csv_file'), async (req, res) => {
   try {
     if (!req.file?.buffer) return err(res, 'Missing file', 400, req.correlationId);
     const evidenceTag = (req.body?.evidenceTag || '').trim();
     if (evidenceTag && !/^[A-Za-z0-9 _-]{1,50}$/.test(evidenceTag)) {
       return err(res, 'Invalid evidenceTag', 400, req.correlationId);
     }
-
     const summary = await summarizeCsv(req.file.buffer);
-    const result = {
+    return ok(res, {
       ok: true,
       correlationId: req.correlationId,
       evidenceTag: evidenceTag || null,
@@ -380,17 +378,14 @@ app.post('/', upload.single('csv_file'), async (req, res) => {
       errorsByReason: summary.errorsByReason,
       headers: summary.headers,
       itemsSample: summary.itemsSample
-    };
-    return ok(res, result, 200, req.correlationId);
+    }, 200, req.correlationId);
   } catch (e) {
     return err(res, e, 400, req.correlationId);
   }
 });
 
-// ----------------------------------------------------------------------------
-// "Large" run (processed synchronously here, with blob status/output)
-// ----------------------------------------------------------------------------
-app.post('/start', upload.single('csv_file'), async (req, res) => {
+// "Large" run (requires storage)
+router.post('/start', upload.single('csv_file'), async (req, res) => {
   try {
     if (!req.file?.buffer) return err(res, 'Missing file', 400, req.correlationId);
     if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
@@ -405,7 +400,6 @@ app.post('/start', upload.single('csv_file'), async (req, res) => {
     const statusName = `${jobId}.json`;
     const outName = `${jobId}.csv`;
 
-    // Initial status
     await putJson(CONTAINERS.status, statusName, {
       state: 'running',
       jobId,
@@ -418,14 +412,11 @@ app.post('/start', upload.single('csv_file'), async (req, res) => {
       downloadUrl: `/api/ch-strategic/download/${jobId}`
     });
 
-    // Analyze + build output
     const analysis = await summarizeCsv(req.file.buffer);
     const outputCsv = await buildOutputCsv(req.file.buffer);
 
-    // Save CSV
     await putCsv(CONTAINERS.out, outName, outputCsv);
 
-    // Final status
     await putJson(CONTAINERS.status, statusName, {
       state: 'done',
       jobId,
@@ -454,7 +445,7 @@ app.post('/start', upload.single('csv_file'), async (req, res) => {
 // ----------------------------------------------------------------------------
 // Status (reads from blob)
 // ----------------------------------------------------------------------------
-app.get('/status/:id', async (req, res) => {
+router.get('/status/:id', async (req, res) => {
   try {
     if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
     const id = String(req.params.id || '').trim();
@@ -467,10 +458,11 @@ app.get('/status/:id', async (req, res) => {
   }
 });
 
+
 // ----------------------------------------------------------------------------
 // Download (streams CSV)
 // ----------------------------------------------------------------------------
-app.get('/download/:id', async (req, res) => {
+router.get('/download/:id', async (req, res) => {
   try {
     if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
     const id = String(req.params.id || '').trim();
@@ -492,7 +484,7 @@ app.get('/download/:id', async (req, res) => {
 // ----------------------------------------------------------------------------
 // Feedback
 // ----------------------------------------------------------------------------
-app.post('/feedback', async (req, res) => {
+router.post('/feedback', async (req, res) => {
   try {
     if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
     await ensureContainers();
@@ -515,7 +507,8 @@ app.post('/feedback', async (req, res) => {
 // ----------------------------------------------------------------------------
 // Optional: PBI Export (role gated). Here we emit a trivial CSV from the payload.
 // ----------------------------------------------------------------------------
-app.post('/pbi-export', requireRole(process.env.CH_STRATEGIC_PBI_ROLE || 'pbi-exporter'),
+router.post('/pbi-export',
+  requireRole(process.env.CH_STRATEGIC_PBI_ROLE || 'pbi-exporter'),
   async (req, res) => {
     try {
       const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
@@ -528,7 +521,6 @@ app.post('/pbi-export', requireRole(process.env.CH_STRATEGIC_PBI_ROLE || 'pbi-ex
     }
   }
 );
-
 // CSV serializer for PBI export
 function toCsv(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return '';
@@ -541,11 +533,50 @@ function toCsv(rows) {
 // ----------------------------------------------------------------------------
 // 404 and error guard
 // ----------------------------------------------------------------------------
-app.all('*', (req, res) => err(res, `Not found: ${req.method} ${req.path}`, 404, req.correlationId));
+router.all('*', (req, res) => err(res, `Not found: ${req.method} ${req.path}`, 404, req.correlationId));
 
-app.use((e, req, res, _next) => {
-  const code = Number(e?.statusCode || e?.status || 500);
-  return err(res, e, code, req?.correlationId || undefined);
+// Global error handler (keep this as the LAST middleware before createHandler)
+app.use((err, req, res, next) => {
+  const cid = req?.correlationId || uuid();
+
+  // If headers already went out, delegate to Express default
+  if (res.headersSent) return next(err);
+
+  let code = Number(err?.statusCode || err?.status || 500);
+  let message = 'Internal error';
+
+  // Granular cases
+  if (err?.name === 'MulterError') {
+    // Common Multer codes: LIMIT_FILE_SIZE, LIMIT_UNEXPECTED_FILE, etc.
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      code = 413; // Payload Too Large
+      message = 'File too large';
+    } else {
+      code = 400;
+      message = `Upload error: ${err.message}`;
+    }
+  } else if (err?.type === 'entity.too.large') {
+    code = 413;
+    message = 'Payload too large';
+  } else if (err instanceof SyntaxError && 'body' in err) {
+    // body-parser JSON parse error
+    code = 400;
+    message = 'Invalid JSON';
+  } else if (err?.code === 'ERR_STREAM_PREMATURE_CLOSE') {
+    code = 400;
+    message = 'Request aborted';
+  } else if (err?.code === 'ENOENT') {
+    code = 404;
+    message = err.message || 'Not found';
+  } else if (typeof err?.message === 'string' && err.message.trim()) {
+    message = err.message.trim();
+  }
+
+  // Ensure headers + JSON body
+  res
+    .status(code)
+    .set({ ...CORS, 'Content-Type': 'application/json', 'X-Correlation-Id': cid })
+    .end(JSON.stringify({ ok: false, code, message }));
 });
 
 // ----------------------------------------------------------------------------
