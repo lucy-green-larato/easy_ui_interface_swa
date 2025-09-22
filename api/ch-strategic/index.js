@@ -32,8 +32,7 @@ const { createHandler } = require('azure-function-express');
 const express = require('express');
 const multer = require('multer');
 const { BlobServiceClient } = require('@azure/storage-blob');
-const _csvp = require('csv-parse');
-const parse = _csvp.parse ? _csvp.parse : _csvp;
+const { parse: parseSync } = require('csv-parse/sync');
 const { PassThrough } = require('stream');
 const { webcrypto } = require('crypto');
 
@@ -254,124 +253,87 @@ async function streamToBuffer(readable) {
 // ----------------------------------------------------------------------------
 const SMALL_MAX_ROWS = Number(process.env.CH_STRATEGIC_SMALL_MAX_ROWS || 5000);
 
-// Count rows and check headers quickly (streaming)
+// Count rows + expose headers (sync)
 async function analyzeCsv(buffer) {
-  return new Promise((resolve, reject) => {
-    let rows = 0;
-    let headers = null;
-    const errorsByReason = {};
-    const parser = parse({
-      columns: (hdr) => { headers = hdr.map(h => String(h || '').trim()); return true; },
-      bom: true,
-      relax_column_count: true,
-      skip_empty_lines: true,
-      trim: true
-    });
-    parser.on('readable', () => {
-      let record;
-      while ((record = parser.read()) !== null) {
-        rows += 1;
-      }
-    });
-    parser.on('error', reject);
-    parser.on('end', () => {
-      resolve({ rows, headers: headers || [], errorsByReason });
-    });
-    parser.write(buffer);
-    parser.end();
+  const records = parseSync(buffer, {
+    columns: true,
+    bom: true,
+    relax_column_count: true,
+    skip_empty_lines: true,
+    trim: true
   });
+  const headers = records.length
+    ? Object.keys(records[0]).map(h => String(h).trim())
+    : [];
+  return { rows: records.length, headers, errorsByReason: {} };
 }
 
-// Basic “business logic” for demo: a row is "matched" if it has both Company Number and Company Name
+// Produce summary for UI (sync)
 async function summarizeCsv(buffer) {
-  return new Promise((resolve, reject) => {
-    const headerSeen = new Set();
-    let headers = null;
-    let rows = 0, matched = 0, skipped = 0;
-    const errorsByReason = {};
-    const itemsSample = [];
-
-    const parser = parse({
-      columns: (hdr) => { headers = hdr.map(h => String(h || '').trim()); return true; },
-      bom: true,
-      relax_column_count: true,
-      skip_empty_lines: true,
-      trim: true
-    });
-
-    const colIndex = (name) => headers ? headers.findIndex(h => h.toLowerCase() === name.toLowerCase()) : -1;
-
-    parser.on('readable', () => {
-      let rec;
-      while ((rec = parser.read()) !== null) {
-        rows += 1;
-        if (headers) headers.forEach(h => headerSeen.add(h));
-        const nameIdx = colIndex('Company Name');
-        const numIdx = colIndex('Company Number');
-        const hasName = nameIdx >= 0 && String(rec[nameIdx] ?? '').trim().length > 0;
-        const hasNum = numIdx >= 0 && String(rec[numIdx] ?? '').trim().length > 0;
-
-        if (hasName && hasNum) {
-          matched += 1;
-          if (itemsSample.length < 10) {
-            itemsSample.push({ companyNumber: String(rec[numIdx]).trim(), companyName: String(rec[nameIdx]).trim() });
-          }
-        } else {
-          skipped += 1;
-          const reason = !hasNum && !hasName ? 'missing_both' : (!hasNum ? 'missing_company_number' : 'missing_company_name');
-          errorsByReason[reason] = (errorsByReason[reason] || 0) + 1;
-        }
-      }
-    });
-
-    parser.on('error', reject);
-    parser.on('end', () => {
-      resolve({
-        rows, matched, skipped, errorsByReason,
-        headers: [...headerSeen],
-        itemsSample
-      });
-    });
-
-    parser.write(buffer);
-    parser.end();
+  const records = parseSync(buffer, {
+    columns: true,
+    bom: true,
+    relax_column_count: true,
+    skip_empty_lines: true,
+    trim: true
   });
+
+  const headers = new Set();
+  let rows = 0, matched = 0, skipped = 0;
+  const errorsByReason = {};
+  const itemsSample = [];
+
+  for (const rec of records) {
+    rows += 1;
+    Object.keys(rec).forEach(h => headers.add(String(h)));
+
+    const name = String(rec['Company Name'] ?? '').trim();
+    const num = String(rec['Company Number'] ?? '').trim();
+
+    if (name && num) {
+      matched += 1;
+      if (itemsSample.length < 10) {
+        itemsSample.push({ companyNumber: num, companyName: name });
+      }
+    } else {
+      skipped += 1;
+      const reason = !name && !num
+        ? 'missing_both'
+        : (!num ? 'missing_company_number' : 'missing_company_name');
+      errorsByReason[reason] = (errorsByReason[reason] || 0) + 1;
+    }
+  }
+
+  return {
+    rows,
+    matched,
+    skipped,
+    errorsByReason,
+    headers: [...headers],
+    itemsSample
+  };
 }
 
-// Create an output CSV (for download) – here we output only matched rows with the 2 key columns
+// Build output CSV buffer of matched rows (sync)
 async function buildOutputCsv(buffer) {
-  return new Promise((resolve, reject) => {
-    let headers = null;
-    const out = [];
-    const parser = parse({
-      columns: (hdr) => { headers = hdr.map(h => String(h || '').trim()); return true; },
-      bom: true, relax_column_count: true, skip_empty_lines: true, trim: true
-    });
-    const colIndex = (name) => headers ? headers.findIndex(h => h.toLowerCase() === name.toLowerCase()) : -1;
-
-    parser.on('readable', () => {
-      let rec;
-      while ((rec = parser.read()) !== null) {
-        const nameIdx = colIndex('Company Name');
-        const numIdx = colIndex('Company Number');
-        const hasName = nameIdx >= 0 && String(rec[nameIdx] ?? '').trim().length > 0;
-        const hasNum = numIdx >= 0 && String(rec[numIdx] ?? '').trim().length > 0;
-        if (hasName && hasNum) {
-          out.push(`${String(rec[numIdx]).trim()},${csvEscape(String(rec[nameIdx]).trim())}`);
-        }
-      }
-    });
-
-    parser.on('error', reject);
-    parser.on('end', () => {
-      const header = 'Company Number,Company Name';
-      const body = out.join('\n');
-      resolve(Buffer.from(`${header}\n${body}\n`, 'utf8'));
-    });
-
-    parser.write(buffer);
-    parser.end();
+  const records = parseSync(buffer, {
+    columns: true,
+    bom: true,
+    relax_column_count: true,
+    skip_empty_lines: true,
+    trim: true
   });
+
+  const out = [];
+  for (const rec of records) {
+    const name = String(rec['Company Name'] ?? '').trim();
+    const num = String(rec['Company Number'] ?? '').trim();
+    if (name && num) out.push(`${num},${csvEscape(name)}`);
+  }
+
+  const header = 'Company Number,Company Name';
+  const body = out.join('\n');
+  return Buffer.from(`${header}\n${body}\n`, 'utf8');
 }
 
 function csvEscape(s) {
