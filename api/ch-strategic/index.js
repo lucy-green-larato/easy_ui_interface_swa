@@ -401,54 +401,24 @@ router.get('/healthz', async (req, res) => {
 });
 
 // Small run (multipart) — robust wrapper + guards + trace
+// TEMP: Small run (diagnostic only) — no CSV parsing, just echo upload info
 router.post(
   '/',
-  // Multer wrapper: surface errors to the global error handler
   (req, res, next) => {
-    upload.single('csv_file')(req, res, (err) => {
-      if (err) return next(err);
-      next();
-    });
+    upload.single('csv_file')(req, res, (err) => { if (err) return next(err); next(); });
   },
   async (req, res) => {
-    try {
-      // Must be multipart/form-data
-      const ct = req.headers['content-type'] || '';
-      if (!ct.startsWith('multipart/form-data')) {
-        return err(res, 'Expected multipart/form-data', 415, req.correlationId);
-      }
-
-      // File presence + non-empty buffer
-      if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
-        return err(res, 'Missing file', 400, req.correlationId);
-      }
-
-      // Optional tag validation
-      const evidenceTag = (req.body?.evidenceTag || '').trim();
-      if (evidenceTag && !/^[A-Za-z0-9 _-]{1,50}$/.test(evidenceTag)) {
-        return err(res, 'Invalid evidenceTag', 400, req.correlationId);
-      }
-
-      // Trace (temporary; remove when stable)
-      console.log('small-run:',
-        { cid: req.correlationId, bytes: req.file.buffer.length, filename: req.file.originalname });
-
-      // Summarise CSV and return JSON
-      const summary = await summarizeCsv(req.file.buffer);
-      return ok(res, {
-        ok: true,
-        correlationId: req.correlationId,
-        evidenceTag: evidenceTag || null,
-        rows: summary.rows,
-        matched: summary.matched,
-        skipped: summary.skipped,
-        errorsByReason: summary.errorsByReason,
-        headers: summary.headers,
-        itemsSample: summary.itemsSample
-      }, 200, req.correlationId);
-    } catch (e) {
-      return err(res, e, 400, req.correlationId);
-    }
+    const ct = req.headers['content-type'] || '';
+    const info = {
+      ok: true,
+      cid: req.correlationId,
+      contentType: ct,
+      hasFile: !!req.file,
+      filename: req.file?.originalname || null,
+      bytes: req.file?.buffer?.length ?? null,
+      evidenceTag: (req.body?.evidenceTag || '').trim() || null
+    };
+    return ok(res, info, 200, req.correlationId);
   }
 );
 
