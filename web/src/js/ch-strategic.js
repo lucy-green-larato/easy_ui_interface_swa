@@ -419,19 +419,24 @@
   // ---------- API (spec-compliant endpoints) ----------
   async function apiSmallRunMultipart({ file, evidenceTag }) {
     const fd = new FormData();
-    fd.append("file", file);
-    fd.append("evidenceTag", evidenceTag);
-    const res = await fetch("/api/ch-strategic", { method: "POST", body: fd });
-    return res;
+    fd.append("csv_file", file);                // <-- field name MUST be csv_file
+    if (evidenceTag) fd.append("evidenceTag", evidenceTag);
+    return fetch("/api/ch-strategic", { method: "POST", body: fd });
   }
 
   // Large run start: POST /api/ch-strategic/start
+  // === REPLACE in web/src/js/ch-strategic.js ===
   async function apiStartLargeRun({ file, evidenceTag }) {
     const fd = new FormData();
-    fd.append("file", file);
-    fd.append("evidenceTag", evidenceTag);
+    fd.append("csv_file", file);               // <-- must be csv_file
+    if (evidenceTag) fd.append("evidenceTag", evidenceTag);
+
     const res = await fetch("/api/ch-strategic/start", { method: "POST", body: fd });
-    if (!res.ok) throw new Error(`Start failed (${res.status})`);
+    if (!res.ok) {
+      let msg = '';
+      try { msg = await res.text(); } catch { }
+      throw new Error(`Start failed (${res.status})${msg ? `: ${msg}` : ''}`);
+    }
     return res.json(); // { jobId, statusUrl, downloadUrl }
   }
 
