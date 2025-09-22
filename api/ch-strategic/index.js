@@ -32,7 +32,8 @@ const { createHandler } = require('azure-function-express');
 const express = require('express');
 const multer = require('multer');
 const { BlobServiceClient } = require('@azure/storage-blob');
-const { parse } = require('csv-parse');
+const _csvp = require('csv-parse');
+const parse = _csvp.parse ? _csvp.parse : _csvp;
 const { PassThrough } = require('stream');
 const { webcrypto } = require('crypto');
 
@@ -399,88 +400,150 @@ router.get('/healthz', async (req, res) => {
   return ok(res, meta, 200, req.correlationId);
 });
 
-// Small run (multipart)
-router.post('/', upload.single('csv_file'), async (req, res) => {
-  try {
-    if (!req.file?.buffer) return err(res, 'Missing file', 400, req.correlationId);
-    const evidenceTag = (req.body?.evidenceTag || '').trim();
-    if (evidenceTag && !/^[A-Za-z0-9 _-]{1,50}$/.test(evidenceTag)) {
-      return err(res, 'Invalid evidenceTag', 400, req.correlationId);
-    }
-    const summary = await summarizeCsv(req.file.buffer);
-    return ok(res, {
-      ok: true,
-      correlationId: req.correlationId,
-      evidenceTag: evidenceTag || null,
-      rows: summary.rows,
-      matched: summary.matched,
-      skipped: summary.skipped,
-      errorsByReason: summary.errorsByReason,
-      headers: summary.headers,
-      itemsSample: summary.itemsSample
-    }, 200, req.correlationId);
-  } catch (e) {
-    return err(res, e, 400, req.correlationId);
-  }
-});
-
-// "Large" run (requires storage)
-router.post('/start', upload.single('csv_file'), async (req, res) => {
-  try {
-    if (!req.file?.buffer) return err(res, 'Missing file', 400, req.correlationId);
-    if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
-    await ensureContainers();
-
-    const evidenceTag = (req.body?.evidenceTag || '').trim();
-    if (evidenceTag && !/^[A-Za-z0-9 _-]{1,50}$/.test(evidenceTag)) {
-      return err(res, 'Invalid evidenceTag', 400, req.correlationId);
-    }
-
-    const jobId = uuid();
-    const statusName = `${jobId}.json`;
-    const outName = `${jobId}.csv`;
-
-    await putJson(CONTAINERS.status, statusName, {
-      state: 'running',
-      jobId,
-      startedAt: new Date().toISOString(),
-      evidenceTag: evidenceTag || null,
-      totalRows: null,
-      matched: 0,
-      skipped: 0,
-      errorsByReason: {},
-      downloadUrl: `/api/ch-strategic/download/${jobId}`
+// Small run (multipart) — robust wrapper + guards + trace
+router.post(
+  '/',
+  // Multer wrapper: surface errors to the global error handler
+  (req, res, next) => {
+    upload.single('csv_file')(req, res, (err) => {
+      if (err) return next(err);
+      next();
     });
+  },
+  async (req, res) => {
+    try {
+      // Must be multipart/form-data
+      const ct = req.headers['content-type'] || '';
+      if (!ct.startsWith('multipart/form-data')) {
+        return err(res, 'Expected multipart/form-data', 415, req.correlationId);
+      }
 
-    const analysis = await summarizeCsv(req.file.buffer);
-    const outputCsv = await buildOutputCsv(req.file.buffer);
+      // File presence + non-empty buffer
+      if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
+        return err(res, 'Missing file', 400, req.correlationId);
+      }
 
-    await putCsv(CONTAINERS.out, outName, outputCsv);
+      // Optional tag validation
+      const evidenceTag = (req.body?.evidenceTag || '').trim();
+      if (evidenceTag && !/^[A-Za-z0-9 _-]{1,50}$/.test(evidenceTag)) {
+        return err(res, 'Invalid evidenceTag', 400, req.correlationId);
+      }
 
-    await putJson(CONTAINERS.status, statusName, {
-      state: 'done',
-      jobId,
-      startedAt: undefined,
-      finishedAt: new Date().toISOString(),
-      evidenceTag: evidenceTag || null,
-      totalRows: analysis.rows,
-      matched: analysis.matched,
-      skipped: analysis.skipped,
-      errorsByReason: analysis.errorsByReason,
-      downloadUrl: `/api/ch-strategic/download/${jobId}`
-    });
+      // Trace (temporary; remove when stable)
+      console.log('small-run:',
+        { cid: req.correlationId, bytes: req.file.buffer.length, filename: req.file.originalname });
 
-    return ok(res, {
-      ok: true,
-      jobId,
-      statusUrl: `/api/ch-strategic/status/${jobId}`,
-      downloadUrl: `/api/ch-strategic/download/${jobId}`,
-      correlationId: req.correlationId
-    }, 200, req.correlationId);
-  } catch (e) {
-    return err(res, e, 400, req.correlationId);
+      // Summarise CSV and return JSON
+      const summary = await summarizeCsv(req.file.buffer);
+      return ok(res, {
+        ok: true,
+        correlationId: req.correlationId,
+        evidenceTag: evidenceTag || null,
+        rows: summary.rows,
+        matched: summary.matched,
+        skipped: summary.skipped,
+        errorsByReason: summary.errorsByReason,
+        headers: summary.headers,
+        itemsSample: summary.itemsSample
+      }, 200, req.correlationId);
+    } catch (e) {
+      return err(res, e, 400, req.correlationId);
+    }
   }
-});
+);
+
+
+// "Large" run — sync processing + blob status/output (requires storage)
+router.post(
+  '/start',
+  // Multer wrapper so upload errors hit the global error handler
+  (req, res, next) => {
+    upload.single('csv_file')(req, res, (err) => {
+      if (err) return next(err);
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      // Must be multipart/form-data
+      const ct = req.headers['content-type'] || '';
+      if (!ct.startsWith('multipart/form-data')) {
+        return err(res, 'Expected multipart/form-data', 415, req.correlationId);
+      }
+
+      // File presence + non-empty buffer
+      if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
+        return err(res, 'Missing file', 400, req.correlationId);
+      }
+
+      // Storage required for /start
+      if (!AZ_CONN) {
+        return err(res, 'Storage not configured', 500, req.correlationId);
+      }
+      await ensureContainers();
+
+      // Optional evidence tag
+      const evidenceTag = (req.body?.evidenceTag || '').trim();
+      if (evidenceTag && !/^[A-Za-z0-9 _-]{1,50}$/.test(evidenceTag)) {
+        return err(res, 'Invalid evidenceTag', 400, req.correlationId);
+      }
+
+      // Create job id + blob names
+      const jobId = uuid();
+      const statusName = `${jobId}.json`;
+      const outName = `${jobId}.csv`;
+
+      // Initial status
+      await putJson(CONTAINERS.status, statusName, {
+        state: 'running',
+        jobId,
+        startedAt: new Date().toISOString(),
+        evidenceTag: evidenceTag || null,
+        totalRows: null,
+        matched: 0,
+        skipped: 0,
+        errorsByReason: {},
+        downloadUrl: `/api/ch-strategic/download/${jobId}`
+      });
+
+      // Process CSV
+      console.log('start-run:', {
+        cid: req.correlationId,
+        bytes: req.file.buffer.length,
+        filename: req.file.originalname
+      });
+      const analysis = await summarizeCsv(req.file.buffer);
+      const outputCsv = await buildOutputCsv(req.file.buffer);
+
+      // Save CSV
+      await putCsv(CONTAINERS.out, outName, outputCsv);
+
+      // Final status
+      await putJson(CONTAINERS.status, statusName, {
+        state: 'done',
+        jobId,
+        finishedAt: new Date().toISOString(),
+        evidenceTag: evidenceTag || null,
+        totalRows: analysis.rows,
+        matched: analysis.matched,
+        skipped: analysis.skipped,
+        errorsByReason: analysis.errorsByReason,
+        downloadUrl: `/api/ch-strategic/download/${jobId}`
+      });
+
+      // Response with external URLs
+      return ok(res, {
+        ok: true,
+        jobId,
+        statusUrl: `/api/ch-strategic/status/${jobId}`,
+        downloadUrl: `/api/ch-strategic/download/${jobId}`,
+        correlationId: req.correlationId
+      }, 200, req.correlationId);
+    } catch (e) {
+      return err(res, e, 400, req.correlationId);
+    }
+  }
+);
 
 // ----------------------------------------------------------------------------
 // Status (reads from blob)
