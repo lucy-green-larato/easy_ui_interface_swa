@@ -440,6 +440,9 @@
     return res.json(); // { jobId, statusUrl, downloadUrl }
   }
 
+  document.getElementById('download-link').href = downloadUrl;
+
+
   // Status uses PATH PARAM with jobId (normalized to UI shape)
   async function apiPollStatus(jobId, { signal } = {}) {
     const s = await getJSON(`/api/ch-strategic/status/${encodeURIComponent(jobId)}`, { signal });
