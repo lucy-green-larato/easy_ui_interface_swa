@@ -67,6 +67,27 @@ function csvEscape(s) {
   return /["\n,\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
 }
 
+// --- Header normalisation + lookup ---
+function normHeader(s) {
+  return String(s || '')
+    .normalize('NFKC')               // unify Unicode forms
+    .replace(/^\uFEFF/, '')          // strip BOM if present
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');      // drop spaces, underscores, punctuation
+}
+
+function findHeader(headers, targetLabel) {
+  const want = normHeader(targetLabel);
+  return headers.find(h => normHeader(h) === want) || null;
+}
+
+function validateRequired(headers) {
+  const missing = [];
+  if (!findHeader(headers, 'Company Name')) missing.push('Company Name');
+  if (!findHeader(headers, 'Company Number')) missing.push('Company Number');
+  return missing;
+}
+
 function preflight(req) {
   return (req?.method || '').toUpperCase() === 'OPTIONS';
 }
@@ -128,16 +149,24 @@ async function summarizeCsv(buffer) {
     trim: true
   });
 
-  const headers = new Set();
+  // Collect headers as seen across records (handles empty files too)
+  const headersSet = new Set();
+  for (const r of recs) Object.keys(r).forEach(h => headersSet.add(String(h)));
+  const headers = Array.from(headersSet);
+
+  // Resolve actual column keys to read (robust match)
+  const nameKey = findHeader(headers, 'Company Name');
+  const numKey  = findHeader(headers, 'Company Number');
+
   let rows = 0, matched = 0, skipped = 0;
   const errorsByReason = {};
   const itemsSample = [];
 
   for (const r of recs) {
     rows += 1;
-    Object.keys(r).forEach(h => headers.add(String(h)));
-    const name = String(r['Company Name'] ?? '').trim();
-    const num = String(r['Company Number'] ?? '').trim();
+    const name = String(nameKey ? r[nameKey] : '').trim();
+    const num  = String(numKey  ? r[numKey]  : '').trim();
+
     if (name && num) {
       matched += 1;
       if (itemsSample.length < 10) itemsSample.push({ companyNumber: num, companyName: name });
@@ -148,8 +177,7 @@ async function summarizeCsv(buffer) {
       errorsByReason[reason] = (errorsByReason[reason] || 0) + 1;
     }
   }
-
-  return { rows, matched, skipped, errorsByReason, headers: [...headers], itemsSample };
+  return { rows, matched, skipped, errorsByReason, headers, itemsSample };
 }
 
 async function buildOutputCsv(buffer) {
