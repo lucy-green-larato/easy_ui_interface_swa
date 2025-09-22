@@ -1,3 +1,4 @@
+/** api/generate/kinds/ch-strategic.js Sept 22 2025 v1 */
 'use strict';
 
 const crypto = require('crypto');
@@ -5,7 +6,7 @@ const { BlobServiceClient } = require('@azure/storage-blob');
 const { QueueClient } = require('@azure/storage-queue');
 const parse = require('csv-parse');
 const express = require('express');
-const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+const { error, ok, uuid } = require('../../lib/http');
 function ok(res, payload, code = 200) { res.status(code).json(payload); }
 function error(res, status, message, data, cid) {
   const body = { code: status, message, correlationId: cid };
@@ -154,7 +155,7 @@ function createAzureClients() {
   if (!conn) throw new Error('AzureWebJobsStorage is not configured');
   return {
     blob: BlobServiceClient.fromConnectionString(conn),
-    queue: new QueueClient(conn, QUEUE_NAME)
+    queue: QueueClient.fromConnectionString(conn, QUEUE_NAME)
   };
 }
 
