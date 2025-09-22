@@ -845,6 +845,23 @@
     btnStart = el.analyze || btnStart;
   }
 
+  function bindPicker() {
+    const fileEl = document.getElementById('csv_file');
+    const btn = document.getElementById('pick-file');
+    if (!fileEl || !btn) return;
+    fileEl.disabled = false;
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        if (typeof fileEl.showPicker === 'function') fileEl.showPicker();
+        else fileEl.click();
+      } catch {
+        fileEl.click();
+      }
+    }, { passive: false });
+  }
+
   // ---------- Init ----------
   function init() {
     // status region accessibility
@@ -852,6 +869,7 @@
     loadCallType();
     updateAnalyzeState();
     wireForm();
+    bindPicker();
     wireRightRail();
     wirePbiDialog();
     wireHelp();
