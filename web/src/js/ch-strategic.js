@@ -1,6 +1,8 @@
 /* web/src/js/ch-strategic.js */
 /* eslint-disable no-console */
 (() => {
+  "use strict";
+
   // ---------- Utilities ----------
   const qs = (sel, root = document) => root.querySelector(sel);
   const byId = (id) => document.getElementById(id);
@@ -54,7 +56,7 @@
       } catch (err) {
         lastErr = err;
         if (i === retries) break;
-        await new Promise(r => setTimeout(r, 300 * Math.pow(2, i))); // 300ms, 600ms backoff
+        await sleep(300 * Math.pow(2, i)); // 300ms, 600ms backoff
       }
     }
     throw lastErr || new Error('Network error');
@@ -86,6 +88,7 @@
   };
 
   // --- Client-side limits (keep in sync with server) ---------------------------
+  // Server validates: length <= 50 and /^[A-Za-z0-9 _-]*$/
   const CLIENT_LIMITS = {
     MAX_BYTES: 20 * 1024 * 1024,          // 20 MB (match server MAX_SIZE)
     EVIDENCE_MAX: 50,                      // max chars
@@ -131,7 +134,6 @@
     callType: "Direct",
     csvFile: /** @type {File|null} */ (null),  // Source CSV file (upload or synthesized from PBI)
     evidence: "",
-    // Large run state
     largeRun: null, // { jobId, polling, pollAbort?, downloadShown }
   };
 
@@ -454,7 +456,7 @@
 
   // PBI export returns CSV (server handles MSAL + allowlist); we parse client-side
   async function apiPbiExport(payload) {
-    const res = await fetch("/api/pbi-export", {
+    const res = await fetch("/api/ch-strategic/pbi-export", { // <-- fixed path
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload || {}),
@@ -479,7 +481,7 @@
     }
     if (!res.ok) throw new Error(`Request failed (${res.status})`);
 
-    // Expect a compact inline result. We’ll accept either a CSV body or JSON with matches.
+    // Expect a compact inline result. Accept either a CSV body or JSON with matches.
     const contentType = res.headers.get("content-type") || "";
     if (contentType.includes("text/csv")) {
       // Server returned final CSV directly
@@ -534,14 +536,14 @@
     if (!jobId) throw new Error("No jobId returned.");
 
     // Initialize run state + announce start
-    state.largeRun = { jobId, polling: true, downloadShown: false };
+    state.largeRun = { jobId, polling: true, pollAbort: null, downloadShown: false };
     setProgress(5);
     renderStatus(`Background job started: ${jobId.slice(0, 8)}…`, "info");
     // Populate the Job ID badge in the retention note
     const badge = document.getElementById('job-id-badge');
     if (badge) badge.textContent = jobId;
 
-    // 2b) accessibility: mark busy and focus status region
+    // accessibility: mark busy and focus status region
     {
       const statusEl = document.getElementById('status');
       if (statusEl) { statusEl.setAttribute('aria-busy', 'true'); statusEl.focus?.(); }
@@ -653,6 +655,8 @@
         }
 
         const wasCancelled = status?.state === 'cancelled';
+        const hadIssues = Number(status?.skipped || 0) > 0 || (Array.isArray(status?.errors) && status.errors.length > 0);
+
         renderStatus(
           wasCancelled
             ? "Job was cancelled."
@@ -660,21 +664,16 @@
               ? "Job completed. You can download results."
               : "Job completed. No matches were found."),
           "info",
-          { openSkipped: Number(status?.skipped) > 0 }
+          { openSkipped: hadIssues }
         );
+
         const matched = Number(status?.matched || 0);
-        const hadIssues = Number(status?.skipped || 0) > 0 || Array.isArray(status?.errors) && status.errors.length > 0;
         const showDetails = wasCancelled || matched === 0 || hadIssues;
-        showFeedbackCard(showDetails);   // ← add this line
+        showFeedbackCard(showDetails);
 
-        setStartsDisabled(false);
-        break;
-
-        // 3) accessibility: mark not busy on completion/cancel
-        {
-          const statusEl = document.getElementById('status');
-          if (statusEl) statusEl.setAttribute('aria-busy', 'false');
-        }
+        // accessibility: mark not busy on completion
+        const statusEl2 = document.getElementById('status');
+        if (statusEl2) statusEl2.setAttribute('aria-busy', 'false');
 
         setStartsDisabled(false);
         break;
@@ -683,13 +682,13 @@
       // Backoff: 0–20s @750ms, 20–60s @1500ms, 60s+ @3000ms
       const ageSec = (Date.now() - startedAt) / 1000;
       const delay = ageSec < 20 ? 750 : ageSec < 60 ? 1500 : 3000;
-      await new Promise((r) => setTimeout(r, delay));
+      await sleep(delay);
     }
 
     // ensure any in-flight fetch is cancelled when loop exits
     pollAbort.abort();
 
-    // 3) safety: also mark not busy here in case we exited outside the completion block
+    // safety: also mark not busy here in case we exited outside the completion block
     {
       const statusEl = document.getElementById('status');
       if (statusEl) statusEl.setAttribute('aria-busy', 'false');
@@ -745,9 +744,9 @@
     el.helpBtn?.addEventListener("click", () => {
       const msg = [
         "This tool scans only the Strategic Report section for your evidence tag.",
-        "• Evidence tag is case-insensitive and tolerant of common OCR typos/synonyms.",
+        "• Evidence tag is case-insensitive and limited to letters, digits, space, underscore, hyphen (max 50 chars).",
         "• CSV must include Company Name and Company Number.",
-        "• Large jobs run as a background orchestration; Download CSV becomes available once the first row is written."
+        "• Large jobs run as a background orchestration; Download becomes available once the first row is written."
       ].join("\n");
       alert(msg);
     });
@@ -767,85 +766,85 @@
   });
 
   function wireForm() {
-  // 1) Call type + remember
-  el.callType?.addEventListener("change", () => {
-    state.callType = el.callType.value;
-    text(el.mapLabel, state.callType);
-    persistCallType();
-  });
-  el.remember?.addEventListener("change", persistCallType);
+    // 1) Call type + remember
+    el.callType?.addEventListener("change", () => {
+      state.callType = el.callType.value;
+      text(el.mapLabel, state.callType);
+      persistCallType();
+    });
+    el.remember?.addEventListener("change", persistCallType);
 
-  // 2) Evidence + CSV inputs
-  el.evidence?.addEventListener("input", () => {
-    state.evidence = (el.evidence.value || "").trim();
-    updateAnalyzeState();
-  });
-  el.csv?.addEventListener("change", () => {
-    state.csvFile = el.csv.files?.[0] || null;
-    updateAnalyzeState();
-  });
+    // 2) Evidence + CSV inputs
+    el.evidence?.addEventListener("input", () => {
+      state.evidence = (el.evidence.value || "").trim();
+      updateAnalyzeState();
+    });
+    el.csv?.addEventListener("change", () => {
+      state.csvFile = el.csv.files?.[0] || null;
+      updateAnalyzeState();
+    });
 
-  // 3) Analyze (small run, with server-side upgrade if >50)
-  el.analyze?.addEventListener("click", async (evt) => {
-    evt.preventDefault();
-    clearResults();
+    // 3) Analyze (small run, with server-side upgrade if >50)
+    el.analyze?.addEventListener("click", async (evt) => {
+      evt.preventDefault();
+      clearResults();
 
-    const { ok } = validateClientInputs(state.csvFile, state.evidence);
-    if (!ok) return;
+      const { ok } = validateClientInputs(state.csvFile, state.evidence);
+      if (!ok) return;
 
-    setStartsDisabled(true);
-    try {
-      const res = await handleSmallOrUpgrade({ file: state.csvFile, evidence: state.evidence });
-      if (res?.upgraded) {
-        await handleLargeRun({ file: state.csvFile, evidence: state.evidence });
+      setStartsDisabled(true);
+      try {
+        const res = await handleSmallOrUpgrade({ file: state.csvFile, evidence: state.evidence });
+        if (res?.upgraded) {
+          await handleLargeRun({ file: state.csvFile, evidence: state.evidence });
+        }
+      } catch (err) {
+        renderStatus("Request failed.", "error");
+        appendResultItem(`Error: ${err.message || err}`);
+      } finally {
+        setStartsDisabled(false);
       }
-    } catch (err) {
-      renderStatus("Request failed.", "error");
-      appendResultItem(`Error: ${err.message || err}`);
-    } finally {
+    });
+
+    // 4) Start large run explicitly
+    el.startLarge?.addEventListener("click", async (evt) => {
+      evt.preventDefault();
+      clearResults();
+
+      const { ok } = validateClientInputs(state.csvFile, state.evidence);
+      if (!ok) return;
+
+      setStartsDisabled(true);
+      try {
+        await handleLargeRun({ file: state.csvFile, evidence: state.evidence });
+      } catch (err) {
+        renderStatus("Start failed.", "error");
+        appendResultItem(`Error: ${err.message || err}`);
+      } finally {
+        setStartsDisabled(false);
+      }
+    });
+
+    // 5) Reset
+    el.reset?.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      el.form?.reset?.();
+      state.csvFile = null;
+      state.evidence = "";
+      clearResults();
+      updateAnalyzeState();
       setStartsDisabled(false);
-    }
-  });
+    });
 
-  // 4) Start large run explicitly
-  el.startLarge?.addEventListener("click", async (evt) => {
-    evt.preventDefault();
-    clearResults();
+    // Optional: Enter key on evidence triggers Analyze
+    el.evidence?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !el.analyze?.disabled) el.analyze.click();
+    });
 
-    const { ok } = validateClientInputs(state.csvFile, state.evidence);
-    if (!ok) return;
+    // Keep our primary start alias synced
+    btnStart = el.analyze || btnStart;
+  }
 
-    setStartsDisabled(true);
-    try {
-      await handleLargeRun({ file: state.csvFile, evidence: state.evidence });
-    } catch (err) {
-      renderStatus("Start failed.", "error");
-      appendResultItem(`Error: ${err.message || err}`);
-    } finally {
-      setStartsDisabled(false);
-    }
-  });
-
-  // 5) Reset
-  el.reset?.addEventListener("click", (evt) => {
-    evt.preventDefault();
-    el.form?.reset?.();
-    state.csvFile = null;
-    state.evidence = "";
-    clearResults();
-    updateAnalyzeState();
-    setStartsDisabled(false);
-  });
-
-  // Optional: Enter key on evidence triggers Analyze
-  el.evidence?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !el.analyze?.disabled) el.analyze.click();
-  });
-
-  // Keep our primary start alias synced
-  btnStart = el.analyze || btnStart;
-}
-  
   // ---------- Init ----------
   function init() {
     // status region accessibility
