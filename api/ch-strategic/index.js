@@ -140,21 +140,54 @@ async function getCsvStream(containerName, blobName) {
 }
 
 // ------------------------------- CSV helpers (sync; no Node streams) -------------------------------
+// Try multiple CSV dialects and pick the best (prefer the one that contains required headers)
+function parseCsvFlexible(buffer) {
+  const delims = [',', ';', '\t', '|'];
+  let best = null;
+
+  for (const d of delims) {
+    try {
+      const recs = parseSync(buffer, {
+        columns: true,
+        bom: true,
+        relax_column_count: true,
+        skip_empty_lines: true,
+        trim: true,
+        delimiter: d
+      });
+
+      const headersSet = new Set();
+      for (const r of recs) Object.keys(r).forEach(h => headersSet.add(String(h)));
+      const headers = Array.from(headersSet);
+
+      // scoring: prefer dialects that contain both required columns (normalized), then more columns
+      const hasBoth =
+        headers.some(h => normHeader(h) === normHeader('Company Name')) &&
+        headers.some(h => normHeader(h) === normHeader('Company Number'));
+
+      const score = (hasBoth ? 1000 : 0) + headers.length; // tie-breaker: wider header set wins
+
+      if (!best || score > best.score) {
+        best = { recs, headers, delimiter: d, score };
+      }
+    } catch { /* ignore this delimiter */ }
+  }
+
+  if (!best) {
+    // fallback to default comma
+    const recs = parseSync(buffer, {
+      columns: true, bom: true, relax_column_count: true, skip_empty_lines: true, trim: true
+    });
+    const headers = Array.from(new Set(recs.flatMap(r => Object.keys(r).map(String))));
+    return { recs, headers, delimiter: ',' };
+  }
+  return best;
+}
+
 async function summarizeCsv(buffer) {
-  const recs = parseSync(buffer, {
-    columns: true,
-    bom: true,
-    relax_column_count: true,
-    skip_empty_lines: true,
-    trim: true
-  });
+  const { recs, headers } = parseCsvFlexible(buffer);
 
-  // Collect headers as seen across records (handles empty files too)
-  const headersSet = new Set();
-  for (const r of recs) Object.keys(r).forEach(h => headersSet.add(String(h)));
-  const headers = Array.from(headersSet);
-
-  // Resolve actual column keys to read (robust match)
+  // Resolve actual column keys robustly
   const nameKey = findHeader(headers, 'Company Name');
   const numKey = findHeader(headers, 'Company Number');
 
@@ -177,22 +210,12 @@ async function summarizeCsv(buffer) {
       errorsByReason[reason] = (errorsByReason[reason] || 0) + 1;
     }
   }
+
   return { rows, matched, skipped, errorsByReason, headers, itemsSample };
 }
 
 async function buildOutputCsv(buffer) {
-  const recs = parseSync(buffer, {
-    columns: true,
-    bom: true,
-    relax_column_count: true,
-    skip_empty_lines: true,
-    trim: true
-  });
-
-  // Collect & resolve keys
-  const headersSet = new Set();
-  for (const r of recs) Object.keys(r).forEach(h => headersSet.add(String(h)));
-  const headers = Array.from(headersSet);
+  const { recs, headers } = parseCsvFlexible(buffer);
   const nameKey = findHeader(headers, 'Company Name');
   const numKey = findHeader(headers, 'Company Number');
 
@@ -202,11 +225,9 @@ async function buildOutputCsv(buffer) {
     const num = String(numKey ? r[numKey] : '').trim();
     if (name && num) out.push(`${num},${csvEscape(name)}`);
   }
-
   return Buffer.from(`Company Number,Company Name\n${out.join('\n')}\n`, 'utf8');
 }
 
-// ------------------------------- Multipart (Busboy v1.6.0) -------------------------------
 // ------------------------------- Multipart (Busboy v1.6.0, Azure Functions classic req) -------------------------------
 async function readMultipart(req) {
   // Azure Functions (v4, classic programming model) gives:
