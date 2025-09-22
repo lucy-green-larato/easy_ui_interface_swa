@@ -9,6 +9,7 @@ const cors = {
 
 const { webcrypto } = require('crypto');
 const _crypto = globalThis.crypto ?? webcrypto;
+const { preflight, uuid, ok, error, cors } = require('../lib/http');
 
 function preflight(req, res) {
   if (req.method !== 'OPTIONS') return false;
@@ -49,5 +50,12 @@ function ok(res, code, body, cid) {
   if (cid) headers['X-Correlation-Id'] = cid;
   res.status(code).set(headers).end(JSON.stringify(body ?? {}));
 }
+
+app.use((req, res, next) => {
+  if (preflight && preflight(req, res)) return;
+  req.correlationId = req.headers['x-correlation-id'] || uuid();
+  res.set('X-Correlation-Id', req.correlationId);
+  next();
+});
 
 module.exports = { cors, ok, error, uuid };
