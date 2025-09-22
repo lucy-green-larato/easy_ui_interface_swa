@@ -1,65 +1,37 @@
 {
   "routes": [
-    {
-      "route": "/",
-      "rewrite": "/index.html",
-      "allowedRoles": ["authenticated"],
-      "headers": { "Cache-Control": "no-store" }
-    },
-    {
-      "route": "/index.html",
-      "allowedRoles": ["authenticated"],
-      "headers": { "Cache-Control": "no-store" }
-    },
-    {
-      "route": "/.auth/*",
-      "headers": { "Cache-Control": "no-store" }
-    },
-    { "route": "/reports",   "rewrite": "/reports.html" },
+    { "route": "/", "rewrite": "/index.html", "allowedRoles": ["authenticated"], "headers": { "Cache-Control": "no-store" } },
+    { "route": "/index.html", "allowedRoles": ["authenticated"], "headers": { "Cache-Control": "no-store" } },
+
+    { "route": "/.auth/*", "headers": { "Cache-Control": "no-store" } },
+
+    { "route": "/reports", "rewrite": "/reports.html" },
     { "route": "/reports/*", "rewrite": "/reports.html" },
-    { "route": "/engagement",   "rewrite": "/engagement/index.html" },
+
+    { "route": "/engagement", "rewrite": "/engagement/index.html" },
     { "route": "/engagement/*", "rewrite": "/engagement/index.html" },
-    { "route": "/first-call-script-v2",   "redirect": "/engagement", "statusCode": 301 },
+    { "route": "/first-call-script-v2", "redirect": "/engagement", "statusCode": 301 },
     { "route": "/first-call-script-v2/*", "redirect": "/engagement", "statusCode": 301 },
-    { "route": "/qualification",   "rewrite": "/qualification/index.html" },
+
+    { "route": "/qualification", "rewrite": "/qualification/index.html" },
     { "route": "/qualification/*", "rewrite": "/qualification/index.html" },
-    { "route": "/lead-qualification",   "redirect": "/qualification", "statusCode": 301 },
+    { "route": "/lead-qualification", "redirect": "/qualification", "statusCode": 301 },
     { "route": "/lead-qualification/*", "redirect": "/qualification", "statusCode": 301 },
-    {
-      "route": "/ch-strategic",
-      "rewrite": "/ch-strategic/index.html",
-      "headers": { "Cache-Control": "no-store" }
-    },
-    {
-      "route": "/ch-strategic/*",
-      "rewrite": "/ch-strategic/index.html",
-      "headers": { "Cache-Control": "no-store" }
-    },
-    {
-      "route": "/src/js/ch-strategic.js",
-      "headers": { "Cache-Control": "no-store" }
-    },
-    {
-      "route": "/campaign",
-      "rewrite": "/campaign/index.html",
-      "headers": { "Cache-Control": "no-cache, no-store, must-revalidate" }
-    },
-    {
-      "route": "/campaign/*",
-      "rewrite": "/campaign/index.html",
-      "headers": { "Cache-Control": "no-cache, no-store, must-revalidate" }
-    },
-    {
-      "route": "/content/call-library/*",
-      "headers": { "Cache-Control": "no-store" }
-    }
+
+    { "route": "/ch-strategic", "rewrite": "/ch-strategic/index.html", "headers": { "Cache-Control": "no-store" } },
+    { "route": "/ch-strategic/*", "rewrite": "/ch-strategic/index.html", "headers": { "Cache-Control": "no-store" } },
+
+    { "route": "/campaign", "rewrite": "/campaign/index.html", "headers": { "Cache-Control": "no-cache, no-store, must-revalidate" } },
+    { "route": "/campaign/*", "rewrite": "/campaign/index.html", "headers": { "Cache-Control": "no-cache, no-store, must-revalidate" } },
+
+    { "route": "/src/*", "headers": { "Cache-Control": "no-store" } },
+    { "route": "/assets/*", "headers": { "Cache-Control": "public, max-age=31536000, immutable" } },
+    { "route": "/favicon.ico", "headers": { "Cache-Control": "public, max-age=31536000, immutable" } },
+    { "route": "/content/call-library/*", "headers": { "Cache-Control": "no-store" } }
   ],
 
   "responseOverrides": {
-    "401": {
-      "rewrite": "/.auth/login/aad?post_login_redirect_uri=/",
-      "statusCode": 302
-    }
+    "401": { "rewrite": "/.auth/login/aad?post_login_redirect_uri=/", "statusCode": 302 }
   },
 
   "globalHeaders": {
@@ -81,6 +53,6 @@
 
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/api/*", "/.auth/*", "/assets/*", "/src/*"]
+    "exclude": ["/api/*", "/.auth/*"]
   }
 }
