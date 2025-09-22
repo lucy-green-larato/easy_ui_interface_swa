@@ -1,276 +1,126 @@
-// api/ch-strategic/index.js
+/** api/ch-strategic/index.js single Azure handler 22/09/2025 */
 'use strict';
 
 /**
- * CH Strategic – fully functional HTTP API for Azure Static Web Apps + Functions
- * -----------------------------------------------------------------------------
- * Endpoints (mounted under route "ch-strategic/{*path}" → /api/ch-strategic/*):
- *  - POST /ch-strategic                        : Small run (multipart: file + evidenceTag)
- *  - POST /ch-strategic/start                  : "Large" run (synchronous processing here)
- *  - GET  /ch-strategic/status/:id             : Read status JSON from blob
- *  - GET  /ch-strategic/download/:id           : Stream generated CSV
- *  - POST /ch-strategic/feedback               : Store feedback JSON
- *  - POST /ch-strategic/pbi-export             : Role-gated CSV export (optional)
+ * CH Strategic — Azure Functions HTTP trigger (no Express/Multer)
+ * - Small run:    POST  /api/ch-strategic            (multipart; no storage; ≤ SMALL_MAX_ROWS)
+ * - Start (big):  POST  /api/ch-strategic/start      (multipart; requires storage)
+ * - Status:       GET   /api/ch-strategic/status/:id (reads blob JSON)
+ * - Download:     GET   /api/ch-strategic/download/:id (streams CSV)
+ * - Feedback:     POST  /api/ch-strategic/feedback   (small JSON body)
+ * - Health:       GET   /api/ch-strategic/healthz
  *
- * Storage containers (auto-created):
- *  - ch-strategic-input     (optional, not persisted here)
- *  - ch-strategic-out
- *  - ch-strategic-status
- *  - ch-strategic-feedback
- *
- * Env (optional):
- *  - AzureWebJobsStorage                : Storage connection (Functions default)
- *  - CH_STRATEGIC_UPLOAD_LIMIT_BYTES    : default 20MB
- *  - CH_STRATEGIC_JSON_LIMIT            : default "2mb"
- *  - CH_STRATEGIC_URLENC_LIMIT          : default "64kb"
- *  - CH_STRATEGIC_SMALL_MAX_ROWS        : default 5000
- *  - CH_STRATEGIC_PBI_ROLE              : default "pbi-exporter"
- *  - CH_STRATEGIC_VERSION               : arbitrary version string
+ * Ports unchanged: Node 7072 (Functions), SWA 4280 (proxy), Python 7071
  */
 
-const { createHandler } = require('azure-function-express');
-const express = require('express');
-const multer = require('multer');
-const { BlobServiceClient } = require('@azure/storage-blob');
+const Busboy = require('busboy'); // v1.6.0 (already in your deps)
 const { parse: parseSync } = require('csv-parse/sync');
-const { PassThrough } = require('stream');
-const { webcrypto } = require('crypto');
+const { BlobServiceClient } = require('@azure/storage-blob');
+const { randomUUID } = require('crypto');
 
-const crypto = globalThis.crypto ?? webcrypto;
-
-// ----------------------------------------------------------------------------
-// Minimal HTTP helpers (self-contained; no external lib/http module)
-// ----------------------------------------------------------------------------
-const CORS = {
+// ------------------------------- Config / Constants -------------------------------
+const CORS = Object.freeze({
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
   'Access-Control-Allow-Headers': 'authorization, content-type, x-ms-client-principal, x-correlation-id'
-};
+});
 
+const SMALL_MAX_ROWS = Number(process.env.CH_STRATEGIC_SMALL_MAX_ROWS || 50);
+const UPLOAD_LIMIT_BYTES = Number(process.env.CH_STRATEGIC_UPLOAD_LIMIT_BYTES || 20 * 1024 * 1024); // 20MB default
+const AZ_CONN = process.env.AzureWebJobsStorage || null;
+
+// ------------------------------- Utils -------------------------------
 function uuid() {
-  return crypto.randomUUID ? crypto.randomUUID()
-    : ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
-      (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
-}
-
-function preflight(req, res) {
-  if (req.method !== 'OPTIONS') return false;
-  res.set(CORS).status(204).end();
-  return true;
-}
-
-function ok(res, body = {}, code = 200, cid) {
-  const headers = { ...CORS, 'Content-Type': 'application/json' };
-  if (cid) headers['X-Correlation-Id'] = cid;
-  res.status(code).set(headers).end(JSON.stringify(body));
-}
-
-function err(res, e, code = 500, cid) {
-  const headers = { ...CORS, 'Content-Type': 'application/json' };
-  if (cid) headers['X-Correlation-Id'] = cid;
-  const message = typeof e === 'string' ? e : e?.message || 'Internal error';
-  res.status(code).set(headers).end(JSON.stringify({ ok: false, code, message }));
-}
-
-// ----------------------------------------------------------------------------
-// Express app setup
-// ----------------------------------------------------------------------------
-const app = express();
-const router = express.Router();
-router.use((req, _res, next) => {
-  console.log('→ ROUTER', req.method, req.url);
-  next();
-});
-app.disable('x-powered-by');
-app.set('trust proxy', true);
-// EARLY healthz: short-circuit before any body parsers/streams
-app.get(['/api/ch-strategic/healthz', '/ch-strategic/healthz', '/healthz'], (req, res) => {
-  // Try to keep the same correlation id if your normalizer ran, otherwise synthesize one
-  const cid = req?.correlationId || (typeof uuid === 'function' ? uuid() : undefined);
-  res
-    .status(200)
-    .set({
-      ...CORS,
-      'Content-Type': 'application/json; charset=utf-8',
-      ...(cid ? { 'X-Correlation-Id': cid } : {})
-    })
-    .end(JSON.stringify({
-      ok: true,
-      name: 'ch-strategic',
-      version: process.env.CH_STRATEGIC_VERSION || 'dev',
-      node: process.version,
-      storageConfigured: !!process.env.AzureWebJobsStorage,
-      time: new Date().toISOString(),
-      cid
-    }));
-});
-
-app.use((req, res, next) => {
-  // Correlation ID passthrough or generate a new one
-  const hdr = req.headers['x-correlation-id'];
-  req.correlationId = (typeof hdr === 'string' && hdr.trim()) || uuid();
-  res.setHeader('X-Correlation-Id', req.correlationId);
-
-  // Normalize base path so Express sees bare routes regardless of host shape
-  // Keep querystrings intact by rewriting req.url (not req.path).
-  if (req.url.startsWith('/api/ch-strategic')) {
-    req.url = req.url.replace(/^\/api\/ch-strategic(?=\/|$)/, '') || '/';
-  } else if (req.url.startsWith('/ch-strategic')) {
-    req.url = req.url.replace(/^\/ch-strategic(?=\/|$)/, '') || '/';
+  try { return randomUUID(); } catch {
+    // Should not happen on Node 20+, but keep a fallback
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = (Math.random() * 16) | 0, v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
   }
-  console.log('→', req.method, req.originalUrl, '=>', req.url);
-  next();
-});
-
-app.use((req, _res, next) => {
-  console.log('→ APP', req.method, req.originalUrl, '=>', req.url);
-  next();
-});
-
-app.use((req, res, next) => { if (preflight(req, res)) return; next(); });
-app.use((req, res, next) => { Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v)); next(); });
-
-{
-  const jsonParser = express.json({ limit: process.env.CH_STRATEGIC_JSON_LIMIT || '2mb' });
-  const urlencParser = express.urlencoded({ extended: true, limit: process.env.CH_STRATEGIC_URLENC_LIMIT || '64kb' });
-  app.use((req, res, next) => {
-    // If it's multipart, skip body parsers so Multer can own the stream
-    const ct = req.headers['content-type'] || '';
-    if (ct.startsWith('multipart/form-data')) return next();
-    // Otherwise apply JSON → urlencoded parsers
-    jsonParser(req, res, () => urlencParser(req, res, next));
-  });
 }
 
-
-// ----------------------------------------------------------------------------
-// SWA principal & role helpers
-// ----------------------------------------------------------------------------
-function getPrincipal(req) {
-  try {
-    const raw = req.headers['x-ms-client-principal'];
-    if (!raw) return null;
-    const json = Buffer.from(raw, 'base64').toString('utf8');
-    return JSON.parse(json);
-  } catch { return null; }
+function getCid(req) {
+  const hdr = req?.headers?.['x-correlation-id'];
+  return (typeof hdr === 'string' && hdr.trim()) || uuid();
 }
 
-function requireRole(...roles) {
-  const required = new Set(roles.filter(Boolean));
-  return (req, res, next) => {
-    if (required.size === 0) return next();
-    const p = getPrincipal(req);
-    const userRoles = Array.isArray(p?.userRoles) ? p.userRoles : [];
-    const allowed = userRoles.some(r => required.has(r));
-    if (!allowed) return err(res, 'Forbidden', 403, req.correlationId);
-    next();
+function ok(code, body, cid) {
+  return {
+    status: code,
+    headers: { ...CORS, 'Content-Type': 'application/json; charset=utf-8', 'X-Correlation-Id': cid },
+    body
   };
 }
 
-// ----------------------------------------------------------------------------
-// Multer (in-memory) for multipart uploads
-// ----------------------------------------------------------------------------
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: Number(process.env.CH_STRATEGIC_UPLOAD_LIMIT_BYTES || 20 * 1024 * 1024) }
-});
-
-// ----------------------------------------------------------------------------
-// Azure Blob Storage helpers
-// ----------------------------------------------------------------------------
-const AZ_CONN = process.env.AzureWebJobsStorage;
-if (!AZ_CONN) {
-  // We do NOT throw at module load to allow local dev without storage for healthz.
-  // Endpoints that need storage will error gracefully if missing.
+function err(code, message, cid) {
+  const msg = typeof message === 'string' ? message : (message?.message || 'Internal error');
+  return {
+    status: code,
+    headers: { ...CORS, 'Content-Type': 'application/json; charset=utf-8', 'X-Correlation-Id': cid },
+    body: { ok: false, code, message: msg }
+  };
 }
 
+function csvEscape(s) {
+  const str = String(s);
+  return /["\n,\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+}
+
+function preflight(req) {
+  return (req?.method || '').toUpperCase() === 'OPTIONS';
+}
+
+// ------------------------------- Storage -------------------------------
 const BLOB = AZ_CONN ? BlobServiceClient.fromConnectionString(AZ_CONN) : null;
-const CONTAINERS = {
-  input: 'ch-strategic-input',
+const CONTAINERS = Object.freeze({
   out: 'ch-strategic-out',
   status: 'ch-strategic-status',
   feedback: 'ch-strategic-feedback'
-};
+});
 
 async function ensureContainers() {
   if (!BLOB) throw new Error('AzureWebJobsStorage is not configured');
-  await Promise.all(Object.values(CONTAINERS).map(async name => {
+  await Promise.all(Object.values(CONTAINERS).map(async (name) => {
     const c = BLOB.getContainerClient(name);
     await c.createIfNotExists();
   }));
 }
 
-function container(name) {
-  if (!BLOB) throw new Error('AzureWebJobsStorage is not configured');
-  return BLOB.getContainerClient(name);
-}
-
 async function putJson(containerName, blobName, obj) {
-  const c = container(containerName);
-  const block = c.getBlockBlobClient(blobName);
+  const c = BLOB.getContainerClient(containerName);
+  const b = c.getBlockBlobClient(blobName);
   const data = Buffer.from(JSON.stringify(obj, null, 2), 'utf8');
-  await block.uploadData(data, {
-    blobHTTPHeaders: { blobContentType: 'application/json; charset=utf-8' }
-  });
+  await b.uploadData(data, { blobHTTPHeaders: { blobContentType: 'application/json; charset=utf-8' } });
 }
 
 async function getJson(containerName, blobName) {
-  const c = container(containerName);
-  const block = c.getBlockBlobClient(blobName);
-  if (!(await block.exists())) return null;
-  const dl = await block.download();
-  const buf = await streamToBuffer(dl.readableStreamBody);
-  return JSON.parse(buf.toString('utf8'));
+  const c = BLOB.getContainerClient(containerName);
+  const b = c.getBlockBlobClient(blobName);
+  if (!(await b.exists())) return null;
+  const dl = await b.download();
+  const chunks = [];
+  for await (const d of dl.readableStreamBody) chunks.push(d);
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
 async function putCsv(containerName, blobName, buffer) {
-  const c = container(containerName);
-  const block = c.getBlockBlobClient(blobName);
-  await block.uploadData(buffer, {
-    blobHTTPHeaders: { blobContentType: 'text/csv; charset=utf-8' }
-  });
+  const c = BLOB.getContainerClient(containerName);
+  const b = c.getBlockBlobClient(blobName);
+  await b.uploadData(buffer, { blobHTTPHeaders: { blobContentType: 'text/csv; charset=utf-8' } });
 }
 
 async function getCsvStream(containerName, blobName) {
-  const c = container(containerName);
-  const block = c.getBlockBlobClient(blobName);
-  if (!(await block.exists())) return null;
-  const dl = await block.download();
+  const c = BLOB.getContainerClient(containerName);
+  const b = c.getBlockBlobClient(blobName);
+  if (!(await b.exists())) return null;
+  const dl = await b.download();
   return { stream: dl.readableStreamBody, size: dl.contentLength || undefined };
 }
 
-async function streamToBuffer(readable) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    readable.on('data', (d) => chunks.push(d));
-    readable.on('end', () => resolve(Buffer.concat(chunks)));
-    readable.on('error', reject);
-  });
-}
-
-// ----------------------------------------------------------------------------
-// CSV parsing / processing helpers
-// ----------------------------------------------------------------------------
-const SMALL_MAX_ROWS = Number(process.env.CH_STRATEGIC_SMALL_MAX_ROWS || 5000);
-
-// Count rows + expose headers (sync)
-async function analyzeCsv(buffer) {
-  const records = parseSync(buffer, {
-    columns: true,
-    bom: true,
-    relax_column_count: true,
-    skip_empty_lines: true,
-    trim: true
-  });
-  const headers = records.length
-    ? Object.keys(records[0]).map(h => String(h).trim())
-    : [];
-  return { rows: records.length, headers, errorsByReason: {} };
-}
-
-// Produce summary for UI (sync)
+// ------------------------------- CSV helpers (sync; no Node streams) -------------------------------
 async function summarizeCsv(buffer) {
-  const records = parseSync(buffer, {
+  const recs = parseSync(buffer, {
     columns: true,
     bom: true,
     relax_column_count: true,
@@ -283,40 +133,27 @@ async function summarizeCsv(buffer) {
   const errorsByReason = {};
   const itemsSample = [];
 
-  for (const rec of records) {
+  for (const r of recs) {
     rows += 1;
-    Object.keys(rec).forEach(h => headers.add(String(h)));
-
-    const name = String(rec['Company Name'] ?? '').trim();
-    const num = String(rec['Company Number'] ?? '').trim();
-
+    Object.keys(r).forEach(h => headers.add(String(h)));
+    const name = String(r['Company Name'] ?? '').trim();
+    const num = String(r['Company Number'] ?? '').trim();
     if (name && num) {
       matched += 1;
-      if (itemsSample.length < 10) {
-        itemsSample.push({ companyNumber: num, companyName: name });
-      }
+      if (itemsSample.length < 10) itemsSample.push({ companyNumber: num, companyName: name });
     } else {
       skipped += 1;
-      const reason = !name && !num
-        ? 'missing_both'
+      const reason = !name && !num ? 'missing_both'
         : (!num ? 'missing_company_number' : 'missing_company_name');
       errorsByReason[reason] = (errorsByReason[reason] || 0) + 1;
     }
   }
 
-  return {
-    rows,
-    matched,
-    skipped,
-    errorsByReason,
-    headers: [...headers],
-    itemsSample
-  };
+  return { rows, matched, skipped, errorsByReason, headers: [...headers], itemsSample };
 }
 
-// Build output CSV buffer of matched rows (sync)
 async function buildOutputCsv(buffer) {
-  const records = parseSync(buffer, {
+  const recs = parseSync(buffer, {
     columns: true,
     bom: true,
     relax_column_count: true,
@@ -325,102 +162,162 @@ async function buildOutputCsv(buffer) {
   });
 
   const out = [];
-  for (const rec of records) {
-    const name = String(rec['Company Name'] ?? '').trim();
-    const num = String(rec['Company Number'] ?? '').trim();
+  for (const r of recs) {
+    const name = String(r['Company Name'] ?? '').trim();
+    const num = String(r['Company Number'] ?? '').trim();
     if (name && num) out.push(`${num},${csvEscape(name)}`);
   }
-
-  const header = 'Company Number,Company Name';
-  const body = out.join('\n');
-  return Buffer.from(`${header}\n${body}\n`, 'utf8');
+  return Buffer.from(`Company Number,Company Name\n${out.join('\n')}\n`, 'utf8');
 }
 
-function csvEscape(s) {
-  if (s.includes('"') || s.includes(',') || s.includes('\n') || s.includes('\r')) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
+// ------------------------------- Multipart (Busboy v1.6.0) -------------------------------
+async function readMultipart(req) {
+  const ct = req.headers?.['content-type'] || '';
+  if (!/^multipart\/form-data/i.test(ct)) return { error: 'Expected multipart/form-data' };
 
-// ----------------------------------------------------------------------------
-// Health
-// ----------------------------------------------------------------------------
-router.get('/healthz', async (req, res) => {
-  const meta = {
-    ok: true,
-    name: 'ch-strategic',
-    version: process.env.CH_STRATEGIC_VERSION || 'dev',
-    node: process.version,
-    site: process.env.WEBSITE_SITE_NAME || null,
-    slot: process.env.WEBSITE_SLOT_NAME || null,
-    commit: process.env.SCM_COMMIT_ID || process.env.COMMIT_SHA || null,
-    storageConfigured: !!AZ_CONN,
-    time: new Date().toISOString(),
-    cid: req.correlationId
-  };
-  return ok(res, meta, 200, req.correlationId);
-});
+  const bb = new Busboy({
+    headers: req.headers,
+    limits: {
+      fileSize: UPLOAD_LIMIT_BYTES, // enforce upload size
+      files: 1,
+      fields: 10
+    }
+  });
 
-// Small run (multipart) — robust wrapper + guards + trace
-// TEMP: Small run (diagnostic only) — no CSV parsing, just echo upload info
-router.post(
-  '/',
-  (req, res, next) => {
-    upload.single('csv_file')(req, res, (err) => { if (err) return next(err); next(); });
-  },
-  async (req, res) => {
-    const ct = req.headers['content-type'] || '';
-    const info = {
-      ok: true,
-      cid: req.correlationId,
-      contentType: ct,
-      hasFile: !!req.file,
-      filename: req.file?.originalname || null,
-      bytes: req.file?.buffer?.length ?? null,
-      evidenceTag: (req.body?.evidenceTag || '').trim() || null
-    };
-    return ok(res, info, 200, req.correlationId);
-  }
-);
+  const fields = {};
+  let file = null;
+  let fileCount = 0;
 
+  const p = new Promise((resolve, reject) => {
+    bb.on('field', (name, val) => { fields[name] = val; });
 
-// "Large" run — sync processing + blob status/output (requires storage)
-router.post(
-  '/start',
-  // Multer wrapper so upload errors hit the global error handler
-  (req, res, next) => {
-    upload.single('csv_file')(req, res, (err) => {
-      if (err) return next(err);
-      next();
+    bb.on('file', (name, stream, filename, encoding, mimetype) => {
+      if (++fileCount > 1) { stream.resume(); return; } // ignore extras
+      const chunks = [];
+      stream.on('data', d => chunks.push(d));
+      stream.on('end', () => {
+        if (name === 'csv_file') {
+          file = { buffer: Buffer.concat(chunks), filename, encoding, mimetype };
+        }
+      });
+      stream.on('error', reject);
     });
-  },
-  async (req, res) => {
-    try {
-      // Must be multipart/form-data
-      const ct = req.headers['content-type'] || '';
-      if (!ct.startsWith('multipart/form-data')) {
-        return err(res, 'Expected multipart/form-data', 415, req.correlationId);
+
+    bb.on('partsLimit', () => reject(new Error('Too many parts')));
+    bb.on('filesLimit', () => reject(new Error('Too many files')));
+    bb.on('fieldsLimit', () => reject(new Error('Too many fields')));
+
+    bb.on('error', reject);
+    bb.on('finish', () => resolve({ fields, file }));
+  });
+
+  req.pipe(bb);
+  return p;
+}
+
+// ------------------------------- Route helpers -------------------------------
+function normalizePath(context) {
+  const rel = String(context.bindingData?.path || '').replace(/^\/+/, '');
+  return '/' + rel;
+}
+
+function isHealth(path) {
+  return path === '/healthz' || path === '/api/ch-strategic/healthz' || path === '/ch-strategic/healthz';
+}
+
+function isSmallRun(method, path) {
+  return method === 'POST' && (path === '/' || path === '/api/ch-strategic' || path === '/ch-strategic');
+}
+
+function isStart(method, path) {
+  return method === 'POST' && (path === '/start' || path === '/api/ch-strategic/start' || path === '/ch-strategic/start');
+}
+
+function isStatus(method, path) {
+  return method === 'GET' && /^\/(api\/ch-strategic\/|ch-strategic\/)?status\/[a-f0-9-]{16,}$/i.test(path);
+}
+
+function isDownload(method, path) {
+  return method === 'GET' && /^\/(api\/ch-strategic\/|ch-strategic\/)?download\/[a-f0-9-]{16,}$/i.test(path);
+}
+
+function isFeedback(method, path) {
+  return method === 'POST' && (path === '/feedback' || path === '/api/ch-strategic/feedback' || path === '/ch-strategic/feedback');
+}
+
+// ------------------------------- Azure Function entry -------------------------------
+module.exports = async function (context, req) {
+  try {
+    const cid = getCid(req);
+    const method = (req.method || 'GET').toUpperCase();
+    const path = normalizePath(context);
+
+    // CORS preflight
+    if (preflight(req)) { context.res = { status: 204, headers: CORS }; return; }
+
+    // Health
+    if (method === 'GET' && isHealth(path)) {
+      context.res = ok(200, {
+        ok: true,
+        name: 'ch-strategic',
+        version: process.env.CH_STRATEGIC_VERSION || 'dev',
+        node: process.version,
+        storageConfigured: !!AZ_CONN,
+        time: new Date().toISOString(),
+        cid
+      }, cid);
+      return;
+    }
+
+    // Small run (no storage)
+    if (isSmallRun(method, path)) {
+      const { file, fields, error } = await readMultipart(req);
+      if (error) { context.res = err(415, error, cid); return; }
+      if (!file?.buffer?.length) { context.res = err(400, 'Missing file', cid); return; }
+
+      const evidenceTag = (fields.evidenceTag || '').trim();
+      if (evidenceTag && !/^[A-Za-z0-9 _-]{1,50}$/.test(evidenceTag)) { context.res = err(400, 'Invalid evidenceTag', cid); return; }
+
+      const summary = await summarizeCsv(file.buffer);
+
+      // Required headers
+      const required = ['Company Name', 'Company Number'];
+      const missing = required.filter(h => !summary.headers.includes(h));
+      if (missing.length) { context.res = err(400, `Missing required column(s): ${missing.join(', ')}`, cid); return; }
+
+      // Row cap
+      if (summary.rows > SMALL_MAX_ROWS) {
+        context.res = err(413, `Too many rows for small run: ${summary.rows} > ${SMALL_MAX_ROWS}. Use /start.`, cid);
+        return;
       }
 
-      // File presence + non-empty buffer
-      if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
-        return err(res, 'Missing file', 400, req.correlationId);
-      }
+      context.log?.info?.({ cid, method, path, bytes: file.buffer.length, rows: summary.rows }, 'ch-strategic small-run');
+      context.res = ok(200, {
+        ok: true,
+        correlationId: cid,
+        evidenceTag: evidenceTag || null,
+        rows: summary.rows,
+        matched: summary.matched,
+        skipped: summary.skipped,
+        errorsByReason: summary.errorsByReason,
+        headers: summary.headers,
+        itemsSample: summary.itemsSample
+      }, cid);
+      return;
+    }
 
-      // Storage required for /start
-      if (!AZ_CONN) {
-        return err(res, 'Storage not configured', 500, req.correlationId);
-      }
+    // Start (requires storage)
+    if (isStart(method, path)) {
+      if (!AZ_CONN) { context.res = err(500, 'Storage not configured', cid); return; }
       await ensureContainers();
 
-      // Optional evidence tag
-      const evidenceTag = (req.body?.evidenceTag || '').trim();
-      if (evidenceTag && !/^[A-Za-z0-9 _-]{1,50}$/.test(evidenceTag)) {
-        return err(res, 'Invalid evidenceTag', 400, req.correlationId);
-      }
+      const { file, fields, error } = await readMultipart(req);
+      if (error) { context.res = err(415, error, cid); return; }
+      if (!file?.buffer?.length) { context.res = err(400, 'Missing file', cid); return; }
 
-      // Create job id + blob names
+      const evidenceTag = (fields.evidenceTag || '').trim();
+      if (evidenceTag && !/^[A-Za-z0-9 _-]{1,50}$/.test(evidenceTag)) { context.res = err(400, 'Invalid evidenceTag', cid); return; }
+
       const jobId = uuid();
       const statusName = `${jobId}.json`;
       const outName = `${jobId}.csv`;
@@ -438,19 +335,26 @@ router.post(
         downloadUrl: `/api/ch-strategic/download/${jobId}`
       });
 
-      // Process CSV
-      console.log('start-run:', {
-        cid: req.correlationId,
-        bytes: req.file.buffer.length,
-        filename: req.file.originalname
-      });
-      const analysis = await summarizeCsv(req.file.buffer);
-      const outputCsv = await buildOutputCsv(req.file.buffer);
+      // Process
+      const analysis = await summarizeCsv(file.buffer);
 
-      // Save CSV
-      await putCsv(CONTAINERS.out, outName, outputCsv);
+      // Required headers
+      const required = ['Company Name', 'Company Number'];
+      const missing = required.filter(h => !analysis.headers.includes(h));
+      if (missing.length) {
+        await putJson(CONTAINERS.status, statusName, {
+          state: 'error',
+          jobId,
+          finishedAt: new Date().toISOString(),
+          error: `Missing required column(s): ${missing.join(', ')}`
+        });
+        context.res = err(400, `Missing required column(s): ${missing.join(', ')}`, cid);
+        return;
+      }
 
-      // Final status
+      const outBuffer = await buildOutputCsv(file.buffer);
+      await putCsv(CONTAINERS.out, outName, outBuffer);
+
       await putJson(CONTAINERS.status, statusName, {
         state: 'done',
         jobId,
@@ -463,158 +367,69 @@ router.post(
         downloadUrl: `/api/ch-strategic/download/${jobId}`
       });
 
-      // Response with external URLs
-      return ok(res, {
+      context.log?.info?.({ cid, method, path, jobId, rows: analysis.rows, outBytes: outBuffer.length }, 'ch-strategic start done');
+
+      context.res = ok(200, {
         ok: true,
         jobId,
         statusUrl: `/api/ch-strategic/status/${jobId}`,
         downloadUrl: `/api/ch-strategic/download/${jobId}`,
-        correlationId: req.correlationId
-      }, 200, req.correlationId);
-    } catch (e) {
-      return err(res, e, 400, req.correlationId);
+        correlationId: cid
+      }, cid);
+      return;
     }
-  }
-);
 
-// ----------------------------------------------------------------------------
-// Status (reads from blob)
-// ----------------------------------------------------------------------------
-router.get('/status/:id', async (req, res) => {
-  try {
-    if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
-    const id = String(req.params.id || '').trim();
-    if (!/^[a-f0-9-]{16,}$/.test(id)) return err(res, 'Bad id', 400, req.correlationId);
-    const status = await getJson(CONTAINERS.status, `${id}.json`);
-    if (!status) return err(res, 'Not found', 404, req.correlationId);
-    return ok(res, status, 200, req.correlationId);
-  } catch (e) {
-    return err(res, e, 400, req.correlationId);
-  }
-});
-
-
-// ----------------------------------------------------------------------------
-// Download (streams CSV)
-// ----------------------------------------------------------------------------
-router.get('/download/:id', async (req, res) => {
-  try {
-    if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
-    const id = String(req.params.id || '').trim();
-    if (!/^[a-f0-9-]{16,}$/.test(id)) return err(res, 'Bad id', 400, req.correlationId);
-    const name = `${id}.csv`;
-    const streamInfo = await getCsvStream(CONTAINERS.out, name);
-    if (!streamInfo) return err(res, 'Not found', 404, req.correlationId);
-
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="ch-strategic-${id}.csv"`);
-    res.setHeader('X-Correlation-Id', req.correlationId);
-    if (streamInfo.size) res.setHeader('Content-Length', String(streamInfo.size));
-    streamInfo.stream.pipe(res);
-  } catch (e) {
-    return err(res, e, 400, req.correlationId);
-  }
-});
-
-// ----------------------------------------------------------------------------
-// Feedback
-// ----------------------------------------------------------------------------
-router.post('/feedback', async (req, res) => {
-  try {
-    if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
-    await ensureContainers();
-    const p = getPrincipal(req);
-    const body = Object(req.body || {});
-    const payload = {
-      receivedAt: new Date().toISOString(),
-      correlationId: req.correlationId,
-      principal: p ? { userId: p.userId, identityProvider: p.identityProvider, userDetails: p.userDetails, userRoles: p.userRoles } : null,
-      up: !!body.up,
-      details: (body.details || '').toString().slice(0, 2000)
-    };
-    await putJson(CONTAINERS.feedback, `${uuid()}.json`, payload);
-    res.set(CORS).status(204).end();
-  } catch (e) {
-    return err(res, e, 400, req.correlationId);
-  }
-});
-
-// ----------------------------------------------------------------------------
-// Optional: PBI Export (role gated). Here we emit a trivial CSV from the payload.
-// ----------------------------------------------------------------------------
-router.post('/pbi-export',
-  requireRole(process.env.CH_STRATEGIC_PBI_ROLE || 'pbi-exporter'),
-  async (req, res) => {
-    try {
-      const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
-      const csv = toCsv(rows);
-      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('X-Correlation-Id', req.correlationId);
-      res.status(200).end(csv);
-    } catch (e) {
-      return err(res, e, 400, req.correlationId);
+    // Status
+    if (isStatus(method, path)) {
+      const id = path.split('/').pop();
+      if (!AZ_CONN) { context.res = err(500, 'Storage not configured', cid); return; }
+      const status = await getJson(CONTAINERS.status, `${id}.json`);
+      if (!status) { context.res = err(404, 'Not found', cid); return; }
+      context.res = ok(200, status, cid);
+      return;
     }
-  }
-);
-// CSV serializer for PBI export
-function toCsv(rows) {
-  if (!Array.isArray(rows) || rows.length === 0) return '';
-  const headers = Array.from(new Set(rows.flatMap(r => Object.keys(r)))); // union of keys
-  const headerLine = headers.map(csvEscape).join(',');
-  const lines = rows.map(r => headers.map(h => csvEscape(r[h] == null ? '' : String(r[h]))).join(','));
-  return `${headerLine}\n${lines.join('\n')}\n`;
-}
 
-// ----------------------------------------------------------------------------
-// 404 and error guard
-// ----------------------------------------------------------------------------
-router.all('*', (req, res) => err(res, `Not found: ${req.method} ${req.path}`, 404, req.correlationId));
-
-// Global error handler (keep this as the LAST middleware before createHandler)
-app.use((err, req, res, next) => {
-  const cid = req?.correlationId || uuid();
-
-  // If headers already went out, delegate to Express default
-  if (res.headersSent) return next(err);
-
-  let code = Number(err?.statusCode || err?.status || 500);
-  let message = 'Internal error';
-
-  // Granular cases
-  if (err?.name === 'MulterError') {
-    // Common Multer codes: LIMIT_FILE_SIZE, LIMIT_UNEXPECTED_FILE, etc.
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      code = 413; // Payload Too Large
-      message = 'File too large';
-    } else {
-      code = 400;
-      message = `Upload error: ${err.message}`;
+    // Download
+    if (isDownload(method, path)) {
+      const id = path.split('/').pop();
+      if (!AZ_CONN) { context.res = err(500, 'Storage not configured', cid); return; }
+      const info = await getCsvStream(CONTAINERS.out, `${id}.csv`);
+      if (!info) { context.res = err(404, 'Not found', cid); return; }
+      context.res = {
+        status: 200,
+        headers: {
+          ...CORS,
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="ch-strategic-${id}.csv"`,
+          'X-Correlation-Id': cid
+        },
+        body: info.stream
+      };
+      return;
     }
-  } else if (err?.type === 'entity.too.large') {
-    code = 413;
-    message = 'Payload too large';
-  } else if (err instanceof SyntaxError && 'body' in err) {
-    // body-parser JSON parse error
-    code = 400;
-    message = 'Invalid JSON';
-  } else if (err?.code === 'ERR_STREAM_PREMATURE_CLOSE') {
-    code = 400;
-    message = 'Request aborted';
-  } else if (err?.code === 'ENOENT') {
-    code = 404;
-    message = err.message || 'Not found';
-  } else if (typeof err?.message === 'string' && err.message.trim()) {
-    message = err.message.trim();
+
+    // Feedback (JSON body; small)
+    if (isFeedback(method, path)) {
+      if (!AZ_CONN) { context.res = err(500, 'Storage not configured', cid); return; }
+      await ensureContainers();
+      const body = typeof req.body === 'object' && req.body ? req.body : {};
+      const payload = {
+        receivedAt: new Date().toISOString(),
+        correlationId: cid,
+        up: !!body.up,
+        details: (body.details || '').toString().slice(0, 2000)
+      };
+      await putJson(CONTAINERS.feedback, `${uuid()}.json`, payload);
+      context.res = { status: 204, headers: CORS };
+      return;
+    }
+
+    // Fallback
+    context.res = err(404, `Not found: ${method} ${path}`, cid);
+  } catch (e) {
+    const cid = getCid(req);
+    // Surface in Functions logs / App Insights if configured
+    context.log?.error?.('ch-strategic fatal', e);
+    context.res = err(500, e?.message || 'Internal error', cid);
   }
-
-  // Ensure headers + JSON body
-  res
-    .status(code)
-    .set({ ...CORS, 'Content-Type': 'application/json', 'X-Correlation-Id': cid })
-    .end(JSON.stringify({ ok: false, code, message }));
-});
-
-// ----------------------------------------------------------------------------
-// Azure Function handler export
-// ----------------------------------------------------------------------------
-module.exports = createHandler(app);
+};
