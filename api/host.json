@@ -9,7 +9,12 @@
     "http": {
       "routePrefix": "api",
       "maxOutstandingRequests": 200,
-      "maxConcurrentRequests": 100
+      "maxConcurrentRequests": 100,
+      "dynamicThrottlesEnabled": true,
+      "customHeaders": {
+        "X-Frame-Options": "DENY",
+        "X-Content-Type-Options": "nosniff"
+      }
     },
     "queues": {
       "maxDequeueCount": 5,
