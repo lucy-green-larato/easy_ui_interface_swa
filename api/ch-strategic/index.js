@@ -351,7 +351,7 @@ app.get('/healthz', async (req, res) => {
 // ----------------------------------------------------------------------------
 // Small run (multipart)
 // ----------------------------------------------------------------------------
-app.post('/', upload.single('file'), async (req, res) => {
+app.post('/', upload.single('csv_file'), async (req, res) => {
   try {
     if (!req.file?.buffer) return err(res, 'Missing file', 400, req.correlationId);
     const evidenceTag = (req.body?.evidenceTag || '').trim();
@@ -380,7 +380,7 @@ app.post('/', upload.single('file'), async (req, res) => {
 // ----------------------------------------------------------------------------
 // "Large" run (processed synchronously here, with blob status/output)
 // ----------------------------------------------------------------------------
-app.post('/start', upload.single('file'), async (req, res) => {
+app.post('/start', upload.single('csv_file'), async (req, res) => {
   try {
     if (!req.file?.buffer) return err(res, 'Missing file', 400, req.correlationId);
     if (!AZ_CONN) return err(res, 'Storage not configured', 500, req.correlationId);
