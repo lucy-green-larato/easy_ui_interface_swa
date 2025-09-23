@@ -328,6 +328,28 @@ function json400(context, body) {
 }
 
 // ------------------------------- CSV helpers (sync; no Node streams) -------------------------------
+
+// ADD: robust header normalisation + single-source resolver for required keys
+function stripBOMTrim(s) {
+  return String(s || '').replace(/^\uFEFF/, '').trim();
+}
+function normalizeHeaderList(headers) {
+  return Array.isArray(headers) ? headers.map(stripBOMTrim) : [];
+}
+/**
+ * Resolve required CSV keys from a Buffer using the SAME logic everywhere.
+ * Returns { headers, nameKey, numKey } or throws on parse error.
+ */
+function resolveCompanyKeysFromBuffer(buffer) {
+  const { headers } = parseCsvFlexible(buffer);
+  const norm = normalizeHeaderList(headers);
+  // Prefer aliases against normalised headers, then raw as fallback
+  const nameKey = findHeaderWithAliases(norm, 'Company Name') || findHeaderWithAliases(headers, 'Company Name');
+  const numKey = findHeaderWithAliases(norm, 'Company Number') || findHeaderWithAliases(headers, 'Company Number');
+  return { headers: norm, nameKey, numKey };
+}
+
+
 // Try multiple CSV dialects and pick the best (prefer the one that contains required headers)
 function parseCsvFlexible(buffer) {
   const delims = [',', ';', '\t', '|'];
@@ -383,10 +405,12 @@ async function summarizeCsv(buffer, opts = {}) {
   const evidenceTag = (opts?.evidenceTag ?? '').trim();
   const evidenceTerms = Array.isArray(opts?.evidenceTerms) ? opts.evidenceTerms : parseEvidenceList(evidenceTag);
 
-  const { recs, headers } = parseCsvFlexible(buffer);
-  const nameKey = findHeaderWithAliases(headers, 'Company Name');
-  const numKey = findHeaderWithAliases(headers, 'Company Number');
-
+  const { recs } = parseCsvFlexible(buffer);
+  const resolved = resolveCompanyKeysFromBuffer(buffer);
+  const headers = resolved.headers;
+  const nameKey = resolved.nameKey;
+  const numKey = resolved.numKey;
+  
   let rows = 0, matched = 0, skipped = 0;
   const errorsByReason = {};
   const itemsSample = [];
@@ -594,9 +618,9 @@ module.exports = async function (context, req) {
       }
 
       // Flexible CSV header validation
-      let headers;
+      let parsed;
       try {
-        ({ headers } = parseCsvFlexible(file.buffer));
+        parsed = resolveCompanyKeysFromBuffer(file.buffer);
       } catch (e) {
         return json400(context, {
           ok: false,
@@ -605,8 +629,7 @@ module.exports = async function (context, req) {
           detail: String((e && e.message) || e)
         });
       }
-      const nameKey = findHeaderWithAliases(headers, 'Company Name');
-      const numKey = findHeaderWithAliases(headers, 'Company Number');
+      const { headers, nameKey, numKey } = parsed;
       if (!nameKey || !numKey) {
         return json400(context, {
           ok: false,
@@ -675,9 +698,9 @@ module.exports = async function (context, req) {
       }
 
       // Flexible CSV header validation
-      let headers;
+      let parsed;
       try {
-        ({ headers } = parseCsvFlexible(file.buffer));
+        parsed = resolveCompanyKeysFromBuffer(file.buffer);
       } catch (e) {
         return json400(context, {
           ok: false,
@@ -686,8 +709,7 @@ module.exports = async function (context, req) {
           detail: String((e && e.message) || e)
         });
       }
-      const nameKey = findHeaderWithAliases(headers, 'Company Name');
-      const numKey = findHeaderWithAliases(headers, 'Company Number');
+      const { headers, nameKey, numKey } = parsed;
       if (!nameKey || !numKey) {
         return json400(context, {
           ok: false,
