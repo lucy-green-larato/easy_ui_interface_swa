@@ -97,6 +97,7 @@ function snippetAround(text, needle, radius = 80) {
 // Get context snippet from the company report
 // (URL OCR → CH URL OCR → CH buffer OCR)
 async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 200000 } = {}) {
+  aiTrack('ch-strategic.reader.start', { num: companyNumber, ...envFingerprint() });
   logProbe('start', {
     companyNumber,
     base: !!(process.env.CH_STRATEGIC_TEXT_URL || process.env.CH_READER_ENDPOINT),
@@ -125,6 +126,7 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
       if (typeof j.data.body === 'string') return j.data.body;
       if (typeof j.data.content === 'string') return j.data.content;
     }
+    aiTrack('ch-strategic.reader.end', { num: companyNumber, returned: false });
     return '';
   };
 
@@ -1034,6 +1036,59 @@ function logProbe(stage, data) {
     console.log(`CH_PROBE:${stage}`, JSON.stringify(data));
   } catch { }
 }
+// ADD: minimal App Insights boot (safe: only starts if a key/conn string exists)
+let _ai = null;
+function initAI() {
+  if (_ai) return _ai;
+  const cs = process.env.APPLICATIONINSIGHTS_CONNECTION_STRING;
+  const ik = process.env.APPINSIGHTS_INSTRUMENTATIONKEY;
+  try {
+    if (cs || ik) {
+      const appInsights = require('applicationinsights');
+      if (!_ai) {
+        if (cs) process.env.APPLICATIONINSIGHTS_CONNECTION_STRING = cs;
+        if (ik && !process.env.APPINSIGHTS_INSTRUMENTATIONKEY) process.env.APPINSIGHTS_INSTRUMENTATIONKEY = ik;
+        appInsights.setup()
+          .setAutoCollectRequests(true)
+          .setAutoCollectDependencies(true)
+          .setAutoCollectExceptions(true)
+          .setSendLiveMetrics(false)
+          .start();
+        _ai = appInsights.defaultClient;
+      }
+    }
+  } catch (_) { /* ignore */ }
+  return _ai;
+}
+function aiTrack(name, props) {
+  const c = initAI();
+  if (!c) return;
+  try { c.trackEvent({ name, properties: props || {} }); } catch (_) { }
+}
+function logProbe(stage, data) {
+  if (process.env.CH_DEBUG !== '1') return;
+  const payload = { stage, ...(data || {}) };
+  try { console.log(`CH_PROBE ${JSON.stringify(payload)}`); } catch (_) { }
+  aiTrack(`CH_PROBE.${stage}`, payload);
+}
+
+// ADD: quick env fingerprint to confirm which app/slot handled the request
+function envFingerprint() {
+  return {
+    WEBSITE_SITE_NAME: process.env.WEBSITE_SITE_NAME || null,
+    WEBSITE_HOSTNAME: process.env.WEBSITE_HOSTNAME || null,
+    FUNCTIONS_EXTENSION_VERSION: process.env.FUNCTIONS_EXTENSION_VERSION || null,
+    REGION_NAME: process.env.REGION_NAME || null,
+    AI_conn: !!process.env.APPLICATIONINSIGHTS_CONNECTION_STRING,
+    AI_key: !!process.env.APPINSIGHTS_INSTRUMENTATIONKEY,
+    CH_DEBUG: process.env.CH_DEBUG || null
+  };
+}
+
+// ADD: diag route helper
+function isDiag(method, path) {
+  return method === 'GET' && /^\/api\/ch-strategic\/diag\/[A-Za-z0-9]+\/?$/i.test(path);
+}
 
 // ------------------------------- Azure Function entry -------------------------------
 module.exports = async function (context, req) {
@@ -1041,6 +1096,7 @@ module.exports = async function (context, req) {
     const cid = getCid(req);
     const method = (req.method || 'GET').toUpperCase();
     const path = normalizePath(context);
+    aiTrack('ch-strategic.entry', { cid, method, path, ...envFingerprint() });
     // DEBUG ADD: routing/build fingerprints
     context.log?.info?.(
       { cid, method, path, build: process.env.CH_STRATEGIC_VERSION || 'dev', fp: 'router-hit-v1' },
@@ -1059,6 +1115,32 @@ module.exports = async function (context, req) {
         storageConfigured: !!AZ_CONN,
         time: new Date().toISOString(),
         cid
+      }, cid);
+      return;
+    }
+
+    // ADD: GET /api/ch-strategic/diag/:num  → shows which app handled it + sample text
+    if (isDiag(method, path)) {
+      const m = path.match(/\/diag\/([A-Za-z0-9]+)\/?$/i);
+      const numRaw = m ? m[1] : '';
+      const num = normalizeCompanyNumber(numRaw);
+      const t0 = Date.now();
+      const full = await tryGetReportText(num);
+      const sr = extractStrategicReport(full || '');
+      aiTrack('ch-strategic.diag', {
+        cid, numRaw, numNorm: num,
+        haveFull: !!full, fullLen: (full || '').length,
+        haveSR: !!sr, srLen: (sr || '').length
+      });
+      context.res = ok(200, {
+        ok: true,
+        cid,
+        env: envFingerprint(),
+        numRaw, numNorm: num,
+        haveFull: !!full, fullLen: (full || '').length,
+        haveSR: !!sr, srLen: (sr || '').length,
+        sample: (sr && sr.trim() ? sr : (full || '')).slice(0, 300),
+        ms: Date.now() - t0
       }, cid);
       return;
     }
