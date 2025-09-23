@@ -327,31 +327,23 @@
   }
 
   // Safe result/status line (accepts string or object with details)
-  function appendResultItem(item) {
-    const container = el.results || el.status;
-    if (!container) return;
+  function appendResultItem({ type, companyNumber, companyName, message }) {
+    const line = document.createElement('div');
+    line.className = `result ${type}`;
+    const parts = [];
+    if (type) parts.push(`${type}:`);
+    if (companyName) parts.push(`Name=${companyName}`);
+    if (companyNumber) parts.push(`• Number=${companyNumber}`);
+    if (message) parts.push(`• ${message}`);
+    line.textContent = parts.join(' ');
 
-    const div = document.createElement('div');
-    div.className = 'status-item';
+    // Send matches to the matches pane; everything else to skipped/errors.
+    const target =
+      (type === 'match'
+        ? (document.getElementById('results-matches') || document.getElementById('results'))
+        : (document.getElementById('results-skipped') || document.getElementById('results')));
 
-    if (item && typeof item === 'object') {
-      const badge = document.createElement('strong');
-      badge.textContent = (item.type || 'info') + ': ';
-      const msg = document.createElement('span');
-      const parts = [];
-      if (item.companyName) parts.push(`Name=${item.companyName}`);
-      if (item.companyNumber) parts.push(`Number=${item.companyNumber}`);
-      if (item.message) parts.push(`Msg=${item.message}`);
-      msg.textContent = parts.join(' • ') || '';
-      div.appendChild(badge);
-      div.appendChild(msg);
-    } else {
-      const msg = document.createElement('span');
-      msg.className = 'msg';
-      msg.textContent = String(item ?? '');
-      div.appendChild(msg);
-    }
-    container.appendChild(div);
+    if (target) target.appendChild(line);
   }
 
   function renderDownloadButton({ filename, href, blobContent }) {
