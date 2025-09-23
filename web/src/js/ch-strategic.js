@@ -519,7 +519,12 @@
       return { upgraded: false, done: true };
     } else {
       const data = await res.json();
-      const counts = data?.counts || {};
+      const counts = data?.counts || {
+        total: Number(data?.rows ?? data?.total ?? 0),
+        processed: Number(data?.processed ?? data?.rows ?? 0),
+        matched: Number(data?.matched ?? 0),
+        skipped: Number(data?.skipped ?? 0),
+      };
       setCounters(counts);
       setProgress(100);
 
@@ -547,7 +552,7 @@
         hasIssues ? "warn" : "info",
         { openSkipped: hasIssues }
       );
-      const matched = Number(data?.counts?.matched || 0);
+      const matched = Number((data?.counts?.matched ?? data?.matched ?? 0));
       const showDetails = (matched === 0) || hasIssues;
       showFeedbackCard(showDetails);
       setTimeout(() => setProgress(null), 1200);
