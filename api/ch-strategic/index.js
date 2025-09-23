@@ -95,8 +95,14 @@ function snippetAround(text, needle, radius = 80) {
 }
 
 // Get context snippet from the company report
-// REPLACE the entire tryGetReportText with this version (URL OCR → CH URL OCR → CH buffer OCR)
+// (URL OCR → CH URL OCR → CH buffer OCR)
 async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 200000 } = {}) {
+  logProbe('start', {
+    companyNumber,
+    base: !!(process.env.CH_STRATEGIC_TEXT_URL || process.env.CH_READER_ENDPOINT),
+    di: !!(process.env.AZ_DI_ENDPOINT && process.env.AZ_DI_KEY),
+    ch: !!(process.env.CH_API_KEY)
+  });
   if (!companyNumber) return null;
 
   const base = process.env.CH_STRATEGIC_TEXT_URL || process.env.CH_READER_ENDPOINT || '';
@@ -125,7 +131,7 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
   const pagesFirst = Number(process.env.CH_SR_PAGES_FIRST || 0) || null;
 
   try {
-    // (1) Your reader service first (if configured)
+    // (1) Try your reader service first (if configured)
     for (const url of candidates) {
       try {
         const res = await fetch(url, {
@@ -133,50 +139,57 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
           headers: { 'Accept': 'application/json, text/plain, text/html, application/pdf, text/markdown' },
           signal: controller.signal,
         });
+
+        const ctype = (res.headers.get('content-type') || '').toLowerCase();
+        logProbe('reader.fetch', { url, ok: res.ok, status: res.status, contentType: ctype });
+
         if (!res.ok) {
-          if (res.status >= 500) break;
-          continue;
+          if (res.status >= 500) break; // hard server error: stop trying reader
+          continue;                     // try next candidate on 4xx
         }
 
-        const ct = (res.headers.get('content-type') || '').toLowerCase();
-
-        if (ct.includes('application/json')) {
+        if (ctype.includes('application/json')) {
           const j = await res.json();
-          // Direct text?
           let text = pickText(j);
           if (typeof text === 'string') text = text.replace(/^\uFEFF/, '').trim();
           if (text && !/<!doctype html>|<html[\s>]/i.test(text)) {
             return text.length > maxLen ? text.slice(0, maxLen) : text;
           }
-          // JSON may reference a PDF URL → OCR via DI (URL source)
+          // JSON may reference a PDF URL → OCR via DI (URL first, then authenticated bytes)
           const pdfUrl = pickPdfUrl(j, encNum);
+          logProbe('reader.json.pdfUrl', { hasPdfUrl: !!pdfUrl, pdfUrl });
           if (pdfUrl) {
             const byUrl = await azureReadTextFromUrl(pdfUrl, { pagesFirst });
+            logProbe('reader.json.ocr.url.done', { got: !!byUrl, len: (byUrl || '').length });
             if (byUrl) return byUrl.length > maxLen ? byUrl.slice(0, maxLen) : byUrl;
 
-            // If DI cannot fetch the URL (requires auth), try authenticated download + buffer OCR
             const pdfBuf = await chDownloadPdfBuffer(pdfUrl);
+            logProbe('reader.json.pdf.download', { ok: !!pdfBuf, len: pdfBuf ? pdfBuf.length : 0 });
             if (pdfBuf && pdfBuf.length) {
               const byBuf = await azureReadTextFromBuffer(pdfBuf);
+              logProbe('reader.json.ocr.buf.done', { got: !!byBuf, len: (byBuf || '').length });
               if (byBuf) return byBuf.length > maxLen ? byBuf.slice(0, maxLen) : byBuf;
             }
           }
           continue;
         }
 
-        if (ct.includes('application/pdf')) {
+        if (ctype.includes('application/pdf')) {
           const byUrl = await azureReadTextFromUrl(url, { pagesFirst });
+          logProbe('reader.pdf.ocr.url.done', { got: !!byUrl, len: (byUrl || '').length });
           if (byUrl) return byUrl.length > maxLen ? byUrl.slice(0, maxLen) : byUrl;
-          // If direct pdf URL also needs auth, fetch bytes with our creds (if this is a CH doc URL)
+
           const pdfBuf = await chDownloadPdfBuffer(url);
+          logProbe('reader.pdf.download', { ok: !!pdfBuf, len: pdfBuf ? pdfBuf.length : 0 });
           if (pdfBuf && pdfBuf.length) {
             const byBuf = await azureReadTextFromBuffer(pdfBuf);
+            logProbe('reader.pdf.ocr.buf.done', { got: !!byBuf, len: (byBuf || '').length });
             if (byBuf) return byBuf.length > maxLen ? byBuf.slice(0, maxLen) : byBuf;
           }
           continue;
         }
 
-        // Plain text / HTML as text
+        // Treat as text (text/plain, text/markdown, etc.)
         let text = await res.text();
         if (typeof text !== 'string') continue;
         text = text.replace(/^\uFEFF/, '').trim();
@@ -185,26 +198,29 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
         return text.length > maxLen ? text.slice(0, maxLen) : text;
 
       } catch {
-        continue;
+        continue; // network/parse error → next candidate
       }
     }
 
-    // (2) Reader gave nothing → Companies House fallback:
-    //     find a recent Accounts filing, get a PDF URL (CH Document API), OCR
+    // (2) Reader gave nothing → Companies House fallback (filing history → PDF → OCR)
+    logProbe('ch.fh.lookup', { haveKey: !!process.env.CH_API_KEY, num: companyNumber });
     const pdfUrl = await chFindAccountsPdfUrl(normalizeCompanyNumber(companyNumber));
+    logProbe('ch.fh.pdfUrl', { ok: !!pdfUrl, pdfUrl });
     if (pdfUrl) {
-      // Try URL OCR first (works only if URL is public)
       const byUrl = await azureReadTextFromUrl(pdfUrl, { pagesFirst });
+      logProbe('ch.ocr.url', { got: !!byUrl, len: (byUrl || '').length });
       if (byUrl) return byUrl.length > maxLen ? byUrl.slice(0, maxLen) : byUrl;
 
-      // Otherwise fetch bytes with CH auth and OCR from buffer
       const pdfBuf = await chDownloadPdfBuffer(pdfUrl);
+      logProbe('ch.pdf.download', { ok: !!pdfBuf, len: pdfBuf ? pdfBuf.length : 0 });
       if (pdfBuf && pdfBuf.length) {
         const byBuf = await azureReadTextFromBuffer(pdfBuf);
+        logProbe('ch.ocr.buf', { got: !!byBuf, len: (byBuf || '').length });
         if (byBuf) return byBuf.length > maxLen ? byBuf.slice(0, maxLen) : byBuf;
       }
     }
 
+    logProbe('end', { returned: false, len: 0 });
     return null;
   } finally {
     clearTimeout(timer);
@@ -1009,6 +1025,14 @@ async function azureReadTextFromBuffer(
     if (status === 'failed' || status === 'error') return '';
   }
   return '';
+}
+// ADD: one-shot probe logger so we can see exactly which path returned (or failed)
+function logProbe(stage, data) {
+  if (process.env.CH_DEBUG !== '1') return;
+  try {
+    // eslint-disable-next-line no-console
+    console.log(`CH_PROBE:${stage}`, JSON.stringify(data));
+  } catch { }
 }
 
 // ------------------------------- Azure Function entry -------------------------------
