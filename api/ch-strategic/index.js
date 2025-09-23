@@ -111,7 +111,7 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  // Local helper to normalize various JSON shapes to a string
+  // Normalize various JSON shapes to a string
   const pickText = (j) => {
     if (!j || typeof j !== 'object') return '';
     if (typeof j.text === 'string') return j.text;
@@ -130,11 +130,12 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
       try {
         const res = await fetch(url, {
           method: 'GET',
-          headers: { 'Accept': 'application/json, text/plain, text/html' },
+          headers: { 'Accept': 'application/json, text/plain, text/html, text/markdown' },
           signal: controller.signal,
         });
+
         if (!res.ok) {
-          // Try next candidate on 404/400; bail on hard server errors
+          // Try next candidate on 4xx; bail on hard server errors/timeouts
           if (res.status >= 500) return null;
           continue;
         }
@@ -146,19 +147,24 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
           const j = await res.json();
           text = pickText(j);
         } else {
-          // Accept text/plain and text/html as plain text
           text = await res.text();
         }
 
         if (typeof text !== 'string') continue;
-        text = text.trim();
+        // Strip BOM and trim
+        text = text.replace(/^\uFEFF/, '').trim();
         if (!text) continue;
+
+        // Guard: ignore HTML pages (login/error/landing)
+        if (/<!doctype html>|<html[\s>]/i.test(text)) {
+          continue;
+        }
 
         // Cap length to protect memory / CSV size
         if (text.length > maxLen) text = text.slice(0, maxLen);
         return text;
       } catch {
-        // Network or abort — try next candidate
+        // Network/abort/parse error — try next candidate
         continue;
       }
     }
@@ -206,10 +212,16 @@ function evidenceAny(text, tagOrList, singleTermMatch) {
   return false;
 }
 
-// ADD: simple single-term matcher (case-insensitive, collapses whitespace)
 function textMatchesEvidence(text, term) {
   if (!text || !term) return false;
-  const norm = (s) => String(s).toLowerCase().replace(/\s+/g, ' ').trim();
+  const norm = (s) => String(s)
+    .normalize('NFKD')                // split accents
+    .replace(/[\u0300-\u036f]/g, '')  // drop diacritics
+    .replace(/[\u00A0\u2007\u202F]/g, ' ') // NBSPs -> space
+    .replace(/[‐-‒–—]/g, '-')         // dash variants -> '-'
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
   return norm(text).includes(norm(term));
 }
 
@@ -409,9 +421,11 @@ function parseEvidenceList(input) {
 }
 
 // REPLACE summarizeCsv with SR-aware matching + safe fallbacks (SR → full filing → company name)
+// REPLACE summarizeCsv with SR-aware matching, robust fallbacks, and debug logs
 async function summarizeCsv(buffer, opts = {}) {
   const evidenceTag = (opts?.evidenceTag ?? '').trim();
   const evidenceTerms = Array.isArray(opts?.evidenceTerms) ? opts.evidenceTerms : parseEvidenceList(evidenceTag);
+  const DEBUG = process.env.CH_DEBUG === '1';
 
   // Parse CSV (auto delimiter) and resolve keys once
   const { recs } = parseCsvFlexibleAuto(buffer);
@@ -438,26 +452,30 @@ async function summarizeCsv(buffer, opts = {}) {
       continue;
     }
 
-    // 1) Try to fetch full filing text from your reader (may be empty if not configured)
+    // Fetch full text from reader
     let fullText = '';
-    try {
-      fullText = await tryGetReportText(num) || '';
-    } catch {
-      fullText = '';
-    }
+    try { fullText = await tryGetReportText(num) || ''; } catch { fullText = ''; }
 
-    // 2) Extract the Strategic Report region if present
     const srOnly = extractStrategicReport(fullText);
-
-    // 3) Choose the search body with solid fallbacks so we NEVER drop to "no match" just because text is missing
-    //    Order: Strategic Report → full filing → company name
     const searchText = (srOnly && srOnly.trim())
       ? srOnly
       : (fullText && fullText.trim())
         ? fullText
         : name;
 
-    // 4) Evidence matching (multi-term OR) on the chosen body
+    if (DEBUG) {
+      const meta = {
+        num,
+        haveFull: !!fullText,
+        fullLen: fullText ? fullText.length : 0,
+        haveSR: !!srOnly,
+        srLen: srOnly ? srOnly.length : 0,
+        searchLen: searchText.length
+      };
+      // eslint-disable-next-line no-console
+      console.log('summarizeCsv:body', meta);
+    }
+
     const { hit, term } = evidenceAnyWithTerm(
       searchText,
       (evidenceTerms.length ? evidenceTerms : evidenceTag)
@@ -465,8 +483,6 @@ async function summarizeCsv(buffer, opts = {}) {
 
     if (hit) {
       matched += 1;
-      // Snippet is taken from the BEST-AVAILABLE body for user context:
-      // prefer SR-only; else full filing; else (last resort) the company name
       const snippetSource = (srOnly && srOnly.trim()) ? srOnly : (fullText && fullText.trim()) ? fullText : name;
       const snippet = sentenceSnippet(snippetSource, term || evidenceTag);
       const m = { companyNumber: num, companyName: name, evidence: term || evidenceTag, snippet };
@@ -476,6 +492,11 @@ async function summarizeCsv(buffer, opts = {}) {
       skipped += 1;
       const reason = (fullText || srOnly) ? 'no_evidence_match_in_text' : 'no_text_available';
       errorsByReason[reason] = (errorsByReason[reason] || 0) + 1;
+
+      if (DEBUG) {
+        // eslint-disable-next-line no-console
+        console.log('summarizeCsv:nohit', { num, name, terms: evidenceTerms.length ? evidenceTerms : [evidenceTag] });
+      }
     }
   }
 
@@ -651,40 +672,55 @@ function _canon(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
 function _lower(s) { return _canon(s).toLowerCase(); }
 
 // ADD: extract only the "Strategic Report" section from a full filing text
+// REPLACE: robust Strategic Report extractor
 function extractStrategicReport(fullText) {
   if (!fullText) return '';
-  const text = fullText;                           // keep original for substring slicing
+  const text = String(fullText).replace(/\r/g, '\n'); // normalize newlines
   const lc = text.toLowerCase();
 
-  // Common headings that begin/end the section (case/space tolerant)
-  const starts = [
-    'strategic report', 'the strategic report', 'strategic-report', 'strategic–report'
+  // Headings: allow hyphen/en-dash variations and optional "the"
+  const startPatterns = [
+    /\bthe?\s*strategic[\s\-–—]*report\b/i,
+    /\bstrategic[\s\-–—]*report\b/i
   ];
-  const ends = [
-    "directors' report", 'directors’ report', 'directors report',
-    'independent auditor', 'corporate governance', 'governance statement',
-    'statement of directors', 'remuneration report', 'chairman’s statement',
-    'company balance sheet', 'consolidated statement', 'profit and loss account'
+  // Common section starts that typically FOLLOW Strategic Report
+  const endPatterns = [
+    /\bdirectors[\s’']?\s*report\b/i,
+    /\bindependent\s+auditor/i,
+    /\bcorporate\s+governance/i,
+    /\bgovernance\s+statement\b/i,
+    /\bremuneration\s+report\b/i,
+    /\bstatement\s+of\s+directors/i,
+    /\bprofit\s+and\s+loss\b/i,
+    /\bbalance\s+sheet\b/i,
+    /\bconsolidated\s+statement\b/i
   ];
 
-  // Find first plausible start
-  let startIdx = -1;
-  for (const s of starts) {
-    const i = lc.indexOf(s);
-    if (i !== -1 && (startIdx === -1 || i < startIdx)) startIdx = i;
+  // Find first start
+  let start = -1;
+  for (const re of startPatterns) {
+    const m = lc.match(re);
+    if (m && (start === -1 || m.index < start)) start = m.index;
   }
-  if (startIdx === -1) return ''; // no strategic report heading found
+  if (start === -1) return '';
 
-  // From start onward, find the earliest end heading
-  let endIdx = text.length;
-  for (const e of ends) {
-    const j = lc.indexOf(e, startIdx + 16);
-    if (j !== -1 && j < endIdx) endIdx = j;
+  // Find earliest valid end AFTER start
+  let end = text.length;
+  for (const re of endPatterns) {
+    const m = lc.slice(start + 16).match(re);
+    if (m) {
+      const idx = (start + 16) + m.index;
+      if (idx < end) end = idx;
+    }
   }
 
-  const section = text.slice(startIdx, endIdx);
-  // Trim aggressive front matter like the heading line itself to not bias snippets
-  return section.replace(/^\s*strategic[^\n]*\n?/i, '').trim();
+  let section = text.slice(start, end);
+
+  // Remove the heading line to keep snippets clean
+  section = section.replace(/^\s*the?\s*strategic[\s\-–—]*report[^\n]*\n?/i, '');
+
+  // Collapse multi-spaces / page artifacts
+  return section.replace(/\s+/g, ' ').trim();
 }
 
 // ADD: sentence-friendly snippet around the matched term (not just raw slice)
