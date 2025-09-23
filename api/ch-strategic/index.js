@@ -97,16 +97,13 @@ function snippetAround(text, needle, radius = 80) {
 // Get context snippet from the company report
 async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 200000 } = {}) {
   const base = process.env.CH_STRATEGIC_TEXT_URL || process.env.CH_READER_ENDPOINT || '';
-  if (!companyNumber || !base) return null;
+  if (!companyNumber) return null;
 
-  // Build candidate URLs: prefer /:id, then ?id=, then ?companyNumber=
-  const cleanBase = String(base).replace(/\/+$/, '');
-  const enc = encodeURIComponent(companyNumber);
-  const candidates = [
-    `${cleanBase}/${enc}`,
-    `${cleanBase}?id=${enc}`,
-    `${cleanBase}?companyNumber=${enc}`,
-  ];
+  const cleanBase = String(base || '').replace(/\/+$/, '');
+  const enc = encodeURIComponent(normalizeCompanyNumber(companyNumber));
+  const candidates = cleanBase
+    ? [`${cleanBase}/${enc}`, `${cleanBase}?id=${enc}`, `${cleanBase}?companyNumber=${enc}`]
+    : []; // allow running without the reader (CH fallback only)
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -124,7 +121,10 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
     return '';
   };
 
+  const pagesFirst = Number(process.env.CH_SR_PAGES_FIRST || 0) || null;
+
   try {
+    // 1) Try your reader service first (if configured)
     for (const url of candidates) {
       try {
         const res = await fetch(url, {
@@ -132,68 +132,58 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
           headers: { 'Accept': 'application/json, text/plain, text/html, application/pdf, text/markdown' },
           signal: controller.signal,
         });
-
         if (!res.ok) {
-          if (res.status >= 500) return null; // hard fail on server errors
+          if (res.status >= 500) break; // stop reader attempts on server errors
           continue;
         }
 
         const ct = (res.headers.get('content-type') || '').toLowerCase();
 
-        // Case 1: JSON → may contain text or a pdfUrl
         if (ct.includes('application/json')) {
           const j = await res.json();
-          // Try direct text first
           let text = pickText(j);
           if (typeof text === 'string') {
             text = text.replace(/^\uFEFF/, '').trim();
           }
-          // If no text, see if we can OCR from a PDF URL
           if (!text) {
-            const pdfUrl = pickPdfUrl(j, companyNumber);
+            // JSON could include a PDF url → OCR with DI
+            const pdfUrl = pickPdfUrl(j, enc);
             if (pdfUrl) {
-              const pagesFirst = Number(process.env.CH_SR_PAGES_FIRST || 0) || null;
               const ocr = await azureReadTextFromUrl(pdfUrl, { pagesFirst });
-              if (ocr) {
-                if (ocr.length > maxLen) return ocr.slice(0, maxLen);
-                return ocr;
-              }
+              if (ocr) return ocr.length > maxLen ? ocr.slice(0, maxLen) : ocr;
             }
-          }
-          // Guard against HTML in disguise
-          if (text && !/<!doctype html>|<html[\s>]/i.test(text)) {
-            if (text.length > maxLen) text = text.slice(0, maxLen);
-            return text;
-          }
-          continue; // try next candidate if JSON yielded nothing usable
-        }
-
-        // Case 2: PDF directly (rare): OCR via DI
-        if (ct.includes('application/pdf')) {
-          const pagesFirst = Number(process.env.CH_SR_PAGES_FIRST || 0) || null;
-          const ocr = await azureReadTextFromUrl(url, { pagesFirst });
-          if (ocr) {
-            return ocr.length > maxLen ? ocr.slice(0, maxLen) : ocr;
+          } else if (!/<!doctype html>|<html[\s>]/i.test(text)) {
+            return text.length > maxLen ? text.slice(0, maxLen) : text;
           }
           continue;
         }
 
-        // Case 3: Plain text / HTML as text
+        if (ct.includes('application/pdf')) {
+          const ocr = await azureReadTextFromUrl(url, { pagesFirst });
+          if (ocr) return ocr.length > maxLen ? ocr.slice(0, maxLen) : ocr;
+          continue;
+        }
+
         let text = await res.text();
         if (typeof text !== 'string') continue;
         text = text.replace(/^\uFEFF/, '').trim();
         if (!text) continue;
-
-        // Ignore HTML pages (login/error/landing)
         if (/<!doctype html>|<html[\s>]/i.test(text)) continue;
 
-        if (text.length > maxLen) text = text.slice(0, maxLen);
-        return text;
+        return text.length > maxLen ? text.slice(0, maxLen) : text;
 
       } catch {
-        continue; // network/parse; try next candidate
+        continue;
       }
     }
+
+    // 2) Reader returned nothing usable → fallback to Companies House API + DI OCR
+    const pdfUrl = await chFindAccountsPdfUrl(normalizeCompanyNumber(companyNumber));
+    if (pdfUrl) {
+      const ocr = await azureReadTextFromUrl(pdfUrl, { pagesFirst });
+      if (ocr) return ocr.length > maxLen ? ocr.slice(0, maxLen) : ocr;
+    }
+
     return null;
   } finally {
     clearTimeout(timer);
@@ -882,6 +872,62 @@ function normalizeCompanyNumber(raw) {
     return prefix + tail;
   }
   return s;
+}
+
+// ADD: Companies House API fallback (if your reader returns nothing)
+// Env:
+//   CH_API_KEY                 → Companies House API key
+//   CH_API_BASE (optional)     → default "https://api.company-information.service.gov.uk"
+//   CH_DOC_API_BASE (optional) → default "https://document-api.company-information.service.gov.uk"
+function chAuthHeader() {
+  const key = process.env.CH_API_KEY || '';
+  if (!key) return null;
+  // CH uses HTTP Basic with API key as username, blank password
+  const token = Buffer.from(`${key}:`).toString('base64');
+  return { Authorization: `Basic ${token}` };
+}
+
+async function chFetchJson(url) {
+  const hdr = chAuthHeader();
+  if (!hdr) return null;
+  const res = await fetch(url, { headers: { ...hdr, 'Accept': 'application/json' } });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+// Find a likely Accounts filing and resolve to a PDF download URL via the Document API
+async function chFindAccountsPdfUrl(companyNumber) {
+  const base = (process.env.CH_API_BASE || 'https://api.company-information.service.gov.uk').replace(/\/+$/, '');
+  const docBase = (process.env.CH_DOC_API_BASE || 'https://document-api.company-information.service.gov.uk').replace(/\/+$/, '');
+  const num = normalizeCompanyNumber(companyNumber);
+  // Get recent filing history; increase items_per_page if needed
+  const fh = await chFetchJson(`${base}/company/${encodeURIComponent(num)}/filing-history?items_per_page=100`);
+  if (!fh || !Array.isArray(fh.items)) return null;
+
+  // Heuristic: pick the newest item in category "accounts" that has a document link
+  const candidate = fh.items.find(it =>
+    it &&
+    (it.category === 'accounts' || /accounts/i.test(it.category || '')) &&
+    it.links && it.links.document_metadata
+  );
+  if (!candidate) return null;
+
+  // Fetch document metadata → find PDF link
+  const metaUrl = `${docBase}${candidate.links.document_metadata}`;
+  const hdr = chAuthHeader();
+  const mRes = await fetch(metaUrl, { headers: { ...hdr, 'Accept': 'application/json' } });
+  if (!mRes.ok) return null;
+  const meta = await mRes.json();
+
+  // Newer doc API payloads expose "links.document" (direct), or "resources.application/pdf.href"
+  const direct = meta?.links?.document || meta?.links?.self; // sometimes "document"
+  const resPdf = meta?.resources && (meta.resources['application/pdf'] || meta.resources['application/pdf; charset=utf-8']);
+  const href = (resPdf && (resPdf.url || resPdf.href)) || direct;
+  if (!href) return null;
+
+  // If the href is relative (starts with /document/...), prefix with docBase
+  const pdfUrl = /^https?:\/\//i.test(href) ? href : `${docBase}${href}`;
+  return pdfUrl;
 }
 
 // ------------------------------- Azure Function entry -------------------------------
