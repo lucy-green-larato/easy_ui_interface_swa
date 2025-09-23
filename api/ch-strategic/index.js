@@ -76,6 +76,31 @@ function normHeader(s) {
     .replace(/[^a-z0-9]/g, '');      // drop spaces, underscores, punctuation
 }
 
+// ADD: Multi-term parsing that remains backward-compatible with single term
+function parseEvidenceList(input) {
+  const s = (input ?? '').trim();
+  if (!s) return [];
+  // split on commas, keep phrases intact, trim/normalize, drop empties, dedupe
+  const terms = s.split(',').map(t => t.trim()).filter(Boolean);
+  return Array.from(new Set(terms));
+}
+
+// ADD: Wrap existing single-term matcher with an ANY-of-terms check
+// IMPORTANT: 'singleTermMatch' must be your current matching function or inline check.
+// If you don't have a named function, pass a callback that implements your current logic.
+function evidenceAny(text, tagOrList, singleTermMatch) {
+  const terms = Array.isArray(tagOrList) ? tagOrList : parseEvidenceList(tagOrList);
+  // If no commas (i.e., 0 or 1 term), fall through to the original single-term matcher
+  if (terms.length <= 1) {
+    const t = terms[0] ?? (typeof tagOrList === 'string' ? tagOrList : '');
+    return singleTermMatch(text, t);
+  }
+  for (const t of terms) {
+    if (singleTermMatch(text, t)) return true;
+  }
+  return false;
+}
+
 function findHeader(headers, targetLabel) {
   const want = normHeader(targetLabel);
   return headers.find(h => normHeader(h) === want) || null;
@@ -345,7 +370,27 @@ module.exports = async function (context, req) {
       if (error) { context.res = err(415, error, cid); return; }
       if (!file?.buffer?.length) { context.res = err(400, 'Missing file', cid); return; }
       const evidenceTag = (fields?.evidenceTag ?? '').trim();
-      if (evidenceTag && !/^[A-Za-z0-9 _-]{1,50}$/.test(evidenceTag)) { context.res = err(400, 'Invalid evidenceTag', cid); return; }
+      const termPattern = /^[A-Za-z0-9 _-]{1,50}$/;
+
+      // Parse comma-separated terms -> unique, trimmed, non-empty
+      const evidenceTerms = evidenceTag
+        ? Array.from(new Set(evidenceTag.split(',').map(t => t.trim()).filter(Boolean)))
+        : [];
+
+      // Validate each term (or the single tag if no commas)
+      for (const t of (evidenceTerms.length ? evidenceTerms : [evidenceTag])) {
+        if (t && !termPattern.test(t)) {
+          context.res = err(400, `Invalid evidence term: "${t}"`, cid);
+          return;
+        }
+      }
+
+      // Optional safety cap
+      if (evidenceTerms.length > 10) {
+        context.res = err(400, 'Too many evidence terms (max 10).', cid);
+        return;
+      }
+
 
       // Flexible CSV header validation (same as small-run)
       let headers;
@@ -409,7 +454,26 @@ module.exports = async function (context, req) {
       if (!file?.buffer?.length) { context.res = err(400, 'Missing file', cid); return; }
 
       const evidenceTag = (fields?.evidenceTag ?? '').trim();
-      if (evidenceTag && !/^[A-Za-z0-9 _-]{1,50}$/.test(evidenceTag)) { context.res = err(400, 'Invalid evidenceTag', cid); return; }
+      const termPattern = /^[A-Za-z0-9 _-]{1,50}$/;
+
+      // Parse comma-separated terms -> unique, trimmed, non-empty
+      const evidenceTerms = evidenceTag
+        ? Array.from(new Set(evidenceTag.split(',').map(t => t.trim()).filter(Boolean)))
+        : [];
+
+      // Validate each term (or the single tag if no commas)
+      for (const t of (evidenceTerms.length ? evidenceTerms : [evidenceTag])) {
+        if (t && !termPattern.test(t)) {
+          context.res = err(400, `Invalid evidence term: "${t}"`, cid);
+          return;
+        }
+      }
+
+      // Optional safety cap
+      if (evidenceTerms.length > 10) {
+        context.res = err(400, 'Too many evidence terms (max 10).', cid);
+        return;
+      }
       // Flexible CSV header validation (same as small-run)
       let headers;
       try {
