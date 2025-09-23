@@ -294,6 +294,16 @@ async function getCsvStream(containerName, blobName) {
   return { stream: dl.readableStreamBody, size: dl.contentLength || undefined };
 }
 
+// ADD: ensure json400 exists (structured 400 response with CORS)
+function json400(context, body) {
+  context.res = {
+    status: 400,
+    headers: CORS,
+    body
+  };
+  return;
+}
+
 // ------------------------------- CSV helpers (sync; no Node streams) -------------------------------
 // Try multiple CSV dialects and pick the best (prefer the one that contains required headers)
 function parseCsvFlexible(buffer) {
