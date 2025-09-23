@@ -787,20 +787,24 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // Status → GET /api/ch-strategic/status/:id
+    // STATUS
     if (isStatus(method, path)) {
-      const id = path.split('/').pop();
       if (!AZ_CONN) { context.res = err(500, 'Storage not configured', cid); return; }
+      const m = path.match(/\/status\/([A-Za-z0-9_-]+)\/?$/i);
+      const id = m ? m[1] : '';
+      if (!id) { context.res = err(400, 'Bad status path', cid); return; }
       const status = await getJson(CONTAINERS.status, `${id}.json`);
       if (!status) { context.res = err(404, 'Not found', cid); return; }
       context.res = ok(200, status, cid);
       return;
     }
 
-    // Download → GET /api/ch-strategic/download/:id
+    // DOWNLOAD
     if (isDownload(method, path)) {
-      const id = path.split('/').pop();
       if (!AZ_CONN) { context.res = err(500, 'Storage not configured', cid); return; }
+      const m = path.match(/\/download\/([A-Za-z0-9_-]+)\/?$/i);
+      const id = m ? m[1] : '';
+      if (!id) { context.res = err(400, 'Bad download path', cid); return; }
       const info = await getCsvStream(CONTAINERS.out, `${id}.csv`);
       if (!info) { context.res = err(404, 'Not found', cid); return; }
       context.res = {
