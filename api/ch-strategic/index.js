@@ -336,19 +336,33 @@ function stripBOMTrim(s) {
 function normalizeHeaderList(headers) {
   return Array.isArray(headers) ? headers.map(stripBOMTrim) : [];
 }
-/**
- * Resolve required CSV keys from a Buffer using the SAME logic everywhere.
- * Returns { headers, nameKey, numKey } or throws on parse error.
- */
-function resolveCompanyKeysFromBuffer(buffer) {
-  const { headers } = parseCsvFlexible(buffer);
-  const norm = normalizeHeaderList(headers);
-  // Prefer aliases against normalised headers, then raw as fallback
-  const nameKey = findHeaderWithAliases(norm, 'Company Name') || findHeaderWithAliases(headers, 'Company Name');
-  const numKey = findHeaderWithAliases(norm, 'Company Number') || findHeaderWithAliases(headers, 'Company Number');
-  return { headers: norm, nameKey, numKey };
-}
 
+// REPLACE: always return ORIGINAL header keys so object lookups work on parsed rows
+function resolveCompanyKeysFromBuffer(buffer) {
+  const { headers } = parseCsvFlexible(buffer);           // headers as emitted by csv-parse (original casing)
+  // Build a norm->original lookup once
+  const toOrig = new Map(headers.map(h => [normHeader(h), h]));
+  const aliases = {
+    'Company Name': [
+      'Company Name', 'CompanyName', 'Name', 'Company', 'Organisation', 'Organization'
+    ],
+    'Company Number': [
+      'Company Number', 'CompanyNumber', 'Number', 'Company No', 'Company No.', 'Registration Number',
+      'Reg Number', 'Companies House Number', 'Co Number', 'Co. Number'
+    ]
+  };
+
+  const wantName = aliases['Company Name'].map(a => normHeader(a));
+  const wantNum = aliases['Company Number'].map(a => normHeader(a));
+
+  let nameKey = null, numKey = null;
+  for (const k of wantName) { const hit = toOrig.get(k); if (hit) { nameKey = hit; break; } }
+  for (const k of wantNum) { const hit = toOrig.get(k); if (hit) { numKey = hit; break; } }
+
+  // Return ORIGINAL headers (trimmed BOM), and ORIGINAL keys
+  const cleanHeaders = headers.map(h => String(h).replace(/^\uFEFF/, '').trim());
+  return { headers: cleanHeaders, nameKey, numKey };
+}
 
 // Try multiple CSV dialects and pick the best (prefer the one that contains required headers)
 function parseCsvFlexible(buffer) {
@@ -404,11 +418,10 @@ function parseEvidenceList(input) {
 async function summarizeCsv(buffer, opts = {}) {
   const evidenceTag = (opts?.evidenceTag ?? '').trim();
   const evidenceTerms = Array.isArray(opts?.evidenceTerms) ? opts.evidenceTerms : parseEvidenceList(evidenceTag);
-
   const { recs } = parseCsvFlexible(buffer);
   const resolved = resolveCompanyKeysFromBuffer(buffer);
-  const headers = resolved.headers;
-  const nameKey = resolved.nameKey;
+  const headers = resolved.headers;    
+  const nameKey = resolved.nameKey; 
   const numKey = resolved.numKey;
 
   let rows = 0, matched = 0, skipped = 0;
