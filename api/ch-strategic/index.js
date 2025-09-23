@@ -453,10 +453,11 @@ async function summarizeCsv(buffer, opts = {}) {
 }
 
 async function buildOutputCsv(buffer, evidenceTag) {
-  const { recs, headers } = parseCsvFlexible(buffer);
-  const nameKey = findHeaderWithAliases(headers, 'Company Name');
-  const numKey = findHeaderWithAliases(headers, 'Company Number');
-
+  const { recs } = parseCsvFlexible(buffer);
+  const parsed = resolveCompanyKeysFromBuffer(buffer);
+  const headers = parsed.headers;
+  const nameKey = parsed.nameKey;
+  const numKey = parsed.numKey;
   const rows = [];
   for (const r of recs) {
     const name = String(nameKey ? r[nameKey] : '').trim();
@@ -624,7 +625,6 @@ module.exports = async function (context, req) {
       }
 
       // Flexible CSV header validation
-      // SMALL RUN header validation (keep the rest of your small-run block unchanged)
       let parsed;
       try {
         parsed = resolveCompanyKeysFromBuffer(file.buffer);
@@ -645,6 +645,7 @@ module.exports = async function (context, req) {
           headers
         });
       }
+
       // Run analysis (pass evidence to enable multi-term matching)
       const summary = await summarizeCsv(file.buffer, { evidenceTag, evidenceTerms });
 
@@ -704,6 +705,7 @@ module.exports = async function (context, req) {
       }
 
       // START (large run) header validation
+      let parsed;
       try {
         parsed = resolveCompanyKeysFromBuffer(file.buffer);
       } catch (e) {
