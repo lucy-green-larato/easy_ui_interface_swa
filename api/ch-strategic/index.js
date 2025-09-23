@@ -384,8 +384,8 @@ async function summarizeCsv(buffer, opts = {}) {
   const evidenceTerms = Array.isArray(opts?.evidenceTerms) ? opts.evidenceTerms : parseEvidenceList(evidenceTag);
 
   const { recs, headers } = parseCsvFlexible(buffer);
-  const nameKey = findHeader(headers, 'Company Name');
-  const numKey = findHeader(headers, 'Company Number');
+  const nameKey = findHeaderWithAliases(headers, 'Company Name');
+  const numKey = findHeaderWithAliases(headers, 'Company Number');
 
   let rows = 0, matched = 0, skipped = 0;
   const errorsByReason = {};
@@ -430,8 +430,8 @@ async function summarizeCsv(buffer, opts = {}) {
 
 async function buildOutputCsv(buffer, evidenceTag) {
   const { recs, headers } = parseCsvFlexible(buffer);
-  const nameKey = findHeader(headers, 'Company Name');
-  const numKey = findHeader(headers, 'Company Number');
+  const nameKey = findHeaderWithAliases(headers, 'Company Name');
+  const numKey = findHeaderWithAliases(headers, 'Company Number');
 
   const rows = [];
   for (const r of recs) {
@@ -605,8 +605,8 @@ module.exports = async function (context, req) {
           detail: String((e && e.message) || e)
         });
       }
-      const nameKey = findHeader(headers, 'Company Name');
-      const numKey = findHeader(headers, 'Company Number');
+      const nameKey = findHeaderWithAliases(headers, 'Company Name');
+      const numKey = findHeaderWithAliases(headers, 'Company Number');
       if (!nameKey || !numKey) {
         return json400(context, {
           ok: false,
@@ -686,8 +686,8 @@ module.exports = async function (context, req) {
           detail: String((e && e.message) || e)
         });
       }
-      const nameKey = findHeader(headers, 'Company Name');
-      const numKey = findHeader(headers, 'Company Number');
+      const nameKey = findHeaderWithAliases(headers, 'Company Name');
+      const numKey = findHeaderWithAliases(headers, 'Company Number');
       if (!nameKey || !numKey) {
         return json400(context, {
           ok: false,
