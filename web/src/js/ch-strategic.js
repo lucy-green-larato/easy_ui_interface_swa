@@ -36,6 +36,28 @@
   };
   const normaliseHeader = (s) => (s ?? "").trim().toLowerCase();
 
+  function setDownloadAnchor(href) {
+    if (!href) return;
+    let a = document.getElementById('download-link');
+    if (!a) {
+      const fileInput = document.getElementById('csv_file');
+      a = document.createElement('a');
+      a.id = 'download-link';
+      a.download = 'ch-strategic.csv';
+      a.textContent = 'Download CSV';
+      a.href = href;
+      a.setAttribute('hidden', 'hidden');
+      if (fileInput && fileInput.parentNode) {
+        fileInput.parentNode.appendChild(a);
+      } else {
+        document.body.appendChild(a);
+      }
+    } else {
+      a.href = href;
+    }
+    a.removeAttribute('hidden');
+  }
+
   // --- resilient fetch helper ---------------------------------------------------
   function withTimeout(promise, ms, aborter) {
     let to;
@@ -425,7 +447,6 @@
   }
 
   // Large run start: POST /api/ch-strategic/start
-  // === REPLACE in web/src/js/ch-strategic.js ===
   async function apiStartLargeRun({ file, evidenceTag }) {
     const fd = new FormData();
     fd.append("csv_file", file);               // <-- must be csv_file
@@ -540,7 +561,8 @@
 
   async function handleLargeRun({ file, evidence }) {
     // Start orchestration
-    const { jobId } = await apiStartLargeRun({ file, evidenceTag: evidence });
+    const { jobId, downloadUrl } = await apiStartLargeRun({ file, evidenceTag: evidence });
+    setDownloadAnchor(downloadUrl || `/api/ch-strategic/download/${encodeURIComponent(jobId)}`);
     if (!jobId) throw new Error("No jobId returned.");
 
     // Initialize run state + announce start
