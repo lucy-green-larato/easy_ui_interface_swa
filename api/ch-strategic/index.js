@@ -76,6 +76,98 @@ function normHeader(s) {
     .replace(/[^a-z0-9]/g, '');      // drop spaces, underscores, punctuation
 }
 
+function ciIndexOf(haystack, needle, from = 0) {
+  if (!haystack || !needle) return -1;
+  const h = String(haystack).toLowerCase();
+  const n = String(needle).toLowerCase();
+  return h.indexOf(n, from);
+}
+function snippetAround(text, needle, radius = 80) {
+  if (!text || !needle) return '';
+  const idx = ciIndexOf(text, needle);
+  if (idx < 0) return '';
+  const start = Math.max(0, idx - radius);
+  const end = Math.min(text.length, idx + String(needle).length + radius);
+  let s = text.slice(start, end).replace(/\s+/g, ' ').trim();
+  if (start > 0) s = '… ' + s;
+  if (end < text.length) s = s + ' …';
+  return s;
+}
+
+// Get context snippet from the company report
+async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 200000 } = {}) {
+  const base = process.env.CH_STRATEGIC_TEXT_URL || process.env.CH_READER_ENDPOINT || '';
+  if (!companyNumber || !base) return null;
+
+  // Build candidate URLs: prefer /:id, then ?id=, then ?companyNumber=
+  const cleanBase = String(base).replace(/\/+$/, '');
+  const enc = encodeURIComponent(companyNumber);
+  const candidates = [
+    `${cleanBase}/${enc}`,
+    `${cleanBase}?id=${enc}`,
+    `${cleanBase}?companyNumber=${enc}`,
+  ];
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  // Local helper to normalize various JSON shapes to a string
+  const pickText = (j) => {
+    if (!j || typeof j !== 'object') return '';
+    if (typeof j.text === 'string') return j.text;
+    if (typeof j.body === 'string') return j.body;
+    if (typeof j.content === 'string') return j.content;
+    if (j.data) {
+      if (typeof j.data.text === 'string') return j.data.text;
+      if (typeof j.data.body === 'string') return j.data.body;
+      if (typeof j.data.content === 'string') return j.data.content;
+    }
+    return '';
+  };
+
+  try {
+    for (const url of candidates) {
+      try {
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json, text/plain, text/html' },
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          // Try next candidate on 404/400; bail on hard server errors
+          if (res.status >= 500) return null;
+          continue;
+        }
+
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+
+        let text = '';
+        if (ct.includes('application/json')) {
+          const j = await res.json();
+          text = pickText(j);
+        } else {
+          // Accept text/plain and text/html as plain text
+          text = await res.text();
+        }
+
+        if (typeof text !== 'string') continue;
+        text = text.trim();
+        if (!text) continue;
+
+        // Cap length to protect memory / CSV size
+        if (text.length > maxLen) text = text.slice(0, maxLen);
+        return text;
+      } catch {
+        // Network or abort — try next candidate
+        continue;
+      }
+    }
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ADD: Multi-term parsing that remains backward-compatible with single term
 function parseEvidenceList(input) {
   const s = (input ?? '').trim();
@@ -83,6 +175,19 @@ function parseEvidenceList(input) {
   // split on commas, keep phrases intact, trim/normalize, drop empties, dedupe
   const terms = s.split(',').map(t => t.trim()).filter(Boolean);
   return Array.from(new Set(terms));
+}
+
+// ADD: OR-match across terms and return WHICH term matched
+function evidenceAnyWithTerm(text, tagOrList, singleMatch) {
+  const terms = Array.isArray(tagOrList) ? tagOrList : parseEvidenceList(tagOrList);
+  if (terms.length <= 1) {
+    const t = terms[0] ?? (typeof tagOrList === 'string' ? tagOrList : '');
+    return singleMatch(text, t) ? { hit: true, term: t } : { hit: false, term: '' };
+  }
+  for (const t of terms) {
+    if (singleMatch(text, t)) return { hit: true, term: t };
+  }
+  return { hit: false, term: '' };
 }
 
 // ADD: Wrap existing single-term matcher with an ANY-of-terms check
@@ -99,6 +204,31 @@ function evidenceAny(text, tagOrList, singleTermMatch) {
     if (singleTermMatch(text, t)) return true;
   }
   return false;
+}
+
+// ADD: simple single-term matcher (case-insensitive, collapses whitespace)
+function textMatchesEvidence(text, term) {
+  if (!text || !term) return false;
+  const norm = (s) => String(s).toLowerCase().replace(/\s+/g, ' ').trim();
+  return norm(text).includes(norm(term));
+}
+
+// ADD: parse comma-separated list and OR-match, returning WHICH term hit
+function parseEvidenceList(input) {
+  const s = (input ?? '').trim();
+  if (!s) return [];
+  return Array.from(new Set(s.split(',').map(t => t.trim()).filter(Boolean)));
+}
+function evidenceAnyWithTerm(text, tagOrList) {
+  const terms = Array.isArray(tagOrList) ? tagOrList : parseEvidenceList(tagOrList);
+  if (terms.length <= 1) {
+    const t = terms[0] ?? (typeof tagOrList === 'string' ? tagOrList : '');
+    return textMatchesEvidence(text, t) ? { hit: true, term: t } : { hit: false, term: '' };
+  }
+  for (const t of terms) {
+    if (textMatchesEvidence(text, t)) return { hit: true, term: t };
+  }
+  return { hit: false, term: '' };
 }
 
 function findHeader(headers, targetLabel) {
@@ -209,34 +339,60 @@ function parseCsvFlexible(buffer) {
   return best;
 }
 
-async function summarizeCsv(buffer) {
-  const { recs, headers } = parseCsvFlexible(buffer);
+// ADD: parse comma-separated evidence list (backward-compatible with single term)
+function parseEvidenceList(input) {
+  const s = (input ?? '').trim();
+  if (!s) return [];
+  return Array.from(new Set(s.split(',').map(t => t.trim()).filter(Boolean)));
+}
 
-  // Resolve actual column keys robustly
+async function summarizeCsv(buffer, opts = {}) {
+  const evidenceTag = (opts?.evidenceTag ?? '').trim();
+  const evidenceTerms = Array.isArray(opts?.evidenceTerms) ? opts.evidenceTerms : parseEvidenceList(evidenceTag);
+
+  const { recs, headers } = parseCsvFlexible(buffer);
   const nameKey = findHeader(headers, 'Company Name');
   const numKey = findHeader(headers, 'Company Number');
 
   let rows = 0, matched = 0, skipped = 0;
   const errorsByReason = {};
   const itemsSample = [];
+  const matches = [];
 
   for (const r of recs) {
     rows += 1;
     const name = String(nameKey ? r[nameKey] : '').trim();
     const num = String(numKey ? r[numKey] : '').trim();
 
-    if (name && num) {
-      matched += 1;
-      if (itemsSample.length < 10) itemsSample.push({ companyNumber: num, companyName: name });
-    } else {
+    if (!name || !num) {
       skipped += 1;
       const reason = !name && !num ? 'missing_both'
         : (!num ? 'missing_company_number' : 'missing_company_name');
       errorsByReason[reason] = (errorsByReason[reason] || 0) + 1;
+      continue;
+    }
+
+    // Prefer Azure reader text if available, otherwise fall back to Company Name
+    const reportText = (await tryGetReportText(num)) || name;
+
+    const { hit, term } = evidenceAnyWithTerm(
+      reportText,
+      (evidenceTerms.length ? evidenceTerms : evidenceTag)
+    );
+
+    if (hit) {
+      matched += 1;
+      const snippet = snippetAround(reportText, term || evidenceTag);
+      const m = { companyNumber: num, companyName: name, evidence: term || evidenceTag, snippet };
+      matches.push(m);
+      if (itemsSample.length < 10) itemsSample.push(m);
+    } else {
+      skipped += 1;
+      errorsByReason['no_evidence_match'] = (errorsByReason['no_evidence_match'] || 0) + 1;
     }
   }
 
-  return { rows, matched, skipped, errorsByReason, headers, itemsSample };
+  return { rows, matched, skipped, errorsByReason, headers, itemsSample, matches };
 }
 
 async function buildOutputCsv(buffer, evidenceTag) {
@@ -253,6 +409,20 @@ async function buildOutputCsv(buffer, evidenceTag) {
     }
   }
   const header = 'Company Number,Company Name,Evidence';
+  return Buffer.from(`${header}\n${rows.join('\n')}\n`, 'utf8');
+}
+
+// ADD: Build CSV from the server-side matches array so each row uses its matched term
+async function buildOutputCsvFromMatches(matches, fallbackEvidence = '') {
+  const header = 'Company Number,Company Name,Evidence,Snippet';
+  const rows = (matches || []).map(m => {
+    const num = String(m.companyNumber ?? '').trim();
+    const name = String(m.companyName ?? '').trim();
+    const ev = String(m.evidence ?? fallbackEvidence ?? '').trim();
+    const snippet = String(m.snippet ?? '').trim();
+    if (!num || !name) return '';
+    return `${num},${csvEscape(name)},${csvEscape(ev)},${csvEscape(snippet)}`;
+  }).filter(Boolean);
   return Buffer.from(`${header}\n${rows.join('\n')}\n`, 'utf8');
 }
 
@@ -364,15 +534,15 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // Small run (no storage)
+    // Small run (no storage) → POST /api/ch-strategic
     if (isSmallRun(method, path)) {
       const { file, fields, error } = await readMultipart(req);
       if (error) { context.res = err(415, error, cid); return; }
       if (!file?.buffer?.length) { context.res = err(400, 'Missing file', cid); return; }
+
+      // Evidence: single or comma-separated terms (deduped)
       const evidenceTag = (fields?.evidenceTag ?? '').trim();
       const termPattern = /^[A-Za-z0-9 _-]{1,50}$/;
-
-      // Parse comma-separated terms -> unique, trimmed, non-empty
       const evidenceTerms = evidenceTag
         ? Array.from(new Set(evidenceTag.split(',').map(t => t.trim()).filter(Boolean)))
         : [];
@@ -384,15 +554,13 @@ module.exports = async function (context, req) {
           return;
         }
       }
-
       // Optional safety cap
       if (evidenceTerms.length > 10) {
         context.res = err(400, 'Too many evidence terms (max 10).', cid);
         return;
       }
 
-
-      // Flexible CSV header validation (same as small-run)
+      // Flexible CSV header validation
       let headers;
       try {
         ({ headers } = parseCsvFlexible(file.buffer));
@@ -401,7 +569,7 @@ module.exports = async function (context, req) {
           ok: false,
           code: 400,
           message: "Could not parse CSV",
-          detail: String(e && e.message || e)
+          detail: String((e && e.message) || e)
         });
       }
       const nameKey = findHeader(headers, 'Company Name');
@@ -411,12 +579,12 @@ module.exports = async function (context, req) {
           ok: false,
           code: 400,
           message: "Missing required column(s): Company Name, Company Number",
-          headers  // echo parsed headers to help debug odd whitespace/BOM/casing
+          headers
         });
       }
 
-
-      const summary = await summarizeCsv(file.buffer);
+      // Run analysis (pass evidence to enable multi-term matching)
+      const summary = await summarizeCsv(file.buffer, { evidenceTag, evidenceTerms });
 
       // Required headers
       const required = ['Company Name', 'Company Number'];
@@ -444,7 +612,7 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // Start (requires storage)
+    // Start (large run; writes to Azure) → POST /api/ch-strategic/start
     if (isStart(method, path)) {
       if (!AZ_CONN) { context.res = err(500, 'Storage not configured', cid); return; }
       await ensureContainers();
@@ -453,10 +621,9 @@ module.exports = async function (context, req) {
       if (error) { context.res = err(415, error, cid); return; }
       if (!file?.buffer?.length) { context.res = err(400, 'Missing file', cid); return; }
 
+      // Evidence: single or comma-separated terms (deduped)
       const evidenceTag = (fields?.evidenceTag ?? '').trim();
       const termPattern = /^[A-Za-z0-9 _-]{1,50}$/;
-
-      // Parse comma-separated terms -> unique, trimmed, non-empty
       const evidenceTerms = evidenceTag
         ? Array.from(new Set(evidenceTag.split(',').map(t => t.trim()).filter(Boolean)))
         : [];
@@ -468,13 +635,13 @@ module.exports = async function (context, req) {
           return;
         }
       }
-
       // Optional safety cap
       if (evidenceTerms.length > 10) {
         context.res = err(400, 'Too many evidence terms (max 10).', cid);
         return;
       }
-      // Flexible CSV header validation (same as small-run)
+
+      // Flexible CSV header validation
       let headers;
       try {
         ({ headers } = parseCsvFlexible(file.buffer));
@@ -483,7 +650,7 @@ module.exports = async function (context, req) {
           ok: false,
           code: 400,
           message: "Could not parse CSV",
-          detail: String(e && e.message || e)
+          detail: String((e && e.message) || e)
         });
       }
       const nameKey = findHeader(headers, 'Company Name');
@@ -493,9 +660,11 @@ module.exports = async function (context, req) {
           ok: false,
           code: 400,
           message: "Missing required column(s): Company Name, Company Number",
-          headers  // echo parsed headers to help debug odd whitespace/BOM/casing
+          headers
         });
       }
+
+      // Create job
       const jobId = uuid();
       const statusName = `${jobId}.json`;
       const outName = `${jobId}.csv`;
@@ -513,8 +682,8 @@ module.exports = async function (context, req) {
         downloadUrl: `/api/ch-strategic/download/${jobId}`
       });
 
-      // Process
-      const analysis = await summarizeCsv(file.buffer);
+      // Process (pass evidence to enable multi-term matching)
+      const analysis = await summarizeCsv(file.buffer, { evidenceTag, evidenceTerms });
 
       // Required headers
       const missing = validateRequired(analysis.headers);
@@ -529,9 +698,11 @@ module.exports = async function (context, req) {
         return;
       }
 
-      const outBuffer = await buildOutputCsv(file.buffer, evidenceTag);
+      // Build CSV from matches (writes only the term that matched per row)
+      const outBuffer = await buildOutputCsvFromMatches(analysis.matches, evidenceTag);
       await putCsv(CONTAINERS.out, outName, outBuffer);
 
+      // Final status
       await putJson(CONTAINERS.status, statusName, {
         state: 'done',
         jobId,
@@ -556,7 +727,7 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // Status
+    // Status → GET /api/ch-strategic/status/:id
     if (isStatus(method, path)) {
       const id = path.split('/').pop();
       if (!AZ_CONN) { context.res = err(500, 'Storage not configured', cid); return; }
@@ -566,7 +737,7 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // Download
+    // Download → GET /api/ch-strategic/download/:id
     if (isDownload(method, path)) {
       const id = path.split('/').pop();
       if (!AZ_CONN) { context.res = err(500, 'Storage not configured', cid); return; }
@@ -605,7 +776,6 @@ module.exports = async function (context, req) {
     context.res = err(404, `Not found: ${method} ${path}`, cid);
   } catch (e) {
     const cid = getCid(req);
-    // Surface in Functions logs / App Insights if configured
     context.log?.error?.('ch-strategic fatal', e);
     context.res = err(500, e?.message || 'Internal error', cid);
   }
