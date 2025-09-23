@@ -410,7 +410,7 @@ async function summarizeCsv(buffer, opts = {}) {
   const headers = resolved.headers;
   const nameKey = resolved.nameKey;
   const numKey = resolved.numKey;
-  
+
   let rows = 0, matched = 0, skipped = 0;
   const errorsByReason = {};
   const itemsSample = [];
@@ -538,33 +538,39 @@ async function readMultipart(req) {
 }
 
 // ------------------------------- Route helpers -------------------------------
+// ROUTE + CORS HELPERS (drop-in)
 function normalizePath(context) {
-  const rel = String(context.bindingData?.path || '').replace(/^\/+/, '');
-  return '/' + rel;
+  // Works in Azure Functions (Node 20). Strips origin + query.
+  const url = context?.req?.url || '';
+  const p = url.replace(/^https?:\/\/[^/]+/i, '').split('?')[0];
+  // Ensure no trailing slash duplication issues
+  return p.replace(/\/{2,}/g, '/').replace(/\/+$/, (m) => (m.length > 1 ? '/' : ''));
 }
 
-function isHealth(path) {
-  return path === '/healthz' || path === '/api/ch-strategic/healthz' || path === '/ch-strategic/healthz';
+function preflight(req) {
+  return (req.method || '').toUpperCase() === 'OPTIONS';
 }
 
+// Exact routes this single function handles:
 function isSmallRun(method, path) {
-  return method === 'POST' && (path === '/' || path === '/api/ch-strategic' || path === '/ch-strategic');
+  return method === 'POST' && /^\/api\/ch-strategic\/?$/i.test(path);
 }
-
 function isStart(method, path) {
-  return method === 'POST' && (path === '/start' || path === '/api/ch-strategic/start' || path === '/ch-strategic/start');
+  return method === 'POST' && /^\/api\/ch-strategic\/start\/?$/i.test(path);
 }
-
 function isStatus(method, path) {
-  return method === 'GET' && /^\/(api\/ch-strategic\/|ch-strategic\/)?status\/[a-f0-9-]{16,}$/i.test(path);
+  return method === 'GET' && /^\/api\/ch-strategic\/status\/[A-Za-z0-9_-]+\/?$/i.test(path);
 }
-
 function isDownload(method, path) {
-  return method === 'GET' && /^\/(api\/ch-strategic\/|ch-strategic\/)?download\/[a-f0-9-]{16,}$/i.test(path);
+  return method === 'GET' && /^\/api\/ch-strategic\/download\/[A-Za-z0-9_-]+\/?$/i.test(path);
 }
-
+function isHealth(path) {
+  // keep whatever your health path is; this matches /api/ch-strategic/health if you have it,
+  // or let your existing check stay (this keeps compatibility with your earlier code)
+  return /health$/i.test(path);
+}
 function isFeedback(method, path) {
-  return method === 'POST' && (path === '/feedback' || path === '/api/ch-strategic/feedback' || path === '/ch-strategic/feedback');
+  return method === 'POST' && /^\/api\/ch-strategic\/feedback\/?$/i.test(path);
 }
 
 // ------------------------------- Azure Function entry -------------------------------
@@ -618,6 +624,7 @@ module.exports = async function (context, req) {
       }
 
       // Flexible CSV header validation
+      // SMALL RUN header validation (keep the rest of your small-run block unchanged)
       let parsed;
       try {
         parsed = resolveCompanyKeysFromBuffer(file.buffer);
@@ -638,7 +645,6 @@ module.exports = async function (context, req) {
           headers
         });
       }
-
       // Run analysis (pass evidence to enable multi-term matching)
       const summary = await summarizeCsv(file.buffer, { evidenceTag, evidenceTerms });
 
@@ -697,8 +703,7 @@ module.exports = async function (context, req) {
         return;
       }
 
-      // Flexible CSV header validation
-      let parsed;
+      // START (large run) header validation
       try {
         parsed = resolveCompanyKeysFromBuffer(file.buffer);
       } catch (e) {
