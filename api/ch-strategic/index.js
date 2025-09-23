@@ -111,7 +111,6 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  // Normalize various JSON shapes to a string
   const pickText = (j) => {
     if (!j || typeof j !== 'object') return '';
     if (typeof j.text === 'string') return j.text;
@@ -130,42 +129,68 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
       try {
         const res = await fetch(url, {
           method: 'GET',
-          headers: { 'Accept': 'application/json, text/plain, text/html, text/markdown' },
+          headers: { 'Accept': 'application/json, text/plain, text/html, application/pdf, text/markdown' },
           signal: controller.signal,
         });
 
         if (!res.ok) {
-          // Try next candidate on 4xx; bail on hard server errors/timeouts
-          if (res.status >= 500) return null;
+          if (res.status >= 500) return null; // hard fail on server errors
           continue;
         }
 
         const ct = (res.headers.get('content-type') || '').toLowerCase();
 
-        let text = '';
+        // Case 1: JSON → may contain text or a pdfUrl
         if (ct.includes('application/json')) {
           const j = await res.json();
-          text = pickText(j);
-        } else {
-          text = await res.text();
+          // Try direct text first
+          let text = pickText(j);
+          if (typeof text === 'string') {
+            text = text.replace(/^\uFEFF/, '').trim();
+          }
+          // If no text, see if we can OCR from a PDF URL
+          if (!text) {
+            const pdfUrl = pickPdfUrl(j, companyNumber);
+            if (pdfUrl) {
+              const ocr = await azureReadTextFromUrl(pdfUrl);
+              if (ocr) {
+                if (ocr.length > maxLen) return ocr.slice(0, maxLen);
+                return ocr;
+              }
+            }
+          }
+          // Guard against HTML in disguise
+          if (text && !/<!doctype html>|<html[\s>]/i.test(text)) {
+            if (text.length > maxLen) text = text.slice(0, maxLen);
+            return text;
+          }
+          continue; // try next candidate if JSON yielded nothing usable
         }
 
-        if (typeof text !== 'string') continue;
-        // Strip BOM and trim
-        text = text.replace(/^\uFEFF/, '').trim();
-        if (!text) continue;
-
-        // Guard: ignore HTML pages (login/error/landing)
-        if (/<!doctype html>|<html[\s>]/i.test(text)) {
+        // Case 2: PDF directly (rare): OCR via DI
+        if (ct.includes('application/pdf')) {
+          // We need a URL for DI; if the current candidate is a URL, reuse it
+          const ocr = await azureReadTextFromUrl(url);
+          if (ocr) {
+            return ocr.length > maxLen ? ocr.slice(0, maxLen) : ocr;
+          }
           continue;
         }
 
-        // Cap length to protect memory / CSV size
+        // Case 3: Plain text / HTML as text
+        let text = await res.text();
+        if (typeof text !== 'string') continue;
+        text = text.replace(/^\uFEFF/, '').trim();
+        if (!text) continue;
+
+        // Ignore HTML pages (login/error/landing)
+        if (/<!doctype html>|<html[\s>]/i.test(text)) continue;
+
         if (text.length > maxLen) text = text.slice(0, maxLen);
         return text;
+
       } catch {
-        // Network/abort/parse error — try next candidate
-        continue;
+        continue; // network/parse; try next candidate
       }
     }
     return null;
@@ -760,6 +785,69 @@ async function getStrategicReportText(companyNumber) {
   const full = await tryGetReportText(companyNumber); // your reader endpoint
   const sr = extractStrategicReport(full);
   return sr || full || ''; // prefer SR; fall back to whole filing if SR missing
+}
+
+// ADD: Azure Document Intelligence (Read) OCR — URL source only
+// Env: AZ_DI_ENDPOINT (e.g. https://<resourcename>.cognitiveservices.azure.com)
+//      AZ_DI_KEY
+// Notes: Uses Read (prebuilt-read) to OCR image-only PDFs.
+async function azureReadTextFromUrl(pdfUrl, { timeoutMs = 45000, pollMs = 1200, maxLen = 2_000_000 } = {}) {
+  const endpoint = (process.env.AZ_DI_ENDPOINT || '').replace(/\/+$/, '');
+  const key = process.env.AZ_DI_KEY || '';
+  if (!endpoint || !key || !pdfUrl) return '';
+
+  const analyzeUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-07-31`;
+  const res = await fetch(analyzeUrl, {
+    method: 'POST',
+    headers: {
+      'Ocp-Apim-Subscription-Key': key,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ urlSource: pdfUrl })
+  });
+  if (!res.ok) return '';
+
+  const opLoc = res.headers.get('operation-location');
+  if (!opLoc) return '';
+
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    await new Promise(r => setTimeout(r, pollMs));
+    const s = await fetch(opLoc, {
+      headers: { 'Ocp-Apim-Subscription-Key': key }
+    });
+    if (!s.ok) return '';
+    const j = await s.json();
+    const status = (j.status || '').toLowerCase();
+    if (status === 'succeeded') {
+      // v4 payload has a top-level 'content' plus structured pages
+      let txt = (j.analyzeResult && j.analyzeResult.content) || '';
+      if (typeof txt !== 'string' || !txt.trim()) {
+        // Fallback: concatenate per-page content if present
+        const pages = (j.analyzeResult && j.analyzeResult.pages) || [];
+        txt = pages.map(p => p.content || '').join('\n');
+      }
+      txt = (txt || '').replace(/^\uFEFF/, '').trim();
+      if (txt.length > maxLen) txt = txt.slice(0, maxLen);
+      return txt;
+    }
+    if (status === 'failed' || status === 'error') return '';
+  }
+  return '';
+}
+
+// ADD: extract a PDF URL from various reader payload shapes or env template
+// Env optional: CH_PDF_URL_TEMPLATE e.g. "https://example/{companyNumber}.pdf"
+function pickPdfUrl(j, companyNumber) {
+  const cand = [
+    j && j.pdfUrl,
+    j && j.url,
+    j && j.pdf && j.pdf.url,
+    process.env.CH_PDF_URL_TEMPLATE ? String(process.env.CH_PDF_URL_TEMPLATE).replace('{companyNumber}', companyNumber) : ''
+  ].filter(Boolean);
+  // Basic sanity: ends with .pdf or has content-type hint elsewhere
+  const u = cand.find(u => /\.pdf(\?|#|$)/i.test(String(u)));
+  return u || '';
 }
 
 // ------------------------------- Azure Function entry -------------------------------
