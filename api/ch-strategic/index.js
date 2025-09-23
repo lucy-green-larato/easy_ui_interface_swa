@@ -214,9 +214,8 @@ async function summarizeCsv(buffer) {
   return { rows, matched, skipped, errorsByReason, headers, itemsSample };
 }
 
-
 async function buildOutputCsv(buffer, evidenceTag) {
-  const { recs, headers } = parseCsvFlexible(buffer); // if you don't have parseCsvFlexible, use your current parseSync(...) pattern
+  const { recs, headers } = parseCsvFlexible(buffer);
   const nameKey = findHeader(headers, 'Company Name');
   const numKey = findHeader(headers, 'Company Number');
 
