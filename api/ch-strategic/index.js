@@ -468,7 +468,8 @@ async function summarizeCsv(buffer, opts = {}) {
   for (const r of recs) {
     rows += 1;
     const name = String(nameKey ? r[nameKey] : '').trim();
-    const num = String(numKey ? r[numKey] : '').trim();
+    const numRaw = String(numKey ? r[numKey] : '').trim();
+    const num = normalizeCompanyNumber(numRaw);
 
     if (!name || !num) {
       skipped += 1;
@@ -480,8 +481,11 @@ async function summarizeCsv(buffer, opts = {}) {
 
     // Fetch full text from reader
     let fullText = '';
-    try { fullText = await tryGetReportText(num) || ''; } catch { fullText = ''; }
-
+    fullText = await tryGetReportText(num) || '';
+    if (process.env.CH_DEBUG === '1') {
+      // eslint-disable-next-line no-console
+      console.log('reader', { numRaw: numRaw, numNorm: num, got: !!fullText, len: fullText ? fullText.length : 0 });
+    }
     const srOnly = extractStrategicReport(fullText);
     const searchText = (srOnly && srOnly.trim())
       ? srOnly
@@ -538,7 +542,8 @@ async function buildOutputCsv(buffer, evidenceTag) {
   const rows = [];
   for (const r of recs) {
     const name = String(nameKey ? r[nameKey] : '').trim();
-    const num = String(numKey ? r[numKey] : '').trim();
+    const numRaw = String(numKey ? r[numKey] : '').trim();
+    const num = normalizeCompanyNumber(numRaw);
     if (name && num) {
       rows.push(`${num},${csvEscape(name)},${csvEscape(evidenceTag || '')}`);
     }
@@ -856,6 +861,27 @@ function pickPdfUrl(j, companyNumber) {
   // Basic sanity: ends with .pdf or has content-type hint elsewhere
   const u = cand.find(u => /\.pdf(\?|#|$)/i.test(String(u)));
   return u || '';
+}
+
+// ADD: Normalise Companies House numbers (fix lost leading zeros etc.)
+function normalizeCompanyNumber(raw) {
+  let s = String(raw || '').toUpperCase().trim().replace(/\s+/g, '');
+  if (!s) return '';
+  // Pure digits → left-pad to 8 (CH common)
+  if (/^\d+$/.test(s)) {
+    if (s.length < 8) s = s.padStart(8, '0');
+    return s;
+  }
+  // Alpha + digits (e.g., SC, NI, OC, LP…) → keep prefix, pad numeric tail to 6 where applicable
+  const m = s.match(/^([A-Z]{1,3})(\d{1,7})$/);
+  if (m) {
+    const prefix = m[1];
+    let tail = m[2];
+    // Most prefixed series use 6 digits; keep a safe pad without truncation
+    if (tail.length < 6) tail = tail.padStart(6, '0');
+    return prefix + tail;
+  }
+  return s;
 }
 
 // ------------------------------- Azure Function entry -------------------------------
