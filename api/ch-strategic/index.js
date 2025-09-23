@@ -294,6 +294,29 @@ async function getCsvStream(containerName, blobName) {
   return { stream: dl.readableStreamBody, size: dl.contentLength || undefined };
 }
 
+// ADD: header resolver with common aliases (works with your normHeader/findHeader)
+function findHeaderWithAliases(headers, target) {
+  const key = findHeader(headers, target);
+  if (key) return key;
+  const aliases = {
+    'Company Name': [
+      'Company Name', 'CompanyName', 'Name', 'Company', 'Organisation', 'Organization'
+    ],
+    'Company Number': [
+      'Company Number', 'CompanyNumber', 'Number', 'Company No', 'Company No.', 'Registration Number',
+      'Reg Number', 'Companies House Number', 'Co Number', 'Co. Number'
+    ]
+  };
+  const wanted = aliases[target] || [target];
+  const norm = (s) => normHeader(String(s || ''));
+  const set = new Map(headers.map(h => [norm(h), h]));
+  for (const a of wanted) {
+    const hit = set.get(norm(a));
+    if (hit) return hit;
+  }
+  return null;
+}
+
 // ADD: ensure json400 exists (structured 400 response with CORS)
 function json400(context, body) {
   context.res = {
