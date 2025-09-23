@@ -408,12 +408,12 @@ function parseEvidenceList(input) {
   return Array.from(new Set(s.split(',').map(t => t.trim()).filter(Boolean)));
 }
 
-// REPLACE summarizeCsv with SR-aware matching + helpful snippets
+// REPLACE summarizeCsv with SR-aware matching + safe fallbacks (SR → full filing → company name)
 async function summarizeCsv(buffer, opts = {}) {
   const evidenceTag = (opts?.evidenceTag ?? '').trim();
   const evidenceTerms = Array.isArray(opts?.evidenceTerms) ? opts.evidenceTerms : parseEvidenceList(evidenceTag);
 
-  // Use the same CSV parser/detector you wired earlier
+  // Parse CSV (auto delimiter) and resolve keys once
   const { recs } = parseCsvFlexibleAuto(buffer);
   const resolved = resolveCompanyKeysFromBuffer(buffer);
   const headers = resolved.headers;
@@ -438,35 +438,44 @@ async function summarizeCsv(buffer, opts = {}) {
       continue;
     }
 
-    // --- fetch Strategic Report section text (preferred) ---
-    let srText = '';
+    // 1) Try to fetch full filing text from your reader (may be empty if not configured)
+    let fullText = '';
     try {
-      srText = await getStrategicReportText(num);
+      fullText = await tryGetReportText(num) || '';
     } catch {
-      srText = '';
+      fullText = '';
     }
 
-    if (!srText) {
-      skipped += 1;
-      errorsByReason['no_strategic_report_text'] = (errorsByReason['no_strategic_report_text'] || 0) + 1;
-      continue;
-    }
+    // 2) Extract the Strategic Report region if present
+    const srOnly = extractStrategicReport(fullText);
 
-    // --- evidence matching (multi-term OR) within Strategic Report text ---
+    // 3) Choose the search body with solid fallbacks so we NEVER drop to "no match" just because text is missing
+    //    Order: Strategic Report → full filing → company name
+    const searchText = (srOnly && srOnly.trim())
+      ? srOnly
+      : (fullText && fullText.trim())
+        ? fullText
+        : name;
+
+    // 4) Evidence matching (multi-term OR) on the chosen body
     const { hit, term } = evidenceAnyWithTerm(
-      srText,
+      searchText,
       (evidenceTerms.length ? evidenceTerms : evidenceTag)
     );
 
     if (hit) {
       matched += 1;
-      const snippet = sentenceSnippet(srText, term || evidenceTag);
+      // Snippet is taken from the BEST-AVAILABLE body for user context:
+      // prefer SR-only; else full filing; else (last resort) the company name
+      const snippetSource = (srOnly && srOnly.trim()) ? srOnly : (fullText && fullText.trim()) ? fullText : name;
+      const snippet = sentenceSnippet(snippetSource, term || evidenceTag);
       const m = { companyNumber: num, companyName: name, evidence: term || evidenceTag, snippet };
       matches.push(m);
       if (itemsSample.length < 10) itemsSample.push(m);
     } else {
       skipped += 1;
-      errorsByReason['no_evidence_match_in_sr'] = (errorsByReason['no_evidence_match_in_sr'] || 0) + 1;
+      const reason = (fullText || srOnly) ? 'no_evidence_match_in_text' : 'no_text_available';
+      errorsByReason[reason] = (errorsByReason[reason] || 0) + 1;
     }
   }
 
