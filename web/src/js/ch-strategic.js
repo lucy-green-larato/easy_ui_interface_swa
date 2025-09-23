@@ -337,13 +337,16 @@
     if (message) parts.push(`• ${message}`);
     line.textContent = parts.join(' ');
 
-    // Send matches to the matches pane; everything else to skipped/errors.
-    const target =
-      (type === 'match'
-        ? (document.getElementById('results-matches') || document.getElementById('results'))
-        : (document.getElementById('results-skipped') || document.getElementById('results')));
+    const matchesPane = document.getElementById('results-matches');
+    const skippedPane = document.getElementById('results-skipped');
 
-    if (target) target.appendChild(line);
+    if (type === 'match' && matchesPane) {
+      document.getElementById('matches-title')?.removeAttribute('hidden');
+      matchesPane.appendChild(line);
+    } else if (skippedPane) {
+      document.getElementById('skipped-title')?.removeAttribute('hidden');
+      skippedPane.appendChild(line);
+    }
   }
 
   function renderDownloadButton({ filename, href, blobContent }) {
