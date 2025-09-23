@@ -236,10 +236,14 @@ function findHeader(headers, targetLabel) {
   return headers.find(h => normHeader(h) === want) || null;
 }
 
+// REPLACE the whole validateRequired() with alias-aware version
 function validateRequired(headers) {
+  // Accept common aliases like "Name" / "Number" etc.
   const missing = [];
-  if (!findHeader(headers, 'Company Name')) missing.push('Company Name');
-  if (!findHeader(headers, 'Company Number')) missing.push('Company Number');
+  const nameKey = findHeaderWithAliases(headers, 'Company Name');
+  const numKey = findHeaderWithAliases(headers, 'Company Number');
+  if (!nameKey) missing.push('Company Name');
+  if (!numKey) missing.push('Company Number');
   return missing;
 }
 
@@ -331,38 +335,27 @@ function json400(context, body) {
 
 // ADD: robust header normalisation + single-source resolver for required keys
 function stripBOMTrim(s) {
-  return String(s || '').replace(/^\uFEFF/, '').trim();
+  return String(s || '')
+    .replace(/^\uFEFF/, '')
+    .replace(/[\u00A0\u2007\u202F]/g, ' ') // NBSPs to space
+    .trim();
 }
+
 function normalizeHeaderList(headers) {
   return Array.isArray(headers) ? headers.map(stripBOMTrim) : [];
 }
 
-// REPLACE: always return ORIGINAL header keys so object lookups work on parsed rows
+// REPLACE resolveCompanyKeysFromBuffer to use parseCsvFlexibleAuto
 function resolveCompanyKeysFromBuffer(buffer) {
-  const { headers } = parseCsvFlexible(buffer);           // headers as emitted by csv-parse (original casing)
-  // Build a norm->original lookup once
-  const toOrig = new Map(headers.map(h => [normHeader(h), h]));
-  const aliases = {
-    'Company Name': [
-      'Company Name', 'CompanyName', 'Name', 'Company', 'Organisation', 'Organization'
-    ],
-    'Company Number': [
-      'Company Number', 'CompanyNumber', 'Number', 'Company No', 'Company No.', 'Registration Number',
-      'Reg Number', 'Companies House Number', 'Co Number', 'Co. Number'
-    ]
-  };
-
-  const wantName = aliases['Company Name'].map(a => normHeader(a));
-  const wantNum = aliases['Company Number'].map(a => normHeader(a));
-
-  let nameKey = null, numKey = null;
-  for (const k of wantName) { const hit = toOrig.get(k); if (hit) { nameKey = hit; break; } }
-  for (const k of wantNum) { const hit = toOrig.get(k); if (hit) { numKey = hit; break; } }
-
-  // Return ORIGINAL headers (trimmed BOM), and ORIGINAL keys
-  const cleanHeaders = headers.map(h => String(h).replace(/^\uFEFF/, '').trim());
+  const { headers } = parseCsvFlexibleAuto(buffer);
+  const cleanHeaders = Array.isArray(headers)
+    ? headers.map(h => String(h).replace(/^\uFEFF/, '').trim())
+    : [];
+  const nameKey = findHeaderWithAliases(cleanHeaders, 'Company Name');
+  const numKey = findHeaderWithAliases(cleanHeaders, 'Company Number');
   return { headers: cleanHeaders, nameKey, numKey };
 }
+
 
 // Try multiple CSV dialects and pick the best (prefer the one that contains required headers)
 function parseCsvFlexible(buffer) {
@@ -418,10 +411,10 @@ function parseEvidenceList(input) {
 async function summarizeCsv(buffer, opts = {}) {
   const evidenceTag = (opts?.evidenceTag ?? '').trim();
   const evidenceTerms = Array.isArray(opts?.evidenceTerms) ? opts.evidenceTerms : parseEvidenceList(evidenceTag);
-  const { recs } = parseCsvFlexible(buffer);
+  const { recs } = parseCsvFlexibleAuto(buffer);
   const resolved = resolveCompanyKeysFromBuffer(buffer);
-  const headers = resolved.headers;    
-  const nameKey = resolved.nameKey; 
+  const headers = resolved.headers;
+  const nameKey = resolved.nameKey;
   const numKey = resolved.numKey;
 
   let rows = 0, matched = 0, skipped = 0;
@@ -587,13 +580,59 @@ function isFeedback(method, path) {
   return method === 'POST' && /^\/api\/ch-strategic\/feedback\/?$/i.test(path);
 }
 
+// DEBUG? ADD: Ensure CSV buffer is UTF-8; auto-convert UTF-16LE if detected
+function ensureUtf8Buffer(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 2) return buf;
+  const b0 = buf[0], b1 = buf[1];
+  // UTF-16LE BOM 0xFFFE or heuristic (lots of 0x00 in header area)
+  const looksUtf16 = (b0 === 0xFF && b1 === 0xFE) || (buf.slice(0, 64).some((x, i) => i % 2 === 1 && x === 0x00));
+  if (!looksUtf16) return buf;
+  const dec = new TextDecoder('utf-16le');
+  const s = dec.decode(buf);
+  return Buffer.from(s, 'utf8');
+}
+
+// ADD: tiny delimiter autodetect for first non-empty line
+function detectDelimiter(sampleLine) {
+  if (!sampleLine) return ',';
+  const counts = [
+    [',', (sampleLine.match(/,/g) || []).length],
+    [';', (sampleLine.match(/;/g) || []).length],
+    ['\t', (sampleLine.match(/\t/g) || []).length],
+  ].sort((a, b) => b[1] - a[1]);
+  return counts[0][1] > 0 ? counts[0][0] : ',';
+}
+
+// ADD: parse CSV flexibly with auto delimiter (returns { recs, headers })
+function parseCsvFlexibleAuto(buffer) {
+  const s = Buffer.isBuffer(buffer) ? buffer.toString('utf8') : String(buffer || '');
+  const lines = s.split(/\r?\n/).filter(l => l.trim().length > 0);
+  const delim = detectDelimiter(lines[0] || '');
+  const { parse } = require('csv-parse/sync');
+  const recs = parse(s, {
+    columns: true,
+    delimiter: delim,
+    bom: true,
+    skip_empty_lines: true,
+    trim: true
+  });
+  const headers = recs.length
+    ? Object.keys(recs[0])
+    : (lines[0] ? lines[0].split(delim).map(h => h.replace(/^\uFEFF/, '').trim()) : []);
+  return { recs, headers };
+}
+
 // ------------------------------- Azure Function entry -------------------------------
 module.exports = async function (context, req) {
   try {
     const cid = getCid(req);
     const method = (req.method || 'GET').toUpperCase();
     const path = normalizePath(context);
-
+    // DEBUG ADD: routing/build fingerprints
+    context.log?.info?.(
+      { cid, method, path, build: process.env.CH_STRATEGIC_VERSION || 'dev', fp: 'router-hit-v1' },
+      'router-hit'
+    );
     // CORS preflight
     if (preflight(req)) { context.res = { status: 204, headers: CORS }; return; }
 
@@ -616,6 +655,7 @@ module.exports = async function (context, req) {
       const { file, fields, error } = await readMultipart(req);
       if (error) { context.res = err(415, error, cid); return; }
       if (!file?.buffer?.length) { context.res = err(400, 'Missing file', cid); return; }
+      const bufUtf8 = ensureUtf8Buffer(file.buffer);
 
       // Evidence: single or comma-separated terms (deduped)
       const evidenceTag = (fields?.evidenceTag ?? '').trim();
@@ -640,7 +680,7 @@ module.exports = async function (context, req) {
       // Flexible CSV header validation
       let parsed;
       try {
-        parsed = resolveCompanyKeysFromBuffer(file.buffer);
+        parsed = resolveCompanyKeysFromBuffer(bufUtf8);
       } catch (e) {
         return json400(context, {
           ok: false,
@@ -651,6 +691,12 @@ module.exports = async function (context, req) {
       }
       const { headers, nameKey, numKey } = parsed;
       if (!nameKey || !numKey) {
+        // 9) Deep header diagnostics before returning
+        const headerCodes = Array.isArray(headers)
+          ? headers.map(h => Array.from(String(h)).map(ch => ch.charCodeAt(0)))
+          : [];
+        context.log?.info?.({ cid, headers, headerCodes }, 'start-headers-deep');
+
         return json400(context, {
           ok: false,
           code: 400,
@@ -660,7 +706,7 @@ module.exports = async function (context, req) {
       }
 
       // Run analysis (pass evidence to enable multi-term matching)
-      const summary = await summarizeCsv(file.buffer, { evidenceTag, evidenceTerms });
+      const summary = await summarizeCsv(bufUtf8, { evidenceTag, evidenceTerms });
 
       // Required headers
       const required = ['Company Name', 'Company Number'];
@@ -696,6 +742,7 @@ module.exports = async function (context, req) {
       const { file, fields, error } = await readMultipart(req);
       if (error) { context.res = err(415, error, cid); return; }
       if (!file?.buffer?.length) { context.res = err(400, 'Missing file', cid); return; }
+      const bufUtf8 = ensureUtf8Buffer(file.buffer);
 
       // Evidence: single or comma-separated terms (deduped)
       const evidenceTag = (fields?.evidenceTag ?? '').trim();
@@ -720,7 +767,7 @@ module.exports = async function (context, req) {
       // START (large run) header validation
       let parsed;
       try {
-        parsed = resolveCompanyKeysFromBuffer(file.buffer);
+        parsed = resolveCompanyKeysFromBuffer(bufUtf8);
       } catch (e) {
         return json400(context, {
           ok: false,
@@ -731,6 +778,12 @@ module.exports = async function (context, req) {
       }
       const { headers, nameKey, numKey } = parsed;
       if (!nameKey || !numKey) {
+        // 9) Deep header diagnostics before returning
+        const headerCodes = Array.isArray(headers)
+          ? headers.map(h => Array.from(String(h)).map(ch => ch.charCodeAt(0)))
+          : [];
+        context.log?.info?.({ cid, headers, headerCodes }, 'start-headers-deep');
+
         return json400(context, {
           ok: false,
           code: 400,
@@ -738,6 +791,8 @@ module.exports = async function (context, req) {
           headers
         });
       }
+
+      context.log?.info?.({ cid, headers, nameKey, numKey }, 'start-key-resolution');
 
       // Create job
       const jobId = uuid();
@@ -758,7 +813,7 @@ module.exports = async function (context, req) {
       });
 
       // Process (pass evidence to enable multi-term matching)
-      const analysis = await summarizeCsv(file.buffer, { evidenceTag, evidenceTerms });
+      const analysis = await summarizeCsv(bufUtf8, { evidenceTag, evidenceTerms });
 
       // Required headers
       const missing = validateRequired(analysis.headers);
