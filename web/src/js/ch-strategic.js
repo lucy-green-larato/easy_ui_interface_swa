@@ -519,6 +519,8 @@
       return { upgraded: false, done: true };
     } else {
       const data = await res.json();
+
+      // ---- counters (server may send rows/matched/skipped instead of counts) ----
       const counts = data?.counts || {
         total: Number(data?.rows ?? data?.total ?? 0),
         processed: Number(data?.processed ?? data?.rows ?? 0),
@@ -528,7 +530,7 @@
       setCounters(counts);
       setProgress(100);
 
-      // Skipped/errors listing (if server provided detail)
+      // ---- skipped/errors detail (if provided) ----
       (data?.skipped || []).forEach((s) =>
         appendResultItem({ type: "skip", companyNumber: s.companyNumber, companyName: s.companyName, message: s.reason })
       );
@@ -536,23 +538,34 @@
         appendResultItem({ type: "error", companyNumber: e.companyNumber, companyName: e.companyName, message: e.message })
       );
 
-      // Build/download CSV if provided or construct minimal from matches
+      // ---- matches list into the Results panel (itemsSample fallback) ----
+      const items =
+        Array.isArray(data?.matches) ? data.matches :
+          (Array.isArray(data?.itemsSample) ? data.itemsSample : []);
+
+      items.forEach((m) =>
+        appendResultItem({ type: "match", companyNumber: m.companyNumber, companyName: m.companyName })
+      );
+
+      // ---- offer a client-side CSV too (from matches/itemsSample) ----
+      const evidence = String(data?.evidenceTag ?? "").trim();
       const filename = `strategic-review_matches_${nowStamp()}.csv`;
       if (data?.csv) {
         renderDownloadButton({ filename, blobContent: data.csv });
-      } else if (Array.isArray(data?.matches)) {
+      } else if (items.length) {
         const header = ["Company Name", "Company Number", "Evidence"];
-        const rows = data.matches.map((m) => [m.companyName ?? "", m.companyNumber ?? "", m.evidence ?? ""]);
+        const rows = items.map((m) => [m.companyName ?? "", m.companyNumber ?? "", m.evidence ?? evidence]);
         renderDownloadButton({ filename, blobContent: toCsv(rows, header) });
       }
 
+      // ---- final status ----
       const hasIssues = (data?.skipped?.length || 0) > 0 || (data?.errors?.length || 0) > 0;
       renderStatus(
         hasIssues ? "Job completed. Some companies were skipped or errored." : "Job completed.",
         hasIssues ? "warn" : "info",
         { openSkipped: hasIssues }
       );
-      const matched = Number((data?.counts?.matched ?? data?.matched ?? 0));
+      const matched = Number(counts.matched || 0);
       const showDetails = (matched === 0) || hasIssues;
       showFeedbackCard(showDetails);
       setTimeout(() => setProgress(null), 1200);
