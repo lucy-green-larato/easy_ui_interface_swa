@@ -149,16 +149,15 @@
         <span id="count-skipped" data-count="0">Skipped: 0</span>
       </div>
 
-      <!-- Results: Matches -->
+      <!-- Results containers (single column, stable layout) -->
       <section style="margin-top:var(--s-4)">
-        <h3>Matches</h3>
-        <div id="results-matches" class="results" aria-live="polite"></div>
-      </section>
+        <div id="results" class="results" aria-live="polite">
+          <h3 id="matches-title" hidden>Matches</h3>
+          <div id="results-matches"></div>
 
-      <!-- Results: Skipped & errors -->
-      <section style="margin-top:var(--s-4)">
-        <h3>Skipped &amp; errors</h3>
-        <div id="results-skipped" class="results" aria-live="polite"></div>
+          <h3 id="skipped-title" hidden>Skipped &amp; errors</h3>
+          <div id="results-skipped"></div>
+        </div>
       </section>
 
       <!-- RIGHT PANEL :: Helpers -->
