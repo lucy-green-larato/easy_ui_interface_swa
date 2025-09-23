@@ -408,9 +408,12 @@ function parseEvidenceList(input) {
   return Array.from(new Set(s.split(',').map(t => t.trim()).filter(Boolean)));
 }
 
+// REPLACE summarizeCsv with SR-aware matching + helpful snippets
 async function summarizeCsv(buffer, opts = {}) {
   const evidenceTag = (opts?.evidenceTag ?? '').trim();
   const evidenceTerms = Array.isArray(opts?.evidenceTerms) ? opts.evidenceTerms : parseEvidenceList(evidenceTag);
+
+  // Use the same CSV parser/detector you wired earlier
   const { recs } = parseCsvFlexibleAuto(buffer);
   const resolved = resolveCompanyKeysFromBuffer(buffer);
   const headers = resolved.headers;
@@ -435,23 +438,35 @@ async function summarizeCsv(buffer, opts = {}) {
       continue;
     }
 
-    // Prefer Azure reader text if available, otherwise fall back to Company Name
-    const reportText = (await tryGetReportText(num)) || name;
+    // --- fetch Strategic Report section text (preferred) ---
+    let srText = '';
+    try {
+      srText = await getStrategicReportText(num);
+    } catch {
+      srText = '';
+    }
 
+    if (!srText) {
+      skipped += 1;
+      errorsByReason['no_strategic_report_text'] = (errorsByReason['no_strategic_report_text'] || 0) + 1;
+      continue;
+    }
+
+    // --- evidence matching (multi-term OR) within Strategic Report text ---
     const { hit, term } = evidenceAnyWithTerm(
-      reportText,
+      srText,
       (evidenceTerms.length ? evidenceTerms : evidenceTag)
     );
 
     if (hit) {
       matched += 1;
-      const snippet = snippetAround(reportText, term || evidenceTag);
+      const snippet = sentenceSnippet(srText, term || evidenceTag);
       const m = { companyNumber: num, companyName: name, evidence: term || evidenceTag, snippet };
       matches.push(m);
       if (itemsSample.length < 10) itemsSample.push(m);
     } else {
       skipped += 1;
-      errorsByReason['no_evidence_match'] = (errorsByReason['no_evidence_match'] || 0) + 1;
+      errorsByReason['no_evidence_match_in_sr'] = (errorsByReason['no_evidence_match_in_sr'] || 0) + 1;
     }
   }
 
@@ -476,7 +491,7 @@ async function buildOutputCsv(buffer, evidenceTag) {
   return Buffer.from(`${header}\n${rows.join('\n')}\n`, 'utf8');
 }
 
-// ADD: Build CSV from the server-side matches array so each row uses its matched term
+
 async function buildOutputCsvFromMatches(matches, fallbackEvidence = '') {
   const header = 'Company Number,Company Name,Evidence,Snippet';
   const rows = (matches || []).map(m => {
@@ -620,6 +635,86 @@ function parseCsvFlexibleAuto(buffer) {
     ? Object.keys(recs[0])
     : (lines[0] ? lines[0].split(delim).map(h => h.replace(/^\uFEFF/, '').trim()) : []);
   return { recs, headers };
+}
+
+// ADD: normalize whitespace + heading-friendly lowercasing
+function _canon(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
+function _lower(s) { return _canon(s).toLowerCase(); }
+
+// ADD: extract only the "Strategic Report" section from a full filing text
+function extractStrategicReport(fullText) {
+  if (!fullText) return '';
+  const text = fullText;                           // keep original for substring slicing
+  const lc = text.toLowerCase();
+
+  // Common headings that begin/end the section (case/space tolerant)
+  const starts = [
+    'strategic report', 'the strategic report', 'strategic-report', 'strategic–report'
+  ];
+  const ends = [
+    "directors' report", 'directors’ report', 'directors report',
+    'independent auditor', 'corporate governance', 'governance statement',
+    'statement of directors', 'remuneration report', 'chairman’s statement',
+    'company balance sheet', 'consolidated statement', 'profit and loss account'
+  ];
+
+  // Find first plausible start
+  let startIdx = -1;
+  for (const s of starts) {
+    const i = lc.indexOf(s);
+    if (i !== -1 && (startIdx === -1 || i < startIdx)) startIdx = i;
+  }
+  if (startIdx === -1) return ''; // no strategic report heading found
+
+  // From start onward, find the earliest end heading
+  let endIdx = text.length;
+  for (const e of ends) {
+    const j = lc.indexOf(e, startIdx + 16);
+    if (j !== -1 && j < endIdx) endIdx = j;
+  }
+
+  const section = text.slice(startIdx, endIdx);
+  // Trim aggressive front matter like the heading line itself to not bias snippets
+  return section.replace(/^\s*strategic[^\n]*\n?/i, '').trim();
+}
+
+// ADD: sentence-friendly snippet around the matched term (not just raw slice)
+function sentenceSnippet(text, term, maxChars = 250) {
+  if (!text || !term) return '';
+  const hay = text;
+  const idx = hay.toLowerCase().indexOf(String(term).toLowerCase());
+  if (idx < 0) return '';
+
+  // Expand to sentence boundaries (., !, ?, newline) within reasonable window
+  const win = 600; // guardrail for pathological files
+  const from = Math.max(0, idx - win);
+  const to = Math.min(hay.length, idx + term.length + win);
+  const windowText = hay.slice(from, to);
+
+  // Find nearest sentence bounds inside the window
+  const rel = idx - from;
+  const left = windowText.slice(0, rel).lastIndexOf('. ');
+  const right = windowText.slice(rel).indexOf('. ');
+  let snippet = windowText.slice(left >= 0 ? left + 2 : 0, right >= 0 ? rel + right + 2 : windowText.length);
+
+  snippet = _canon(snippet);
+  if (snippet.length > maxChars) {
+    // Center the term within maxChars
+    const half = Math.floor(maxChars / 2);
+    const cutFrom = Math.max(0, rel - half);
+    const cutTo = Math.min(windowText.length, rel + (maxChars - (rel - cutFrom)));
+    snippet = _canon(windowText.slice(cutFrom, cutTo));
+    if (cutFrom > 0) snippet = '… ' + snippet;
+    if (cutTo < windowText.length) snippet = snippet + ' …';
+  }
+  return snippet;
+}
+
+// ADD: convenience wrapper to fetch full text and return just the Strategic Report body
+async function getStrategicReportText(companyNumber) {
+  const full = await tryGetReportText(companyNumber); // your reader endpoint
+  const sr = extractStrategicReport(full);
+  return sr || full || ''; // prefer SR; fall back to whole filing if SR missing
 }
 
 // ------------------------------- Azure Function entry -------------------------------
