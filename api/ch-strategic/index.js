@@ -95,15 +95,16 @@ function snippetAround(text, needle, radius = 80) {
 }
 
 // Get context snippet from the company report
+// REPLACE the entire tryGetReportText with this version (URL OCR → CH URL OCR → CH buffer OCR)
 async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 200000 } = {}) {
-  const base = process.env.CH_STRATEGIC_TEXT_URL || process.env.CH_READER_ENDPOINT || '';
   if (!companyNumber) return null;
 
+  const base = process.env.CH_STRATEGIC_TEXT_URL || process.env.CH_READER_ENDPOINT || '';
   const cleanBase = String(base || '').replace(/\/+$/, '');
-  const enc = encodeURIComponent(normalizeCompanyNumber(companyNumber));
+  const encNum = encodeURIComponent(normalizeCompanyNumber(companyNumber));
   const candidates = cleanBase
-    ? [`${cleanBase}/${enc}`, `${cleanBase}?id=${enc}`, `${cleanBase}?companyNumber=${enc}`]
-    : []; // allow running without the reader (CH fallback only)
+    ? [`${cleanBase}/${encNum}`, `${cleanBase}?id=${encNum}`, `${cleanBase}?companyNumber=${encNum}`]
+    : [];
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -124,7 +125,7 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
   const pagesFirst = Number(process.env.CH_SR_PAGES_FIRST || 0) || null;
 
   try {
-    // 1) Try your reader service first (if configured)
+    // (1) Your reader service first (if configured)
     for (const url of candidates) {
       try {
         const res = await fetch(url, {
@@ -133,7 +134,7 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
           signal: controller.signal,
         });
         if (!res.ok) {
-          if (res.status >= 500) break; // stop reader attempts on server errors
+          if (res.status >= 500) break;
           continue;
         }
 
@@ -141,35 +142,46 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
 
         if (ct.includes('application/json')) {
           const j = await res.json();
+          // Direct text?
           let text = pickText(j);
-          if (typeof text === 'string') {
-            text = text.replace(/^\uFEFF/, '').trim();
-          }
-          if (!text) {
-            // JSON could include a PDF url → OCR with DI
-            const pdfUrl = pickPdfUrl(j, enc);
-            if (pdfUrl) {
-              const ocr = await azureReadTextFromUrl(pdfUrl, { pagesFirst });
-              if (ocr) return ocr.length > maxLen ? ocr.slice(0, maxLen) : ocr;
-            }
-          } else if (!/<!doctype html>|<html[\s>]/i.test(text)) {
+          if (typeof text === 'string') text = text.replace(/^\uFEFF/, '').trim();
+          if (text && !/<!doctype html>|<html[\s>]/i.test(text)) {
             return text.length > maxLen ? text.slice(0, maxLen) : text;
+          }
+          // JSON may reference a PDF URL → OCR via DI (URL source)
+          const pdfUrl = pickPdfUrl(j, encNum);
+          if (pdfUrl) {
+            const byUrl = await azureReadTextFromUrl(pdfUrl, { pagesFirst });
+            if (byUrl) return byUrl.length > maxLen ? byUrl.slice(0, maxLen) : byUrl;
+
+            // If DI cannot fetch the URL (requires auth), try authenticated download + buffer OCR
+            const pdfBuf = await chDownloadPdfBuffer(pdfUrl);
+            if (pdfBuf && pdfBuf.length) {
+              const byBuf = await azureReadTextFromBuffer(pdfBuf);
+              if (byBuf) return byBuf.length > maxLen ? byBuf.slice(0, maxLen) : byBuf;
+            }
           }
           continue;
         }
 
         if (ct.includes('application/pdf')) {
-          const ocr = await azureReadTextFromUrl(url, { pagesFirst });
-          if (ocr) return ocr.length > maxLen ? ocr.slice(0, maxLen) : ocr;
+          const byUrl = await azureReadTextFromUrl(url, { pagesFirst });
+          if (byUrl) return byUrl.length > maxLen ? byUrl.slice(0, maxLen) : byUrl;
+          // If direct pdf URL also needs auth, fetch bytes with our creds (if this is a CH doc URL)
+          const pdfBuf = await chDownloadPdfBuffer(url);
+          if (pdfBuf && pdfBuf.length) {
+            const byBuf = await azureReadTextFromBuffer(pdfBuf);
+            if (byBuf) return byBuf.length > maxLen ? byBuf.slice(0, maxLen) : byBuf;
+          }
           continue;
         }
 
+        // Plain text / HTML as text
         let text = await res.text();
         if (typeof text !== 'string') continue;
         text = text.replace(/^\uFEFF/, '').trim();
         if (!text) continue;
         if (/<!doctype html>|<html[\s>]/i.test(text)) continue;
-
         return text.length > maxLen ? text.slice(0, maxLen) : text;
 
       } catch {
@@ -177,11 +189,20 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
       }
     }
 
-    // 2) Reader returned nothing usable → fallback to Companies House API + DI OCR
+    // (2) Reader gave nothing → Companies House fallback:
+    //     find a recent Accounts filing, get a PDF URL (CH Document API), OCR
     const pdfUrl = await chFindAccountsPdfUrl(normalizeCompanyNumber(companyNumber));
     if (pdfUrl) {
-      const ocr = await azureReadTextFromUrl(pdfUrl, { pagesFirst });
-      if (ocr) return ocr.length > maxLen ? ocr.slice(0, maxLen) : ocr;
+      // Try URL OCR first (works only if URL is public)
+      const byUrl = await azureReadTextFromUrl(pdfUrl, { pagesFirst });
+      if (byUrl) return byUrl.length > maxLen ? byUrl.slice(0, maxLen) : byUrl;
+
+      // Otherwise fetch bytes with CH auth and OCR from buffer
+      const pdfBuf = await chDownloadPdfBuffer(pdfUrl);
+      if (pdfBuf && pdfBuf.length) {
+        const byBuf = await azureReadTextFromBuffer(pdfBuf);
+        if (byBuf) return byBuf.length > maxLen ? byBuf.slice(0, maxLen) : byBuf;
+      }
     }
 
     return null;
@@ -928,6 +949,66 @@ async function chFindAccountsPdfUrl(companyNumber) {
   // If the href is relative (starts with /document/...), prefix with docBase
   const pdfUrl = /^https?:\/\//i.test(href) ? href : `${docBase}${href}`;
   return pdfUrl;
+}
+// ADD: Download a Companies House PDF (authenticated) and return a Buffer
+async function chDownloadPdfBuffer(pdfUrl) {
+  if (!pdfUrl) return null;
+  const hdr = chAuthHeader();
+  if (!hdr) return null;
+  const res = await fetch(pdfUrl, {
+    method: 'GET',
+    headers: { ...hdr, 'Accept': 'application/pdf' }
+  });
+  if (!res.ok) return null;
+  const ab = await res.arrayBuffer();
+  return Buffer.from(ab);
+}
+
+// ADD: Azure Document Intelligence (Read) OCR — BUFFER source (no public URL required)
+async function azureReadTextFromBuffer(
+  pdfBuffer,
+  { timeoutMs = 45000, pollMs = 1200, maxLen = 2_000_000 } = {}
+) {
+  const endpoint = (process.env.AZ_DI_ENDPOINT || '').replace(/\/+$/, '');
+  const key = process.env.AZ_DI_KEY || '';
+  if (!endpoint || !key || !pdfBuffer || !pdfBuffer.length) return '';
+
+  const analyzeUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-07-31`;
+
+  // Start analyze with binary body
+  const res = await fetch(analyzeUrl, {
+    method: 'POST',
+    headers: {
+      'Ocp-Apim-Subscription-Key': key,
+      'Content-Type': 'application/pdf'
+    },
+    body: pdfBuffer
+  });
+  if (!res.ok) return '';
+
+  const opLoc = res.headers.get('operation-location');
+  if (!opLoc) return '';
+
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    await new Promise(r => setTimeout(r, pollMs));
+    const s = await fetch(opLoc, { headers: { 'Ocp-Apim-Subscription-Key': key } });
+    if (!s.ok) return '';
+    const j = await s.json();
+    const status = (j.status || '').toLowerCase();
+    if (status === 'succeeded') {
+      let txt = (j.analyzeResult && j.analyzeResult.content) || '';
+      if (!txt) {
+        const pages = (j.analyzeResult && j.analyzeResult.pages) || [];
+        txt = pages.map(p => p.content || '').join('\n');
+      }
+      txt = (txt || '').replace(/^\uFEFF/, '').trim();
+      if (txt.length > maxLen) txt = txt.slice(0, maxLen);
+      return txt;
+    }
+    if (status === 'failed' || status === 'error') return '';
+  }
+  return '';
 }
 
 // ------------------------------- Azure Function entry -------------------------------
