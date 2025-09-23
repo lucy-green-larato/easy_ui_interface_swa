@@ -113,8 +113,9 @@
   // Server validates: length <= 50 and /^[A-Za-z0-9 _-]*$/
   const CLIENT_LIMITS = {
     MAX_BYTES: 20 * 1024 * 1024,          // 20 MB (match server MAX_SIZE)
-    EVIDENCE_MAX: 50,                      // max chars
-    EVIDENCE_RE: /^[A-Za-z0-9 _-]{1,50}$/, // allowed chars
+    EVIDENCE_MAX: 50,                      // max chars per term
+    MAX_TERMS: 10,                         // keep in sync with server
+    TERM_RE: /^[A-Za-z0-9 _-]{1,50}$/,     // allowed chars per term (single term)
   };
 
   // Quick file-type check (MIME or extension)
@@ -139,12 +140,19 @@
     }
 
     const ev = (evidence || '').trim();
-    if (!ev) errs.evidence = 'Enter a keyword or phrase.';
-    else if (!CLIENT_LIMITS.EVIDENCE_RE.test(ev)) {
-      errs.evidence = `Evidence may be up to ${CLIENT_LIMITS.EVIDENCE_MAX} chars (A–Z a–z 0–9 space _ -).`;
+    if (!ev) {
+      errs.evidence = 'Enter a keyword or phrase.';
+    } else {
+      const terms = Array.from(new Set(ev.split(',').map(t => t.trim()).filter(Boolean)));
+      if (terms.length === 0) {
+        errs.evidence = 'Enter a keyword or phrase.';
+      } else if (terms.length > CLIENT_LIMITS.MAX_TERMS) {
+        errs.evidence = `Too many evidence terms (max ${CLIENT_LIMITS.MAX_TERMS}).`;
+      } else if (!terms.every(t => CLIENT_LIMITS.TERM_RE.test(t))) {
+        errs.evidence = `Each term may be up to ${CLIENT_LIMITS.EVIDENCE_MAX} chars (A–Z a–z 0–9 space _ -).`;
+      }
     }
 
-    // Paint errors (XSS-safe)
     if (el.csvError) el.csvError.textContent = errs.file;
     if (el.evidenceError) el.evidenceError.textContent = errs.evidence;
 
@@ -265,7 +273,17 @@
   function updateAnalyzeState() {
     const ev = (el.evidence?.value || '').trim();
     const f = state.csvFile;
-    const evidenceLooksOk = ev.length > 0 && ev.length <= CLIENT_LIMITS.EVIDENCE_MAX && CLIENT_LIMITS.EVIDENCE_RE.test(ev);
+
+    // client-side multi-term validation mirrors server:
+    let evidenceLooksOk = false;
+    if (ev) {
+      const terms = Array.from(new Set(ev.split(',').map(t => t.trim()).filter(Boolean)));
+      evidenceLooksOk =
+        terms.length > 0 &&
+        terms.length <= CLIENT_LIMITS.MAX_TERMS &&
+        terms.every(t => CLIENT_LIMITS.TERM_RE.test(t));
+    }
+
     const fileLooksOk = !!f && looksLikeCsv(f) && f.size <= CLIENT_LIMITS.MAX_BYTES;
 
     if (el.analyze) el.analyze.disabled = !(evidenceLooksOk && fileLooksOk);
