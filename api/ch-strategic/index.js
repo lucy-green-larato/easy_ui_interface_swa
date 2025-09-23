@@ -233,63 +233,57 @@ async function buildOutputCsv(buffer, evidenceTag) {
 
 // ------------------------------- Multipart (Busboy v1.6.0, Azure Functions classic req) -------------------------------
 async function readMultipart(req) {
-  // Azure Functions (v4, classic programming model) gives:
-  //   - req.headers (must include Content-Type with boundary)
-  //   - req.rawBody   (Buffer | string)  <-- we use this instead of req.pipe(...)
-  // There is NO req.pipe here.
+  // Azure Functions v4 (classic model): use req.headers + req.rawBody (Buffer|string)
   const ct = req.headers?.['content-type'] || '';
   if (!/^multipart\/form-data/i.test(ct)) return { error: 'Expected multipart/form-data' };
-
-  // Ensure we have bytes to parse
-  const hasRaw = req.rawBody != null;
-  if (!hasRaw) return { error: 'Missing rawBody for multipart parsing' };
+  if (req.rawBody == null) return { error: 'Missing rawBody for multipart parsing' };
 
   const bodyBuf = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody);
 
-  // NOTE: Busboy v1.x usage — call as a function (no `new`)
+  // Busboy v1: called as a function (no `new`)
   const bb = require('busboy')({
-    headers: { 'content-type': ct },             // make sure boundary is passed
+    headers: { 'content-type': ct }, // must include boundary
     limits: {
       fileSize: Number(process.env.CH_STRATEGIC_UPLOAD_LIMIT_BYTES || 20 * 1024 * 1024), // 20MB default
       files: 1,
-      fields: 10
-    }
+      fields: 10,
+    },
   });
 
   const fields = {};
   let file = null;
-  let fileCount = 0;
 
   const p = new Promise((resolve, reject) => {
-    bb.on('field', (name, val) => { fields[name] = val; });
+    // Capture simple fields (trimmed)
+    bb.on('field', (name, val) => {
+      fields[name] = (typeof val === 'string') ? val.trim() : val;
+    });
 
-    // v1 signature: (fieldname, fileStream, filename, encoding, mimetype)
+    // v1 signature: (fieldname, stream, filename, encoding, mimetype)
     bb.on('file', (name, stream, filename, encoding, mimetype) => {
-      if (++fileCount > 1) { stream.resume(); return; } // ignore extras defensively
+      // Only buffer the agreed file field; drain everything else
+      if (name !== 'csv_file') { stream.resume(); return; }
       const chunks = [];
       stream.on('data', d => chunks.push(d));
       stream.on('end', () => {
-        if (name === 'csv_file') {
-          file = { buffer: Buffer.concat(chunks), filename, encoding, mimetype };
-        }
+        file = { buffer: Buffer.concat(chunks), filename, encoding, mimetype };
       });
       stream.on('error', reject);
     });
 
-    // Limits → convert to user-facing errors
+    // Convert limit events to friendly errors
     bb.on('partsLimit', () => reject(new Error('Too many parts')));
     bb.on('filesLimit', () => reject(new Error('Too many files')));
     bb.on('fieldsLimit', () => reject(new Error('Too many fields')));
 
     bb.on('error', reject);
-    bb.on('finish', () => resolve({ fields, file }));   // v1 uses 'finish'
+    bb.on('finish', () => resolve({ fields, file })); // v1 emits 'finish'
   });
 
-  // IMPORTANT: In Functions classic, push the whole raw body into Busboy
+  // Push the whole raw body into Busboy
   bb.end(bodyBuf);
   return p;
 }
-
 
 // ------------------------------- Route helpers -------------------------------
 function normalizePath(context) {
@@ -350,9 +344,32 @@ module.exports = async function (context, req) {
       const { file, fields, error } = await readMultipart(req);
       if (error) { context.res = err(415, error, cid); return; }
       if (!file?.buffer?.length) { context.res = err(400, 'Missing file', cid); return; }
-
-      const evidenceTag = (fields.evidenceTag || '').trim();
+      const evidenceTag = (fields?.evidenceTag ?? '').trim();
       if (evidenceTag && !/^[A-Za-z0-9 _-]{1,50}$/.test(evidenceTag)) { context.res = err(400, 'Invalid evidenceTag', cid); return; }
+
+      // Flexible CSV header validation (same as small-run)
+      let headers;
+      try {
+        ({ headers } = parseCsvFlexible(file.buffer));
+      } catch (e) {
+        return json400(context, {
+          ok: false,
+          code: 400,
+          message: "Could not parse CSV",
+          detail: String(e && e.message || e)
+        });
+      }
+      const nameKey = findHeader(headers, 'Company Name');
+      const numKey = findHeader(headers, 'Company Number');
+      if (!nameKey || !numKey) {
+        return json400(context, {
+          ok: false,
+          code: 400,
+          message: "Missing required column(s): Company Name, Company Number",
+          headers  // echo parsed headers to help debug odd whitespace/BOM/casing
+        });
+      }
+
 
       const summary = await summarizeCsv(file.buffer);
 
@@ -391,9 +408,30 @@ module.exports = async function (context, req) {
       if (error) { context.res = err(415, error, cid); return; }
       if (!file?.buffer?.length) { context.res = err(400, 'Missing file', cid); return; }
 
-      const evidenceTag = (fields.evidenceTag || '').trim();
+      const evidenceTag = (fields?.evidenceTag ?? '').trim();
       if (evidenceTag && !/^[A-Za-z0-9 _-]{1,50}$/.test(evidenceTag)) { context.res = err(400, 'Invalid evidenceTag', cid); return; }
-
+      // Flexible CSV header validation (same as small-run)
+      let headers;
+      try {
+        ({ headers } = parseCsvFlexible(file.buffer));
+      } catch (e) {
+        return json400(context, {
+          ok: false,
+          code: 400,
+          message: "Could not parse CSV",
+          detail: String(e && e.message || e)
+        });
+      }
+      const nameKey = findHeader(headers, 'Company Name');
+      const numKey = findHeader(headers, 'Company Number');
+      if (!nameKey || !numKey) {
+        return json400(context, {
+          ok: false,
+          code: 400,
+          message: "Missing required column(s): Company Name, Company Number",
+          headers  // echo parsed headers to help debug odd whitespace/BOM/casing
+        });
+      }
       const jobId = uuid();
       const statusName = `${jobId}.json`;
       const outName = `${jobId}.csv`;
