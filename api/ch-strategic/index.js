@@ -152,7 +152,8 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
           if (!text) {
             const pdfUrl = pickPdfUrl(j, companyNumber);
             if (pdfUrl) {
-              const ocr = await azureReadTextFromUrl(pdfUrl);
+              const pagesFirst = Number(process.env.CH_SR_PAGES_FIRST || 0) || null;
+              const ocr = await azureReadTextFromUrl(pdfUrl, { pagesFirst });
               if (ocr) {
                 if (ocr.length > maxLen) return ocr.slice(0, maxLen);
                 return ocr;
@@ -169,8 +170,8 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
 
         // Case 2: PDF directly (rare): OCR via DI
         if (ct.includes('application/pdf')) {
-          // We need a URL for DI; if the current candidate is a URL, reuse it
-          const ocr = await azureReadTextFromUrl(url);
+          const pagesFirst = Number(process.env.CH_SR_PAGES_FIRST || 0) || null;
+          const ocr = await azureReadTextFromUrl(url, { pagesFirst });
           if (ocr) {
             return ocr.length > maxLen ? ocr.slice(0, maxLen) : ocr;
           }
@@ -791,19 +792,30 @@ async function getStrategicReportText(companyNumber) {
 // Env: AZ_DI_ENDPOINT (e.g. https://<resourcename>.cognitiveservices.azure.com)
 //      AZ_DI_KEY
 // Notes: Uses Read (prebuilt-read) to OCR image-only PDFs.
-async function azureReadTextFromUrl(pdfUrl, { timeoutMs = 45000, pollMs = 1200, maxLen = 2_000_000 } = {}) {
+async function azureReadTextFromUrl(
+  pdfUrl,
+  { timeoutMs = 45000, pollMs = 1200, maxLen = 2_000_000, pagesFirst = null } = {}
+) {
   const endpoint = (process.env.AZ_DI_ENDPOINT || '').replace(/\/+$/, '');
   const key = process.env.AZ_DI_KEY || '';
   if (!endpoint || !key || !pdfUrl) return '';
 
   const analyzeUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-07-31`;
+
+  // If you only want the first N pages, pass ["1","2",...]
+  const body = { urlSource: pdfUrl };
+  if (pagesFirst && Number(pagesFirst) > 0) {
+    const n = Math.max(1, Math.min(1000, Number(pagesFirst)));
+    body.pages = Array.from({ length: n }, (_, i) => String(i + 1));
+  }
+
   const res = await fetch(analyzeUrl, {
     method: 'POST',
     headers: {
       'Ocp-Apim-Subscription-Key': key,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ urlSource: pdfUrl })
+    body: JSON.stringify(body)
   });
   if (!res.ok) return '';
 
@@ -813,17 +825,13 @@ async function azureReadTextFromUrl(pdfUrl, { timeoutMs = 45000, pollMs = 1200, 
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     await new Promise(r => setTimeout(r, pollMs));
-    const s = await fetch(opLoc, {
-      headers: { 'Ocp-Apim-Subscription-Key': key }
-    });
+    const s = await fetch(opLoc, { headers: { 'Ocp-Apim-Subscription-Key': key } });
     if (!s.ok) return '';
     const j = await s.json();
     const status = (j.status || '').toLowerCase();
     if (status === 'succeeded') {
-      // v4 payload has a top-level 'content' plus structured pages
       let txt = (j.analyzeResult && j.analyzeResult.content) || '';
-      if (typeof txt !== 'string' || !txt.trim()) {
-        // Fallback: concatenate per-page content if present
+      if (!txt) {
         const pages = (j.analyzeResult && j.analyzeResult.pages) || [];
         txt = pages.map(p => p.content || '').join('\n');
       }
