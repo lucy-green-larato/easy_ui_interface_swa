@@ -20,6 +20,8 @@ jobs:
       ORYX_PLATFORM_VERSION: 20.18.1
       ORYX_NODE_VERSION: 20.18.1
       ORYX_ENABLE_NODE_DYNAMIC_INSTALL: true
+      FUNCTIONS_NODE_VERSION: '20'
+      WEBSITE_NODE_DEFAULT_VERSION: '20.18.1'
 
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +50,7 @@ jobs:
           api_location: "api"
           # IMPORTANT: let Oryx pick the Node version; do not override api_build_command
           skip_app_build: true
+
 
 
 
