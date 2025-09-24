@@ -1,5 +1,9 @@
 # Node
 **/node_modules/
+.swa/
+.vscode/
+.devcontainer/
+.env
 
 # Local settings (keep untracked)
 api/local.settings.json
@@ -26,3 +30,9 @@ env/
 .DS_Store
 *.swp
 api-worker/local.settings.json
+
+*.zip
+.chstrategic.paths
+ch-strategic-*.zip
+repo-snapshot*.zip
+package.private.json
