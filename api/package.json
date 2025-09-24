@@ -5,9 +5,13 @@
   "description": "Azure Functions API for Inside Track Tools (lead qualification, call scripts, exports).",
   "license": "MIT",
   "type": "commonjs",
+
   "engines": {
-    "node": ">=20.18.1"
+    "node": "20.x",
+    "npm": ">=10"
   },
+  "packageManager": "npm@10.8.2",
+
   "dependencies": {
     "@azure/functions": "^4.7.2",
     "@azure/msal-node": "^2.16.3",
@@ -32,15 +36,7 @@
     "start": "func start",
     "validate:calllib": "ajv validate -s ./schemas/call-library.schema.json -d './web/content/call-library/v1/**/*.json'"
   },
-  "keywords": [
-    "azure-functions",
-    "swa",
-    "lead-qualification",
-    "ixbrl",
-    "docx"
-  ],
+  "keywords": ["azure-functions", "swa", "lead-qualification", "ixbrl", "docx"],
   "author": "",
-  "directories": {
-    "lib": "lib"
-  }
+  "directories": { "lib": "lib" }
 }
