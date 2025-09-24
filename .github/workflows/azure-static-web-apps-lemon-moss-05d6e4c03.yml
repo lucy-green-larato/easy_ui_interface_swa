@@ -6,77 +6,44 @@ on:
     paths:
       - "web/**"
       - "api/**"
-      - "web/staticwebapp.config.json"
       - ".github/workflows/azure-static-web-apps-lemon-moss-05d6e4c03.yml"
   workflow_dispatch:
-  pull_request:
-    types: [opened, synchronize, reopened, closed]
-    branches: [ main ]
-
-permissions:
-  contents: read
-
-concurrency:
-  group: swa-deploy-main
-  cancel-in-progress: true
 
 jobs:
-  build_and_deploy_job:
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
-    runs-on: ubuntu-latest
+  build_and_deploy:
     name: Build and Deploy
+    runs-on: ubuntu-latest
+
+    # Force Oryx to use Node 20 for the API build
+    env:
+      ORYX_PLATFORM_NAME: nodejs
+      ORYX_PLATFORM_VERSION: 20.18.1
+      ORYX_NODE_VERSION: 20.18.1
+      ORYX_ENABLE_NODE_DYNAMIC_INSTALL: true
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: false
           lfs: false
-          
-      - name: Verify API version hints exist
+
+      - name: Verify API pins
         run: |
           echo "Contents of api/.oryxrc:"
           cat api/.oryxrc || true
           echo "----"
-          echo "Contents of api/.npmrc:"
-          cat api/.npmrc || true
-          echo "----"
           echo "package.json engines:"
-          cat api/package.json | jq '.engines' || cat api/package.json
-   
-      - name: Build and Deploy to Azure Static Web Apps
-        id: builddeploy
+          (jq '.engines' api/package.json) 2>/dev/null || cat api/package.json
+          echo "---- ls api"
+          ls -la api
+
+      - name: Build And Deploy
         uses: Azure/static-web-apps-deploy@v1
-        env:
-          # Force Oryx to use Node 20 for the **API** build
-          ORYX_PLATFORM_NAME: "nodejs"
-          ORYX_PLATFORM_VERSION: "20.18.1"
-          ORYX_NODE_VERSION: "20.18.1"
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_LEMON_MOSS_05D6E4C03 }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          action: "upload"
-
-          # Frontend (served as static files)
           app_location: "web"
           output_location: ""
-
-          # Managed Functions (API)
           api_location: "api"
-
-          # Keep the web step trivial; build only the API
+          # IMPORTANT: let Oryx pick the Node version; do not override api_build_command
           skip_app_build: true
-          api_build_command: "npm ci --omit=dev"
-
-  close_pull_request_job:
-    if: github.event_name == 'pull_request' && github.event.action == 'closed'
-    runs-on: ubuntu-latest
-    name: Close PR Preview
-    steps:
-      - name: Close PR Environment
-        uses: Azure/static-web-apps-deploy@v1
-        with:
-          action: "close"
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_LEMON_MOSS_05D6E4C03 }}
-
-
