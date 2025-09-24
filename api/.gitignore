@@ -2,3 +2,12 @@
 local.settings.json
 node_modules/
 bin/
+# --- local artifacts (do not commit) ---
+*.zip
+.chstrategic.paths
+api-worker/
+.swa/
+.vscode/
+.devcontainer/
+node_modules/
+api/local.settings.json
