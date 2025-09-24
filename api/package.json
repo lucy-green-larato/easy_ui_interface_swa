@@ -6,8 +6,9 @@
   "license": "MIT",
   "type": "commonjs",
   "engines": {
-    "node": ">=20.18.1"
+    "node": ">=20.18.1", "npm": ">=10"
   },
+  "packageManager": "npm@10.8.2",
   "dependencies": {
     "@azure/functions": "^4.7.2",
     "@azure/msal-node": "^2.16.3",
