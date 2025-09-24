@@ -14,15 +14,6 @@ jobs:
     name: Build and Deploy
     runs-on: ubuntu-latest
 
-    # Force Oryx to use Node 20 for the API build
-    env:
-      ORYX_PLATFORM_NAME: nodejs
-      ORYX_PLATFORM_VERSION: 20.18.1
-      ORYX_NODE_VERSION: 20.18.1
-      ORYX_ENABLE_NODE_DYNAMIC_INSTALL: true
-      FUNCTIONS_NODE_VERSION: '20'
-      WEBSITE_NODE_DEFAULT_VERSION: '20.18.1'
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,6 +32,14 @@ jobs:
 
       - name: Build And Deploy
         uses: Azure/static-web-apps-deploy@v1
+        # Force Oryx to use Node 20 for the API build
+        env:
+          ORYX_PLATFORM_NAME: nodejs
+          ORYX_PLATFORM_VERSION: 20.18.1
+          ORYX_NODE_VERSION: 20.18.1
+          ORYX_ENABLE_NODE_DYNAMIC_INSTALL: true
+          FUNCTIONS_NODE_VERSION: '20'
+          WEBSITE_NODE_DEFAULT_VERSION: '20.18.1'
         with:
           action: upload
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_LEMON_MOSS_05D6E4C03 }}
@@ -50,6 +49,7 @@ jobs:
           api_location: "api"
           # IMPORTANT: let Oryx pick the Node version; do not override api_build_command
           skip_app_build: true
+
 
 
 
