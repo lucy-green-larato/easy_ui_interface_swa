@@ -1097,28 +1097,6 @@ module.exports = async function (context, req) {
     const method = (req.method || 'GET').toUpperCase();
     const path = normalizePath(context);
     aiTrack('ch-strategic.entry', { cid, method, path, ...envFingerprint() });
-    // ADD: DEBUG GET /api/ch-strategic/diag/:companyNumber  → fetch text, detect Strategic Report, return a short sample
-    if (isDiag(method, path)) {
-      const m = path.match(/\/diag\/([A-Za-z0-9]+)\/?$/i);
-      const numRaw = m ? m[1] : '';
-      const num = normalizeCompanyNumber(numRaw);
-      const t0 = Date.now();
-      const full = await tryGetReportText(num);
-      const sr = extractStrategicReport(full || '');
-      const body = (sr && sr.trim()) ? sr : (full || '');
-      context.res = ok(200, {
-        ok: true,
-        numRaw,
-        numNorm: num,
-        haveFull: !!full,
-        fullLen: (full || '').length,
-        haveSR: !!sr,
-        srLen: (sr || '').length,
-        sample: (body || '').slice(0, 300),
-        ms: Date.now() - t0
-      }, cid);
-      return;
-    }
     // DEBUG ADD: routing/build fingerprints
     context.log?.info?.(
       { cid, method, path, build: process.env.CH_STRATEGIC_VERSION || 'dev', fp: 'router-hit-v1' },
