@@ -1,6 +1,8 @@
 /* web/src/js/ch-strategic.js */
 /* eslint-disable no-console */
 (() => {
+  "use strict";
+
   // ---------- Utilities ----------
   const qs = (sel, root = document) => root.querySelector(sel);
   const byId = (id) => document.getElementById(id);
@@ -34,6 +36,54 @@
   };
   const normaliseHeader = (s) => (s ?? "").trim().toLowerCase();
 
+  function setDownloadAnchor(href) {
+    if (!href) return;
+    let a = document.getElementById('download-link');
+    if (!a) {
+      const fileInput = document.getElementById('csv_file');
+      a = document.createElement('a');
+      a.id = 'download-link';
+      a.download = 'ch-strategic.csv';
+      a.textContent = 'Download CSV';
+      a.href = href;
+      a.setAttribute('hidden', 'hidden');
+      if (fileInput && fileInput.parentNode) {
+        fileInput.parentNode.appendChild(a);
+      } else {
+        document.body.appendChild(a);
+      }
+    } else {
+      a.href = href;
+    }
+    a.removeAttribute('hidden');
+  }
+
+  // --- resilient fetch helper ---------------------------------------------------
+  function withTimeout(promise, ms, aborter) {
+    let to;
+    const timeout = new Promise((_, rej) => { to = setTimeout(() => { aborter?.abort(); rej(new Error('Request timeout')); }, ms); });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(to));
+  }
+
+  // Basic retry (idempotent GETs only)
+  async function getJSON(url, { timeout = 12000, retries = 2, signal } = {}) {
+    let lastErr;
+    for (let i = 0; i <= retries; i++) {
+      const controller = new AbortController();
+      const chained = signal ? (signal.addEventListener('abort', () => controller.abort()), controller.signal) : controller.signal;
+      try {
+        const res = await withTimeout(fetch(url, { cache: 'no-store', signal: chained }), timeout, controller);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json().catch(() => ({})); // never throw on JSON parse
+      } catch (err) {
+        lastErr = err;
+        if (i === retries) break;
+        await sleep(300 * Math.pow(2, i)); // 300ms, 600ms backoff
+      }
+    }
+    throw lastErr || new Error('Network error');
+  }
+
   // Build tiny CSV from matches (fallback for small inline result)
   function toCsv(rows, header) {
     const esc = (v) => {
@@ -59,13 +109,62 @@
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
   };
 
+  // --- Client-side limits (keep in sync with server) ---------------------------
+  // Server validates: length <= 50 and /^[A-Za-z0-9 _-]*$/
+  const CLIENT_LIMITS = {
+    MAX_BYTES: 20 * 1024 * 1024,          // 20 MB (match server MAX_SIZE)
+    EVIDENCE_MAX: 50,                      // max chars per term
+    MAX_TERMS: 10,                         // keep in sync with server
+    TERM_RE: /^[A-Za-z0-9 _-]{1,50}$/,     // allowed chars per term (single term)
+  };
+
+  // Quick file-type check (MIME or extension)
+  function looksLikeCsv(file) {
+    if (!file) return false;
+    const t = (file.type || '').toLowerCase();
+    if (t.includes('text/csv') || t === 'text/plain' || t === 'application/vnd.ms-excel') return true;
+    return /\.csv$/i.test(file.name || '');
+  }
+
+  // Validate inputs; returns { ok, errs } and fills UI error slots
+  function validateClientInputs(file, evidence) {
+    const errs = { file: '', evidence: '' };
+
+    if (!file) errs.file = 'Provide a CSV file.';
+    else {
+      if (!looksLikeCsv(file)) errs.file = 'Please upload a CSV file.';
+      else if (file.size > CLIENT_LIMITS.MAX_BYTES) {
+        const mb = (CLIENT_LIMITS.MAX_BYTES / (1024 * 1024)) | 0;
+        errs.file = `File too large. Max ${mb} MB.`;
+      }
+    }
+
+    const ev = (evidence || '').trim();
+    if (!ev) {
+      errs.evidence = 'Enter a keyword or phrase.';
+    } else {
+      const terms = Array.from(new Set(ev.split(',').map(t => t.trim()).filter(Boolean)));
+      if (terms.length === 0) {
+        errs.evidence = 'Enter a keyword or phrase.';
+      } else if (terms.length > CLIENT_LIMITS.MAX_TERMS) {
+        errs.evidence = `Too many evidence terms (max ${CLIENT_LIMITS.MAX_TERMS}).`;
+      } else if (!terms.every(t => CLIENT_LIMITS.TERM_RE.test(t))) {
+        errs.evidence = `Each term may be up to ${CLIENT_LIMITS.EVIDENCE_MAX} chars (A–Z a–z 0–9 space _ -).`;
+      }
+    }
+
+    if (el.csvError) el.csvError.textContent = errs.file;
+    if (el.evidenceError) el.evidenceError.textContent = errs.evidence;
+
+    return { ok: !errs.file && !errs.evidence, errs };
+  }
+
   // ---------- State ----------
   const state = {
     callType: "Direct",
     csvFile: /** @type {File|null} */ (null),  // Source CSV file (upload or synthesized from PBI)
     evidence: "",
-    // Large run state
-    largeRun: null, // { instanceId, polling, downloadShown }
+    largeRun: null, // { jobId, polling, pollAbort?, downloadShown }
   };
 
   // ---------- Elements ----------
@@ -89,6 +188,9 @@
     reset: byId("resetBtn"),
     status: byId("status"),
     diag: byId("diag-json"),
+
+    // cancel button
+    btnCancel: byId("btnCancel"),
 
     // right rail toggles + skipped details
     intelToggle: byId("toggle-intel"),
@@ -118,6 +220,15 @@
     pbiVisual: byId("pbi-visual"),
     pbiStatus: byId("pbi-status"),
   };
+
+  // Single alias for the primary start button (Analyze by default)
+  let btnStart = el.analyze;
+
+  // Enable/disable both start buttons together
+  function setStartsDisabled(disabled) {
+    if (el.analyze) el.analyze.disabled = !!disabled;
+    if (el.startLarge) el.startLarge.disabled = !!disabled;
+  }
 
   // ---------- Storage (remember call type) ----------
   const STORAGE_KEYS = { CALL_TYPE: "itt.call_type" };
@@ -160,25 +271,53 @@
   }
 
   function updateAnalyzeState() {
-    const evidenceOK = (el.evidence?.value || "").trim().length > 0;
-    const fileOK = !!state.csvFile;
-    el.analyze.disabled = !(evidenceOK && fileOK);
+    const ev = (el.evidence?.value || '').trim();
+    const f = state.csvFile;
+
+    // client-side multi-term validation mirrors server:
+    let evidenceLooksOk = false;
+    if (ev) {
+      const terms = Array.from(new Set(ev.split(',').map(t => t.trim()).filter(Boolean)));
+      evidenceLooksOk =
+        terms.length > 0 &&
+        terms.length <= CLIENT_LIMITS.MAX_TERMS &&
+        terms.every(t => CLIENT_LIMITS.TERM_RE.test(t));
+    }
+
+    const fileLooksOk = !!f && looksLikeCsv(f) && f.size <= CLIENT_LIMITS.MAX_BYTES;
+
+    if (el.analyze) el.analyze.disabled = !(evidenceLooksOk && fileLooksOk);
+    if (el.startLarge) el.startLarge.disabled = !(evidenceLooksOk && fileLooksOk);
   }
 
   function renderStatus(msg, type = "info", { openSkipped = false } = {}) {
     if (!el.status) return;
     el.status.className = `status ${type}`;
+    // clear existing content
+    while (el.status.firstChild) el.status.removeChild(el.status.firstChild);
+
+    // add message safely
+    const textNode = document.createElement('span');
+    textNode.textContent = String(msg ?? '');
+    el.status.appendChild(textNode);
+
+    // optional "View details" button (fixed markup, no user content)
     if (openSkipped) {
-      el.status.innerHTML = `${msg} <button type="button" id="status-open-skipped" class="btn inline">View details</button>`;
-      byId("status-open-skipped")?.addEventListener("click", () => {
+      const space = document.createTextNode(' ');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'status-open-skipped';
+      btn.className = 'btn inline';
+      btn.textContent = 'View details';
+      btn.addEventListener('click', () => {
         const d = el.skippedDetails;
         if (!d) return;
         try { d.open = true; } catch { /* older browsers */ }
-        d.removeAttribute("hidden");
-        d.scrollIntoView({ behavior: "smooth", block: "start" });
+        d.removeAttribute('hidden');
+        d.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
-    } else {
-      el.status.textContent = msg;
+      el.status.appendChild(space);
+      el.status.appendChild(btn);
     }
   }
 
@@ -205,18 +344,27 @@
     setProgress(null);
   }
 
-  function appendResultItem({ type = "info", companyNumber, companyName, message }) {
-    if (!el.results) return;
-    const item = document.createElement("div");
-    item.className = `result ${type}`;
-    item.innerHTML = `
-      <div class="result__head">
-        <strong>${companyName || "(no name)"} </strong>
-        <span class="muted">· ${companyNumber || "(no number)"} </span>
-      </div>
-      <div class="result__body">${message || ""}</div>
-    `;
-    el.results.appendChild(item);
+  // Safe result/status line (accepts string or object with details)
+  function appendResultItem({ type, companyNumber, companyName, message }) {
+    const line = document.createElement('div');
+    line.className = `result ${type}`;
+    const parts = [];
+    if (type) parts.push(`${type}:`);
+    if (companyName) parts.push(`Name=${companyName}`);
+    if (companyNumber) parts.push(`• Number=${companyNumber}`);
+    if (message) parts.push(`• ${message}`);
+    line.textContent = parts.join(' ');
+
+    const matchesPane = document.getElementById('results-matches');
+    const skippedPane = document.getElementById('results-skipped');
+
+    if (type === 'match' && matchesPane) {
+      document.getElementById('matches-title')?.removeAttribute('hidden');
+      matchesPane.appendChild(line);
+    } else if (skippedPane) {
+      document.getElementById('skipped-title')?.removeAttribute('hidden');
+      skippedPane.appendChild(line);
+    }
   }
 
   function renderDownloadButton({ filename, href, blobContent }) {
@@ -231,41 +379,122 @@
     el.downloadContainer.appendChild(btn);
   }
 
+  function showFeedbackCard(showDetails = false) {
+    const card = document.getElementById('feedbackCard');
+    if (!card) return;
+    card.hidden = false;
+    const details = document.getElementById('fbDetails');
+    if (details) details.hidden = !showDetails;
+  }
+
+  function wireFeedbackUI() {
+    const up = document.getElementById('fbUp');
+    const down = document.getElementById('fbDown');
+    const details = document.getElementById('fbDetails');
+    const submit = document.getElementById('fbSubmit');
+    const status = document.getElementById('fbStatus');
+
+    if (!up || !down || !submit) return;
+
+    up.addEventListener('click', () => {
+      details.hidden = true;
+      up.setAttribute('aria-pressed', 'true'); down.setAttribute('aria-pressed', 'false');
+    });
+    down.addEventListener('click', () => {
+      details.hidden = false;
+      down.setAttribute('aria-pressed', 'true'); up.setAttribute('aria-pressed', 'false');
+    });
+
+    submit.addEventListener('click', async () => {
+      const jobId = (state.largeRun && state.largeRun.jobId) || document.getElementById('job-id-badge')?.textContent || '';
+      const useful = down.getAttribute('aria-pressed') === 'true' ? 'down' : 'up';
+      const comment = (document.getElementById('fbComment')?.value || '').trim().slice(0, 500);
+      const includeSample = !!document.getElementById('fbSample')?.checked;
+      const tagEls = Array.from(document.querySelectorAll('#fbDetails input[type="checkbox"]'));
+      const tags = tagEls.filter(x => x.checked).map(x => x.value);
+
+      // totals from the counters
+      const totals = {
+        total: Number(el.countTotal?.dataset.count || 0),
+        matched: Number(el.countMatched?.dataset.count || 0),
+        skipped: Number(el.countSkipped?.dataset.count || 0)
+      };
+
+      const evidenceTag = (el.evidence?.value || '').trim().slice(0, 50);
+
+      status.textContent = 'Sending…';
+      try {
+        const r = await fetch('/api/ch-strategic/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobId, useful, tags, comment, includeSample, evidenceTag, totals })
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        status.textContent = 'Thanks for the feedback!';
+      } catch (e) {
+        status.textContent = 'Failed to send feedback. Please try again later.';
+      }
+    });
+  }
+
+  // --- Global error visibility (no silent failures) --------------------------
+  window.addEventListener('unhandledrejection', (e) => {
+    const msg = (e && e.reason && e.reason.message) ? e.reason.message : 'Unexpected error';
+    appendResultItem(`Error: ${msg}`);
+  });
+  window.addEventListener('error', (e) => {
+    appendResultItem(`Error: ${e.message || 'Unexpected error'}`);
+  });
+
   // ---------- File helpers ----------
   async function fileFromCsvString(csvText, name = "companies.csv") {
     return new File([csvText], name, { type: "text/csv;charset=utf-8" });
   }
 
   // ---------- API (spec-compliant endpoints) ----------
-  // Small run: POST /api/ch-strategic (multipart: file, evidenceTag)
   async function apiSmallRunMultipart({ file, evidenceTag }) {
     const fd = new FormData();
-    fd.append("file", file);
-    fd.append("evidenceTag", evidenceTag);
-    const res = await fetch("/api/ch-strategic", { method: "POST", body: fd });
-    return res;
+    fd.append("csv_file", file);                // <-- field name MUST be csv_file
+    if (evidenceTag) fd.append("evidenceTag", evidenceTag);
+    return fetch("/api/ch-strategic", { method: "POST", body: fd });
   }
 
-  // Large run start: POST /api/ch-strategic/start (we send same multipart; server can persist to blob)
+  // Large run start: POST /api/ch-strategic/start
   async function apiStartLargeRun({ file, evidenceTag }) {
     const fd = new FormData();
-    fd.append("file", file);
-    fd.append("evidenceTag", evidenceTag);
-    const res = await fetch("/api/ch-strategic/start", { method: "POST", body: fd });
-    if (!res.ok) throw new Error(`Start failed (${res.status})`);
-    return res.json(); // { instanceId }
-  }
+    fd.append("csv_file", file);               // <-- must be csv_file
+    if (evidenceTag) fd.append("evidenceTag", evidenceTag);
 
-  // Status + download use PATH PARAMS with instanceId
-  async function apiPollStatus(instanceId) {
-    const res = await fetch(`/api/ch-strategic/status/${encodeURIComponent(instanceId)}`, { cache: "no-store" });
-    if (!res.ok) throw new Error(`Status failed (${res.status})`);
-    return res.json(); // { total, processed, matched, skipped, errorsByReason, ...optional flags }
+    const res = await fetch("/api/ch-strategic/start", { method: "POST", body: fd });
+    if (!res.ok) {
+      let msg = '';
+      try { msg = await res.text(); } catch { }
+      throw new Error(`Start failed (${res.status})${msg ? `: ${msg}` : ''}`);
+    }
+    return res.json(); // { jobId, statusUrl, downloadUrl }
+  }
+  // Status uses PATH PARAM with jobId (normalized to UI shape)
+  async function apiPollStatus(jobId, { signal } = {}) {
+    const s = await getJSON(`/api/ch-strategic/status/${encodeURIComponent(jobId)}`, { signal });
+    const total = Number(s.totalChunks || 0);
+    const processed = Number(s.completedChunks || 0);
+    const completed = s.state === 'done' || s.state === 'cancelled' || s.state === 'error';
+    const canDownload = s.state === 'done' && !!s.outputBlob;
+    return {
+      total, processed,
+      matched: Number(s.matched || 0),
+      skipped: Number(s.skipped || 0),
+      errorsByReason: s.errorsByReason || null,
+      completed, canDownload,
+      firstRowEmitted: canDownload,
+      rows: processed,
+      state: s.state
+    };
   }
 
   // PBI export returns CSV (server handles MSAL + allowlist); we parse client-side
   async function apiPbiExport(payload) {
-    const res = await fetch("/api/pbi-export", {
+    const res = await fetch("/api/ch-strategic/pbi-export", { // <-- fixed path
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload || {}),
@@ -280,6 +509,8 @@
   async function handleSmallOrUpgrade({ file, evidence }) {
     // Try small-run first (server decides). If >50, spec says server returns 400 with guidance to batch.
     renderStatus("Submitting for inline processing…");
+    const statusEl = document.getElementById('status');
+    if (statusEl) { statusEl.setAttribute('aria-busy', 'true'); statusEl.focus?.(); }
     const res = await apiSmallRunMultipart({ file, evidenceTag: evidence });
 
     if (res.status === 400) {
@@ -288,7 +519,7 @@
     }
     if (!res.ok) throw new Error(`Request failed (${res.status})`);
 
-    // Expect a compact inline result. We’ll accept either a CSV body or JSON with matches.
+    // Expect a compact inline result. Accept either a CSV body or JSON with matches.
     const contentType = res.headers.get("content-type") || "";
     if (contentType.includes("text/csv")) {
       // Server returned final CSV directly
@@ -297,14 +528,22 @@
       renderDownloadButton({ filename, blobContent: csv });
       setProgress(100);
       renderStatus("Job completed. You can download results.", "info");
+      showFeedbackCard(false);
       return { upgraded: false, done: true };
     } else {
       const data = await res.json();
-      const counts = data?.counts || {};
+
+      // ---- counters (server may send rows/matched/skipped instead of counts) ----
+      const counts = data?.counts || {
+        total: Number(data?.rows ?? data?.total ?? 0),
+        processed: Number(data?.processed ?? data?.rows ?? 0),
+        matched: Number(data?.matched ?? 0),
+        skipped: Number(data?.skipped ?? 0),
+      };
       setCounters(counts);
       setProgress(100);
 
-      // Skipped/errors listing (if server provided detail)
+      // ---- skipped/errors detail (if provided) ----
       (data?.skipped || []).forEach((s) =>
         appendResultItem({ type: "skip", companyNumber: s.companyNumber, companyName: s.companyName, message: s.reason })
       );
@@ -312,22 +551,36 @@
         appendResultItem({ type: "error", companyNumber: e.companyNumber, companyName: e.companyName, message: e.message })
       );
 
-      // Build/download CSV if provided or construct minimal from matches
+      // ---- matches list into the Results panel (itemsSample fallback) ----
+      const items =
+        Array.isArray(data?.matches) ? data.matches :
+          (Array.isArray(data?.itemsSample) ? data.itemsSample : []);
+
+      items.forEach((m) =>
+        appendResultItem({ type: "match", companyNumber: m.companyNumber, companyName: m.companyName })
+      );
+
+      // ---- offer a client-side CSV too (from matches/itemsSample) ----
+      const evidence = String(data?.evidenceTag ?? "").trim();
       const filename = `strategic-review_matches_${nowStamp()}.csv`;
       if (data?.csv) {
         renderDownloadButton({ filename, blobContent: data.csv });
-      } else if (Array.isArray(data?.matches)) {
+      } else if (items.length) {
         const header = ["Company Name", "Company Number", "Evidence"];
-        const rows = data.matches.map((m) => [m.companyName ?? "", m.companyNumber ?? "", m.evidence ?? ""]);
+        const rows = items.map((m) => [m.companyName ?? "", m.companyNumber ?? "", m.evidence ?? evidence]);
         renderDownloadButton({ filename, blobContent: toCsv(rows, header) });
       }
 
+      // ---- final status ----
       const hasIssues = (data?.skipped?.length || 0) > 0 || (data?.errors?.length || 0) > 0;
       renderStatus(
         hasIssues ? "Job completed. Some companies were skipped or errored." : "Job completed.",
         hasIssues ? "warn" : "info",
         { openSkipped: hasIssues }
       );
+      const matched = Number(counts.matched || 0);
+      const showDetails = (matched === 0) || hasIssues;
+      showFeedbackCard(showDetails);
       setTimeout(() => setProgress(null), 1200);
       return { upgraded: false, done: true };
     }
@@ -335,16 +588,66 @@
 
   async function handleLargeRun({ file, evidence }) {
     // Start orchestration
-    const { instanceId } = await apiStartLargeRun({ file, evidenceTag: evidence });
-    if (!instanceId) throw new Error("No instanceId returned.");
+    const { jobId, downloadUrl } = await apiStartLargeRun({ file, evidenceTag: evidence });
+    setDownloadAnchor(downloadUrl || `/api/ch-strategic/download/${encodeURIComponent(jobId)}`);
+    if (!jobId) throw new Error("No jobId returned.");
 
-    state.largeRun = { instanceId, polling: true, downloadShown: false };
+    // Initialize run state + announce start
+    state.largeRun = { jobId, polling: true, pollAbort: null, downloadShown: false };
     setProgress(5);
-    renderStatus(`Background job started: ${instanceId.slice(0, 8)}…`);
+    renderStatus(`Background job started: ${jobId.slice(0, 8)}…`, "info");
+    // Populate the Job ID badge in the retention note
+    const badge = document.getElementById('job-id-badge');
+    if (badge) badge.textContent = jobId;
 
-    // Poll
+    // accessibility: mark busy and focus status region
+    {
+      const statusEl = document.getElementById('status');
+      if (statusEl) { statusEl.setAttribute('aria-busy', 'true'); statusEl.focus?.(); }
+    }
+
+    // Wire the Cancel button for THIS jobId
+    if (el.btnCancel) {
+      el.btnCancel.disabled = false;
+
+      const onCancel = async () => {
+        el.btnCancel.disabled = true;          // prevent double-clicks
+        renderStatus('Cancelling…', 'info');
+        try {
+          await fetch(`/api/ch-strategic/cancel/${encodeURIComponent(jobId)}`, { method: 'POST' });
+          // Stop local polling immediately; the server will flip to "cancelled" shortly
+          if (state.largeRun && state.largeRun.jobId === jobId) {
+            if (state.largeRun.pollAbort) state.largeRun.pollAbort.abort();
+            state.largeRun.polling = false;
+          }
+        } catch (e) {
+          renderStatus('Cancel failed. Please retry.', 'error');
+          el.btnCancel.disabled = false;
+          setStartsDisabled(false);
+          return;
+        }
+        renderStatus('Job cancellation requested.', 'info');
+        setStartsDisabled(false);
+      };
+
+      // Ensure a clean handler per run (no stacking from previous jobs)
+      el.btnCancel.replaceWith(el.btnCancel.cloneNode(true));
+      // Re-select (since replaceWith returns void)
+      const freshBtn = document.getElementById('btnCancel');
+      freshBtn.disabled = false;
+      freshBtn.addEventListener('click', onCancel, { once: true });
+      // Update reference
+      el.btnCancel = freshBtn;
+    }
+
+    // --- Poll with AbortController + backoff ---
+    const pollAbort = new AbortController();
+    state.largeRun.pollAbort = pollAbort;
+    const startedAt = Date.now();
+
     while (state.largeRun.polling) {
-      const status = await apiPollStatus(instanceId);
+      // fetch status with abort support
+      const status = await apiPollStatus(jobId, { signal: pollAbort.signal });
 
       // Counters
       setCounters({
@@ -364,20 +667,18 @@
         status.messages.forEach((m) => appendResultItem(m));
       }
 
-      // Show download only after at least one row exists
+      // Show download only after at least one row exists or server says OK
       const canEnableDownload =
         !state.largeRun.downloadShown &&
-        (
-          Number(status?.matched) > 0 ||
-          Number(status?.rows) > 0 ||
+        (status?.canDownload === true ||
           status?.firstRowEmitted === true ||
-          status?.canDownload === true
-        );
+          Number(status?.rows) > 0 ||
+          Number(status?.matched) > 0);
 
       if (canEnableDownload) {
         renderDownloadButton({
           filename: "",
-          href: `/api/ch-strategic/download/${encodeURIComponent(instanceId)}`,
+          href: `/api/ch-strategic/download/${encodeURIComponent(jobId)}`,
         });
         state.largeRun.downloadShown = true;
       }
@@ -387,121 +688,70 @@
         el.diag.textContent = JSON.stringify({ errorsByReason: status.errorsByReason }, null, 2);
       }
 
-      // Completion
-      if (status?.completed) {
+      // Completion (done or cancelled)
+      if (status?.completed || status?.state === 'cancelled') {
         state.largeRun.polling = false;
         setProgress(100);
 
-        // Safety: if completed with matches but we haven't enabled download yet, enable now
+        // Disable Cancel button now that we're finished
+        if (el.btnCancel) el.btnCancel.disabled = true;
+
+        // Safety: enable download if finished with rows but button not shown yet
         const hasRows =
-          Number(status?.matched) > 0 ||
-          Number(status?.rows) > 0 ||
+          status?.canDownload === true ||
           status?.firstRowEmitted === true ||
-          status?.canDownload === true;
+          Number(status?.rows) > 0 ||
+          Number(status?.matched) > 0;
 
         if (!state.largeRun.downloadShown && hasRows) {
           renderDownloadButton({
             filename: "",
-            href: `/api/ch-strategic/download/${encodeURIComponent(instanceId)}`,
+            href: `/api/ch-strategic/download/${encodeURIComponent(jobId)}`,
           });
           state.largeRun.downloadShown = true;
         }
 
+        const wasCancelled = status?.state === 'cancelled';
+        const hadIssues = Number(status?.skipped || 0) > 0 || (Array.isArray(status?.errors) && status.errors.length > 0);
+
         renderStatus(
-          state.largeRun.downloadShown
-            ? "Job completed. You can download results."
-            : "Job completed. No matches were found.",
+          wasCancelled
+            ? "Job was cancelled."
+            : (state.largeRun.downloadShown
+              ? "Job completed. You can download results."
+              : "Job completed. No matches were found."),
           "info",
-          { openSkipped: Number(status?.skipped) > 0 }
+          { openSkipped: hadIssues }
         );
+
+        const matched = Number(status?.matched || 0);
+        const showDetails = wasCancelled || matched === 0 || hadIssues;
+        showFeedbackCard(showDetails);
+
+        // accessibility: mark not busy on completion
+        const statusEl2 = document.getElementById('status');
+        if (statusEl2) statusEl2.setAttribute('aria-busy', 'false');
+
+        setStartsDisabled(false);
         break;
       }
 
-      await sleep(1500);
+      // Backoff: 0–20s @750ms, 20–60s @1500ms, 60s+ @3000ms
+      const ageSec = (Date.now() - startedAt) / 1000;
+      const delay = ageSec < 20 ? 750 : ageSec < 60 ? 1500 : 3000;
+      await sleep(delay);
     }
 
-    setTimeout(() => setProgress(null), 1500);
-  }
+    // ensure any in-flight fetch is cancelled when loop exits
+    pollAbort.abort();
 
-  // ---------- Event wiring ----------
-  function wireForm() {
-    if (!el.form) return;
+    // safety: also mark not busy here in case we exited outside the completion block
+    {
+      const statusEl = document.getElementById('status');
+      if (statusEl) statusEl.setAttribute('aria-busy', 'false');
+    }
 
-    // Call type
-    el.callType?.addEventListener("change", (e) => {
-      state.callType = e.target.value || "Direct";
-      text(el.mapLabel, state.callType);
-      persistCallType();
-    });
-    el.remember?.addEventListener("change", () => {
-      if (el.remember.checked) persistCallType();
-      else localStorage.removeItem(STORAGE_KEYS.CALL_TYPE);
-    });
-
-    // Evidence
-    el.evidence?.addEventListener("input", () => {
-      state.evidence = el.evidence.value.trim();
-      if (el.evidenceError) el.evidenceError.textContent = "";
-      updateAnalyzeState();
-    });
-
-    // CSV file selection (we keep the File for server-side processing)
-    el.csv?.addEventListener("change", () => {
-      if (el.csvError) el.csvError.textContent = "";
-      clearResults();
-      const f = el.csv.files?.[0] || null;
-      state.csvFile = f;
-      // Optional: estimate total by parsing first to update counters (not required)
-      if (f) {
-        f.text().then((t) => {
-          const rows = parseCsvRows(t);
-          const header = rows[0]?.map(normaliseHeader) || [];
-          const hasCN = header.includes("company name");
-          const hasCNo = header.includes("company number");
-          if (!hasCN || !hasCNo) {
-            el.csvError && (el.csvError.textContent = 'CSV must include headers "Company Name" and "Company Number".');
-          }
-          const total = Math.max(0, rows.length - 1);
-          setCounters({ total });
-          renderStatus(`Loaded ${total} companies from CSV.`, "info");
-        }).catch(() => { /* ignore estimation errors */ });
-      }
-      updateAnalyzeState();
-    });
-
-    // Analyze click
-    el.analyze?.addEventListener("click", async () => {
-      clearResults();
-      el.analyze.disabled = true;
-      try {
-        state.evidence = el.evidence.value.trim();
-        if (!state.evidence) { el.evidenceError && (el.evidenceError.textContent = "Enter a keyword or phrase."); return; }
-        if (!state.csvFile) { el.csvError && (el.csvError.textContent = "Provide a CSV or import from Power BI."); return; }
-
-        // Try small run, upgrade if 400 per spec
-        const small = await handleSmallOrUpgrade({ file: state.csvFile, evidence: state.evidence });
-        if (small.upgraded) {
-          await handleLargeRun({ file: state.csvFile, evidence: state.evidence });
-        }
-      } catch (err) {
-        console.error(err);
-        renderStatus(err.message || "An unexpected error occurred.", "error");
-        if (el.diag) el.diag.textContent = JSON.stringify({ error: String(err) }, null, 2);
-      } finally {
-        el.analyze.disabled = false;
-      }
-    });
-
-    // Reset
-    el.reset?.addEventListener("click", () => {
-      state.csvFile = null;
-      state.evidence = "";
-      clearResults();
-      if (el.status) el.status.textContent = "";
-      if (el.csvError) el.csvError.textContent = "";
-      if (el.evidenceError) el.evidenceError.textContent = "";
-      updateAnalyzeState();
-    });
+    setStartsDisabled(false);
   }
 
   function wireRightRail() {
@@ -551,22 +801,136 @@
     el.helpBtn?.addEventListener("click", () => {
       const msg = [
         "This tool scans only the Strategic Report section for your evidence tag.",
-        "• Evidence tag is case-insensitive and tolerant of common OCR typos/synonyms.",
+        "• Evidence tag is case-insensitive and limited to letters, digits, space, underscore, hyphen (max 50 chars).",
         "• CSV must include Company Name and Company Number.",
-        "• Large jobs run as a background orchestration; Download CSV becomes available once the first row is written."
+        "• Large jobs run as a background orchestration; Download becomes available once the first row is written."
       ].join("\n");
       alert(msg);
     });
   }
 
+  // Pause network when tab is hidden (aborts in-flight fetch safely)
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && state.largeRun?.pollAbort) {
+      try { state.largeRun.pollAbort.abort(); } catch { }
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (state.largeRun?.pollAbort) {
+      try { state.largeRun.pollAbort.abort(); } catch { }
+    }
+  });
+
+  function wireForm() {
+    // 1) Call type + remember
+    el.callType?.addEventListener("change", () => {
+      state.callType = el.callType.value;
+      text(el.mapLabel, state.callType);
+      persistCallType();
+    });
+    el.remember?.addEventListener("change", persistCallType);
+
+    // 2) Evidence + CSV inputs
+    el.evidence?.addEventListener("input", () => {
+      state.evidence = (el.evidence.value || "").trim();
+      updateAnalyzeState();
+    });
+    el.csv?.addEventListener("change", () => {
+      state.csvFile = el.csv.files?.[0] || null;
+      updateAnalyzeState();
+    });
+
+    // 3) Analyze (small run, with server-side upgrade if >50)
+    el.analyze?.addEventListener("click", async (evt) => {
+      evt.preventDefault();
+      clearResults();
+
+      const { ok } = validateClientInputs(state.csvFile, state.evidence);
+      if (!ok) return;
+
+      setStartsDisabled(true);
+      try {
+        const res = await handleSmallOrUpgrade({ file: state.csvFile, evidence: state.evidence });
+        if (res?.upgraded) {
+          await handleLargeRun({ file: state.csvFile, evidence: state.evidence });
+        }
+      } catch (err) {
+        renderStatus("Request failed.", "error");
+        appendResultItem(`Error: ${err.message || err}`);
+      } finally {
+        setStartsDisabled(false);
+      }
+    });
+
+    // 4) Start large run explicitly
+    el.startLarge?.addEventListener("click", async (evt) => {
+      evt.preventDefault();
+      clearResults();
+
+      const { ok } = validateClientInputs(state.csvFile, state.evidence);
+      if (!ok) return;
+
+      setStartsDisabled(true);
+      try {
+        await handleLargeRun({ file: state.csvFile, evidence: state.evidence });
+      } catch (err) {
+        renderStatus("Start failed.", "error");
+        appendResultItem(`Error: ${err.message || err}`);
+      } finally {
+        setStartsDisabled(false);
+      }
+    });
+
+    // 5) Reset
+    el.reset?.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      el.form?.reset?.();
+      state.csvFile = null;
+      state.evidence = "";
+      clearResults();
+      updateAnalyzeState();
+      setStartsDisabled(false);
+    });
+
+    // Optional: Enter key on evidence triggers Analyze
+    el.evidence?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !el.analyze?.disabled) el.analyze.click();
+    });
+
+    // Keep our primary start alias synced
+    btnStart = el.analyze || btnStart;
+  }
+
+  function bindPicker() {
+    const fileEl = document.getElementById('csv_file');
+    const btn = document.getElementById('pick-file');
+    if (!fileEl || !btn) return;
+    fileEl.disabled = false;
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        if (typeof fileEl.showPicker === 'function') fileEl.showPicker();
+        else fileEl.click();
+      } catch {
+        fileEl.click();
+      }
+    }, { passive: false });
+  }
+
   // ---------- Init ----------
   function init() {
+    // status region accessibility
+    if (el.status) { el.status.setAttribute('aria-live', 'polite'); el.status.setAttribute('tabindex', '-1'); }
     loadCallType();
     updateAnalyzeState();
     wireForm();
+    bindPicker();
     wireRightRail();
     wirePbiDialog();
     wireHelp();
+    wireFeedbackUI();
     loadUserBadge();
   }
 
