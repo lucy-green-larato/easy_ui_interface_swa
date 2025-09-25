@@ -1,7 +1,11 @@
-name: deploy-swa
+name: Azure Static Web Apps CI/CD
+
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'web/**'
+      - '.github/workflows/azure-static-web-apps-lemon-moss-05d6e4c03.yml'
   workflow_dispatch:
 
 jobs:
@@ -16,7 +20,7 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install & Build Web
+      - name: Build web
         working-directory: web
         run: |
           npm ci
@@ -28,5 +32,5 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           action: upload
           app_location: "web"
-          output_location: "dist"   # If you're plain HTML (no build), set "" and remove the build step above
-          api_location: ""          # CRITICAL: disables Managed API build
+          output_location: ""   
+          api_location: ""          # CRITICAL: disables Managed API
