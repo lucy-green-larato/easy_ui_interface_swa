@@ -1,56 +1,32 @@
-name: Azure Static Web Apps CI/CD
-
+name: deploy-swa
 on:
   push:
     branches: [ main ]
-    paths:
-      - "web/**"
-      - "api/**"
-      - ".github/workflows/azure-static-web-apps-lemon-moss-05d6e4c03.yml"
   workflow_dispatch:
 
 jobs:
   build_and_deploy:
-    name: Build and Deploy
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: false
-          lfs: false
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Verify API pins
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install & Build Web
+        working-directory: web
         run: |
-          echo "Contents of api/.oryxrc:"
-          cat api/.oryxrc || true
-          echo "----"
-          echo "package.json engines:"
-          (jq '.engines' api/package.json) 2>/dev/null || cat api/package.json
-          echo "---- ls api"
-          ls -la api
+          npm ci
+          npm run build
 
-      - name: Build And Deploy
+      - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
-        # Force Oryx to use Node 20 for the API build
-        env:
-          ORYX_PLATFORM_NAME: nodejs
-          ORYX_PLATFORM_VERSION: 20.18.1
-          ORYX_NODE_VERSION: 20.18.1
-          ORYX_ENABLE_NODE_DYNAMIC_INSTALL: true
-          FUNCTIONS_NODE_VERSION: '20'
-          WEBSITE_NODE_DEFAULT_VERSION: '20.18.1'
         with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           action: upload
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_LEMON_MOSS_05D6E4C03 }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
           app_location: "web"
-          output_location: ""
-          api_location: "api"
-          # IMPORTANT: let Oryx pick the Node version; do not override api_build_command
-          skip_app_build: true
-
-
-
-
-
+          output_location: "dist"   # If you're plain HTML (no build), set "" and remove the build step above
+          api_location: ""          # CRITICAL: disables Managed API build
