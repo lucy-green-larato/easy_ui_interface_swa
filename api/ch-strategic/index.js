@@ -354,30 +354,68 @@ async function handleStatus(_context, req, cid) {
   }
 }
 
-async function handleDownload(_context, req, cid) {
-  const runId = (req.query?.runId || '').trim();
-  const file = (req.query?.file || '').toLowerCase();
-  if (!runId) return err(400, 'bad_request', 'Missing runId', cid);
-  if (!['results', 'log'].includes(file)) return err(400, 'bad_request', 'Missing or invalid file parameter', cid);
-
-  const path = `${runId}/${file}.json`;
+async function handleDownload(context, req, cid) {
   try {
-    const container = blobSvc.getContainerClient(CHS_OUT_CONTAINER);
-    const blob = container.getBlockBlobClient(path);
-    const dl = await blob.download();
+    const runId = (req.query?.runId || "").trim();
+    const file = (req.query?.file || "").toLowerCase().trim();
+    if (!runId) return err(400, "bad_request", "Missing runId", cid);
+    if (!["results", "log"].includes(file)) {
+      return err(400, "bad_request", "file must be 'results' or 'log'", cid);
+    }
+    if (!blobSvc) return err(500, "internal", "AzureWebJobsStorage not configured", cid);
 
-    return {
-      status: 200,
-      headers: {
-        'content-type': 'application/json; charset=utf-8',
-        'content-disposition': `attachment; filename="${file}-${runId}.json"`,
-        'x-correlation-id': cid,
-        ...CORS
-      },
-      body: dl.readableStreamBody
-    };
-  } catch {
-    return err(404, 'not_found', 'Artifact not found', cid);
+    // primary mapping (what the worker writes)
+    const primaryName = file === "results" ? `${runId}.json` : `${runId}.log.json`;
+
+    const outC = blobSvc.getContainerClient(CHS_OUT_CONTAINER);
+    const blob = outC.getBlockBlobClient(primaryName);
+
+    // try the primary name
+    try {
+      const dl = await blob.download();
+      context.res = {
+        status: 200,
+        headers: {
+          ...CORS,
+          "Content-Type": "application/json",
+          "x-correlation-id": cid,
+          "Content-Disposition": `attachment; filename="${primaryName}"`
+        },
+        body: await streamToBuffer(dl.readableStreamBody),
+      };
+      return;
+    } catch {
+      // Fallbacks (optional): legacy names/paths if you had them before
+      const fallbacks = [];
+      // e.g., old fixed names next to runId
+      fallbacks.push(file === "results" ? `${runId}/results.json` : `${runId}/log.json`);
+      // e.g., older campaign-style path (adjust/remove if you never used these)
+      // fallbacks.push(`results/campaign/default/${new Date().getUTCFullYear()}/...`); // remove unless applicable
+
+      for (const name of fallbacks) {
+        try {
+          const alt = outC.getBlockBlobClient(name);
+          const dl2 = await alt.download();
+          context.res = {
+            status: 200,
+            headers: {
+              ...CORS,
+              "Content-Type": "application/json",
+              "x-correlation-id": cid,
+              "Content-Disposition": `attachment; filename="${name.split("/").pop()}"`
+            },
+            body: await streamToBuffer(dl2.readableStreamBody),
+          };
+          return;
+        } catch { /* keep trying */ }
+      }
+
+      // nothing found
+      context.res = err(404, "not_found", `Artifact not found for runId=${runId}, file=${file}`, cid);
+    }
+  } catch (e) {
+    context.log.error("download failed", { cid, error: String(e?.message || e) });
+    context.res = err(500, "internal", "Unexpected error", cid);
   }
 }
 
@@ -488,7 +526,7 @@ module.exports = async function (context, req) {
 
     if (method === "POST" && path === "/start") { context.res = await handleStart(context, req, cid); return; }
     if (method === "GET" && path === "/status") { context.res = await handleStatus(context, req, cid); return; }
-    if (method === "GET" && path === "/download") { context.res = await handleDownload(context, req, cid); return; }
+    if (method === "GET" && path === "/download") {await handleDownload(context, req, cid); return; }
     if (method === "POST" && path === "/feedback") { context.res = await handleFeedback(context, req, cid); return; }
     if (method === "GET" && path === "/health") { context.res = await handleHealth(); return; }
 
