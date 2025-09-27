@@ -19,11 +19,6 @@
   "functions": [
     "auth",
     "generate",
-    "campaign-start",
-    "campaign-status",
-    "campaign-fetch",
-    "campaign-generate",
-    "campaign-worker",
     "ch-strategic",
     "ch-strategic-worker",
     "runs",

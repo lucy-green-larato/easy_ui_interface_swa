@@ -1,156 +1,195 @@
-/** api/ch-strategic-worker/index.js 26-09-2025 v1 */
-"use strict";
+// 27/09/2025  ch-strategic worker (queue-trigger)
+// Consumes jobs from CH_STRATEGIC_JOBS_QUEUE, updates status, and writes results/log JSON.
+// Artifacts:
+//   - Status:  ch-strategic-status/<runId>.json
+//   - Results: ch-strategic-out/<runId>.json
+//   - Log:     ch-strategic-out/<runId>.log.json
 
-/**
- * Queue worker for ch-strategic
- * Message schema (base64 JSON): { type:"ch-strategic", runId, cacheKey, submittedAt }
- */
+'use strict';
 
-const { BlobServiceClient } = require("@azure/storage-blob");
-const crypto = require("crypto");
+// Shared config (same source of truth as the router)
+const {
+  // storage + clients
+  blobSvc,
+  AZURE_STORAGE,
+  CHS_STATUS_CONTAINER,
+  CHS_OUT_CONTAINER,
+  CHS_CACHE_CONTAINER,
+  // business limits (optional diagnostics)
+  CH_STRATEGIC_MAX_ROWS,
+  CH_STRATEGIC_CHUNK_SIZE,
+  // optional: queue name if you want to log it
+  CHS_JOBS_QUEUE,
+} = require('../ch-strategic/config');
 
-// Env & settings (same names as HTTP function)
-const AZURE_STORAGE = process.env.AzureWebJobsStorage;
-const CHS_OUT_CONTAINER      = process.env.CH_STRATEGIC_OUT_CONTAINER      || 'ch-strategic-out';
-const CHS_STATUS_CONTAINER   = process.env.CH_STRATEGIC_STATUS_CONTAINER   || 'ch-strategic-status';
-const CHS_CACHE_CONTAINER    = process.env.CH_STRATEGIC_CACHE_CONTAINER    || 'ch-strategic-cache';
-const CH_STRATEGIC_CHUNK_SIZE = Number(process.env.CH_STRATEGIC_CHUNK_SIZE || 100);
-const CH_STRATEGIC_MAX_ROWS   = Number(process.env.CH_STRATEGIC_MAX_ROWS || 5000);
-
-const blobSvc = BlobServiceClient.fromConnectionString(AZURE_STORAGE);
-
-// Helpers (duplicated here to keep function self-contained)
+// ---------- small helpers ----------
 function nowIso() { return new Date().toISOString(); }
 
-async function streamToBuffer(readable) {
+function streamToBuffer(readable) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    readable.on("data", d => chunks.push(Buffer.from(d)));
-    readable.on("end", () => resolve(Buffer.concat(chunks)));
-    readable.on("error", reject);
+    readable.on('data', (d) => chunks.push(d));
+    readable.on('end', () => resolve(Buffer.concat(chunks)));
+    readable.on('error', reject);
   });
 }
 
-async function writeStatus(runId, patch) {
-  const c = blobSvc.getContainerClient(CHS_STATUS_CONTAINER);
-  await c.createIfNotExists();
-  const b = c.getBlockBlobClient(`${runId}.json`);
-  let current = {};
+async function getJsonIfExists(containerClient, name) {
   try {
-    const dl = await b.download();
+    const blob = containerClient.getBlockBlobClient(name);
+    const dl = await blob.download();
     const buf = await streamToBuffer(dl.readableStreamBody);
-    current = JSON.parse(buf.toString("utf8"));
-  } catch { /* first write */ }
-  const merged = { ...current, ...patch, runId, updatedAt: nowIso() };
-  const body = JSON.stringify(merged);
-  await b.upload(body, Buffer.byteLength(body), { overwrite: true });
+    return JSON.parse(buf.toString('utf8'));
+  } catch {
+    return {};
+  }
+}
+
+async function putJson(containerClient, name, obj) {
+  const body = Buffer.from(typeof obj === 'string' ? obj : JSON.stringify(obj));
+  const blob = containerClient.getBlockBlobClient(name);
+  await blob.upload(body, body.length, {
+    overwrite: true,
+    blobHTTPHeaders: { blobContentType: 'application/json' },
+  });
+}
+
+async function writeStatus(statusC, runId, patch) {
+  const name = `${runId}.json`;
+  const current = await getJsonIfExists(statusC, name);
+  const merged = {
+    ...current,
+    ...patch,
+    runId,
+    updatedAt: nowIso(),
+  };
+  await putJson(statusC, name, merged);
   return merged;
 }
 
-async function putJson(containerName, blobPath, obj) {
-  const c = blobSvc.getContainerClient(containerName);
-  await c.createIfNotExists();
-  const b = c.getBlockBlobClient(blobPath);
-  const body = JSON.stringify(obj);
-  await b.upload(body, Buffer.byteLength(body), { overwrite: true });
-  return `/${containerName}/${blobPath}`;
-}
+// ---------- worker entry ----------
+module.exports = async function (context, queueItem) {
+  const t0 = Date.now();
 
-function csvToRows(buffer) {
-  // basic CSV splitter (no quoted-field handling; OK for deterministic pipeline test datasets)
-  const text = buffer.toString("utf8").replace(/^\uFEFF/, "");
-  const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
-  return lines;
-}
+  // Guard: storage must be configured (host will also require this)
+  if (!AZURE_STORAGE || !blobSvc) {
+    context.log.error('ch-strategic-worker: AzureWebJobsStorage not configured');
+    return;
+  }
 
-module.exports = async function (context, msg) {
+  // Normalise queue message (expected from /start)
+  let msg = queueItem;
+  if (typeof msg === 'string') {
+    try { msg = JSON.parse(msg); } catch { /* leave as string if not JSON */ }
+  }
+  const {
+    runId,
+    cacheKey,              // optional hint for cached upload
+    evidenceTag,           // passthrough from /start
+    totalRows,             // optional (router may have set this)
+    submittedAt,           // optional
+    correlationId,         // optional
+  } = msg || {};
+
+  if (!runId) {
+    context.log.error('ch-strategic-worker: missing runId', { msg });
+    return;
+  }
+
+  // Containers
+  const statusC = blobSvc.getContainerClient(CHS_STATUS_CONTAINER);
+  const outC    = blobSvc.getContainerClient(CHS_OUT_CONTAINER);
+  const cacheC  = blobSvc.getContainerClient(CHS_CACHE_CONTAINER);
+
+  // Dev-friendly: ensure containers exist (noop if already there)
+  await Promise.allSettled([
+    statusC.createIfNotExists(),
+    outC.createIfNotExists(),
+    cacheC.createIfNotExists(),
+  ]);
+
+  // Idempotency: if results already exist, mark Completed & exit
+  const resultsBlob = outC.getBlockBlobClient(`${runId}.json`);
   try {
-    const payload = typeof msg === "string" ? JSON.parse(msg) : msg;
-    if (!payload || payload.type !== "ch-strategic") {
-      context.log.warn("Ignoring message without type ch-strategic");
-      return;
+    await resultsBlob.getProperties();
+    await writeStatus(statusC, runId, {
+      state: 'Completed',
+      message: 'Results already present; skipping reprocess',
+      completedAt: nowIso(),
+      evidenceTag, totalRows, submittedAt, correlationId,
+      limits: { maxRows: CH_STRATEGIC_MAX_ROWS, chunkSize: CH_STRATEGIC_CHUNK_SIZE },
+    });
+    context.log('ch-strategic-worker: idempotent complete', { runId });
+    return;
+  } catch { /* not found → proceed */ }
+
+  // Mark Processing
+  await writeStatus(statusC, runId, {
+    state: 'Processing',
+    startedAt: nowIso(),
+    evidenceTag, totalRows, submittedAt, correlationId,
+    limits: { maxRows: CH_STRATEGIC_MAX_ROWS, chunkSize: CH_STRATEGIC_CHUNK_SIZE },
+    queue: CHS_JOBS_QUEUE || null,
+  });
+
+  try {
+    // ----- Example processing skeleton -----
+    // If you persist uploaded CSV into cache, attempt to read it here.
+    // We don't assume a specific naming; try cacheKey first, then runId as fallback.
+    let inputSummary = { rows: totalRows ?? null, source: null };
+    if (cacheKey) {
+      try {
+        const blob = cacheC.getBlockBlobClient(`${cacheKey}`);
+        const props = await blob.getProperties();
+        inputSummary.source = `cache:${cacheKey}`;
+        inputSummary.bytes = Number(props.contentLength || 0);
+      } catch { /* ignore if not found */ }
     }
-    const { runId, cacheKey } = payload;
-    if (!runId || !cacheKey) {
-      context.log.error("Invalid message", payload);
-      return;
-    }
-
-    await writeStatus(runId, { state: "Parsing", message: "Fetching cached CSV" });
-
-    // Load CSV from cache
-    const cache = blobSvc.getContainerClient(CHS_CACHE_CONTAINER);
-    const blob = cache.getBlockBlobClient(`${cacheKey}.csv`);
-    const dl = await blob.download();
-    const buf = await streamToBuffer(dl.readableStreamBody);
-
-    // Parse rows
-    const lines = csvToRows(buf);
-    if (lines.length === 0) {
-      await writeStatus(runId, { state: "Failed", message: "Empty CSV in cache", processedRows: 0 });
-      return;
-    }
-    if (lines.length > CH_STRATEGIC_MAX_ROWS) {
-      await writeStatus(runId, { state: "Failed", message: `Too many rows (max ${CH_STRATEGIC_MAX_ROWS})`, processedRows: 0 });
-      return;
-    }
-
-    const headers = lines[0].split(",");
-    const dataLines = lines.slice(1);
-    await writeStatus(runId, { state: "Analyzing", message: "Chunked processing started", totalRows: lines.length, processedRows: 0 });
-
-    const items = [];
-    let processed = 0;
-    const chunkSize = Math.max(1, CH_STRATEGIC_CHUNK_SIZE);
-
-    for (let i = 0; i < dataLines.length; i += chunkSize) {
-      const chunk = dataLines.slice(i, i + chunkSize);
-      for (const line of chunk) {
-        const cells = line.split(",");
-        const obj = {};
-        headers.forEach((h, idx) => { obj[h.trim()] = (cells[idx] ?? "").trim(); });
-        obj.__rowLength = cells.length;
-        items.push(obj);
-      }
-      processed += chunk.length;
-      await writeStatus(runId, { processedRows: processed, message: `Processing… ${processed}/${dataLines.length}` });
+    if (!inputSummary.source) {
+      try {
+        const blob = cacheC.getBlockBlobClient(`${runId}`);
+        const props = await blob.getProperties();
+        inputSummary.source = `cache:${runId}`;
+        inputSummary.bytes = Number(props.contentLength || 0);
+      } catch { /* ignore */ }
     }
 
-    // Finalize artifacts
+    // Do your domain logic here (placeholder: echo the message)
     const results = {
+      ok: true,
       runId,
-      generatedAt: nowIso(),
-      summary: { rows: items.length },
-      items
-    };
-    const logObj = {
-      runId,
-      version: "1.0.0",
-      info: [`Analyzed ${items.length} rows`, `Headers: ${headers.join('|')}`, `Chunk size: ${chunkSize}`],
-      warnings: [],
-      errors: []
+      processedAt: nowIso(),
+      evidenceTag: evidenceTag || null,
+      input: inputSummary,
     };
 
-    const resultsPath = `${runId}/results.json`;
-    const logPath = `${runId}/log.json`;
-    await putJson(CHS_OUT_CONTAINER, resultsPath, results);
-    await putJson(CHS_OUT_CONTAINER, logPath, logObj);
-
-    await writeStatus(runId, {
-      state: "Completed",
-      message: "Completed",
-      resultUrl: `/${CHS_OUT_CONTAINER}/${resultsPath}`,
-      logUrl: `/${CHS_OUT_CONTAINER}/${logPath}`
+    // Write results + a lightweight log
+    await putJson(outC, `${runId}.json`, results);
+    await putJson(outC, `${runId}.log.json`, {
+      runId,
+      correlationId: correlationId || null,
+      events: [
+        { at: nowIso(), event: 'worker_started', queue: CHS_JOBS_QUEUE || null },
+        { at: nowIso(), event: 'worker_completed', durationMs: Date.now() - t0 },
+      ],
     });
 
-  } catch (e) {
-    context.log.error("Worker failure:", e?.message || e);
-    // Best effort: we can’t read runId if JSON parse failed; guard it.
-    try {
-      const maybe = typeof msg === "string" ? JSON.parse(msg) : msg;
-      if (maybe?.runId) {
-        await writeStatus(maybe.runId, { state: "Failed", message: e?.message || "Unexpected error" });
-      }
-    } catch { /* no-op */ }
+    // Final status
+    await writeStatus(statusC, runId, {
+      state: 'Completed',
+      message: 'Completed',
+      resultUrl: `blob://${CHS_OUT_CONTAINER}/${runId}.json`,
+      logUrl:    `blob://${CHS_OUT_CONTAINER}/${runId}.log.json`,
+      completedAt: nowIso(),
+    });
+
+    context.log('ch-strategic-worker: completed', { runId, ms: Date.now() - t0 });
+  } catch (err) {
+    context.log.error('ch-strategic-worker: failed', { runId, error: String(err?.message || err) });
+    await writeStatus(statusC, runId, {
+      state: 'Failed',
+      error: { code: 'worker_error', message: String(err?.message || err) },
+      failedAt: nowIso(),
+    });
   }
 };
