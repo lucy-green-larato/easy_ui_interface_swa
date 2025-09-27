@@ -52,32 +52,20 @@ const crypto = require('crypto');
 const { requireAuth, ensureCorrelationId } = require('../lib/auth.js');
 const { requireRole } = require('../lib/auth');
 
-// ----------- Env & Config ----------- //
-const ALLOWED_ROLES = JSON.parse(process.env.ALLOWED_ROLES_CHS || '["campaign","campaign-admin","sales-admin"]');
-
-// Upload limits & MIME whitelist (fully configurable)
-const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 10485760); // default 10MB
-const DEFAULT_ALLOWED_UPLOAD_MIME = (process.env.DEFAULT_ALLOWED_UPLOAD_MIME ||
-  'text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-).split(',').map(s => s.trim().toLowerCase());
-
-// Business tuning/settings
-const CH_STRATEGIC_MAX_ROWS = Number(process.env.CH_STRATEGIC_MAX_ROWS || 5000);
-const CH_STRATEGIC_TTL_DAYS = Number(process.env.CH_STRATEGIC_TTL_DAYS || 30);
-const CH_STRATEGIC_CHUNK_SIZE = Number(process.env.CH_STRATEGIC_CHUNK_SIZE || 100);
-
-// Storage bindings (Function App setting AzureWebJobsStorage required)
-const AZURE_STORAGE = process.env.AzureWebJobsStorage;
-
-// Containers / Queue names (with safe defaults for local dev)
-const CHS_OUT_CONTAINER = process.env.CH_STRATEGIC_OUT_CONTAINER || 'ch-strategic-out';
-const CHS_STATUS_CONTAINER = process.env.CH_STRATEGIC_STATUS_CONTAINER || 'ch-strategic-status';
-const CHS_CACHE_CONTAINER = process.env.CH_STRATEGIC_CACHE_CONTAINER || 'ch-strategic-cache';
-const CHS_FEEDBACK_CONTAINER = process.env.CH_STRATEGIC_FEEDBACK_CONTAINER || 'ch-strategic-feedback';
-const CHS_JOBS_QUEUE = process.env.CH_STRATEGIC_JOBS_QUEUE || 'ch-strategic-jobs';
-
-const blobSvc = AZURE_STORAGE ? BlobServiceClient.fromConnectionString(AZURE_STORAGE) : null;
-const queueClient = (AZURE_STORAGE && CHS_JOBS_QUEUE) ? new QueueClient(AZURE_STORAGE, CHS_JOBS_QUEUE) : null;
+// Use centralised config (router + worker share this)
+const {
+  ALLOWED_ROLES,
+  MAX_UPLOAD_BYTES,
+  DEFAULT_ALLOWED_UPLOAD_MIME,
+  CH_STRATEGIC_MAX_ROWS,
+  CH_STRATEGIC_CHUNK_SIZE,
+  CHS_OUT_CONTAINER,
+  CHS_STATUS_CONTAINER,
+  CHS_CACHE_CONTAINER,
+  CHS_FEEDBACK_CONTAINER,
+  blobSvc,
+  queueClient,
+} = require("./config");
 
 const CORS = Object.freeze({
   'Access-Control-Allow-Origin': '*',
