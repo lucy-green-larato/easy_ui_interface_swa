@@ -1,24 +1,6 @@
 {
-  "navigationFallback": { "rewrite": "/index.html" },
+  "navigationFallback": { "rewrite": "/index.html", "exclude": ["/api/*"] },
   "routes": [
-    { "route": "/", "serve": "/index.html" },
-    { "route": "/campaign/*",      "allowedRoles": ["campaign", "campaign-admin"] },
-    { "route": "/engagement/*",    "allowedRoles": ["sales", "sales-admin"] },
-    { "route": "/qualification/*", "allowedRoles": ["sales", "sales-admin"] },
-    { "route": "/ch-strategic/*",  "allowedRoles": ["campaign", "campaign-admin", "sales-admin"] },
-    { "route": "/api/*",           "allowedRoles": ["authenticated"] }
-  ],
-  "responseOverrides": {
-    "401": { "statusCode": 302, "redirect": "/.auth/login/aad" }
-  },
-  "globalHeaders": {
-    "x-frame-options": "DENY",
-    "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer"
-  },
-  "backend": {
-    "routes": [
-      { "route": "/api/*", "backendUri": "https://fa-bizdev-tools-debnfsh5efffc7be.uksouth-01.azurewebsites.net" }
-    ]
-  }
+    { "route": "/api/*", "allowedRoles": [ "anonymous" ] }
+  ]
 }
