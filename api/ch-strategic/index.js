@@ -49,8 +49,7 @@ const Busboy = require('busboy');
 const { BlobServiceClient } = require('@azure/storage-blob');
 const { QueueClient } = require('@azure/storage-queue');
 const crypto = require('crypto');
-const { requireAuth, ensureCorrelationId } = require('../lib/auth.js');
-const { requireRole } = require('../lib/auth');
+const { requireAuth, ensureCorrelationId } = require('../lib/auth');
 
 // Use centralised config (router + worker share this)
 const {
