@@ -1,3 +1,4 @@
+<!-- Index HTML for ch-strategic page 26-09-2025 v1-->
 <!doctype html>
 <html lang="en" data-app="inside-track-tools">
 
@@ -103,7 +104,7 @@
           <legend id="legend-actions">3. Actions</legend>
           <div class="actions">
             <button id="analyzeBtn" class="btn primary" type="button" disabled>
-              <span class="btn-label">Analyze</span>
+              <span class="btn-label">Start small run</span>
               <span class="spinner" aria-hidden="true"></span>
             </button>
             <button id="startLargeBtn" class="btn" type="button" hidden>Start large run</button>
@@ -133,7 +134,12 @@
     <section class="panel middle">
       <div class="row-between output-head">
         <h2 id="output-title">Results</h2>
-        <div id="downloadContainer" aria-live="polite"></div>
+
+        <!-- Download controls (buttons rendered immediately but disabled until Completed) -->
+        <div id="downloadContainer" aria-live="polite">
+          <button id="chs-download-results" class="btn" disabled title="Download results JSON">Download Results</button>
+          <button id="chs-download-log" class="btn" disabled title="Download processing log">Download Log</button>
+        </div>
       </div>
 
       <!-- Progress bar -->
@@ -149,6 +155,14 @@
         <span id="count-skipped" data-count="0">Skipped: 0</span>
       </div>
 
+      <!-- Lightweight inline preview (first 10 rows shown when Completed) -->
+      <div class="output-preview" style="margin-top:var(--s-3)">
+        <strong class="muted">Output preview:</strong>
+        <pre id="chs-output"
+          style="max-height:320px; overflow:auto; background:#f7f7f7; padding:8px; border-radius:6px;"
+          aria-live="polite"></pre>
+      </div>
+
       <!-- Results containers (single column, stable layout) -->
       <section style="margin-top:var(--s-4)">
         <div id="results" class="results" aria-live="polite">
@@ -161,72 +175,72 @@
       </section>
     </section>
 
-      <!-- RIGHT PANEL :: Helpers -->
-      <section class="panel right" aria-labelledby="helpers-title">
-        <div class="row-between output-head">
-          <h2 id="helpers-title">Helpers</h2>
+    <!-- RIGHT PANEL :: Helpers -->
+    <section class="panel right" aria-labelledby="helpers-title">
+      <div class="row-between output-head">
+        <h2 id="helpers-title">Helpers</h2>
+      </div>
+
+      <aside class="intel card">
+        <div class="intel-head">
+          <h2 id="intel-title">Buyer needs</h2>
+          <button id="toggle-intel" class="btn small" type="button" aria-expanded="false"
+            aria-controls="intel-body">More</button>
         </div>
+        <div id="intel-body" hidden>
+          <div class="intel-grid">
+            <section>
+              <h3>1) Buyer priorities</h3>
+              <ul>
+                <li>Clarity on geographic activities</li>
+                <li>Evidence tags map to strategic themes</li>
+                <li>Quick export for downstream use</li>
+              </ul>
+            </section>
+            <section>
+              <h3>2) Triggers</h3>
+              <ul>
+                <li>Mentions of overseas/global expansion</li>
+                <li>New market entries by region</li>
+                <li>Export growth statements</li>
+              </ul>
+            </section>
+          </div>
+        </div>
+      </aside>
 
-        <aside class="intel card">
-          <div class="intel-head">
-            <h2 id="intel-title">Buyer needs</h2>
-            <button id="toggle-intel" class="btn small" type="button" aria-expanded="false"
-              aria-controls="intel-body">More</button>
-          </div>
-          <div id="intel-body" hidden>
-            <div class="intel-grid">
-              <section>
-                <h3>1) Buyer priorities</h3>
-                <ul>
-                  <li>Clarity on geographic activities</li>
-                  <li>Evidence tags map to strategic themes</li>
-                  <li>Quick export for downstream use</li>
-                </ul>
-              </section>
-              <section>
-                <h3>2) Triggers</h3>
-                <ul>
-                  <li>Mentions of overseas/global expansion</li>
-                  <li>New market entries by region</li>
-                  <li>Export growth statements</li>
-                </ul>
-              </section>
-            </div>
-          </div>
-        </aside>
+      <aside class="intel card" style="margin-top:var(--s-4)">
+        <div class="intel-head">
+          <h2>Call opener ideas</h2>
+          <button class="btn small" type="button" aria-expanded="false" aria-controls="openers-body">More</button>
+        </div>
+        <div id="openers-body" hidden>
+          <ul>
+            <li>“I noticed your strategic report references overseas expansion…”</li>
+            <li>“You mentioned growth in specific regions—how are you approaching those geographies?”</li>
+          </ul>
+        </div>
+      </aside>
 
-        <aside class="intel card" style="margin-top:var(--s-4)">
-          <div class="intel-head">
-            <h2>Call opener ideas</h2>
-            <button class="btn small" type="button" aria-expanded="false" aria-controls="openers-body">More</button>
-          </div>
-          <div id="openers-body" hidden>
-            <ul>
-              <li>“I noticed your strategic report references overseas expansion…”</li>
-              <li>“You mentioned growth in specific regions—how are you approaching those geographies?”</li>
-            </ul>
-          </div>
-        </aside>
-
-        <aside class="intel card" style="margin-top:var(--s-4)">
-          <div class="intel-head">
-            <h2>Helpful tips</h2>
-            <button class="btn small" type="button" aria-expanded="false" aria-controls="tips-body">More</button>
-          </div>
-          <div id="tips-body" hidden>
-            <ul>
-              <li>This tool scans only the <em>Strategic Report</em> section of the filing.</li>
-              <li><strong>Evidence tag</strong> is a flexible keyword match (case-insensitive; tolerates common OCR
-                typos
-                and curated synonyms).</li>
-              <li>Only <code>Company Name</code> and <code>Company Number</code> are used from CSV or Power BI export.
-              </li>
-              <li>Not all filings include a Strategic Report — those will be skipped.</li>
-              <li>Large jobs (up to 5,000 companies) may take hours; results stream into the CSV as they’re found.</li>
-            </ul>
-          </div>
-        </aside>
-      </section>
+      <aside class="intel card" style="margin-top:var(--s-4)">
+        <div class="intel-head">
+          <h2>Helpful tips</h2>
+          <button class="btn small" type="button" aria-expanded="false" aria-controls="tips-body">More</button>
+        </div>
+        <div id="tips-body" hidden>
+          <ul>
+            <li>This tool scans only the <em>Strategic Report</em> section of the filing.</li>
+            <li><strong>Evidence tag</strong> is a flexible keyword match (case-insensitive; tolerates common OCR
+              typos
+              and curated synonyms).</li>
+            <li>Only <code>Company Name</code> and <code>Company Number</code> are used from CSV or Power BI export.
+            </li>
+            <li>Not all filings include a Strategic Report — those will be skipped.</li>
+            <li>Large jobs (up to 5,000 companies) may take hours; results stream into the CSV as they’re found.</li>
+          </ul>
+        </div>
+      </aside>
+    </section>
   </main>
 
   <!-- Power BI Import Dialog -->
