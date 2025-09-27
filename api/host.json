@@ -21,11 +21,14 @@
     "generate",
     "campaign-start",
     "campaign-status",
-    "campaignFetch",
-    "campaign-regenerate",
+    "campaign-fetch",
+    "campaign-generate",
+    "campaign-worker",
     "ch-strategic",
     "ch-strategic-worker",
     "runs",
-    "pbi_token"
+    "pbi_token",
+    "ixbrl-financials",
+    "qualification-generate"
   ]
 }
