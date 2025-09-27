@@ -47,7 +47,7 @@
 
 const Busboy = require('busboy');
 const { BlobServiceClient } = require('@azure/storage-blob');
-const { QueueClient }       = require('@azure/storage-queue');
+const { QueueClient } = require('@azure/storage-queue');
 const crypto = require('crypto');
 const { requireAuth, ensureCorrelationId } = require('../lib/auth.js');
 
@@ -61,19 +61,19 @@ const DEFAULT_ALLOWED_UPLOAD_MIME = (process.env.DEFAULT_ALLOWED_UPLOAD_MIME ||
 ).split(',').map(s => s.trim().toLowerCase());
 
 // Business tuning/settings
-const CH_STRATEGIC_MAX_ROWS   = Number(process.env.CH_STRATEGIC_MAX_ROWS || 5000);
-const CH_STRATEGIC_TTL_DAYS   = Number(process.env.CH_STRATEGIC_TTL_DAYS || 30);
+const CH_STRATEGIC_MAX_ROWS = Number(process.env.CH_STRATEGIC_MAX_ROWS || 5000);
+const CH_STRATEGIC_TTL_DAYS = Number(process.env.CH_STRATEGIC_TTL_DAYS || 30);
 const CH_STRATEGIC_CHUNK_SIZE = Number(process.env.CH_STRATEGIC_CHUNK_SIZE || 100);
 
 // Storage bindings (Function App setting AzureWebJobsStorage required)
 const AZURE_STORAGE = process.env.AzureWebJobsStorage;
 
 // Containers / Queue names (with safe defaults for local dev)
-const CHS_OUT_CONTAINER      = process.env.CH_STRATEGIC_OUT_CONTAINER      || 'ch-strategic-out';
-const CHS_STATUS_CONTAINER   = process.env.CH_STRATEGIC_STATUS_CONTAINER   || 'ch-strategic-status';
-const CHS_CACHE_CONTAINER    = process.env.CH_STRATEGIC_CACHE_CONTAINER    || 'ch-strategic-cache';
+const CHS_OUT_CONTAINER = process.env.CH_STRATEGIC_OUT_CONTAINER || 'ch-strategic-out';
+const CHS_STATUS_CONTAINER = process.env.CH_STRATEGIC_STATUS_CONTAINER || 'ch-strategic-status';
+const CHS_CACHE_CONTAINER = process.env.CH_STRATEGIC_CACHE_CONTAINER || 'ch-strategic-cache';
 const CHS_FEEDBACK_CONTAINER = process.env.CH_STRATEGIC_FEEDBACK_CONTAINER || 'ch-strategic-feedback';
-const CHS_JOBS_QUEUE         = process.env.CH_STRATEGIC_JOBS_QUEUE         || 'ch-strategic-jobs';
+const CHS_JOBS_QUEUE = process.env.CH_STRATEGIC_JOBS_QUEUE || 'ch-strategic-jobs';
 
 const blobSvc = AZURE_STORAGE ? BlobServiceClient.fromConnectionString(AZURE_STORAGE) : null;
 const queueClient = (AZURE_STORAGE && CHS_JOBS_QUEUE) ? new QueueClient(AZURE_STORAGE, CHS_JOBS_QUEUE) : null;
@@ -99,7 +99,7 @@ function err(status, error, message, cid, details) {
   return jsonRes(status, envelope, cid);
 }
 function nowIso() { return new Date().toISOString(); }
-function newId()  { return crypto.randomUUID(); }
+function newId() { return crypto.randomUUID(); }
 function maxUploadLabel() {
   const mb = Math.max(1, Math.floor(Number(MAX_UPLOAD_BYTES || 0) / 1048576));
   return `${mb}MB`;
@@ -159,7 +159,7 @@ async function readMultipartCsv(context, req, cid) {
     function failOnce(payload) {
       if (aborted) return;
       aborted = true;
-      try { bb.removeAllListeners(); } catch {}
+      try { bb.removeAllListeners(); } catch { }
       reject(payload);
     }
 
@@ -172,7 +172,7 @@ async function readMultipartCsv(context, req, cid) {
         if (aborted) return;
         total += chunk.length;
         if (total > MAX_UPLOAD_BYTES) {
-          try { stream.resume(); } catch {}
+          try { stream.resume(); } catch { }
           return failOnce({ code: 413, error: "payload_too_large", message: `Max ${maxUploadLabel()}` });
         }
         chunks.push(chunk);
@@ -209,8 +209,8 @@ async function readMultipartCsv(context, req, cid) {
     const bodyBuf = Buffer.isBuffer(req.body)
       ? req.body
       : (req.rawBody
-          ? (Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody))
-          : Buffer.alloc(0));
+        ? (Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody))
+        : Buffer.alloc(0));
     bb.end(bodyBuf);
   }).catch((e) => {
     if (e && e.code) throw e;
@@ -314,7 +314,7 @@ async function handleStart(context, req, cid) {
   try {
     const cacheContainer = blobSvc.getContainerClient(CHS_CACHE_CONTAINER);
     const cacheBlob = cacheContainer.getBlockBlobClient(`${cacheKey}.csv`);
-    await cacheBlob.upload(csvBuffer, csvBuffer.length, { conditions: { ifNoneMatch: "*" } }).catch(() => {});
+    await cacheBlob.upload(csvBuffer, csvBuffer.length, { conditions: { ifNoneMatch: "*" } }).catch(() => { });
   } catch (e) {
     context.log.error('Cache upload failed', { correlationId: cid, error: e?.message });
     return err(500, 'internal', 'Failed to cache input', cid);
@@ -364,9 +364,9 @@ async function handleStatus(_context, req, cid) {
 
 async function handleDownload(_context, req, cid) {
   const runId = (req.query?.runId || '').trim();
-  const file  = (req.query?.file || '').toLowerCase();
+  const file = (req.query?.file || '').toLowerCase();
   if (!runId) return err(400, 'bad_request', 'Missing runId', cid);
-  if (!['results','log'].includes(file)) return err(400, 'bad_request', 'Missing or invalid file parameter', cid);
+  if (!['results', 'log'].includes(file)) return err(400, 'bad_request', 'Missing or invalid file parameter', cid);
 
   const path = `${runId}/${file}.json`;
   try {
@@ -395,7 +395,7 @@ async function handleFeedback(_context, req, cid) {
 
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const runId = (body.runId || '').toString().trim();
-  const note  = (body.note  || '').toString().trim().slice(0, 4000);
+  const note = (body.note || '').toString().trim().slice(0, 4000);
   if (!runId || !note) {
     return err(400, 'bad_request', 'runId and note required', cid, {
       runIdPresent: Boolean(runId), notePresent: Boolean(note)
@@ -410,8 +410,8 @@ async function handleFeedback(_context, req, cid) {
     correlationId: cid,
     submittedAt: nowIso(),
     user: {
-      id:   principal.userId  || 'unknown',
-      name: principal.name    || 'unknown',
+      id: principal.userId || 'unknown',
+      name: principal.name || 'unknown',
       roles: principal.userRoles || []
     },
     client: {
@@ -450,7 +450,14 @@ function isPreflight(req) {
 }
 
 // ----------- Azure Function entry ----------- //
-module.exports = async function(context, req) {
+module.exports = async function (context, req) {
+  console.log("CH-STRATEGIC ROUTER", {
+    method: req?.method,
+    url: req?.url,
+    params: req?.params,
+    query: req?.query,
+    path: req?.params && req.params.path
+  });
   const cid = ensureCorrelationId(req);
   try {
     if (isPreflight(req)) {
@@ -466,11 +473,11 @@ module.exports = async function(context, req) {
     const path = rawPath.toLowerCase();
     const method = (req.method || 'GET').toUpperCase();
 
-    if (method === 'POST' && path === '/start')   { context.res = await handleStart(context, req, cid);   return; }
-    if (method === 'GET'  && path === '/status')  { context.res = await handleStatus(context, req, cid);  return; }
-    if (method === 'GET'  && path === '/download'){ context.res = await handleDownload(context, req, cid); return; }
-    if (method === 'POST' && path === '/feedback'){ context.res = await handleFeedback(context, req, cid); return; }
-    if (method === 'GET'  && path === '/health')  { context.res = await handleHealth();                   return; }
+    if (method === 'POST' && path === '/start') { context.res = await handleStart(context, req, cid); return; }
+    if (method === 'GET' && path === '/status') { context.res = await handleStatus(context, req, cid); return; }
+    if (method === 'GET' && path === '/download') { context.res = await handleDownload(context, req, cid); return; }
+    if (method === 'POST' && path === '/feedback') { context.res = await handleFeedback(context, req, cid); return; }
+    if (method === 'GET' && path === '/health') { context.res = await handleHealth(); return; }
 
     context.res = err(404, 'not_found', `Unknown route: ${method} ${path}`, cid);
   } catch (e) {
