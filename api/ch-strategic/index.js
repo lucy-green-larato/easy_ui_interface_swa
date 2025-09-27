@@ -1,4 +1,4 @@
-/** api/ch-strategic/index.js 26-09-2025 v2
+/** api/ch-strategic/index.js 27-09-2025 v3
  * ch-strategic — multi-route HTTP trigger (Node 20)
  * Endpoints:
  *   POST /api/ch-strategic/start           (multipart/form-data)
@@ -49,6 +49,7 @@ const Busboy = require('busboy');
 const { BlobServiceClient } = require('@azure/storage-blob');
 const { QueueClient } = require('@azure/storage-queue');
 const crypto = require('crypto');
+const { ensureCorrelationId } = require("../lib/auth");
 const { requireAuth, ensureCorrelationId } = require('../lib/auth.js');
 const { requireRole } = require('../lib/auth');
 
@@ -83,11 +84,21 @@ function jsonRes(status, body, cid, headers = {}) {
     body: JSON.stringify(body)
   };
 }
-function err(status, error, message, cid, details) {
-  const envelope = { error, message, ...(details ? { details } : {}) };
-  return jsonRes(status, envelope, cid);
-}
 function nowIso() { return new Date().toISOString(); }
+function err(status, code, message, cid, extra = {}) {
+  return {
+    status,
+    headers: { "Content-Type": "application/json", "x-correlation-id": cid },
+    body: JSON.stringify({ error: code, message, ...extra })
+  };
+}
+function getBodyBuffer(req) {
+  if (Buffer.isBuffer(req.body)) return req.body;
+  if (typeof req.body === "string") return Buffer.from(req.body);
+  if (Buffer.isBuffer(req.rawBody)) return req.rawBody;       // fallback
+  if (typeof req.rawBody === "string") return Buffer.from(req.rawBody);
+  return null;
+}
 function newId() { return crypto.randomUUID(); }
 function maxUploadLabel() {
   const mb = Math.max(1, Math.floor(Number(MAX_UPLOAD_BYTES || 0) / 1048576));
@@ -210,16 +221,20 @@ async function readMultipartCsv(context, req, cid) {
 // ---------- Blob helpers ----------
 async function writeStatus(runId, patch) {
   const c = blobSvc.getContainerClient(CHS_STATUS_CONTAINER);
+  await c.createIfNotExists();
   const b = c.getBlockBlobClient(`${runId}.json`);
   let current = {};
   try {
     const dl = await b.download();
     const buf = await streamToBuffer(dl.readableStreamBody);
-    current = JSON.parse(buf.toString('utf8'));
+    current = JSON.parse(buf.toString("utf8"));
   } catch { /* first write */ }
   const merged = { ...current, ...patch, runId, updatedAt: nowIso() };
-  const body = JSON.stringify(merged);
-  await b.upload(body, Buffer.byteLength(body), { overwrite: true });
+  const body = Buffer.from(JSON.stringify(merged));
+  await b.upload(body, body.length, {
+    overwrite: true,
+    blobHTTPHeaders: { blobContentType: "application/json" }
+  });
   return merged;
 }
 
@@ -239,105 +254,95 @@ async function getJson(containerName, blobPath) {
   return JSON.parse(buf.toString('utf8'));
 }
 
-async function streamToBuffer(readable) {
+function streamToBuffer(readable) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    readable.on('data', (d) => chunks.push(Buffer.from(d)));
-    readable.on('end', () => resolve(Buffer.concat(chunks)));
-    readable.on('error', reject);
+    readable.on("data", d => chunks.push(d));
+    readable.on("end", () => resolve(Buffer.concat(chunks)));
+    readable.on("error", reject);
   });
 }
 
 // ---------- Handlers ----------
 async function handleStart(context, req, cid) {
-  if (!AZURE_STORAGE || !blobSvc) {
-    return err(500, 'internal', 'Storage not configured', cid);
-  }
-  await ensureContainers();
+  if (!blobSvc)   return err(500, "internal", "AzureWebJobsStorage not configured", cid);
+  if (!queueClient) return err(500, "internal", "Jobs queue not configured", cid);
 
-  // Auth
-  const gate = authGate(req, cid);
-  if (!gate.ok) return gate.res;
-
-  // Content-Type
-  const ctype = String(req.headers['content-type'] || '').toLowerCase();
-  if (!ctype.startsWith('multipart/')) {
-    return err(400, 'bad_request', 'multipart/form-data with CSV required', cid);
+  // must be multipart/form-data
+  const contentType = String(req.headers?.["content-type"] || "");
+  if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
+    return err(400, "bad_request", "Content-Type must be multipart/form-data", cid, { contentType });
   }
 
-  // Parse multipart
-  let csvBuffer, evidenceTag = '';
-  try {
-    const { buffer, fields } = await readMultipartCsv(context, req, cid);
-    csvBuffer = buffer;
-    evidenceTag = (fields?.evidenceTag || '').toString().trim();
-  } catch (e) {
-    return err(e.code || 500, e.error || 'internal', e.message || 'Unexpected error', cid);
-  }
+  const bodyBuf = getBodyBuffer(req);
+  if (!bodyBuf) return err(400, "bad_request", "Request body required", cid);
 
-  // CSV checks
-  const totalRows = estimateCsvRows(csvBuffer);
-  if (totalRows === 0) return err(400, 'bad_request', 'Empty CSV', cid, { rows: 0 });
-  if (totalRows > CH_STRATEGIC_MAX_ROWS) {
-    return err(400, 'bad_request', `Too many rows (max ${CH_STRATEGIC_MAX_ROWS})`, cid, { rows: totalRows });
-  }
+  // parse with Busboy
+  const bb = Busboy({ headers: { "content-type": contentType }, limits: { fileSize: MAX_UPLOAD_BYTES } });
+  const allowed = new Set(DEFAULT_ALLOWED_UPLOAD_MIME);
+  let fileBuf = null, fileMime = null, evidenceTag = null;
 
-  // evidenceTag validation (mirrors client)
-  if (evidenceTag) {
-    const TERM_RE = /^[A-Za-z0-9 _-]{1,50}$/;
-    const terms = Array.from(new Set(evidenceTag.split(',').map(t => t.trim()).filter(Boolean)));
-    if (terms.length > 10 || !terms.every(t => TERM_RE.test(t))) {
-      return err(400, 'bad_request', 'Invalid evidenceTag', cid, {
-        rules: 'Comma-separated; max 10 terms; each <=50 chars; A–Z a–z 0–9 space _ -'
-      });
-    }
-    evidenceTag = terms.join(', ');
-  }
-
-  // Run identifiers
-  const runId = newId();
-  const submittedAt = nowIso();
-
-  // Cache input (dedupe by content hash)
-  const cacheKey = crypto.createHash('sha256').update(csvBuffer).digest('hex');
-  try {
-    const cacheContainer = blobSvc.getContainerClient(CHS_CACHE_CONTAINER);
-    const cacheBlob = cacheContainer.getBlockBlobClient(`${cacheKey}.csv`);
-    await cacheBlob.upload(csvBuffer, csvBuffer.length, { conditions: { ifNoneMatch: "*" } }).catch(() => { });
-  } catch (e) {
-    context.log.error('Cache upload failed', { correlationId: cid, error: e?.message });
-    return err(500, 'internal', 'Failed to cache input', cid);
-  }
-
-  // Initialize status
-  try {
-    await writeStatus(runId, {
-      state: 'Received',
-      submittedAt,
-      message: `Received ${totalRows} rows via upload`,
-      totalRows,
-      processedRows: 0,
-      resultUrl: null,
-      logUrl: null,
-      cacheKey,
-      evidenceTag: evidenceTag || null
+  const parsed = new Promise((resolve, reject) => {
+    bb.on("file", (field, file, info = {}) => {
+      if (field !== "csv_file") { file.resume(); return; }
+      fileMime = info.mimeType || info.mime || "application/octet-stream";
+      if (fileMime && !allowed.has(String(fileMime).toLowerCase())) {
+        file.resume(); reject(err(415, "unsupported_media_type", "Only CSV uploads are allowed", cid, { mime: fileMime })); return;
+      }
+      streamToBuffer(file).then(buf => { fileBuf = buf; }).catch(reject);
     });
-  } catch (e) {
-    context.log.error('Write status failed', { correlationId: cid, error: e?.message });
-    return err(500, 'internal', 'Failed to write status', cid);
-  }
+    bb.on("field", (name, val) => {
+      if (name === "evidenceTag") evidenceTag = String(val || "").slice(0,128);
+    });
+    bb.on("error", reject);
+    bb.on("finish", resolve);
+  });
 
-  // Enqueue worker job (required)
-  if (!queueClient) return err(500, 'internal', 'Jobs queue not configured', cid);
-  try {
-    const msg = { type: 'ch-strategic', runId, cacheKey, submittedAt, evidenceTag };
-    await queueClient.sendMessage(Buffer.from(JSON.stringify(msg), 'utf8').toString('base64'));
-  } catch (e) {
-    context.log.error('Queue enqueue failed', { correlationId: cid, error: e?.message });
-    return err(500, 'internal', 'Failed to enqueue job', cid);
-  }
+  bb.end(bodyBuf);
+  try { await parsed; } catch (e) { return e; }
 
-  return jsonRes(200, { runId }, cid);
+  if (!fileBuf) return err(400, "bad_request", "csv_file is required", cid);
+  if (fileBuf.length > MAX_UPLOAD_BYTES) return err(413, "payload_too_large", "CSV exceeds MAX_UPLOAD_BYTES", cid);
+
+  // count rows quickly and clamp
+  const text = fileBuf.toString("utf8");
+  const totalRows = Math.max(0, (text.match(/\r?\n/g)?.length || 1) - 1);
+  const clippedRows = Math.min(totalRows, CH_STRATEGIC_MAX_ROWS);
+
+  // persist raw upload into cache (keyed by runId)
+  const runId = crypto.randomUUID();
+  const cacheC = blobSvc.getContainerClient(CHS_CACHE_CONTAINER);
+  await cacheC.createIfNotExists();
+  await cacheC.getBlockBlobClient(runId).upload(fileBuf, fileBuf.length, { overwrite: true });
+
+  // initial status
+  await writeStatus(runId, {
+    state: "Received",
+    submittedAt: nowIso(),
+    message: `Received ${clippedRows} rows via upload`,
+    totalRows: clippedRows,
+    evidenceTag,
+    limits: { maxRows: CH_STRATEGIC_MAX_ROWS, chunkSize: CH_STRATEGIC_CHUNK_SIZE }
+  });
+
+  // enqueue job
+  await queueClient.createIfNotExists(); // no-op in prod; handy in dev
+  const msg = { runId, cacheKey: runId, evidenceTag, totalRows: clippedRows, submittedAt: nowIso(), correlationId: cid };
+  await queueClient.sendMessage(Buffer.from(JSON.stringify(msg)).toString("base64"));
+
+  // return 202 with runId
+  return {
+    status: 202,
+    headers: { "Content-Type": "application/json", "x-correlation-id": cid },
+    body: JSON.stringify({
+      ok: true, runId,
+      statusUrl: `/api/ch-strategic/status?runId=${runId}`,
+      downloads: {
+        results: `/api/ch-strategic/download?runId=${runId}&file=results`,
+        log:     `/api/ch-strategic/download?runId=${runId}&file=log`
+      }
+    })
+  };
 }
 
 async function handleStatus(_context, req, cid) {
