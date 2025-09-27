@@ -23,6 +23,8 @@
     "campaign-status",
     "campaignFetch",
     "campaign-regenerate",
+    "ch-strategic",
+    "ch-strategic-worker",
     "runs",
     "pbi_token"
   ]
