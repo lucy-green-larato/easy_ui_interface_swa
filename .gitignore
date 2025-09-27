@@ -25,3 +25,7 @@ env/
 # OS/editor
 .DS_Store
 *.swp
+feedback.json
+results.json
+run.log.json
+samples/
