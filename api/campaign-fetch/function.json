@@ -5,8 +5,8 @@
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "methods": ["post"],
-      "route": "campaign/start"
+      "methods": ["get"],
+      "route": "campaign/fetch"
     },
     {
       "type": "http",

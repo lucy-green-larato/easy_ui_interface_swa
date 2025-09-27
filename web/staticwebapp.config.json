@@ -1,51 +1,24 @@
 {
+  "navigationFallback": { "rewrite": "/index.html" },
   "routes": [
-    { "route": "/.auth/me", "rewrite": "/api/.auth/me" },
-
-    { "route": "/reports", "rewrite": "/reports.html" },
-    { "route": "/reports/*", "rewrite": "/reports.html" },
-
-    { "route": "/engagement", "rewrite": "/engagement/index.html" },
-    { "route": "/engagement/*", "rewrite": "/engagement/index.html" },
-
-    { "route": "/first-call-script-v2", "redirect": "/engagement", "statusCode": 301 },
-    { "route": "/first-call-script-v2/*", "redirect": "/engagement", "statusCode": 301 },
-
-    { "route": "/qualification", "rewrite": "/qualification/index.html" },
-    { "route": "/qualification/*", "rewrite": "/qualification/index.html" },
-
-    { "route": "/lead-qualification", "redirect": "/qualification", "statusCode": 301 },
-    { "route": "/lead-qualification/*", "redirect": "/qualification", "statusCode": 301 },
-
-    { "route": "/ch-strategic", "rewrite": "/ch-strategic/index.html" },
-    { "route": "/ch-strategic/*", "rewrite": "/ch-strategic/index.html"},
-
-    { "route": "/campaign", "rewrite": "/campaign/index.html", "headers": { "cache-control": "no-cache, no-store, must-revalidate" } },
-    { "route": "/campaign/*", "rewrite": "/campaign/index.html", "headers": { "cache-control": "no-cache, no-store, must-revalidate" } },
-
-    { "route": "/content/call-library/*", "headers": { "cache-control": "no-store" } }
+    { "route": "/", "serve": "/index.html" },
+    { "route": "/campaign/*",      "allowedRoles": ["campaign", "campaign-admin"] },
+    { "route": "/engagement/*",    "allowedRoles": ["sales", "sales-admin"] },
+    { "route": "/qualification/*", "allowedRoles": ["sales", "sales-admin"] },
+    { "route": "/ch-strategic/*",  "allowedRoles": ["campaign", "campaign-admin", "sales-admin"] },
+    { "route": "/api/*",           "allowedRoles": ["authenticated"] }
   ],
   "responseOverrides": {
-    "401": {
-      "rewrite": "/index.html",
-      "statusCode": 302
-    }
-  },
-  "roleAssignments": {
-    "admin": ["/admin/*"],
-    "campaignmanager": ["/campaign/*"],
-    "salesleader": ["/leader/*"],
-    "salesuser": ["/user/*"]
+    "401": { "statusCode": 302, "redirect": "/.auth/login/aad" }
   },
   "globalHeaders": {
-    "Referrer-Policy": "strict-origin-when-cross-origin",
-    "X-Content-Type-Options": "nosniff"
+    "x-frame-options": "DENY",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer"
   },
-  "mimeTypes": {
-    ".md": "text/markdown; charset=utf-8",
-    ".mdx": "text/markdown; charset=utf-8",
-    ".js": "application/javascript; charset=utf-8",
-    ".mjs": "application/javascript; charset=utf-8",
-    ".json": "application/json; charset=utf-8"
+  "backend": {
+    "routes": [
+      { "route": "/api/*", "backendUri": "https://fa-bizdev-tools-debnfsh5efffc7be.uksouth-01.azurewebsites.net" }
+    ]
   }
 }

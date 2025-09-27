@@ -1,30 +1,28 @@
-// 26-09-2025 v1 /api/campaign-status/index.js
-// GET /api/campaign/status?runId=... -> reads status.json under computed prefix.
-// Finds the blob by scanning for .../{runId}/status.json to avoid date ambiguity.
+// 26-09-2025 v1 /api/campaign-fetch/index.js
+// GET /api/campaign/fetch?runId=...&file=campaign|evidence_log|status -> streams blob JSON back.
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { requireAuth, jsonError, cryptoRandomId } = require("../lib/auth");
 
 const ALLOWED_ROLES_CAMPAIGN = ["campaign", "campaign-admin"];
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
+const VALID_MAP = {
+  campaign: "campaign.json",
+  evidence_log: "evidence_log.json",
+  status: "status.json",
+};
 
 function correlationIdFrom(req) {
   return (req.headers?.["x-correlation-id"] || "").toString() || cryptoRandomId();
 }
 
-async function streamToString(readable) {
-  if (!readable) return "";
-  const chunks = [];
-  for await (const chunk of readable) chunks.push(chunk);
-  return Buffer.concat(chunks).toString("utf8");
-}
-
-async function findStatusBlob(containerClient, runId) {
-  // Search for any blob ending with `/${runId}/status.json` under results/campaign/
+async function locateRunPrefix(containerClient, runId) {
   const suffix = `/${runId}/status.json`;
   const prefixRoot = `results/campaign/`;
   for await (const item of containerClient.listBlobsFlat({ prefix: prefixRoot })) {
-    if (item.name.endsWith(suffix)) return item.name;
+    if (item.name.endsWith(suffix)) {
+      return item.name.slice(0, item.name.length - "status.json".length);
+    }
   }
   return null;
 }
@@ -41,7 +39,9 @@ module.exports = async function (context, req) {
 
   try {
     const runId = (req.query?.runId || "").trim();
-    if (!runId) {
+    const fileKey = (req.query?.file || "").trim();
+
+    if (!runId || !fileKey || !Object.prototype.hasOwnProperty.call(VALID_MAP, fileKey)) {
       context.res = jsonError(400, "bad_request", "Invalid input", correlationId);
       return;
     }
@@ -49,29 +49,38 @@ module.exports = async function (context, req) {
     const blobService = BlobServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
     const containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
 
-    const blobName = await findStatusBlob(containerClient, runId);
-    if (!blobName) {
+    const prefix = await locateRunPrefix(containerClient, runId);
+    if (!prefix) {
       context.res = {
         status: 404,
         headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
-        body: { state: "Unknown", runId },
+        body: { error: "not_found", message: "Run not found" }
       };
       return;
     }
 
-    const block = containerClient.getBlockBlobClient(blobName);
-    const dl = await block.download();
-    const body = await streamToString(dl.readableStreamBody);
+    const blobName = `${prefix}${VALID_MAP[fileKey]}`;
+    const client = containerClient.getBlockBlobClient(blobName);
+    if (!(await client.exists())) {
+      context.res = {
+        status: 404,
+        headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
+        body: { error: "not_found", message: "File not found" }
+      };
+      return;
+    }
 
-    context.log({ event: "campaign_status_read", runId, correlationId, outcome: "OK" });
+    const dl = await client.download();
+    context.log({ event: "campaign_fetch_stream", runId, file: fileKey, correlationId, outcome: "OK" });
 
     context.res = {
       status: 200,
       headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
-      body,
+      body: dl.readableStreamBody,
+      isRaw: true
     };
   } catch (err) {
-    context.log.error("campaign_status_error", err);
+    context.log.error("campaign_fetch_error", err);
     context.res = jsonError(500, "internal", "Unexpected error", correlationIdFrom(req));
   }
 };
