@@ -15,6 +15,8 @@
 // - devBypass
 // - ensureCorrelationId
 // - mapStatusToCode
+// - authResponse                 <-- NEW
+// - respondIfNotAuthorized       <-- NEW
 
 "use strict";
 
@@ -186,6 +188,40 @@ function requireAuth(a, b, c) {
   return gate.principal;
 }
 
+// ---------- NEW: HTTP helpers to avoid 500s on auth failures ----------
+
+function authResponse(status, code, message, correlationId, extraHeaders = {}, details = {}) {
+  return {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "x-correlation-id": correlationId,
+      ...extraHeaders,
+    },
+    body: { error: code, message, correlationId, details },
+  };
+}
+
+/**
+ * Non-throwing guard that **sets context.res** on failure and returns false.
+ * Use at the top of your handler:
+ *   if (!respondIfNotAuthorized(context, req, allowed, cid, CORS)) return;
+ */
+function respondIfNotAuthorized(context, req, allowedRoles = [], correlationId, extraHeaders = {}) {
+  const gate = authorize(req, allowedRoles);
+  if (gate.ok) return true;
+  const res = authResponse(
+    gate.code,
+    gate.error,
+    gate.message,
+    correlationId,
+    extraHeaders,
+    { required: allowedRoles, actual: gate.principal?.userRoles || [] }
+  );
+  context.res = res;
+  return false;
+}
+
 module.exports = {
   // Main API
   requireAuth,
@@ -193,4 +229,8 @@ module.exports = {
   devBypass,
   ensureCorrelationId,
   mapStatusToCode,
+
+  // NEW exports
+  authResponse,
+  respondIfNotAuthorized,
 };
