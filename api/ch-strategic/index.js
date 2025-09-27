@@ -461,7 +461,7 @@ module.exports = async function (context, req) {
   });
 
   const cid = ensureCorrelationId(req);
- 
+
 
   try {
     // 1) CORS preflight (no auth)

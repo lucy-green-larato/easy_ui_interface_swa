@@ -99,7 +99,7 @@ function mapStatusToCode(status) {
     case 413: return "payload_too_large";
     case 415: return "unsupported_media_type";
     case 429: return "rate_limited";
-    default:  return "internal";
+    default: return "internal";
   }
 }
 
@@ -122,9 +122,9 @@ function devBypass(req, defaultRoles = []) {
   const roleHeader = req.headers?.["x-dev-role"] || req.headers?.["X-DEV-ROLE"];
   const roles = roleHeader
     ? String(roleHeader)
-        .split(",")
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean)
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
     : (defaultRoles || []).map((r) => String(r).toLowerCase());
 
   return {
@@ -222,6 +222,30 @@ function respondIfNotAuthorized(context, req, allowedRoles = [], correlationId, 
   return false;
 }
 
+function requireRoleAdapter(req, correlationId, extraHeaders = {}) {
+  // Read allowed roles from env (same list you use elsewhere)
+  const allowed = JSON.parse(process.env.ALLOWED_ROLES_CHS || '["campaign","campaign-admin","sales-admin"]');
+
+  const gate = authorize(req, allowed);
+  if (gate.ok) return null;  // authorized
+
+  // Return the shape your handler sets directly on context.res
+  return {
+    status: gate.code,                  // 401 or 403
+    headers: {
+      "Content-Type": "application/json",
+      "x-correlation-id": correlationId,
+      ...extraHeaders,
+    },
+    jsonBody: {                         // use jsonBody to match your other helpers
+      error: gate.error,                // "unauthenticated" | "forbidden"
+      message: gate.message,
+      correlationId,
+      details: { required: allowed, actual: gate.principal?.userRoles || [] }
+    }
+  };
+}
+
 module.exports = {
   // Main API
   requireAuth,
@@ -233,4 +257,5 @@ module.exports = {
   // NEW exports
   authResponse,
   respondIfNotAuthorized,
+  requireRole: requireRoleAdapter 
 };
