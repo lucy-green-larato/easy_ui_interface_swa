@@ -159,6 +159,8 @@
     fbStatus: byId("fbStatus")
   };
 
+
+
   // ---------- Storage (remember call type) ----------
   const STORAGE_KEYS = { CALL_TYPE: "itt.call_type" };
   function loadCallType() {
@@ -398,12 +400,17 @@
   });
 
   // ---------- API ----------
+  // ---------- API ----------
   async function apiStartRun({ file, evidenceTag }) {
     const fd = new FormData();
-    // Server reads the file (field name is not enforced but we use "file")
-    fd.append("file", file, file.name);
-    if (evidenceTag) fd.append("evidenceTag", evidenceTag); // server ignores extra fields safely
-    const res = await fetch("/api/ch-strategic/start", { method: "POST", body: fd });
+    // MUST be "csv_file" to match /api/ch-strategic/start
+    fd.append("csv_file", file, file.name);
+    if (evidenceTag) fd.append("evidenceTag", evidenceTag);
+
+    // (Optional) add a correlation id for tracing
+    const headers = { "x-correlation-id": (crypto.randomUUID?.() || String(Date.now())) };
+
+    const res = await fetch("/api/ch-strategic/start", { method: "POST", body: fd, headers });
     if (!res.ok) {
       let msg = "";
       try { msg = await res.text(); } catch { }
@@ -544,7 +551,13 @@
         terms.length <= CLIENT_LIMITS.MAX_TERMS &&
         terms.every(t => CLIENT_LIMITS.TERM_RE.test(t));
     }
-    const fileLooksOk = !!f && looksLikeCsv(f) && f.size <= CLIENT_LIMITS.MAX_BYTES;
+
+    // Use live server limit when available; fall back to client constant
+    const maxBytes = typeof SERVER_LIMITS?.maxUploadBytes === "number"
+      ? SERVER_LIMITS.maxUploadBytes
+      : CLIENT_LIMITS.MAX_BYTES;
+
+    const fileLooksOk = !!f && looksLikeCsv(f) && f.size <= maxBytes;
 
     if (el.analyze) el.analyze.disabled = !(evidenceLooksOk && fileLooksOk);
     if (el.startLarge) el.startLarge.disabled = !(evidenceLooksOk && fileLooksOk);
