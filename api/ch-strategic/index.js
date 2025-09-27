@@ -263,7 +263,7 @@ function streamToBuffer(readable) {
 
 // ---------- Handlers ----------
 async function handleStart(context, req, cid) {
-  if (!blobSvc)   return err(500, "internal", "AzureWebJobsStorage not configured", cid);
+  if (!blobSvc) return err(500, "internal", "AzureWebJobsStorage not configured", cid);
   if (!queueClient) return err(500, "internal", "Jobs queue not configured", cid);
 
   // must be multipart/form-data
@@ -290,7 +290,7 @@ async function handleStart(context, req, cid) {
       streamToBuffer(file).then(buf => { fileBuf = buf; }).catch(reject);
     });
     bb.on("field", (name, val) => {
-      if (name === "evidenceTag") evidenceTag = String(val || "").slice(0,128);
+      if (name === "evidenceTag") evidenceTag = String(val || "").slice(0, 128);
     });
     bb.on("error", reject);
     bb.on("finish", resolve);
@@ -337,7 +337,7 @@ async function handleStart(context, req, cid) {
       statusUrl: `/api/ch-strategic/status?runId=${runId}`,
       downloads: {
         results: `/api/ch-strategic/download?runId=${runId}&file=results`,
-        log:     `/api/ch-strategic/download?runId=${runId}&file=log`
+        log: `/api/ch-strategic/download?runId=${runId}&file=log`
       }
     })
   };
@@ -443,6 +443,7 @@ function isPreflight(req) {
 
 // ----------- Azure Function entry ----------- //
 module.exports = async function (context, req) {
+  // Trace
   console.log("CH-STRATEGIC ROUTER", {
     method: req?.method,
     url: req?.url,
@@ -453,7 +454,6 @@ module.exports = async function (context, req) {
 
   const cid = ensureCorrelationId(req);
 
-
   try {
     // 1) CORS preflight (no auth)
     if (isPreflight(req)) {
@@ -461,10 +461,17 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // 2) AUTH (returns 401/403 when not allowed)
-    const authErr = requireRole(req, cid, CORS);
-    if (authErr) {
-      context.res = authErr;
+    // 2) AUTH (strict: throws an envelope on failure)
+    try {
+      // ALLOWED_ROLES comes from ./config
+      requireAuth(context, req, ALLOWED_ROLES);
+    } catch (resp) {
+      // resp: { status, body }
+      context.res = {
+        status: resp.status || 401,
+        headers: { ...CORS, "x-correlation-id": cid, "Content-Type": "application/json" },
+        body: JSON.stringify(resp.body || { error: "unauthenticated", message: "Auth required" })
+      };
       return;
     }
 
