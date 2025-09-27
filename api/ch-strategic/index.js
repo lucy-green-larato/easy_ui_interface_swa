@@ -50,6 +50,7 @@ const { BlobServiceClient } = require('@azure/storage-blob');
 const { QueueClient } = require('@azure/storage-queue');
 const crypto = require('crypto');
 const { requireAuth, ensureCorrelationId } = require('../lib/auth.js');
+const { requireRole } = require('../lib/auth');
 
 // ----------- Env & Config ----------- //
 const ALLOWED_ROLES = JSON.parse(process.env.ALLOWED_ROLES_CHS || '["campaign","campaign-admin","sales-admin"]');
@@ -458,30 +459,44 @@ module.exports = async function (context, req) {
     query: req?.query,
     path: req?.params && req.params.path
   });
+
   const cid = ensureCorrelationId(req);
+ 
+
   try {
+    // 1) CORS preflight (no auth)
     if (isPreflight(req)) {
-      context.res = { status: 204, headers: { ...CORS, 'x-correlation-id': cid } };
+      context.res = { status: 204, headers: { ...CORS, "x-correlation-id": cid } };
       return;
     }
+
+    // 2) AUTH (returns 401/403 when not allowed)
+    const authErr = requireRole(req, cid, CORS);
+    if (authErr) {
+      context.res = authErr;
+      return;
+    }
+
+    // 3) Storage check
     if (!blobSvc) {
-      context.res = err(500, 'internal', 'AzureWebJobsStorage not configured', cid);
+      context.res = err(500, "internal", "AzureWebJobsStorage not configured", cid);
       return;
     }
 
-    const rawPath = (context.bindingData && context.bindingData.path) ? `/${context.bindingData.path}` : '/';
+    // 4) Routing
+    const rawPath = (context.bindingData && context.bindingData.path) ? `/${context.bindingData.path}` : "/";
     const path = rawPath.toLowerCase();
-    const method = (req.method || 'GET').toUpperCase();
+    const method = (req.method || "GET").toUpperCase();
 
-    if (method === 'POST' && path === '/start') { context.res = await handleStart(context, req, cid); return; }
-    if (method === 'GET' && path === '/status') { context.res = await handleStatus(context, req, cid); return; }
-    if (method === 'GET' && path === '/download') { context.res = await handleDownload(context, req, cid); return; }
-    if (method === 'POST' && path === '/feedback') { context.res = await handleFeedback(context, req, cid); return; }
-    if (method === 'GET' && path === '/health') { context.res = await handleHealth(); return; }
+    if (method === "POST" && path === "/start") { context.res = await handleStart(context, req, cid); return; }
+    if (method === "GET" && path === "/status") { context.res = await handleStatus(context, req, cid); return; }
+    if (method === "GET" && path === "/download") { context.res = await handleDownload(context, req, cid); return; }
+    if (method === "POST" && path === "/feedback") { context.res = await handleFeedback(context, req, cid); return; }
+    if (method === "GET" && path === "/health") { context.res = await handleHealth(); return; }
 
-    context.res = err(404, 'not_found', `Unknown route: ${method} ${path}`, cid);
+    context.res = err(404, "not_found", `Unknown route: ${method} ${path}`, cid);
   } catch (e) {
-    context.log.error('ch-strategic unhandled', { correlationId: cid, error: e?.message });
-    context.res = err(500, 'internal', 'Unexpected error', cid);
+    context.log.error("ch-strategic unhandled", { correlationId: cid, error: e?.message });
+    context.res = err(500, "internal", "Unexpected error", cid);
   }
 };
