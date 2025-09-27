@@ -11,3 +11,6 @@ api-worker/
 .devcontainer/
 node_modules/
 api/local.settings.json
+results.json
+run.log.json
+samples/too_big.csv
