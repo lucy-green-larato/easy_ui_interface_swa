@@ -27,9 +27,23 @@ const {
 
 const { parse: parseCsvSync } = require("csv-parse/sync");
 const MAX_TEXT_CHARS = 200_000;
+const HEARTBEAT_EVERY_ROWS = 50;
+const HEARTBEAT_EVERY_MS = 30_000;
 
 /* -------------------- helpers -------------------- */
 function nowIso() { return new Date().toISOString(); }
+
+async function withRowTimeout(promise, ms, onTimeoutMsg = "row_timeout") {
+  let t;
+  const timeout = new Promise((_, reject) => {
+    t = setTimeout(() => reject(new Error(onTimeoutMsg)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(t);
+  }
+}
 
 function streamToBuffer(readable) {
   return new Promise((resolve, reject) => {
@@ -148,7 +162,6 @@ function buildNeedleRegex(term) {
   return new RegExp(pat, "i");
 }
 /* -------------------- worker entry -------------------- */
-
 module.exports = async function (context, queueItem) {
   const t0 = Date.now();
 
@@ -265,15 +278,14 @@ module.exports = async function (context, queueItem) {
     const headers = rowsArr.length ? Object.keys(rowsArr[0]) : [];
 
     // Cap work to control cost/time
-    const cappedRows = Array.isArray(rowsArr)
-      ? rowsArr.slice(0, CH_STRATEGIC_MAX_ROWS)
-      : [];
+    const cappedRows = Array.isArray(rowsArr) ? rowsArr.slice(0, CH_STRATEGIC_MAX_ROWS) : [];
 
-    const normKey = (h) => String(h || "")
-      .normalize("NFKC")
-      .replace(/^\uFEFF/, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
+    const normKey = (h) =>
+      String(h || "")
+        .normalize("NFKC")
+        .replace(/^\uFEFF/, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
 
     const alias = {
       name: ["company name", "companyname", "name", "company", "organisation", "organization"].map(normKey),
@@ -286,18 +298,26 @@ module.exports = async function (context, queueItem) {
     if (!nameKey || !numKey) throw new Error("Missing required columns: Company Name / Company Number");
 
     // 3) Evidence terms
-    const terms = Array.from(new Set(String(evidenceTag || "").split(",").map(t => t.trim()).filter(Boolean)));
+    const terms = Array.from(new Set(String(evidenceTag || "").split(",").map((t) => t.trim()).filter(Boolean)));
     const termRe = /^[A-Za-z0-9 _-]{1,50}$/;
-    for (const t of terms) if (t && !termRe.test(t)) throw new Error(`Invalid evidence term: ${t}`);
-    const evidenceTerms = terms.length ? terms : (evidenceTag ? [String(evidenceTag)] : []);
+    for (const t of terms) {
+      if (t && !termRe.test(t)) throw new Error(`Invalid evidence term: ${t}`);
+    }
+    const evidenceTerms = terms.length ? terms : evidenceTag ? [String(evidenceTag)] : [];
     const evidenceRegexes = evidenceTerms
-      .map(t => [t, buildNeedleRegex(t)])
+      .map((t) => [t, buildNeedleRegex(t)])
       .filter(([, re]) => !!re);
 
     // 4) Main loop + matching
-    let processedRows = 0, matched = 0, skipped = 0;
+    let processedRows = 0,
+      matched = 0,
+      skipped = 0;
     const items = [];
     const errorsByReason = {};
+
+    const totalPlanned = Math.min(rowsArr.length, CH_STRATEGIC_MAX_ROWS);
+    let lastBeatAt = Date.now();
+
     for (const r of cappedRows) {
       processedRows += 1;
 
@@ -306,92 +326,136 @@ module.exports = async function (context, queueItem) {
 
       if (!companyName || !companyNumber) {
         skipped++;
-        const reason = !companyName && !companyNumber
-          ? "missing_both"
-          : !companyNumber
-            ? "missing_company_number"
-            : "missing_company_name";
+        const reason =
+          !companyName && !companyNumber
+            ? "missing_both"
+            : !companyNumber
+              ? "missing_company_number"
+              : "missing_company_name";
         errorsByReason[reason] = (errorsByReason[reason] || 0) + 1;
+
+        // heartbeat even for skipped rows
+        const needRowBeat = processedRows % HEARTBEAT_EVERY_ROWS === 0;
+        const needTimeBeat = Date.now() - lastBeatAt >= HEARTBEAT_EVERY_MS;
+        if (needRowBeat || needTimeBeat) {
+          await writeStatus(statusC, runId, {
+            state: "Processing",
+            message: `Processing… ${processedRows}/${totalPlanned}`,
+            processedRows,
+            matched,
+            skipped,
+            evidenceTag: evidenceTag || null,
+          });
+          lastBeatAt = Date.now();
+        }
         continue;
       }
 
-      // ---------- Get text (SR-first), apply page windows with fallback ----------
-      let chosenText = "";
+      try {
+        // 60s per-row timeout
+        await withRowTimeout(
+          (async () => {
+            // ---------- Get text (SR-first) ----------
+            let chosenText = "";
+            if (DEBUG_FORCE_TEXT && String(DEBUG_FORCE_TEXT).trim()) {
+              chosenText = String(DEBUG_FORCE_TEXT).trim();
+            } else {
+              const fullText = (await tryGetReportText(companyNumber)) || "";
+              const srText = extractStrategicReport(fullText) || "";
+              const base = srText.length >= 1000 ? srText : fullText;
 
-      if (DEBUG_FORCE_TEXT && String(DEBUG_FORCE_TEXT).trim()) {
-        chosenText = String(DEBUG_FORCE_TEXT).trim();
-      } else {
-        try {
-          const fullText = await tryGetReportText(companyNumber) || "";
-          const srText = extractStrategicReport(fullText) || "";
-          const SR_MIN_LEN = 1000;
-          const srLooksOk = srText.length >= SR_MIN_LEN;
-          const base = srLooksOk ? srText : fullText;
-          let primary = firstNPages(base, CH_SR_PAGES_FIRST);
-          let hay = primary;
+              let hay = firstNPages(base, CH_SR_PAGES_FIRST);
 
-          // If no quick hit in primary and fallback > primary, widen once
-          const canWiden = evidenceRegexes.length > 0 && CH_SR_PAGES_FALLBACK > CH_SR_PAGES_FIRST;
-          if (canWiden) {
-            const hayPrimary = normForMatch(hay); // normalize once
-            const primaryHit = evidenceRegexes.some(([, re]) => re.test(hayPrimary));
-            if (!primaryHit) {
-              hay = firstNPages(base, CH_SR_PAGES_FALLBACK);
+              // widen once if no quick hit in primary window
+              const canWiden = evidenceRegexes.length > 0 && CH_SR_PAGES_FALLBACK > CH_SR_PAGES_FIRST;
+              if (canWiden) {
+                const hayPrimary = normForMatch(hay);
+                const primaryHit = evidenceRegexes.some(([, re]) => re.test(hayPrimary));
+                if (!primaryHit) hay = firstNPages(base, CH_SR_PAGES_FALLBACK);
+              }
+
+              // cap text to avoid huge payloads
+              chosenText = hay.length > MAX_TEXT_CHARS ? hay.slice(0, MAX_TEXT_CHARS) : hay;
             }
-          }
-          chosenText = hay.length > MAX_TEXT_CHARS ? hay.slice(0, MAX_TEXT_CHARS) : hay;
-        } catch {
-          chosenText = "";
-        }
-      }
 
-      // Save first row’s actual search text once (for debugging)
-      if (DEBUG_SAVE_TEXT && processedRows === 1) {
-        try {
-          const sample = (chosenText || "").slice(0, 20000);
-          await putText(CHS_OUT_CONTAINER, `${runId}.debug.txt`, sample, "text/plain; charset=utf-8");
-        } catch { /* best-effort */ }
-      }
+            // write a one-off debug sample for row 1 (if enabled)
+            if (DEBUG_SAVE_TEXT && processedRows === 1) {
+              try {
+                await putText(
+                  CHS_OUT_CONTAINER,
+                  `${runId}.debug.txt`,
+                  (chosenText || "").slice(0, 20000),
+                  "text/plain; charset=utf-8"
+                );
+              } catch { }
+            }
 
-      // ---------- Match ----------
-      const hayMatch = normForMatch(chosenText || "");
-      let hit = "";
-      let mIndex = -1;
+            // ---------- Match ----------
+            const hayMatch = normForMatch(chosenText || "");
+            let hit = "",
+              mIndex = -1;
+            for (const [term, re] of evidenceRegexes) {
+              const m = re.exec(hayMatch);
+              if (m) {
+                hit = term;
+                mIndex = m.index;
+                break;
+              }
+            }
 
-      for (const [term, re] of evidenceRegexes) {
-        const m = re.exec(hayMatch);
-        if (m) { hit = term; mIndex = m.index; break; }
-      }
-
-      if (hit) {
-        matched++;
-
-        // Derive a readable snippet (approximate back from match index)
-        const cleaned = normForSnippet(chosenText || "");
-        const probe = normForMatch(hit).slice(0, 5);
-        const lc = cleaned.toLowerCase();
-        let idx = probe ? lc.indexOf(probe) : -1;
-        if (idx < 0 && mIndex >= 0) idx = Math.min(Math.max(0, mIndex), cleaned.length - 1);
-
-        const WINDOW = 160;
-        const start = Math.max(0, idx >= 0 ? idx - WINDOW : 0);
-        const end = Math.min(cleaned.length, (idx >= 0 ? idx : 0) + WINDOW);
-        const snippet = cleaned.slice(start, end).replace(/\s+/g, " ").trim();
-
-        items.push({ companyName, companyNumber, matched: true, evidence: hit, snippet });
-      } else {
+            if (hit) {
+              matched++;
+              const cleaned = normForSnippet(chosenText || "");
+              const probe = normForMatch(hit).slice(0, 5);
+              const lc = cleaned.toLowerCase();
+              let idx = probe ? lc.indexOf(probe) : -1;
+              if (idx < 0 && mIndex >= 0) idx = Math.min(Math.max(0, mIndex), cleaned.length - 1);
+              const WINDOW = 160;
+              const start = Math.max(0, idx >= 0 ? idx - WINDOW : 0);
+              const end = Math.min(cleaned.length, (idx >= 0 ? idx : 0) + WINDOW);
+              const snippet = cleaned.slice(start, end).replace(/\s+/g, " ").trim();
+              items.push({ companyName, companyNumber, matched: true, evidence: hit, snippet });
+            } else {
+              skipped++;
+              const reason = chosenText ? "no_evidence_match_in_text" : "no_text_available";
+              errorsByReason[reason] = (errorsByReason[reason] || 0) + 1;
+            }
+          })(),
+          60_000,
+          "row_timeout"
+        );
+      } catch (e) {
+        // row-level failure: count as skipped and keep going
         skipped++;
-        const reason = chosenText ? "no_evidence_match_in_text" : "no_text_available";
-        errorsByReason[reason] = (errorsByReason[reason] || 0) + 1;
+        const reason = String((e && e.message) || e);
+        const key = reason === "row_timeout" ? "row_timeout" : "row_error";
+        errorsByReason[key] = (errorsByReason[key] || 0) + 1;
+      }
+
+      // heartbeat at the end of each row (lightweight)
+      const needRowBeat = processedRows % HEARTBEAT_EVERY_ROWS === 0;
+      const needTimeBeat = Date.now() - lastBeatAt >= HEARTBEAT_EVERY_MS;
+      if (needRowBeat || needTimeBeat) {
+        await writeStatus(statusC, runId, {
+          state: "Processing",
+          message: `Processing… ${processedRows}/${totalPlanned}`,
+          processedRows,
+          matched,
+          skipped,
+          evidenceTag: evidenceTag || null,
+        });
+        lastBeatAt = Date.now();
       }
     }
 
-    // Mid-status with preview
-    const preview = (items || []).slice(0, 10).map(
-      ({ companyName, companyNumber, matched, evidence, snippet }) => ({
-        companyName, companyNumber, matched, evidence, snippet
-      })
-    );
+    // Mid-status with preview (once)
+    const preview = (items || []).slice(0, 10).map(({ companyName, companyNumber, matched, evidence, snippet }) => ({
+      companyName,
+      companyNumber,
+      matched,
+      evidence,
+      snippet,
+    }));
     await writeStatus(statusC, runId, {
       state: "Processing",
       message: "Generating outputs…",
@@ -424,9 +488,7 @@ module.exports = async function (context, queueItem) {
     const csvContent = buildResultsCsv(items);
     await putText(CHS_OUT_CONTAINER, csvName, csvContent, "text/csv; charset=utf-8");
 
-    const workerEvents = [
-      { at: nowIso(), event: "worker_started", queue: CH_STRATEGIC_JOBS_QUEUE || null },
-    ];
+    const workerEvents = [{ at: nowIso(), event: "worker_started", queue: CH_STRATEGIC_JOBS_QUEUE || null }];
     workerEvents.push({
       at: nowIso(),
       event: "worker_completed",
@@ -460,7 +522,6 @@ module.exports = async function (context, queueItem) {
     });
 
     context.log("ch-strategic-worker: completed", { runId, ms: Date.now() - t0 });
-
   } catch (err) {
     context.log.error("ch-strategic-worker: failed", { runId, error: String(err?.message || err) });
     await writeStatus(statusC, runId, {
