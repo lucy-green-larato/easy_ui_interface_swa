@@ -7,7 +7,7 @@ const {
   CHS_CACHE_CONTAINER, CHS_STATUS_CONTAINER,
   CH_STRATEGIC_MAX_ROWS, CH_STRATEGIC_CHUNK_SIZE,
   MAX_UPLOAD_BYTES
-} = require("../config");
+} = require("../ch-strategic/config");
 
 function bad(status, code, message, extra) {
   return {
