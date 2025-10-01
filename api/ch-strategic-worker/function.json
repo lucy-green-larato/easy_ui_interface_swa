@@ -3,7 +3,7 @@
     {
       "type": "queueTrigger",
       "direction": "in",
-      "name": "msg",
+      "name": "queueItem",
       "queueName": "%CH_STRATEGIC_JOBS_QUEUE%",
       "connection": "AzureWebJobsStorage"
     }
