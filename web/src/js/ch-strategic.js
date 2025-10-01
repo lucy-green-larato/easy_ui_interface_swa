@@ -6,7 +6,6 @@
   // ---------- Utilities ----------
   const qs = (sel, root = document) => root.querySelector(sel);
   const byId = (id) => document.getElementById(id);
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const text = (el, value) => { if (el) el.textContent = value ?? ""; };
   const show = (el) => el && el.removeAttribute("hidden");
   const hide = (el) => el && el.setAttribute("hidden", "hidden");
@@ -35,21 +34,67 @@
   };
 
   // --- Server limits (read from /api/ch-strategic/health) -----------------------
-  let SERVER_LIMITS = { maxUploadBytes: 10 * 1024 * 1024, maxRows: 5000, chunkSize: 100 }; // safe defaults
+  // Safe defaults (unchanged name)
+  let SERVER_LIMITS = {
+    maxUploadBytes: 10 * 1024 * 1024,  // 10 MB
+    maxRows: 5000,
+    chunkSize: 100
+  };
 
+  // tiny helpers
+  const toFinitePosInt = (v, def) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : def;
+  };
+  const toFinitePosNum = (v, def) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : def;
+  };
+
+  // Unchanged name; now also respects CLIENT_LIMITS via applyServerLimitsFromHealth
   async function loadServerLimits() {
     try {
       const r = await fetch('/api/ch-strategic/health', { cache: 'no-store' });
       if (!r.ok) return;
-      const j = await r.json();
-      if (j?.limits?.maxUploadBytes) SERVER_LIMITS.maxUploadBytes = Number(j.limits.maxUploadBytes);
-      if (j?.limits?.maxRows) SERVER_LIMITS.maxRows = Number(j.limits.maxRows);
-      if (j?.limits?.chunkSize) SERVER_LIMITS.chunkSize = Number(j.limits.chunkSize);
-    } catch { /* use defaults */ }
+
+      const j = await r.json?.() ?? null;
+      const lim = j && j.limits ? j.limits : {};
+
+      // Coerce and only overwrite if valid positive numbers
+      SERVER_LIMITS.maxUploadBytes = toFinitePosNum(lim.maxUploadBytes, SERVER_LIMITS.maxUploadBytes);
+      SERVER_LIMITS.maxRows = toFinitePosInt(lim.maxRows, SERVER_LIMITS.maxRows);
+      SERVER_LIMITS.chunkSize = toFinitePosInt(lim.chunkSize, SERVER_LIMITS.chunkSize);
+
+      // If you wired the client-side mirror, update it too
+      if (typeof applyServerLimitsFromHealth === "function") {
+        applyServerLimitsFromHealth(j);
+      }
+    } catch {
+      // swallow: keep safe defaults in SERVER_LIMITS
+    }
   }
 
   function maxUploadLabelClient() {
     return `${Math.max(1, Math.floor((SERVER_LIMITS.maxUploadBytes || 0) / 1048576))} MB`;
+  }
+
+  function ensureChsPlaceholders() {
+    const root = document.querySelector('[data-chs-root]') || document.body;
+
+    const ensure = (selector, creator) => {
+      let el = document.querySelector(selector);
+      if (!el) { el = creator(); root.appendChild(el); }
+      return el;
+    };
+
+    ensure('[data-chs="total"]', () => Object.assign(document.createElement('span'), { dataset: { chs: 'total' }, textContent: '0' }));
+    ensure('[data-chs="matched"]', () => Object.assign(document.createElement('span'), { dataset: { chs: 'matched' }, textContent: '0' }));
+    ensure('[data-chs="skipped"]', () => Object.assign(document.createElement('span'), { dataset: { chs: 'skipped' }, textContent: '0' }));
+    ensure('[data-chs="output-preview"]', () => {
+      const div = document.createElement('div');
+      div.dataset.chs = 'output-preview';
+      return div;
+    });
   }
 
   // --- resilient fetch helper ---------------------------------------------------
@@ -79,10 +124,10 @@
 
   // Client-side limits (mirror server)
   const CLIENT_LIMITS = {
-    MAX_BYTES: 10 * 1024 * 1024,            // 10 MB
-    EVIDENCE_MAX: 50,
-    MAX_TERMS: 10,
-    TERM_RE: /^[A-Za-z0-9 _-]{1,50}$/
+    MAX_BYTES: 10 * 1024 * 1024,        // default 10 MB; replaced by server maxUploadBytes (if provided)
+    EVIDENCE_MAX: 50,                   // max characters per term (server enforces 1..50)
+    MAX_TERMS: 10,                      // max comma-separated terms allowed in UI
+    TERM_RE: /^[A-Za-z0-9 _-]{1,50}$/   // MUST match server regex
   };
 
   function looksLikeCsv(file) {
@@ -92,6 +137,60 @@
       t === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") return true;
     return /\.csv$/i.test(file.name || "");
   }
+
+  function renderSummary({ total, matched, skipped }) {
+    const t = document.querySelector('[data-chs="total"]');
+    const m = document.querySelector('[data-chs="matched"]');
+    const s = document.querySelector('[data-chs="skipped"]');
+    if (t) t.textContent = String(total ?? 0);
+    if (m) m.textContent = String(matched ?? 0);
+    if (s) s.textContent = String(skipped ?? 0);
+  }
+
+  function renderPreview(list) {
+    const host = document.querySelector('[data-chs="output-preview"]');
+    if (!host) return;
+    const rows = (list || []).map(it => `
+    <li>
+      <strong>${(it.companyName || "").toString()}</strong> (${(it.companyNumber || "").toString()})
+      ${it.evidence ? ` — <em>${it.evidence}</em>` : ""}
+      <br><small>${(it.snippet || "").toString().replace(/\s+/g, " ")}</small>
+    </li>
+  `);
+    host.innerHTML = rows.length ? `<ul>${rows.join("")}</ul>` : "";
+  }
+
+  function countersFromStatus(status) {
+    // Prefer live worker fields
+    if (Number.isFinite(status?.processedRows)
+      && Number.isFinite(status?.matched)
+      && Number.isFinite(status?.skipped)) {
+      return {
+        total: status.processedRows,
+        matched: status.matched,
+        skipped: status.skipped
+      };
+    }
+    // Fallback to summary (from results or status)
+    const s = status?.summary || {};
+    if (Number.isFinite(s.rows) && Number.isFinite(s.matched) && Number.isFinite(s.skipped)) {
+      return { total: s.rows, matched: s.matched, skipped: s.skipped };
+    }
+    // Last resort: preview/items count
+    const items = Array.isArray(status?.preview) ? status.preview
+      : Array.isArray(status?.items) ? status.items : [];
+    if (items.length) {
+      const m = items.filter(x => x && x.matched === true).length;
+      return { total: items.length, matched: m, skipped: Math.max(0, items.length - m) };
+    }
+    return { total: 0, matched: 0, skipped: 0 };
+  }
+
+  function resetRunUI() {
+    renderSummary({ total: 0, matched: 0, skipped: 0 });
+    renderPreview([]);
+  }
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // ---------- State ----------
   const state = {
@@ -400,7 +499,6 @@
   });
 
   // ---------- API ----------
-  // ---------- API ----------
   async function apiStartRun({ file, evidenceTag }) {
     const fd = new FormData();
     // MUST be "csv_file" to match /api/ch-strategic/start
@@ -434,77 +532,56 @@
       state: s.state
     };
   }
-
-  // ---------- Flows ----------
+  // Flows 
   async function startAndPollWorkerFlow({ file, evidence }) {
     // Start
-    renderStatus("Submitting job…");
-    const statusEl = el.status;
-    if (statusEl) { statusEl.setAttribute("aria-busy", "true"); statusEl.focus?.(); }
+    const statusEl = el?.status;
+    const setBusy = (v) => { if (statusEl) { v ? statusEl.setAttribute("aria-busy", "true") : statusEl.removeAttribute("aria-busy"); } };
+    const renderStatus = (t) => { if (statusEl) statusEl.textContent = t; };
+
+    renderStatus("Submitting job…"); setBusy(true);
 
     const { runId } = await apiStartRun({ file, evidenceTag: evidence });
     if (!runId) throw new Error("No runId returned.");
 
-    state.run = { runId, polling: true, pollAbort: new AbortController(), downloadEnabled: false };
+    resetRunUI();
 
-    // Wire download buttons (enabled on completion)
+    state.run = { runId, polling: true, pollAbort: new AbortController(), downloadEnabled: false };
     wireDownloadButtons(runId);
 
-    // Poll
-    const startedAt = Date.now();
-    while (state.run.polling) {
-      const status = await apiPollStatus(runId, { signal: state.run.pollAbort.signal });
+    try {
+      while (state.run?.polling) {
+        let status;
+        try {
+          status = await apiPollStatus(runId, { signal: state.run.pollAbort.signal });
+        } catch {
+          await sleep(750);
+          continue;
+        }
 
-      // Counters & progress
-      setCounters({
-        total: status.total,
-        processed: status.processed,
-        matched: status.matched,
-        skipped: status.skipped
-      });
-      const pct = status.total > 0 ? Math.round((status.processed / status.total) * 100) : (status.completed ? 100 : 0);
-      setProgressPercent(pct);
-      renderStatus(`Processing… ${status.processed}/${status.total}`, "info");
+        // overwrite counters and preview on every tick
+        const { total, matched, skipped } = countersFromStatus(status);
+        renderSummary({ total, matched, skipped });
+        if (Array.isArray(status.preview)) renderPreview(status.preview);
+        if (status?.state === "Processing") {
+          renderStatus(status?.message || "Processing…");
+        }
 
-      // Messages (if any)
-      if (Array.isArray(status.messages)) status.messages.forEach((m) => appendResultItem(m));
-
-      if (status.completed) {
-        state.run.polling = false;
-        setProgressPercent(100);
-
-        // Enable the fixed download buttons (href already wired)
-        if (el.btnDlResults) el.btnDlResults.removeAttribute("disabled");
-        if (el.btnDlLog) el.btnDlLog.removeAttribute("disabled");
-
-        const hadIssues = status.skipped > 0;
-        renderStatus(
-          status.state === "Failed"
-            ? "Job failed. See log for details."
-            : "Job completed. You can download results.",
-          status.state === "Failed" ? "error" : (hadIssues ? "warn" : "info"),
-          { openSkipped: hadIssues }
-        );
-
-        // Show feedback card; open details if no matches or issues occurred
-        const showDetails = (status.state === "Failed") || (status.matched === 0) || hadIssues;
-        showFeedbackCard(showDetails);
-
-        if (statusEl) statusEl.setAttribute("aria-busy", "false");
-        break;
+        if (status?.state === "Completed") {
+          renderStatus("Completed");
+          state.run.downloadEnabled = true;
+          break;
+        }
+        if (status?.state === "Failed") {
+          renderStatus(status?.error?.message || "Failed");
+          break;
+        }
+        await sleep(1000);
       }
-
-      // Backoff: 0–20s @1s, 20–60s @1500ms, 60s+ @3000ms
-      const ageSec = (Date.now() - startedAt) / 1000;
-      const delay = ageSec < 20 ? 1000 : ageSec < 60 ? 1500 : 3000;
-      await sleep(delay);
+    } finally {
+      setBusy(false);
     }
-
-    state.run?.pollAbort?.abort();
-    if (statusEl) statusEl.setAttribute("aria-busy", "false");
-    await renderResultsPanel(state.run.runId);
   }
-
   // ---------- Form wiring & UX ----------
   function validateClientInputs(file, evidence) {
     let fileErr = "", evidenceErr = "";
@@ -670,10 +747,16 @@
     wireFeedbackUI();
     loadUserBadge();
   }
+  let __chs_boot_ran = false;
+  function runOnce() {
+    if (__chs_boot_ran) return;
+    __chs_boot_ran = true;
+    init().catch(err => console.error("init() failed:", err));
+  }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init, { once: true });
+    document.addEventListener("DOMContentLoaded", runOnce, { once: true });
   } else {
-    init();
+    runOnce();
   }
 })();
