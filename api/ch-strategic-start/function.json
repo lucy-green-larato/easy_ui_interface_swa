@@ -1,0 +1,21 @@
+{
+  "bindings": [
+    {
+      "authLevel": "anonymous",
+      "type": "httpTrigger",
+      "direction": "in",
+      "name": "req",
+      "methods": ["post","options"],
+      "route": "ch-strategic/start"
+    },
+    { "type": "http", "direction": "out", "name": "res" },
+    {
+      "type": "queue",
+      "direction": "out",
+      "name": "outJobs",
+      "queueName": "%CH_STRATEGIC_JOBS_QUEUE%",
+      "connection": "AzureWebJobsStorage"
+    }
+  ],
+  "scriptFile": "index.js"
+}
