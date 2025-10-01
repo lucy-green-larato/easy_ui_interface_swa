@@ -1,55 +1,198 @@
-// api/ch-strategic/config.js
-// Centralised env/config for ch-strategic (router + worker)
+// api/ch-strategic/config.js 01-10-2025 v8 (master debug flag + page-window sanitize)
+
+"use strict";
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { QueueClient } = require("@azure/storage-queue");
 
-// Read env with optional aliases + default (works in Azure & Codespaces)
-function getEnv(name, aliases = [], def = undefined) {
-  for (const key of [name, ...aliases]) {
-    const v = process.env[key];
-    if (v !== undefined && v !== "") return v;
+/* -------------------- helpers -------------------- */
+
+function getEnv(name, aliases = [], def) {
+  for (const k of [name, ...aliases]) {
+    const v = process.env[k];
+    if (v !== undefined && v !== null) {
+      const s = String(v).trim();
+      if (s !== "") return s;
+    }
   }
   return def;
 }
 
-// ---------- Auth / roles ----------
-const ALLOWED_ROLES = JSON.parse(
-  getEnv("ALLOWED_ROLES_CHS", [], '["campaign","campaign-admin","sales-admin"]')
+function toInt(v, def) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : def;
+}
+
+function safeJsonArray(str, fallbackJson) {
+  try {
+    const val = JSON.parse(str ?? fallbackJson);
+    return Array.isArray(val) ? val : JSON.parse(fallbackJson);
+  } catch {
+    return JSON.parse(fallbackJson);
+  }
+}
+
+function asBool(v, def = false) {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (!s) return def;
+  return ["1", "true", "yes", "on", "y"].includes(s);
+}
+
+/* -------------------- auth / roles -------------------- */
+
+const ALLOWED_ROLES = safeJsonArray(
+  getEnv("ALLOWED_ROLES_CHS", [], undefined),
+  '["campaign","campaign-admin","sales-admin"]'
 );
 
-// ---------- Upload limits ----------
-const MAX_UPLOAD_BYTES = Number(getEnv("MAX_UPLOAD_BYTES", [], 10485760));
-const DEFAULT_ALLOWED_UPLOAD_MIME = getEnv(
+/* -------------------- upload limits -------------------- */
+
+const MAX_UPLOAD_BYTES = toInt(
+  getEnv("MAX_UPLOAD_BYTES", [], 10 * 1024 * 1024),
+  10 * 1024 * 1024
+);
+
+const DEFAULT_ALLOWED_UPLOAD_MIME = (getEnv(
   "DEFAULT_ALLOWED_UPLOAD_MIME",
   [],
   "text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-).split(",").map(s => s.trim().toLowerCase());
+) || "")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
 
-// ---------- Business tuning ----------
-const CH_STRATEGIC_MAX_ROWS   = Number(getEnv("CH_STRATEGIC_MAX_ROWS", [], 5000));
-const CH_STRATEGIC_CHUNK_SIZE = Number(getEnv("CH_STRATEGIC_CHUNK_SIZE", [], 100));
-const CH_STRATEGIC_FEEDBACK_RPM      = Number(getEnv("CH_STRATEGIC_FEEDBACK_RPM", [], 60));
-const CH_STRATEGIC_FEEDBACK_TTL_DAYS = Number(getEnv("CH_STRATEGIC_FEEDBACK_TTL_DAYS", ["CH_STRATEGIC_TTL_DAYS"], 30));
+/* -------------------- business tuning -------------------- */
 
-// Optional: Key Vault or local
-const DOMAIN_HASH_SALT = getEnv("DOMAIN_HASH_SALT", ["DOMAINHASHSALT"]);
+const CH_STRATEGIC_MAX_ROWS = toInt(
+  getEnv("CH_STRATEGIC_MAX_ROWS", ["CHS_MAX_ROWS"], 5000),
+  5000
+);
 
-// ---------- Storage / containers / queue ----------
-// IMPORTANT: the Functions host needs AzureWebJobsStorage (exact casing)
-const AZURE_STORAGE = getEnv("AzureWebJobsStorage", ["AZUREWEBJOBSSTORAGE"]);
+const CH_STRATEGIC_CHUNK_SIZE = toInt(
+  getEnv("CH_STRATEGIC_CHUNK_SIZE", ["CHS_CHUNK_SIZE"], 100),
+  100
+);
 
-const CHS_OUT_CONTAINER      = getEnv("CH_STRATEGIC_OUT_CONTAINER", [], "ch-strategic-out");
-const CHS_STATUS_CONTAINER   = getEnv("CH_STRATEGIC_STATUS_CONTAINER", [], "ch-strategic-status");
-const CHS_CACHE_CONTAINER    = getEnv("CH_STRATEGIC_CACHE_CONTAINER", [], "ch-strategic-cache");
-const CHS_FEEDBACK_CONTAINER = getEnv("CH_STRATEGIC_FEEDBACK_CONTAINER", [], "ch-strategic-feedback");
+const CH_STRATEGIC_FEEDBACK_RPM = toInt(
+  getEnv("CH_STRATEGIC_FEEDBACK_RPM", ["CHS_FEEDBACK_RPM"], 60),
+  60
+);
 
-// REQUIRED for the queue trigger binding (no default here)
-const CHS_JOBS_QUEUE         = getEnv("CH_STRATEGIC_JOBS_QUEUE", [], undefined);
+const CH_STRATEGIC_FEEDBACK_TTL_DAYS = toInt(
+  getEnv(
+    "CH_STRATEGIC_FEEDBACK_TTL_DAYS",
+    ["CH_STRATEGIC_TTL_DAYS", "CHS_FEEDBACK_TTL_DAYS"],
+    30
+  ),
+  30
+);
 
-// Clients (safe if storage is missing)
-const blobSvc = AZURE_STORAGE ? BlobServiceClient.fromConnectionString(AZURE_STORAGE) : null;
-const queueClient = (AZURE_STORAGE && CHS_JOBS_QUEUE) ? new QueueClient(AZURE_STORAGE, CHS_JOBS_QUEUE) : null;
+// Page-window for SR scanning (sanitize)
+const RAW_PAGE_FIRST = toInt(getEnv("CH_SR_PAGES_FIRST", ["CH_SR_PAGES_PRIMARY"], 6), 6);
+const RAW_PAGE_FALLBACK = toInt(getEnv("CH_SR_PAGES_FALLBACK", ["CH_SR_PAGES_SECONDARY"], 12), 12);
+const _PAGE_FIRST = Math.max(1, RAW_PAGE_FIRST | 0);
+const _PAGE_FALLBACK = Math.max(_PAGE_FIRST, RAW_PAGE_FALLBACK | 0);
+
+/* -------------------- debug (master switch + per-flag) -------------------- */
+
+// Master switch: if false, all debug features are off regardless of per-flags.
+const DEBUG_ENABLED = asBool(getEnv("CH_STRATEGIC_DEBUG", [], "0"), false);
+
+// Per-flags only apply when DEBUG_ENABLED is true
+const DEBUG_SAVE_TEXT  = DEBUG_ENABLED && asBool(getEnv("CHS_DEBUG_SAVE_TEXT", [], "false"), false);
+const DEBUG_FORCE_TEXT = DEBUG_ENABLED ? String(getEnv("CHS_DEBUG_FORCE_TEXT", [], "") || "") : "";
+
+/* -------------------- storage / containers / queue -------------------- */
+
+const AZURE_STORAGE =
+  getEnv("AzureWebJobsStorage", ["AZUREWEBJOBSSTORAGE", "AZURE_WEBJOBS_STORAGE"]) ||
+  getEnv("AZURE_STORAGE_CONNECTION_STRING", ["AZURE_STORAGE"]);
+
+const blobSvc = AZURE_STORAGE
+  ? BlobServiceClient.fromConnectionString(AZURE_STORAGE)
+  : null;
+
+const CHS_OUT_CONTAINER = getEnv(
+  "CH_STRATEGIC_OUT_CONTAINER",
+  ["CHS_OUT_CONTAINER"],
+  "ch-strategic-out"
+);
+
+const CHS_STATUS_CONTAINER = getEnv(
+  "CH_STRATEGIC_STATUS_CONTAINER",
+  ["CHS_STATUS_CONTAINER"],
+  "ch-strategic-status"
+);
+
+const CHS_CACHE_CONTAINER = getEnv(
+  "CH_STRATEGIC_CACHE_CONTAINER",
+  ["CHS_CACHE_CONTAINER"],
+  "ch-strategic-cache"
+);
+
+const CHS_FEEDBACK_CONTAINER = getEnv(
+  "CH_STRATEGIC_FEEDBACK_CONTAINER",
+  ["CHS_FEEDBACK_CONTAINER"],
+  "ch-strategic-feedback"
+);
+
+// Queue name (raw, unsanitized; binding expands env token)
+const CH_STRATEGIC_JOBS_QUEUE =
+  (getEnv("CH_STRATEGIC_JOBS_QUEUE", ["CHS_JOBS_QUEUE", "CH_JOBS_QUEUE", "JOBS_QUEUE", "QUEUE_NAME"]) ||
+    "ch-strategic-jobs").trim();
+
+function resolveStorageConnectionString() {
+  return (
+    getEnv("AzureWebJobsStorage", [
+      "AZUREWEBJOBSSTORAGE",
+      "AZURE_WEBJOBS_STORAGE",
+      "AZURE_STORAGE_CONNECTION_STRING",
+      "AZURE_STORAGE",
+    ]) || ""
+  );
+}
+
+function getQueueClient() {
+  const conn = resolveStorageConnectionString();
+  const q = CH_STRATEGIC_JOBS_QUEUE;
+  if (!conn || !q) return null;
+  try {
+    return QueueClient.fromConnectionString(conn, q);
+  } catch {
+    return null;
+  }
+}
+
+// Eager client (optional)
+const queueClient = (() => {
+  const conn = resolveStorageConnectionString();
+  const q = CH_STRATEGIC_JOBS_QUEUE;
+  try {
+    return conn && q ? QueueClient.fromConnectionString(conn, q) : null;
+  } catch {
+    return null;
+  }
+})();
+
+/**
+ * Ensure containers and the jobs queue exist (idempotent, NON-THROWING).
+ */
+async function ensureInfrastructure() {
+  if (blobSvc) {
+    await Promise.allSettled([
+      blobSvc.getContainerClient(CHS_OUT_CONTAINER).createIfNotExists(),
+      blobSvc.getContainerClient(CHS_STATUS_CONTAINER).createIfNotExists(),
+      blobSvc.getContainerClient(CHS_CACHE_CONTAINER).createIfNotExists(),
+      blobSvc.getContainerClient(CHS_FEEDBACK_CONTAINER).createIfNotExists(),
+    ]);
+  }
+  try {
+    const qc = queueClient || getQueueClient();
+    if (qc) {
+      try { await qc.createIfNotExists(); } catch {}
+    }
+  } catch { /* best-effort */ }
+}
 
 module.exports = {
   // auth
@@ -64,7 +207,15 @@ module.exports = {
   CH_STRATEGIC_CHUNK_SIZE,
   CH_STRATEGIC_FEEDBACK_RPM,
   CH_STRATEGIC_FEEDBACK_TTL_DAYS,
-  DOMAIN_HASH_SALT,
+
+  // page windows (sanitized)
+  CH_SR_PAGES_FIRST: _PAGE_FIRST,
+  CH_SR_PAGES_FALLBACK: _PAGE_FALLBACK,
+
+  // debug (master + per-flag)
+  DEBUG_ENABLED,
+  DEBUG_SAVE_TEXT,
+  DEBUG_FORCE_TEXT,
 
   // storage
   AZURE_STORAGE,
@@ -72,9 +223,13 @@ module.exports = {
   CHS_STATUS_CONTAINER,
   CHS_CACHE_CONTAINER,
   CHS_FEEDBACK_CONTAINER,
-  CHS_JOBS_QUEUE,
 
-  // clients
+  // queue
+  CH_STRATEGIC_JOBS_QUEUE,
+
+  // clients / helpers
   blobSvc,
   queueClient,
+  getQueueClient,
+  ensureInfrastructure,
 };

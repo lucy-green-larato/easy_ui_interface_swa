@@ -1,21 +1,14 @@
 {
   "bindings": [
     {
+      "authLevel": "anonymous",
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "authLevel": "anonymous",
-      "methods": [ "get", "post", "options" ],
+      "methods": ["get","options"],
       "route": "ch-strategic/{*path}"
     },
-    {
-      "type": "http",
-      "direction": "out",
-      "name": "res"
-    }
+    { "type": "http", "direction": "out", "name": "res" }
   ],
   "scriptFile": "index.js"
 }
-
-
-
