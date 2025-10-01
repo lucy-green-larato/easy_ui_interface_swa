@@ -3,9 +3,10 @@
   "functionTimeout": "00:06:00",
   "extensionBundle": {
     "id": "Microsoft.Azure.Functions.ExtensionBundle",
-    "version": "[4.*, 5.0.0)"
+    "version": "[3.*, 4.0.0)"
   },
   "extensions": {
+    "http": {"routePrefix": "api"},
     "durableTask": {
       "hubName": "CampaignHub"
     }
@@ -20,6 +21,7 @@
     "auth",
     "generate",
     "ch-strategic",
+    "ch-strategic-start",
     "ch-strategic-worker",
     "runs",
     "pbi_token",
