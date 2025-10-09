@@ -26,6 +26,7 @@
     "runs",
     "pbi_token",
     "ixbrl-financials",
-    "qualification-generate"
+    "qualification-generate",
+    "engagement-generate"
   ]
 }
