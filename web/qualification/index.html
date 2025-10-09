@@ -5,12 +5,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Tools · Lead qualification</title>
-  <link rel="stylesheet" href="/styles.css?v=2025-08-24-1">
+  <link rel="stylesheet" href="/styles.css?v=2025-10-09-fc2">
 </head>
 
 <body>
   <!-- HEADER (reused shell) -->
-  <header class="app-header" role="banner">
+  <header class="app-header topbar" role="banner">
     <div class="header-left">
       <img class="logo" src="/assets/larato-logo-bullet.svg" alt="Larato Inside Track Sales Tools" />
       <div class="brand-text">
@@ -37,9 +37,8 @@
         <strong id="map-label">Direct</strong>
       </span>
 
-      <button id="help" class="btn inline" type="button" title="About this tool">Help</button>
-
-      <span id="user-badge" class="badge is-hidden" aria-live="polite" aria-atomic="true">
+      <button id="help" class="btn inline chip" type="button" title="About this tool">Help</button>
+      <span id="user-badge" class="chip is-hidden" aria-live="polite" aria-atomic="true">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="12" cy="7" r="4"></circle>
           <path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path>
@@ -50,7 +49,7 @@
   </header>
 
   <!-- LAYOUT -->
-  <main id="main" class="layout" role="main">
+  <main id="main" class="layout" role="main" data-page="qualification">
     <!-- LEFT -->
     <section class="panel left" aria-label="Form">
       <form id="qual-form" novalidate>
@@ -61,7 +60,7 @@
               can be changed above.</em></p>
         </div>
 
-        <fieldset class="card" aria-labelledby="legend-person">
+        <fieldset class="card callout-gold" aria-labelledby="legend-evidence">
           <legend id="legend-person">You and your prospect</legend>
           <div class="grid-2">
             <div class="field">
@@ -193,9 +192,8 @@
           <label for="events">Trade show(s) this year</label>
           <input id="events" name="events" placeholder="e.g., Channel Live; Connected North" />
         </div>
-        </fieldset>
 
-        <fieldset class="card" aria-labelledby="legend-evidence">
+        <fieldset class="card callout-gold" aria-labelledby="legend-evidence">
           <legend id="legend-evidence">Evidence</legend>
 
           <!-- iXBRL fetch -->
@@ -254,7 +252,7 @@
 
         </fieldset>
 
-        <fieldset class="card" aria-labelledby="legend-buyer">
+        <fieldset class="card callout-gold" aria-labelledby="legend-evidence">
           <legend id="legend-buyer">Buyer type</legend>
           <div class="field">
             <label for="buyer_type">Buyer behaviour</label>
@@ -269,8 +267,8 @@
         </fieldset>
 
         <div class="actions">
-          <button id="submit" class="btn primary" type="submit" disabled>
-            <span class="btn-label">Generate qualification</span>
+          <button id="submit" class="btn primary btn-cta" type="submit" disabled>
+            Qualify my lead
             <span class="spinner" aria-hidden="true"></span>
           </button>
           <button id="resetBtn" type="reset" class="btn small">Reset</button>
@@ -343,7 +341,7 @@
 
     <!-- RIGHT -->
     <section class="panel right" aria-labelledby="intel-title">
-      <aside class="intel card">
+      <aside class="intel card callout-gold">
         <div class="intel-head">
           <h2 id="intel-title">Helpful tips</h2>
           <button id="toggle-intel" class="btn small" type="button" aria-expanded="true"
