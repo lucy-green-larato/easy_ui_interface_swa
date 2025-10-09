@@ -892,29 +892,79 @@ form?.addEventListener("reset", () => {
 });
 
 // ==== Init ====
+// lead-qualification init
 (async function init() {
+  // 1) Populate user chip if signed in
   try {
     const me = await fetch("/.auth/me", { cache: "no-store" });
     const j = await me.json();
     const email = j?.clientPrincipal?.userDetails || j?.clientPrincipal?.identityProvider || "";
     const userBadge = document.getElementById("user-badge");
     const userEmail = document.getElementById("user-email");
-    if (email && userBadge && userEmail) { userEmail.textContent = email; userBadge.classList.remove("is-hidden"); }
-  } catch { }
+    if (email && userBadge && userEmail) {
+      userEmail.textContent = email;
+      userBadge.classList.remove("is-hidden");
+    }
+  } catch {/* ignore auth probe errors */ }
 
-  loadForm(); loadCallPref();
-  if (callTypeSelXs && callTypeSel) callTypeSelXs.value = callTypeSel.value || "";
-  updateMapIndicator();
+  // 2) Cache DOM
+  const form = document.getElementById("qual-form");
+  const submitBtn = document.getElementById("submit");
+  const callTypeSel = document.getElementById("call_type");       // desktop selector
+  const callTypeSelXs = document.getElementById("call_type_xs");   // mobile mirror
 
-  await loadTipsBank(); // populate QUAL_TIPS
+  // Guard: if the form or button isn’t present, stop cleanly
+  if (!form || !submitBtn) return;
 
-  // Preload “financial analysis needed” nudge if CH missing
-  const ch = (form?.elements?.company_number?.value || "").trim();
-  if (!ch) document.getElementById("company_number_hint").style.display = "";
+  // 3) Busy helper toggles CSS spinner visibility (.btn.primary.busy .spinner)
+  function setBusy(on) {
+    submitBtn.disabled = on;
+    submitBtn.classList.toggle("busy", on);
+  }
+  let inFlight = false;
+  // 4) Wire submit
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+    } finally {
+      setBusy(false);
+      inFlight = false; 
+    }
+  });
 
-  enableSubmitIfValid();
-  renderActivity();
+  // 5) One source of truth for enabling submit
+  function syncSubmitEnabled() {
+    submitBtn.disabled = !form.checkValidity();
+  }
+  form.addEventListener("input", syncSubmitEnabled);
+  syncSubmitEnabled();
+  if (callTypeSel && callTypeSelXs) {
+    // initial sync to keep them matching on load
+    callTypeSelXs.value = callTypeSel.value || "";
 
-  // Render initial (empty) tips state
-  renderTips();
+    const syncXS = () => { callTypeSelXs.value = callTypeSel.value; };
+    const syncDesk = () => { callTypeSel.value = callTypeSelXs.value; };
+
+    callTypeSel.addEventListener("change", syncXS);
+    callTypeSelXs.addEventListener("change", syncDesk);
+  }
+
+
+  // 6) Your existing bootstraps (safe-guarded)
+  try { loadForm && loadForm(); } catch { }
+  try { loadCallPref && loadCallPref(); } catch { }
+
+  try { updateMapIndicator && updateMapIndicator(); } catch { }
+
+  try { await (loadTipsBank && loadTipsBank()); } catch { }
+
+  const chHintEl = document.getElementById("company_number_hint");
+  const chVal = (form.elements?.company_number?.value || "").trim();
+  if (!chVal && chHintEl) chHintEl.style.display = "";
+
+  // If you keep these helpers, they run; otherwise the try/catch avoids errors.
+  try { enableSubmitIfValid && enableSubmitIfValid(); } catch { }
+  try { renderActivity && renderActivity(); } catch { }
+  try { renderTips && renderTips(); } catch { }
 })();
