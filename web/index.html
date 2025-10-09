@@ -7,22 +7,54 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Inside Track Business Growth Tools</title>
   <meta name="color-scheme" content="light dark" />
+  <!-- First-paint guard: decide visibility before styles/js load -->
+  <style>
+    /* Default: hide both to avoid any flash on first paint */
+    #welcome {
+      display: none !important;
+    }
 
-  <!-- Global tokenised stylesheet -->
-  <link rel="stylesheet" href="styles.css" />
-  <!-- Prevent unauthenticated flash: if an auth cookie exists, hide #welcome immediately -->
+    #dashboard {
+      display: none !important;
+    }
+
+    /* If cookie check says "authed", show dashboard, hide welcome */
+    html[data-likely-authed="1"] #dashboard {
+      display: block !important;
+    }
+
+    html[data-likely-authed="1"] #welcome {
+      display: none !important;
+    }
+
+    /* If cookie check says "not authed", show welcome, hide dashboard */
+    html[data-likely-authed="0"] #welcome {
+      display: block !important;
+    }
+
+    html[data-likely-authed="0"] #dashboard {
+      display: none !important;
+    }
+  </style>
+  <!-- Decide initial state synchronously, before CSS/JS execute -->
   <script>
     (function () {
       try {
-        var c = document.cookie;
-        // Covers Azure App Service/EasyAuth + Static Web Apps
-        var likelyAuthed =
+        var c = document.cookie || "";
+        var authed =
           c.indexOf("AppServiceAuthSession=") !== -1 ||
           c.indexOf("StaticWebAppsAuthCookie=") !== -1;
-        if (likelyAuthed) document.documentElement.setAttribute("data-likely-authed", "1");
-      } catch (e) { /* no-op */ }
+        // Set explicit 1 or 0 so boot CSS can render the right section
+        document.documentElement.setAttribute("data-likely-authed", authed ? "1" : "0");
+      } catch (e) {
+        // If anything goes wrong, show welcome (safe default)
+        document.documentElement.setAttribute("data-likely-authed", "0");
+      }
     })();
   </script>
+
+  <!-- Global tokenised stylesheet -->
+  <link rel="stylesheet" href="styles.css" />
 
   <!-- Power BI SDK (only needed on this page) - must load before main.js -->
   <script src="vendor/powerbi.min.js" defer></script>
@@ -350,8 +382,8 @@
     <div class="header-left">
       <img class="logo" id="brandLogo" src="./assets/larato-logo-bullet.svg" alt="Larato" />
       <div class="brand-text">
-        <div class="app-title">Inside Track Business Growth Tools</div>
-        <div class="kicker">Fast, consistent, evidence-first sales &amp; marketing</div>
+        <div class="app-title">Inside Track Sales Accelerator</div>
+        <div class="kicker">Find the right accounts. Win the right deals.</div>
       </div>
     </div>
     <div class="header-right" id="authButtons">
@@ -368,58 +400,57 @@
           <div class="avatar is-empty" aria-hidden="true"></div>
           <h1 id="welcome-h" class="section-title">Welcome</h1>
         </div>
-        <p class="welcome-text">These tools will save you time and assure that you deliver the best sales and marketing
-          experience to your prospects. Please sign in to get started.</p>
+        <p class="welcome-text">From insight to next meeting. Sign in to qualify accounts, build campaigns, and equip sales in minutes.</p>
         <a id="btnSignInPrimary" class="btn btn-accent" href="/.auth/login/aad?post_login_redirect_uri=/web/">Sign in
           with Microsoft</a>
       </section>
 
       <!-- Signed IN -->
-      <section id="dashboard" class="hide" aria-live="polite">
+      <section id="dashboard" aria-live="polite">
         <div class="page-intro" style="margin-bottom:10px">
           <div class="welcome-bar">
             <div id="userAvatar" class="avatar is-empty" aria-label="User profile image" role="img"></div>
-            <h1 class="section-title">Welcome back <span id="userName"></span></h1>
+            <h1 class="section-title">Welcome back, <span id="userName"></span></h1>
           </div>
         </div>
 
         <!-- Tools -->
         <section class="backdrop" aria-label="Tool launcher">
           <div class="section-head">
-            <h2 class="section-title">Tools for sales</h2>
+            <h2 class="section-title">Sales buddies</h2>
           </div>
 
           <div class="grid-3 group-sales" role="list">
             <a class="tool" role="listitem" href="./engagement/index.html" title="Open Call scripts and emails">
-              <div class="tool-title">Call scripts and emails</div>
-              <small>Craft confident, on-brand outreach in seconds.</small>
+              <div class="tool-title">Sales engagement</div>
+              <small>Engage faster. Convert intent.</small>
             </a>
             <a class="tool" role="listitem" href="./qualification/index.html" title="Open Lead qualification">
               <div class="tool-title">Lead qualification</div>
-              <small>Qualify your leads in seconds.</small>
+              <small>Proof-led qualification in minutes.</small>
             </a>
             <a class="tool disabled" role="listitem" href="#" aria-disabled="true" tabindex="-1" title="Coming soon">
               <div class="tool-title">Beat your competitors</div>
-              <small>Position your value clearly against alternatives.</small>
+              <small>Battlecards that win.</small>
             </a>
           </div>
 
           <div class="section-head" style="margin-top:14px">
-            <h2 class="section-title">Tools for marketing</h2>
+            <h2 class="section-title">Marketing buddies</h2>
           </div>
 
           <div class="grid-3 group-marketing" role="list">
             <a class="tool" role="listitem" href="./campaign/index.html" title="Open Campaign Builder">
               <div class="tool-title">Campaign Builder</div>
-              <small>Create evidence-first B2B campaigns.</small>
+              <small>Create evidence-first B2B campaigns, fast.</small>
             </a>
             <a class="tool" role="listitem" href="./ch-strategic/index.html" title="Open Strategic Report matcher">
-              <div class="tool-title">Strategic Report matcher</div>
-              <small>Upload a CSV and find evidence in Strategic Reports. Large lists run as a background job.</small>
+              <div class="tool-title">Buyer Beacons</div>
+              <small>Surface triggers. Prioritise targets, fast.</small>
             </a>
             <a class="tool disabled" role="listitem" href="#" aria-disabled="true" tabindex="-1" title="Coming soon">
               <div class="tool-title">Differentiation &amp; market-beating messaging</div>
-              <small>Data-backed, personalised messaging &amp; proof of value.</small>
+              <small>Stand out with substance, not noise.</small>
             </a>
           </div>
         </section>
@@ -435,7 +466,8 @@
           </div>
           <div id="reportContainer" role="region" aria-label="Power BI Report"></div>
           <p id="pbi-status" class="fineprint" style="margin-top:10px"></p>
-          <p class="fineprint" style="margin-top:10px">© Larato Limited. Company Registration Number 5451360. Registered
+          <p class="fineprint" style="margin-top:10px; font-size: 10px">© Larato Limited. Company Registration Number
+            5451360. Registered
             in the UK.</p>
         </section>
       </section> <!-- /#dashboard -->
