@@ -3,22 +3,23 @@
 <html lang="en" data-app="inside-track-tools">
 
 <head>
-  <base href="/" />
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Inside Track Tools · Strategic review evidence</title>
-  <link rel="stylesheet" href="/styles.css?v=2025-08-24-1" />
+  <title>Inside Track Tools · Buyer Beacon</title>
+  <link rel="stylesheet" href="/styles.css?v=2025-10-09-fc2">
 </head>
 
 <body>
-  <!-- App header (shared shell) -->
-  <header class="app-header" role="banner">
+  <!-- HEADER (reused shell) -->
+  <header class="app-header topbar compact" role="banner">
     <div class="header-left">
-      <img class="logo" src="/assets/larato-logo-bullet.svg" alt="Larato Inside Track Sales Tools" />
-      <div class="brand-text">
-        <h1 class="app-title">Inside Track Tools</h1>
-        <p class="kicker">Strategic review evidence</p>
-      </div>
+      <a class="brand-link" href="/" aria-label="Back to Inside Track main menu" title="Back to main menu">
+        <img class="logo" src="/assets/larato-logo-bullet.svg" alt="" aria-hidden="true" />
+        <div class="brand-text">
+          <h1 class="app-title">Inside Track Sales Accelerator</h1>
+          <p class="kicker">Buyer Beacon</p>
+        </div>
+      </a>
     </div>
 
     <div class="header-right">
@@ -65,8 +66,8 @@
               <label for="evidence_tag">Keyword or phrase <span aria-hidden="true" class="req">*</span></label>
               <input id="evidence_tag" name="evidence_tag" maxlength="80" placeholder="e.g., international" required
                 autocomplete="off" spellcheck="false" aria-describedby="evidence_help evidence_error" />
-              <p id="evidence_help" class="muted">
-                Looks only in the Strategic Report. Literal match with smart tolerance for OCR and common variants.
+              <p id="evidence_help" class="muted" style ="font-size: smaller;">
+                Enter the keywords you want to search for (up to 10, comma separated).
               </p>
               <span id="evidence_error" class="error-inline" role="alert" aria-live="polite"></span>
             </div>
@@ -81,19 +82,18 @@
               <label for="csv_file">Upload CSV <span aria-hidden="true" class="req">*</span></label>
               <input id="csv_file" name="csv_file" type="file" accept=".csv" required
                 aria-describedby="csv_help csv_error" />
-              <p id="csv_help" class="muted">
-                CSV must include headers <code>Company Name</code> and <code>Company Number</code>. Other columns are
-                ignored.
+              <p id="csv_help" class="muted" style ="font-size: smaller;">
+                You provide Company Name and Company Number. We do the heavy lifting.
               </p>
               <span id="csv_error" class="error-inline" role="alert" aria-live="polite"></span>
             </div>
 
             <div class="field">
-              <label for="importPbiBtn">Or import from Power BI</label>
+              <label for="importPbiBtn">Market Intelligence import</label>
               <button id="importPbiBtn" class="btn inline" type="button" aria-haspopup="dialog"
-                aria-controls="pbi-dialog">Import current selection</button>
-              <p class="muted">
-                Reuses the main report wiring to pull <strong>Company Name</strong> and <strong>Company Number</strong>.
+                aria-controls="pbi-dialog">Import</button>
+              <p class="muted" style ="font-size: smaller;">
+                Click to analyse your profiled prospects.
               </p>
             </div>
           </div>

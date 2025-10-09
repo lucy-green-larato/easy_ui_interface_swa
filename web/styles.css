@@ -1994,21 +1994,111 @@ html[data-theme="dark"] .group-marketing .tool {
 .no-scroll {
   overflow: hidden;
 }
+
 /* === FINAL HOVER OVERRIDES (dark mode) — ensure pressed colours apply === */
 @media (hover: hover) and (pointer: fine) {
+
   /* Sales — pressed: #64234A */
   html[data-theme="dark"] .group-sales .tool:hover {
-    --tile-bg: var(--d-accent-pressed) !important;  /* #64234A */
+    --tile-bg: var(--d-accent-pressed) !important;
+    /* #64234A */
     background: var(--tile-bg) !important;
     transform: translateY(-1px);
-    filter: none !important; /* in case any legacy filter lingers */
+    filter: none !important;
+    /* in case any legacy filter lingers */
   }
 
   /* Marketing — pressed: #E79101 */
   html[data-theme="dark"] .group-marketing .tool:hover {
-    --tile-bg: var(--d-gold-pressed) !important;    /* #E79101 */
+    --tile-bg: var(--d-gold-pressed) !important;
+    /* #E79101 */
     background: var(--tile-bg) !important;
     transform: translateY(-1px);
     filter: none !important;
   }
+}
+
+/* Header brand block */
+.app-header .brand-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  /* vertically align with logo */
+  gap: 2px;
+  /* tighten title ↔ kicker spacing */
+}
+
+/* Title */
+.app-header .app-title {
+  margin: 0;
+  /* remove default h1 margins */
+  line-height: 1.15;
+  /* tighter leading */
+  letter-spacing: -0.01em;
+  /* subtle tracking for density */
+  font-weight: 700;
+  /* keep weight for brand impact */
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1;
+}
+
+/* Kicker (subtitle) */
+.app-header .kicker {
+  margin: 0;
+  line-height: 1.15;
+  /* match title rhythm */
+  font-size: 0.95rem;
+  /* slightly smaller than body */
+  color: var(--text-muted, #666);
+  letter-spacing: -0.005em;
+}
+
+/* Make the entire brand stack a single, large click target */
+.header-left .brand-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+  outline-offset: 3px;
+  /* clear keyboard focus halo */
+}
+
+/* Subtle “it’s a link” affordance on hover/focus */
+.header-left .brand-link:hover .app-title,
+.header-left .brand-link:focus .app-title {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: .08em;
+}
+
+/* Optional: tiny visual nudge on the logo */
+.header-left .brand-link:hover .logo,
+.header-left .brand-link:focus .logo {
+  filter: contrast(115%);
+  transform: translateY(-0.5px);
+}
+
+/* Keep tightened type from earlier */
+.app-header .brand-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.app-header .app-title {
+  margin: 0;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  font-weight: 700;
+}
+
+.app-header .kicker {
+  margin: 0;
+  line-height: 1.15;
+  font-size: 0.95rem;
+  color: var(--text-muted, #666);
 }
