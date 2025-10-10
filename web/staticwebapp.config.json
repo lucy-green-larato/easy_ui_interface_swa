@@ -1,9 +1,19 @@
 {
-  "navigationFallback": { "rewrite": "/index.html" },
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/content/*",
+      "/src/*",
+      "/vendor/*",
+      "/assets/*",
+      "/intel.json"
+    ]
+  },
   "routes": [
     { "route": "/ch-strategic/*", "rewrite": "/ch-strategic/index.html" }
   ],
-  "responseOverrides": {
-    "404": { "rewrite": "/index.html" }
+  "mimeTypes": {
+    ".md": "text/markdown",
+    ".json": "application/json"
   }
 }
