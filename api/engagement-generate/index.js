@@ -1,248 +1,431 @@
-// /api/engagement-generate/index.js
-// Node 20 (Consumption). Auth: anonymous; role-enforced in code.
-// Free-form engagement generator (topic/audience/tone/length/templateId)
+// /api/engagement-generate/index.js 2025-10-11 v4.8 (CommonJS)
+// Secure generation for the Engagement app.
+// Modes:
+//   - script  : JSON-only coach guidance (sections/tips/summary_bullets)
+//   - followup: plain text email (returned as { email: "..." })
+// Strict Azure OpenAI vs public OpenAI separation. No forced sign-off.
 
-const VERSION = "engagement-generate-2025-09-25-1";
+// --- Fetch shim (works on Node 16/18/20, Azure Functions) ---
+const fetchFn =
+  typeof globalThis.fetch === "function"
+    ? (url, opts) => globalThis.fetch(url, opts) // ensure correct signature
+    : (url, opts) =>
+      import("node-fetch").then(({ default: f }) => f(url, opts)); // works with node-fetch v3 ESM
 
-const DEFAULT_LLM_TIMEOUT = Number(process.env.LLM_TIMEOUT_MS || "45000"); // ms
-const FORCE_OPENAI = process.env.FORCE_OPENAI === "1";
 
-const { randomUUID } = require("crypto");
+module.exports = async function (context, req) {
+  const t0 = Date.now();
 
-// ---------- Minimal CORS ----------
-function buildCorsHeaders(req) {
-  const origin = req.headers?.origin || "*";
+  try {
+    // CORS / preflight
+    if (req.method === "OPTIONS") return send(context, 204, "");
+    if (req.method !== "POST") return send(context, 405, "Only POST supported");
+
+    const body = req.body || {};
+    const mode = String(body.mode || "script").toLowerCase(); // "script" | "followup"
+    const policy = body.policy || { language: "en-GB", nonAssumptiveClose: true };
+
+    // -------- FOLLOW-UP EMAIL (JSON response with { email }) --------
+    // Triggered by either mode:"followup" OR op:"email"
+    const isFollowup =
+      mode === "followup" || String(body.op || "").toLowerCase() === "email";
+
+    if (isFollowup) {
+      const seller = body.seller || { name: "", company: "" };
+      const prospect = body.prospect || { name: "", role: "", company: "" };
+      const tone = String(body.tone || "Professional (corporate)");
+      const scriptMdText = String(body.scriptMdText || body.scriptMd || "");
+      const callNotes = String(body.callNotes || "");
+
+      const prompt = buildFollowupPrompt({
+        seller,
+        prospect,
+        tone,
+        scriptMdText,
+        callNotes,
+      });
+
+      const text = await callModelJson(prompt, {
+        json: false, // plain text email
+        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+        timeoutMs: clampInt(
+          process.env.LLM_TIMEOUT_MS || 30000,
+          5000,
+          120000,
+          30000
+        ),
+        context,
+      });
+
+      context.log(
+        `[engagement-generate][followup] ok in ${Date.now() - t0} ms`
+      );
+      // IMPORTANT: return JSON object to match client expectations
+      return send(context, 200, { email: String(text || "").trim() });
+    }
+
+    // -------- SCRIPT (JSON-only) --------
+    const templateMd = String(body.templateMd || "");
+    const variables = body.variables || {};
+
+    if (!templateMd.trim())
+      return send(context, 400, "templateMd is required");
+
+    // Minimal validation / canonicalisation
+    const tone = String(variables.tone || "Professional");
+    const length = clampInt(variables.length, 150, 1200, 450);
+
+    const prompt = buildJsonPrompt({
+      templateMd,
+      variables,
+      policy,
+      tone,
+      length,
+    });
+
+    const response = await callModelJson(prompt, {
+      json: true, // request JSON object
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini", // only used for public OpenAI
+      timeoutMs: clampInt(
+        process.env.LLM_TIMEOUT_MS || 30000,
+        5000,
+        120000,
+        30000
+      ),
+      context,
+    });
+
+    // Validate shape
+    const data = safeParseJson(response);
+    const checked = validateSections(data);
+
+    context.log(`[engagement-generate][script] ok in ${Date.now() - t0} ms`);
+    return send(context, 200, checked);
+  } catch (e) {
+    const msg = e && e.message ? e.message : String(e);
+    context.log.error("[engagement-generate] error", msg);
+    return send(context, 502, msg);
+  }
+};
+
+/* ============================ PROMPTS ============================ */
+
+// Extract <!-- suggested_next_step: ... -->
+function extractSuggestedNext(md) {
+  const m = String(md || "").match(
+    /<!--\s*suggested_next_step:\s*([\s\S]*?)\s*-->/i
+  );
+  return m ? m[1].trim() : "";
+}
+
+// JSON-only coach guidance (script)
+function buildJsonPrompt({ templateMd, variables, policy, tone, length }) {
+  const {
+    seller = {},
+    prospect = {},
+    usps = [], // array of lines (may be empty)
+    other_points = [], // array of lines (may be empty)
+    chosen_next_step = "", // string | null
+    mode,
+    productId,
+    buyerId,
+
+    // Optional richer fields supplied by client
+    productLabel,
+    buyerType,
+    valueProposition,
+    context,
+    nextStep,
+    targetWords,
+  } = variables;
+
+  // Canonical fallbacks
+  const productLabelStr = String(productLabel || productId || "").trim();
+  const buyerTypeStr = String(buyerType || buyerId || "").trim();
+  const uspsStr = String(
+    valueProposition || (Array.isArray(usps) ? usps.join(", ") : "") || ""
+  ).trim();
+  const otherStr = String(
+    context || (Array.isArray(other_points) ? other_points.join(", ") : "") || ""
+  ).trim();
+  const nextStepStr = String(nextStep || chosen_next_step || "").trim();
+  const targetLen = Number(targetWords || length || 0);
+
+  // Tone guidance
+  const style = toneStyles(String(tone || "Professional"));
+  const readability = `Readability: ${style.sentences}. Vocabulary: ${style.vocab}.`;
+  const lengthHint = targetLen ? `Aim for about ${targetLen} words (±10%).` : "";
+
+  // Template hint
+  const suggestedNext = extractSuggestedNext(templateMd);
+
+  return `You are a top UK sales coach. Produce **instructional advice for the salesperson** (not a spoken script).
+
+Write **valid JSON only** (no markdown; no prose outside JSON). Address the salesperson directly ("you") in the requested tone.
+Language: ${policy.language || "en-GB"}.
+Tone: ${style.tone}.
+${readability}
+${lengthHint}
+
+Your advice must use these six sections (these map to our UI and must ALL be present):
+
+{
+  "sections": {
+    "opening": string,                 // What you should do first and how to set context.
+    "buyer_pain": string,              // How to uncover pains for this buyer type; what to listen for.
+    "buyer_desire": string,            // How to test for desired outcomes and decision criteria.
+    "example_illustration": string,    // A relevant customer example to draw on; how to use it.
+    "handling_objections": string,     // Specific objection patterns + how you should respond (in this tone).
+    "next_step": string                // The exact next step you should propose and how to ask for it.
+  },
+  "integration_notes": {
+    "usps_used": string[]?,
+    "other_points_used": string[]?,
+    "next_step_source": "salesperson" | "template" | "assistant"?
+  },
+  "tips": [string, string, string],
+  "summary_bullets": string[]
+}
+
+Constraints:
+- UK business English. No pleasantries. **Adhere to the tone/style above** so tone affects vocabulary and sentence length.
+- **Weave** the salesperson inputs (USPs & Other points) into the most relevant sections as natural guidance.
+- Next step precedence: (1) salesperson-provided; else (2) template <!-- suggested_next_step -->; else (3) a clear, low-friction next step.
+- Include one specific, relevant customer example with measurable results; show how and **when** the salesperson should use it.
+- Return "summary_bullets" with **6–12** short bullets (**5–10 words** each) summarising the advice.
+- Use the template **for ideas only**. **Do NOT copy or paraphrase** its wording.
+
+Context to incorporate:
+- Product: ${productLabelStr}
+- Buyer type: ${buyerTypeStr}
+- Salesperson USPs (optional): ${uspsStr || "(none)"}
+- Other points to cover (optional): ${otherStr || "(none)"}
+- Salesperson requested next step (optional): ${nextStepStr || "(none)"}
+- Template suggested next step (optional): ${suggestedNext || "(none)"}
+
+Template to mine for ideas (don’t copy headings or wording; your output is JSON):
+--- TEMPLATE START ---
+${templateMd}
+--- TEMPLATE END ---
+`;
+}
+
+// FOLLOW-UP EMAIL (plain text) — uses your proposed prompt verbatim
+function buildFollowupPrompt({
+  seller,
+  prospect,
+  tone,
+  scriptMdText,
+  callNotes,
+}) {
+  return `You are a UK B2B salesperson. Draft a concise follow-up email after a discovery call.
+
+Tone: ${tone || "Professional (corporate)"}.
+Output: Plain text email with:
+- Subject line
+- Greeting ("Hello ${prospect?.name || ""},")
+- 2–3 short paragraphs that stitch together (1) the prepared call talking points and (2) the salesperson's call notes (prioritise the notes)
+- A single clear next step
+- Signature as "${seller?.name || ""}, ${seller?.company || ""}"
+
+Prepared talking points (from the script the rep used on the call):
+${scriptMdText || "(none)"}
+
+Salesperson's notes (verbatim):
+${callNotes || "(none)"}`;
+}
+
+/* ============================ HELPERS ============================ */
+
+function toneStyles(tone) {
+  const t = String(tone).toLowerCase();
+  if (t.startsWith("warm"))
+    return {
+      tone: "Warm, human, supportive",
+      sentences: "Mostly medium length",
+      vocab: "Plain, friendly, precise",
+    };
+  if (t.startsWith("straight"))
+    return {
+      tone: "Straightforward, plain-spoken",
+      sentences: "Short to medium sentences",
+      vocab: "Clear, direct, specific",
+    };
   return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, x-correlation-id, x-ms-client-principal",
-    "Vary": "Origin"
+    tone: "Professional, composed, confident",
+    sentences: "Short to medium sentences",
+    vocab: "Clear, specific, evidence-led",
   };
 }
 
-// ---------- Auth guard (SWA principal) ----------
-const ALLOWED_ROLES = new Set(["sales", "sales-admin"]); // ALLOWED_ROLES_ENGAGEMENT
-function parsePrincipal(headerValue) {
-  try {
-    if (!headerValue) return { roles: [] };
-    const json = JSON.parse(Buffer.from(String(headerValue), "base64").toString("utf8"));
-    const roles = Array.isArray(json?.userRoles) ? json.userRoles : [];
-    return { roles };
-  } catch {
-    return { roles: [] };
-  }
-}
-function enforceRoles(req, isLocalDev) {
-  const principalHeader = req.headers?.["x-ms-client-principal"];
-  if (!principalHeader && !isLocalDev) {
-    return { ok: false, code: 401, body: { error: "unauthenticated", message: "Login required" } };
-  }
-  const { roles } = parsePrincipal(principalHeader || "");
-  if (!isLocalDev) {
-    const has = roles.some(r => ALLOWED_ROLES.has(String(r || "").toLowerCase()));
-    if (!has) return { ok: false, code: 403, body: { error: "forbidden", message: "Insufficient role" } };
-  }
-  return { ok: true };
+function clampInt(n, min, max, dflt) {
+  n = parseInt(n, 10);
+  if (Number.isNaN(n)) return dflt;
+  return Math.min(max, Math.max(min, n));
 }
 
-// ---------- Utils ----------
-function getCorrelationId(req) {
-  return (req.headers?.["x-correlation-id"] || randomUUID()).toString();
-}
-function stripPleasantries(text) {
-  if (!text) return text;
-  const lines = String(text).split(/\n/);
-  const rxes = [
-    /\b(i\s+hope\s+(you('| a)re)\s+well)\b/i,
-    /\b(are\s+you\s+well\??)\b/i,
-    /\b(hope\s+you('| a)re\s+(doing\s+)?well)\b/i,
-    /\b(how\s+are\s+you(\s+today)?\??)\b/i,
-    /\b(trust\s+you('| a)re\s+well)\b/i
-  ];
-  const cleaned = [];
-  for (const line of lines) {
-    if (!rxes.some(rx => rx.test(line))) cleaned.push(line);
-  }
-  return cleaned.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-}
-function parseTargetLength(label) {
-  const s = String(label || "").toLowerCase();
-  if (s.includes("650")) return 650;
-  if (s.includes("450")) return 450;
-  if (s.includes("300")) return 300;
-  if (s.includes("150")) return 150;
-  return 300;
-}
-function normaliseTone(raw) {
-  const s = String(raw || "").toLowerCase();
-  if (s.includes("straight")) return "Straightforward";
-  if (s.includes("warm")) return "Warm (professional)";
-  return "Professional (corporate)";
-}
-
-// ---------- Model caller (Azure OpenAI w/ OpenAI fallback) ----------
-async function abortableFetch(url, init = {}, ms = DEFAULT_LLM_TIMEOUT) {
+/**
+ * Strictly separated Azure OpenAI vs public OpenAI:
+ *  - Azure requires: AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_KEY (and optional AZURE_OPENAI_API_VERSION)
+ *  - Public OpenAI requires: OPENAI_API_KEY (and optional OPENAI_API_URL base)
+ * No key reuse across providers. json=true -> response_format=json_object.
+ */
+// Single, correct implementation. No fallback magic, no caller/callee access.
+async function callModelJson(prompt, { json, model, timeoutMs, context }) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error("timeout")), ms);
-  try { return await fetch(url, { ...init, signal: controller.signal }); }
-  finally { clearTimeout(timer); }
-}
-function extractText(res) {
-  if (!res) return "";
+  const id = setTimeout(() => controller.abort(), timeoutMs || 30000);
+
+  // Provider selection (strict separation)
+  const forcePublic = String(process.env.FORCE_OPENAI || "").trim() === "1";
+
+  // Azure
+  const azureEndpoint = String(process.env.AZURE_OPENAI_ENDPOINT || "").trim();
+  const azureDeployment = String(process.env.AZURE_OPENAI_DEPLOYMENT || "").trim();
+  const azureApiVersion = String(process.env.AZURE_OPENAI_API_VERSION || "").trim();
+  const azureKey = String(process.env.AZURE_OPENAI_API_KEY || process.env.AZURE_OPEN_API_KEY || "").trim();
+
+  // Public OpenAI
+  const openaiBase = String(process.env.OPENAI_API_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+  const publicKey = String(process.env.OPENAI_API_KEY || "").trim();
+
+  const canUseAzure = !!azureEndpoint && !!azureDeployment && !!azureKey;
+  const canUsePublic = !!publicKey;
+  const useAzure = !forcePublic && canUseAzure;
+
+  if (!useAzure && !canUsePublic) {
+    clearTimeout(id);
+    throw new Error("No LLM configured: set Azure (AZURE_OPENAI_*) or OPENAI_API_KEY.");
+  }
+  if (!useAzure && forcePublic && !canUsePublic) {
+    clearTimeout(id);
+    throw new Error("FORCE_OPENAI=1 but OPENAI_API_KEY is not set.");
+  }
+
   try {
-    if (res.choices?.[0]?.message?.content) return String(res.choices[0].message.content);
-    if (res.output_text) return String(res.output_text);
-    if (res.text) return String(res.text);
-  } catch {}
-  return "";
-}
-async function callModel({ system, prompt, temperature = 0.6, max_tokens, response_format }) {
-  const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-  const azKey = process.env.AZURE_OPENAI_API_KEY;
-  const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-  const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
-  const oaKey = process.env.OPENAI_API_KEY;
-  const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
-  const azureConfigured = Boolean(azEndpoint && azKey && azDeployment);
+    let url, headers, payload;
 
-  const messages = [{ role: "system", content: system || "" }, { role: "user", content: prompt || "" }];
-
-  async function callAzure() {
-    const url = azEndpoint.replace(/\/+$/, "") +
-      `/openai/deployments/${encodeURIComponent(azDeployment)}/chat/completions?api-version=${encodeURIComponent(azApiVersion)}`;
-    const body = { temperature, messages, ...(max_tokens ? { max_tokens } : {}), ...(response_format ? { response_format } : {}) };
-    const r = await abortableFetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "api-key": azKey, "User-Agent": "sales-tools/" + VERSION },
-      body: JSON.stringify(body)
-    }, DEFAULT_LLM_TIMEOUT);
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      const code = data?.error?.code || r.status;
-      const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
-      const e = new Error(`[AZURE ${code}] ${msg}`);
-      e._az429 = String(code) === "429";
-      e._azTransient = /rate|thrott|timeout|ECONN|ENOTFOUND/i.test(msg);
-      throw e;
+    if (useAzure) {
+      const ver = azureApiVersion || "2024-08-01-preview";
+      url = `${azureEndpoint.replace(/\/+$/, "")}/openai/deployments/${encodeURIComponent(azureDeployment)}/chat/completions?api-version=${encodeURIComponent(ver)}`;
+      headers = { "content-type": "application/json", "api-key": azureKey };
+      payload = {
+        messages: [
+          { role: "system", content: json ? "Return strictly valid JSON only." : "Return a concise plain text email." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.4,
+        ...(json ? { response_format: { type: "json_object" } } : {})
+      };
+    } else {
+      url = `${openaiBase}/chat/completions`;
+      headers = { "content-type": "application/json", authorization: `Bearer ${publicKey}` };
+      payload = {
+        model: model || "gpt-4o-mini",
+        messages: [
+          { role: "system", content: json ? "Return strictly valid JSON only." : "Return a concise plain text email." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.4,
+        ...(json ? { response_format: { type: "json_object" } } : {})
+      };
     }
-    data._provider = "azure";
-    return data;
-  }
-  async function callOpenAI() {
-    const payload = { model: oaModel, temperature, messages, ...(max_tokens ? { max_tokens } : {}), ...(response_format ? { response_format } : {}) };
-    const r = await abortableFetch("https://api.openai.com/v1/chat/completions", {
+
+    // ✅ Correct fetch signature
+    const res = await fetchFn(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + oaKey, "User-Agent": "sales-tools/" + VERSION },
-      body: JSON.stringify(payload)
-    }, DEFAULT_LLM_TIMEOUT);
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(`[OPENAI ${data?.error?.type || r.status}] ${data?.error?.message || r.statusText}`);
-    data._provider = "openai";
-    return data;
-  }
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
 
-  if ((FORCE_OPENAI || !azureConfigured) && oaKey) return callOpenAI();
-  if (azureConfigured) {
-    try { return await callAzure(); }
-    catch (e) {
-      if ((e._az429 || e._azTransient) && oaKey) return callOpenAI();
-      throw e;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      const where = useAzure ? "Azure OpenAI" : "OpenAI";
+      if (context && context.log) {
+        context.log.error("[engagement-generate] upstream error", {
+          provider: where,
+          status: res.status,
+          url,
+          body: body?.slice(0, 2000),
+        });
+      }
+      throw new Error(`LLM ${res.status} (${where}): ${body?.slice(0, 800)}`);
     }
-  }
-  if (oaKey) return callOpenAI();
-  throw new Error("No model configured");
-}
 
-// ---------- Optional template fetch ----------
-async function fetchTemplateMd(templateId, req, context) {
-  if (!templateId) return "";
-  const CALL_LIB_BASE = (process.env.CALL_LIB_BASE || "").trim() || ""; // server-side optional
-  const proto = req.headers?.["x-forwarded-proto"]?.split(",")[0] || "https";
-  const host = (req.headers?.["x-forwarded-host"] || req.headers?.host || "").split(",")[0];
-  const base =
-    CALL_LIB_BASE
-      ? (/^https?:\/\//i.test(CALL_LIB_BASE) ? CALL_LIB_BASE.replace(/\/+$/,"") : `${proto}://${host}${CALL_LIB_BASE.startsWith("/")?"":"/"}${CALL_LIB_BASE}`)
-      : `${proto}://${host}`;
-  // Convention: /content/call-library/v1/templates/{id}.md
-  const url = `${base}/content/call-library/v1/templates/${encodeURIComponent(templateId)}.md`;
-  try {
-    const r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) return "";
-    return (await r.text()) || "";
-  } catch (e) {
-    try { context.log(`[engagement] template fetch failed: ${e.message}`); } catch {}
-    return "";
+    const data = await res.json();
+
+    // ✅ Guarded parsing; never touches forbidden properties
+    const choice = data?.choices?.[0];
+    let text = choice?.message?.content ?? "";
+
+    const fc = choice?.message?.function_call;
+    if (!text && fc && typeof fc === "object" && fc !== null && Object.prototype.hasOwnProperty.call(fc, "arguments")) {
+      text = fc.arguments || "";
+    }
+
+    return text || "";
+  } finally {
+    clearTimeout(id);
   }
 }
 
-// ---------- Azure Function entry ----------
-module.exports = async function (context, req) {
-  const cors = buildCorsHeaders(req);
-  const cid = getCorrelationId(req);
-  const headersBase = { ...cors, "x-correlation-id": cid };
-
-  if (req.method === "OPTIONS") { context.res = { status: 204, headers: headersBase }; return; }
-  if (req.method !== "POST") { context.res = { status: 405, headers: headersBase, body: { error: "bad_request", message: "Invalid method" } }; return; }
-
-  const hostHeader = String(req.headers?.["x-forwarded-host"] || req.headers?.host || "");
-  const isLocalDev = /localhost|127\.0\.0\.1|app\.github\.dev|githubpreview\.dev/i.test(hostHeader);
-
-  // AuthZ
-  const auth = enforceRoles(req, isLocalDev);
-  if (!auth.ok) { context.res = { status: auth.code, headers: headersBase, body: auth.body }; return; }
-
-  // Inputs
-  const b = typeof req.body === "string" ? (JSON.parse(req.body || "{}")) : (req.body || {});
-  const topic = String(b.topic || "").trim();
-  const audience = String(b.audience || "").trim();
-  const tone = normaliseTone(b.tone || "");
-  const targetWords = parseTargetLength(b.length || b.target || "");
-  const templateId = String(b.templateId || "").trim();
-
-  if (!topic || !audience) {
-    context.res = { status: 400, headers: headersBase, body: { error: "bad_request", message: "Invalid input", details: { topic: !!topic, audience: !!audience } } };
-    return;
-  }
-
-  // Optional template
-  const templateMd = await fetchTemplateMd(templateId, req, context);
-
-  const prompt =
-`You are a UK B2B sales coach. Produce concise, **actionable** engagement guidance for a salesperson to start a conversation.
-
-Constraints:
-- UK business English; no pleasantries; no emojis.
-- Tone: ${tone}.
-- Target length: about ${targetWords} words (±10%).
-- Structure using these markdown headings in order:
-## Opening
-## Buyer Pain
-## Buyer Desire
-## Example Illustration
-## Handling Objections
-## Next Step
-
-Context:
-- Topic: ${topic}
-- Audience: ${audience}
-
-Template (optional, for ideas only):
-${templateMd || "(none)"}
-
-Write imperative guidance under each heading.`;
-
-  const started = Date.now();
+function safeParseJson(s) {
   try {
-    const llmRes = await callModel({ system: "Write crisp, specific guidance. No fluff.", prompt, temperature: 0.6 });
-    const durationMs = Date.now() - started;
-    const content = stripPleasantries(extractText(llmRes) || "").trim();
-    context.res = {
-      status: 200,
-      headers: headersBase,
-      body: { content, meta: { model: llmRes?._provider || "unknown", durationMs } }
-    };
-  } catch (e) {
-    context.log.error(`[${VERSION}] ${e?.stack || e}`);
-    context.res = { status: 500, headers: headersBase, body: { error: "internal", message: "Unexpected error" } };
+    return JSON.parse(String(s || "{}"));
+  } catch {
+    return {};
   }
-};
+}
+
+function validateSections(data) {
+  const sections = (data && data.sections) || {};
+  const keys = [
+    "opening",
+    "buyer_pain",
+    "buyer_desire",
+    "example_illustration",
+    "handling_objections",
+    "next_step",
+  ];
+  const out = { sections: {}, tips: [], summary_bullets: [] };
+
+  for (const k of keys) out.sections[k] = trimStr(sections[k]);
+
+  out.tips = Array.isArray(data && data.tips)
+    ? data.tips.map(trimStr).filter(Boolean).slice(0, 3)
+    : [];
+  while (out.tips.length < 3) out.tips.push("");
+
+  out.summary_bullets = Array.isArray(data && data.summary_bullets)
+    ? data.summary_bullets.map(trimStr).filter(Boolean).slice(0, 3)
+    : [];
+  while (out.summary_bullets.length < 3) out.summary_bullets.push("");
+
+  return out;
+}
+
+function trimStr(s) {
+  return String(s || "").trim();
+}
+function list(a) {
+  return Array.isArray(a) && a.length
+    ? a.map((v) => `• ${String(v).trim()}`).join("\n")
+    : "(none)";
+}
+
+function send(context, status, body) {
+  const isString = typeof body === "string";
+  context.res = {
+    status,
+    headers: {
+      "content-type": isString
+        ? "text/plain; charset=utf-8"
+        : "application/json",
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "POST, OPTIONS",
+      "access-control-allow-headers": "content-type, authorization, api-key",
+    },
+    body,
+  };
+  return context.res;
+}

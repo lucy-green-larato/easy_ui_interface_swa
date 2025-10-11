@@ -1,5 +1,7 @@
-// first-call-script-v2.js
-import { getIndex, loadTemplate, canonical } from "../lib/callLibrary.js?v=fix6";
+// web/src/js/first-call-script-v2.js 11-10-2025 v2 (updated)
+
+import { getIndex, loadTemplate, canonicalBuyerId as canonical } from "../lib/contentLoader.js";
+import { initMotivation, getRandomQuote } from "./engagement/motivation.js";
 
 // Shape-agnostic, absolute-only, works with split or unified indexes.
 async function loadProductIndex(mode) {
@@ -120,13 +122,19 @@ const SECTION_ALIASES = {
 // UI-only heading overrides
 const DISPLAY_LABELS = { "Opening": "Overview" };
 
+document.addEventListener("DOMContentLoaded", () => {
+  // Load quotes in the background; if not ready yet, buildPreface will use a safe fallback.
+  initMotivation();
+});
+
 function buildPreface(values = {}) {
   const formName = String(values.seller_name || "").trim();
   const who = formName || currentUserName || "there";
   const title = "About this guide";
+  const motivation = getRandomQuote(); // use module-provided quote
   const body = [
     `Hi ${esc(who)} 👋`,
-    `You’ve got this. This guide gives you concise, practical coaching for your next call — what to focus on, how to steer the conversation, and how to land a clear next step.`,
+    motivation,
     `Pick the ideas that fit your style. Keep it simple, be curious, and use the buyer insights on the right to back your judgement. Good selling! 🚀`
   ].map(p => `<p>${p}</p>`).join("");
   return { title, html: body };
@@ -344,25 +352,22 @@ function renderBulletScriptFromSections(sections) {
   return `<div class="script-body"><h3>Bullet point script</h3><ul>${items || "<li>No bulletable content found.</li>"}</ul></div>`;
 }
 
-/* Keys */
+/* Keys / Constants */
 const FORM_ID = 'script-form';
 const STORAGE_KEY = 'first_call_script_v2.form';
 const ACTIVITY_KEY = 'first_call_script_v2.activity';
 const OUTPUT_KEY = 'first_call_script_v2.last_output';
 const CALL_PREF_KEY = 'first_call_script_v2.call_pref';
 const TIPS_HIDDEN_KEY = 'first_call_script_v2.tips_hidden';
-const OPENERS_HIDDEN_KEY = 'first_call_script_v2.openers_hidden';
-const OPENERS_PREF_VERSION = '2';
-try {
-  const vkey = 'first_call_script_v2.openers_pref_version';
-  if (localStorage.getItem(vkey) !== OPENERS_PREF_VERSION) {
-    localStorage.setItem(OPENERS_HIDDEN_KEY, '1');
-    localStorage.setItem(vkey, OPENERS_PREF_VERSION);
-  }
-} catch { }
+
+// Openers removed (feature not used)
+// const OPENERS_HIDDEN_KEY = 'first_call_script_v2.openers_hidden';
+// const OPENERS_PREF_VERSION = '2';
+// (migration removed)
 
 const NOTES_KEY_PREFIX = 'first_call_script_v2.notes';
-const INTEL_URL = './intel.json';
+// intel.json removed for this app
+const INTEL_URL = null;
 
 const REQUIRED = ['call_type', 'seller_name', 'seller_company', 'prospect_name', 'prospect_role', 'prospect_company', 'buyer_behaviour', 'product'];
 
@@ -376,8 +381,9 @@ const downloadScriptBtn = document.getElementById('download-script');
 const toggleBulletsBtn = document.getElementById('toggle-bullets');
 const tipsList = document.getElementById('tips-list');
 const toggleTipsBtn = document.getElementById('toggle-tips');
-const openersList = document.getElementById('openers-list');
-const toggleOpenersBtn = document.getElementById('toggle-openers');
+// Openers refs removed
+// const openersList = document.getElementById('openers-list');
+// const toggleOpenersBtn = document.getElementById('toggle-openers');
 const tipsBody = document.getElementById('tips-body');
 const popoutBtn = document.getElementById('popout');
 const notesArea = document.getElementById('notes');
@@ -408,8 +414,13 @@ const userBadge = document.getElementById('user-badge');
 const userEmail = document.getElementById('user-email');
 const toggleHighlighterBtn = document.getElementById('toggle-highlighter');
 const clearHighlightsBtn = document.getElementById('clear-highlights');
-const modeFromCallType = v => canonical.mode(v);
-const buyerCanon = v => canonical.buyer(v);
+
+// Correct canonicalisers for the restored HTML:
+const modeFromCallType = v =>
+  (String(v || "").toLowerCase().startsWith("partner") ? "partner" : "direct");
+
+const buyerCanon = v => canonical(v);
+
 const nowTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 // Default Buyer needs collapsed on first load
@@ -419,7 +430,16 @@ if (toggleIntelBtn && intelBody) {
   intelBody.hidden = true;
 }
 
-if (closeModal) closeModal.addEventListener("click", () => modal.close());
+// Toggle Buyer needs open/close
+toggleIntelBtn?.addEventListener('click', () => {
+  const isOpen = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
+  const next = !isOpen;
+  toggleIntelBtn.setAttribute('aria-expanded', String(next));
+  toggleIntelBtn.textContent = next ? 'Hide' : 'Show';
+  if (intelBody) intelBody.hidden = !next;
+});
+
+if (closeModal) closeModal.addEventListener("click", () => modal?.close());
 if (helpBtn) helpBtn.addEventListener('click', () => helpModal?.showModal());
 if (helpClose) helpClose.addEventListener('click', () => helpModal?.close());
 
@@ -451,6 +471,10 @@ outputEl?.addEventListener('mouseup', () => {
   if (highlightMode) highlightCurrentSelection();
 });
 
+outputEl?.addEventListener('touchend', () => {
+  if (highlightMode) highlightCurrentSelection();
+}, { passive: true });
+
 // ESC turns the highlighter off
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && highlightMode) {
@@ -460,14 +484,29 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+function allRequiredFilledSilent(formEl) {
+  if (!formEl) return false;
+  const get = (n) => {
+    if (n === 'product') return (productSel?.value || '').trim();
+    if (n === 'buyer_behaviour') return (buyerBehSel?.value || '').trim();
+    if (n === 'call_type') return ((callTypeSel?.value || callTypeSelXs?.value) || '').trim();
+    return (formEl.elements[n]?.value || '').trim();
+  };
+  for (const name of REQUIRED) if (!get(name)) return false;
+  return true;
+}
+
 function setBusy(isBusy) {
-  if (submitBtn) submitBtn.disabled = isBusy || !allRequiredFilled(form);
+  if (submitBtn) submitBtn.disabled = isBusy || !allRequiredFilledSilent(form);
   if (resetBtn) resetBtn.disabled = isBusy;
+
   const hasText = !!(outputEl?.textContent?.trim());
   if (copyScriptBtn) copyScriptBtn.disabled = isBusy || !hasText;
   if (downloadScriptBtn) downloadScriptBtn.disabled = isBusy || !hasText;
+
   if (submitBtn) submitBtn.classList.toggle('busy', isBusy);
 }
+
 function setStatus(msg, kind = 'info') { if (!statusEl) return; statusEl.textContent = msg; statusEl.dataset.kind = kind; }
 
 function allRequiredFilled(formEl) {
@@ -477,7 +516,7 @@ function allRequiredFilled(formEl) {
   const getVal = (name) => {
     if (name === 'product') return (productSel?.value || '').trim();
     if (name === 'buyer_behaviour') return (buyerBehSel?.value || '').trim();
-    if (name === 'call_type') return (callTypeSel?.value || '').trim();
+    if (name === 'call_type') return ((callTypeSel?.value || callTypeSelXs?.value) || '').trim();
     return (formEl.elements[name]?.value || '').trim();
   };
   for (const name of REQUIRED) { const val = getVal(name); if (!val) missing.push(labels[name] || name); }
@@ -491,11 +530,15 @@ function validateField(input) {
   const el = (typeof input === 'string') ? (form.elements[input] || document.getElementById(input)) : input;
   if (!el) return;
   const id = el.id || el.name || '';
-  const errorEl = document.getElementById(`${id}_error`) || (id === 'call_type' ? document.getElementById('call_type_error') : null);
+  const errorEl =
+    document.getElementById(`${id}_error`) ||
+    (id === 'call_type'
+      ? (document.getElementById('call_type_error') || document.getElementById('call_type_error_xs'))
+      : null);
   let value = '';
   if (id === 'product') value = (productSel.value || '').trim();
   else if (id === 'buyer_behaviour') value = (buyerBehSel.value || '').trim();
-  else if (id === 'call_type') value = (callTypeSel?.value || '').trim();
+  else if (id === 'call_type') value = ((callTypeSel?.value || callTypeSelXs?.value) || '').trim();
   else value = (el.value || '').trim();
   const valid = !!value;
   if (!errorEl) return;
@@ -589,7 +632,8 @@ function addActivity(entry) {
 }
 function renderActivity() {
   const list = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]');
-  if (!activityLog) return; activityLog.innerHTML = '';
+  if (!activityLog || !activityTpl?.content) return;
+  activityLog.innerHTML = '';
   list.forEach(item => {
     const node = activityTpl.content.cloneNode(true);
     node.querySelector('.time').textContent = item.time;
@@ -609,6 +653,7 @@ function computeDelta(oldText, newText) {
 }
 function renderDelta(delta) {
   if (!deltaLog) return;
+  if (!delta.added && !delta.removed) { deltaLog.innerHTML = ''; return; }
   deltaLog.innerHTML = '';
   const a = document.createElement('li'); a.textContent = `+${delta.added} new line${delta.added === 1 ? '' : 's'}`;
   const r = document.createElement('li'); r.textContent = `−${delta.removed} removed line${delta.removed === 1 ? '' : 's'}`;
@@ -620,13 +665,17 @@ function loadCallPref() {
   try {
     const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
     if (pref?.call_type && callTypeSel && !callTypeSel.value) callTypeSel.value = pref.call_type;
+    if (pref?.call_type && callTypeSelXs && !callTypeSelXs.value) callTypeSelXs.value = pref.call_type;
     if (pref?.remember === true && rememberCallType) rememberCallType.checked = true;
   } catch { }
   updateMapIndicator();
 }
 function saveCallPrefIfRequested() {
-  if (rememberCallType && rememberCallType.checked && callTypeSel && callTypeSel.value) {
-    localStorage.setItem(CALL_PREF_KEY, JSON.stringify({ remember: true, call_type: callTypeSel.value }));
+  if (rememberCallType && rememberCallType.checked) {
+    const chosen = (callTypeSel?.value || callTypeSelXs?.value || '').trim();
+    if (chosen) {
+      localStorage.setItem(CALL_PREF_KEY, JSON.stringify({ remember: true, call_type: chosen }));
+    }
   } else if (rememberCallType && !rememberCallType.checked) {
     localStorage.removeItem(CALL_PREF_KEY);
   }
@@ -634,62 +683,7 @@ function saveCallPrefIfRequested() {
 }
 function updateMapIndicator() {
   const pref = JSON.parse(localStorage.getItem(CALL_PREF_KEY) || 'null');
-  if (mapLabel) mapLabel.textContent = pref?.call_type || (callTypeSel?.value || 'Not set');
-}
-
-// Assets for Call opener ideas
-const OPENERS_URL_JSON = './assets/call-opener-ideas.json';
-const OPENERS_URL_TXT = './assets/call-opener-ideas.txt';
-
-async function loadOpenersFromAssets() {
-  try {
-    const rj = await fetch(OPENERS_URL_JSON, { cache: 'no-store' });
-    if (rj.ok) {
-      const arr = await rj.json();
-      const tips = (Array.isArray(arr) ? arr : []).map(s => String(s).trim()).filter(Boolean);
-      if (tips.length) return tips.slice(0, 3);
-    }
-  } catch { }
-
-  try {
-    const rt = await fetch(OPENERS_URL_TXT, { cache: 'no-store' });
-    if (rt.ok) {
-      const t = await rt.text();
-      const tips = t.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-      if (tips.length) return tips.slice(0, 3);
-    }
-  } catch { }
-
-  return [];
-}
-
-function renderOpeners(list) {
-  if (!openersList) return;
-  openersList.innerHTML = '';
-
-  const items = (list && list.length) ? list.slice(0, 3) : [
-    'Add up to 3 ideas in ./assets/call-opener-ideas.json or .txt'
-  ];
-
-  items.forEach(t => {
-    const li = document.createElement('li');
-    li.textContent = t;
-    if (!list || !list.length) li.className = 'muted';
-    openersList.appendChild(li);
-  });
-}
-
-function applyOpenersVisibility() {
-  const openersBody = document.getElementById('openers-body');
-  const btn = document.getElementById('toggle-openers');
-  if (!openersBody || !btn) return;
-
-  const stored = localStorage.getItem(OPENERS_HIDDEN_KEY);
-  const hidden = (stored === null) ? true : stored === '1';
-
-  openersBody.hidden = hidden;
-  btn.textContent = hidden ? 'Show' : 'Hide';
-  btn.setAttribute('aria-expanded', String(!hidden));
+  if (mapLabel) mapLabel.textContent = pref?.call_type || (callTypeSel?.value || callTypeSelXs?.value || 'Not set');
 }
 
 // Tips toggle + auto-hide
@@ -717,7 +711,7 @@ function applyTipsVisibility() {
     empty.remove();
   }
 }
-
+//CHECKED TO HERE
 // Events
 const onChangeRecalcIntel = () => {
   const label = productSel?.options?.[productSel.selectedIndex]?.text ?? productSel?.value ?? '';
@@ -745,21 +739,10 @@ buyerBehSel?.addEventListener('change', () => {
   onChangeRecalcIntel();
 });
 
-callTypeSelXs?.addEventListener('change', async () => {
+callTypeSelXs?.addEventListener('change', () => {
   if (!callTypeSel) return;
   callTypeSel.value = callTypeSelXs.value;
-  validateField(callTypeSel);
-  saveForm(); updateMapIndicator(); refreshSubmitState();
-  const mode = modeFromCallType(callTypeSel.value) || 'direct';
-  await populateProductsForMode(mode);
   callTypeSel.dispatchEvent(new Event('change', { bubbles: true }));
-});
-
-document.getElementById('toggle-intel')?.addEventListener('click', () => {
-  const expanded = toggleIntelBtn.getAttribute('aria-expanded') === 'true';
-  toggleIntelBtn.setAttribute('aria-expanded', String(!expanded));
-  if (intelBody) intelBody.hidden = expanded;
-  toggleIntelBtn.textContent = expanded ? 'Show' : 'Hide';
 });
 
 toggleTipsBtn?.addEventListener('click', () => {
@@ -794,7 +777,7 @@ async function populateProductsForMode(mode) {
     const items = Array.isArray(idx?.products) ? idx.products : Array.isArray(idx?.items) ? idx.items : Array.isArray(idx) ? idx : [];
     if (!items.length) { sel.innerHTML = `<option value="">No products found</option>`; console.warn('[Product] index.json loaded but empty', idx); return; }
     const saved = (form?.elements?.product?.value || '').trim().toLowerCase();
-    sel.innerHTML = '<option value="" disabled>Select…</option>';
+    sel.innerHTML = '<option value="" disabled selected>Select…</option>';
     for (const item of items) {
       const idLike = item.id ?? item.slug ?? item.value ?? item.key ?? item.name ?? item.label;
       const label = item.label ?? item.name ?? String(idLike ?? '');
@@ -804,7 +787,9 @@ async function populateProductsForMode(mode) {
       if (saved && (saved === val || saved === String(label).toLowerCase())) opt.selected = true;
       sel.appendChild(opt);
     }
-    if (!sel.value) sel.options[0].selected = true;
+    if (!sel.value && sel.options.length) {
+      sel.selectedIndex = 0;
+    }
     validateField(sel);
     if (buyerBehSel?.value) {
       const label = sel?.options?.[sel.selectedIndex]?.text || sel.value || '';
@@ -869,7 +854,6 @@ form && form.addEventListener("submit", async (e) => {
     const tips = data?.script?.tips || [];
     if (!script || !script.trim()) throw new Error("Empty script returned from API");
 
-    const escapeRx = s => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const rendered = renderSectionsToHtml(script, values);
     const bulletsHtml = renderBulletScriptFromSections(rendered.sections);
     lastRender = { html: rendered.html, bulletsHtml }; window.lastRender = lastRender;
@@ -889,12 +873,6 @@ form && form.addEventListener("submit", async (e) => {
     tipsList.innerHTML = ""; (tips || []).forEach(t => { const li = document.createElement("li"); li.textContent = t; tipsList.appendChild(li); });
     applyTipsVisibility();
 
-    try {
-      const openerTips = await loadOpenersFromAssets();
-      renderOpeners(openerTips);
-    } catch { }
-    applyOpenersVisibility();
-
     copyScriptBtn.disabled = false; downloadScriptBtn.disabled = false;
 
     const old = localStorage.getItem(OUTPUT_KEY) || "";
@@ -902,7 +880,7 @@ form && form.addEventListener("submit", async (e) => {
     renderDelta(delta);
     localStorage.setItem(OUTPUT_KEY, script);
 
-    addActivity({ time: nowTime(), product: productId, buyer_behaviour: values.buyer_behaviour || "—", length: values.length || "—" });
+    addActivity({ time: nowTime(), product: productId, buyer_behaviour: values.buyer_behaviour || "—", length: values.script_length || "—" });
 
     setStatus("Done. (Generated from API)");
     setBusy(false);
@@ -913,7 +891,7 @@ form && form.addEventListener("submit", async (e) => {
     setBusy(false);
   }
 });
-
+//CHECKING ABOVE//
 // Follow-up email
 document.getElementById('make-followup')?.addEventListener('click', async () => {
   try {
@@ -928,19 +906,19 @@ document.getElementById('make-followup')?.addEventListener('click', async () => 
         prospect_company: (form.elements.prospect_company?.value || "").trim(),
         tone: (form.elements.tone?.value || "").trim(),
       },
-      scriptMdText: localStorage.getItem('first_call_script_v2.last_output') || "",
+      scriptMdText: localStorage.getItem(OUTPUT_KEY) || "",
       callNotes: (notesArea?.value || "")
     };
     setStatus('Building follow-up email…');
     const r = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const data = await r.json();
     if (!r.ok) throw new Error(data?.error || 'Could not build follow-up');
-    modalScript.innerText = data?.followup?.email || 'No email produced.';
-    modal.showModal();
+    if (modalScript) modalScript.innerText = data?.followup?.email || 'No email produced.';
+    if (modal?.showModal) modal.showModal();
     setStatus('Follow-up ready.');
   } catch (e) {
     setStatus('Could not build follow-up email', 'error');
-    diag.open = true; diagJson.textContent = String(e?.message || e);
+    if (diag) { diag.open = true; if (diagJson) diagJson.textContent = String(e?.message || e); }
   }
 });
 
@@ -948,7 +926,7 @@ document.getElementById('make-followup')?.addEventListener('click', async () => 
 if (popoutBtn) {
   popoutBtn.onclick = () => {
     const meta = (document.getElementById('output-meta')?.textContent || '').trim();
-    const html = (window.bulletMode && window.lastRender?.bulletsHtml) || (window.lastRender?.html) || (outputEl?.innerHTML || "");
+    const html = (window.bulletMode && window.lastRender?.bulletsHtml) || window.lastRender?.html || outputEl?.innerHTML || "";
     if (!html || !html.trim()) { setStatus("No script to pop out yet.", "error"); return; }
     const w = window.open("", "_blank", "noopener,noreferrer");
     if (!w) { setStatus("Pop-out was blocked by the browser.", "error"); return; }
@@ -1000,7 +978,7 @@ form?.addEventListener('reset', () => {
       typeof fillAll === 'function' && fillAll(['—']);
       typeof refreshSubmitState === 'function' && refreshSubmitState();
 
-      document.querySelector('.panel.left')?.scrollTo({ top: 0, behavior: 'instant' });
+      document.querySelector('.panel.left')?.scrollTo({ top: 0, behavior: 'auto' });
       document.getElementById('seller_name')?.focus();
 
       typeof applyTipsVisibility === 'function' && applyTipsVisibility();
@@ -1019,8 +997,16 @@ form?.addEventListener('reset', () => {
     if (email && userBadge && userEmail) { userEmail.textContent = email; userBadge.classList.remove('is-hidden'); }
   } catch { }
 
-  try { const res = await fetch(INTEL_URL, { cache: 'no-store' }); intel = normaliseIntel(await res.json()); }
-  catch { intel = { products: {} }; }
+  try {
+    if (INTEL_URL) {
+      const res = await fetch(INTEL_URL, { cache: 'no-store' });
+      intel = normaliseIntel(await res.json());
+    } else {
+      intel = { products: {} };
+    }
+  } catch {
+    intel = { products: {} };
+  }
 
   loadForm(); loadCallPref();
   if (callTypeSelXs && callTypeSel) { callTypeSelXs.value = callTypeSel.value || ''; }
@@ -1038,12 +1024,6 @@ form?.addEventListener('reset', () => {
   downloadScriptBtn.disabled = !hasText;
   submitBtn.disabled = !allRequiredFilled(form);
   loadNotes();
-
-  try {
-    const openerTips = await loadOpenersFromAssets();
-    renderOpeners(openerTips);
-  } catch { }
-  applyOpenersVisibility();
 
   document.addEventListener('input', (e) => {
     if (e.target.closest('#' + FORM_ID)) { validateField(e.target); saveForm(); refreshSubmitState(); }

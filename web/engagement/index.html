@@ -1,11 +1,11 @@
-<!--web/engagement/index.html 02-10-2025 v1-->
+<!-- web/engagement/index.html 11-10-2025 v1 (restored 3-col layout, header, help, diagnostics) -->
 <!doctype html>
 <html lang="en" data-app="inside-track-tools">
 
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Inside Track Tools · Lead qualification</title>
+  <title>Inside Track Sales Accelerator · Sales engagement</title>
   <link rel="stylesheet" href="/styles.css?v=2025-10-09-fc2">
 </head>
 
@@ -29,8 +29,8 @@
 
         <select id="call_type" name="call_type" form="script-form" required aria-describedby="call_type_error">
           <option value="">Select…</option>
-          <option>Direct</option>
-          <option>Partner</option>
+          <option value="Direct" selected>Direct</option>
+          <option value="Partner">Partner</option>
         </select>
 
         <label class="remember" for="remember_call_type">
@@ -77,8 +77,8 @@
               <label for="call_type_xs">Sales model <span aria-hidden="true" class="req">*</span></label>
               <select id="call_type_xs" name="call_type_xs" aria-describedby="call_type_error_xs">
                 <option value="">Select…</option>
-                <option>Direct</option>
-                <option>Partner</option>
+                <option value="Direct" selected>Direct</option>
+                <option value="Partner">Partner</option>
               </select>
               <p class="error" id="call_type_error_xs" role="alert" aria-live="polite"></p>
             </div>
@@ -207,7 +207,7 @@
         </div>
       </div>
 
-      <div id="output" class="output" tabindex="0" aria-label="Generated script will appear here"></div>
+      <div id="output" class="output" tabindex="0" aria-label="Your winning hints and tips will appear here."></div>
 
       <div class="output-actions">
         <button id="copy-script" class="btn inline" type="button" disabled>Copy script</button>
@@ -273,7 +273,7 @@
               <li><strong>Your desired next step</strong> – if you have a preferred CTA.</li>
             </ul>
           </li>
-          <li><strong>Generate script:</strong> click <em>Generate script</em>. The <em>Conversation Guide</em> appears
+          <li><strong>Generate script:</strong> click <em>Go</em>. The <em>Conversation Guide</em> appears
             in the middle, with clear sections (Opening, Buyer Pain, Buyer Desire, Example, Objections, Next Step).</li>
           <li><strong>Use it:</strong> copy or download the script using the buttons under the guide. The tips card
             gives three quick coaching pointers.</li>
@@ -371,17 +371,6 @@
 
       <aside class="intel card" style="margin-top:var(--s-4)">
         <div class="intel-head">
-          <h2 id="openers-title">Call opener ideas</h2>
-          <button id="toggle-openers" class="btn small" type="button" aria-expanded="false"
-            aria-controls="openers-body">Show</button>
-        </div>
-        <div id="openers-body" hidden>
-          <ul id="openers-list"></ul>
-        </div>
-      </aside>
-
-      <aside class="intel card" style="margin-top:var(--s-4)">
-        <div class="intel-head">
           <h2 id="tips-title">Helpful tips</h2>
           <button id="toggle-tips" class="btn small" type="button" aria-expanded="true"
             aria-controls="tips-body">Hide</button>
@@ -402,10 +391,8 @@
     </li>
   </template>
 
-  <!-- Shared suite header logic -->
-  <script type="module" src="/src/js/shell.js"></script>
-  <!-- Tool logic -->
-  <script type="module" src="/src/js/first-call-script-v2.js?v=fix6"></script>
+  <!-- App logic -->
+  <script type="module" src="/src/js/engagement/app.js"></script>
 </body>
 
 </html>

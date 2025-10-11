@@ -1,161 +1,182 @@
-// /src/lib/contentLoader.js
-// Library loader that supports BOTH:
-// 1) ./content/call-library/v1/{mode}/index.json  (products array)
-// 2) ./content/call-library/v1/index.json         (products: {direct:[], partner:[]})
-// All fetches are RELATIVE so SWA sub-paths work.
+// /web/src/lib/contentLoader.js 2025-10-11 v2.1
+// Single place for content pathing + canonicalisation + fetches.
+// Works with a unified /content/call-library/v1/index.json (preferred),
+// but tolerates older shapes. Strict MIME checks prevent SPA fallback issues.
 
-const BUYER_ALIASES = new Map([
-  ["innovator", "innovator"],
-  ["innovators", "innovator"],
+const LIBRARY_BASE = "/content/call-library/v1"; // root-anchored (IMPORTANT)
 
-  ["early adopter", "early-adopter"],
-  ["early adopters", "early-adopter"],
-  ["early_adopter", "early-adopter"],
-  ["early_adopters", "early-adopter"],
-  ["early-adopter", "early-adopter"],
-  ["early-adopters", "early-adopter"],
+const DEFAULT_BUYER_TYPES = [
+  "innovator", "early-adopter", "early-majority", "late-majority", "sceptic"
+];
 
-  ["early majority", "early-majority"],
-  ["early_majority", "early-majority"],
-  ["early-majority", "early-majority"],
-
-  ["late majority", "late-majority"],
-  ["late_majority", "late-majority"],
-  ["late-majority", "late-majority"],
-
-  ["sceptic", "sceptic"],
-  ["sceptics", "sceptic"],
-  ["skeptic", "sceptic"],
-  ["skeptics", "sceptic"]
-]);
-
-/** Lowercase; collapse spaces/underscores/dashes; keep [a-z0-9-]. */
-function slugify(s = "") {
-  return String(s)
-    .toLowerCase()
-    .replace(/[\u2010-\u2015]/g, "-")          // unicode dashes
-    .replace(/[_\s]+/g, "-")                   // spaces/underscores -> '-'
-    .replace(/-+/g, "-")
-    .replace(/[^a-z0-9\-]/g, "")
-    .trim();
+/** Canonical buyer slug from any label. */
+export function canonicalBuyerId(label) {
+  const s = String(label || "").trim().toLowerCase();
+  if (!s) return "innovator";
+  if (s.startsWith("innov")) return "innovator";
+  if (s.startsWith("early ad")) return "early-adopter";
+  if (s.startsWith("early ma")) return "early-majority";
+  if (s.startsWith("late ma")) return "late-majority";
+  if (s.startsWith("skept") || s.startsWith("scept")) return "sceptic";
+  return s.replace(/\s+/g, "-");
 }
 
-/** Canonical buyer id for filesystem lookup (exported). */
-export function canonicaliseBuyerId(value = "") {
-  const raw = String(value || "").toLowerCase().trim();
-  const normal = raw.replace(/[\u2010-\u2015]/g, "-").replace(/[_\s]+/g, " ").trim();
-  if (BUYER_ALIASES.has(normal)) return BUYER_ALIASES.get(normal);
-  const slugSp = slugify(normal).replace(/-/g, " ");        // try again with spaces
-  if (BUYER_ALIASES.has(slugSp)) return BUYER_ALIASES.get(slugSp);
-  return slugify(normal);                                   // fallback (may be hyphenated already)
-}
-
-async function safeFetchJson(url) {
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch { return null; }
-}
-
-/** Normalise a product.path into a RELATIVE base under ./content/call-library/v1/ */
-function normaliseProductBasePath(rawPath = "", mode = "direct", productId = "") {
-  let p = String(rawPath || "").trim();
-
-  // Remove leading './' or '/'
-  p = p.replace(/^[./]+/, "");
-
-  // If the path already includes 'content/call-library/v1/', strip that prefix
-  p = p.replace(/^content\/call-library\/v1\//, "");
-
-  // If there is no mode segment, prefix with mode/product
-  if (!/^direct\/|^partner\//.test(p)) {
-    const prod = slugify(productId);
-    p = `${mode}/${p || prod}`;
+/** Normalises various possible buyer_types shapes to an array of canonical ids. */
+function normaliseBuyerTypes(bt) {
+  if (!bt) return DEFAULT_BUYER_TYPES.slice();
+  if (Array.isArray(bt)) {
+    return bt
+      .map(x => canonicalBuyerId(typeof x === "string" ? x : (x?.id || x?.label || "")))
+      .filter(Boolean);
   }
+  return DEFAULT_BUYER_TYPES.slice();
+}
 
-  // Ensure trailing slash
-  if (!p.endsWith("/")) p += "/";
+/** Return a safe string id from diverse product shapes. */
+function deriveProductId(p) {
+  if (typeof p === "string") return p.trim();
+  const id = p?.id || p?.slug || p?.name;
+  if (id) return String(id).trim();
+  // Try derive from path last segment
+  const fromPath = p?.path && typeof p.path === "string"
+    ? p.path.split("/").filter(Boolean).pop()
+    : "";
+  return String(fromPath || "").trim();
+}
 
-  // Final relative path from web root (no leading slash)
-  return p;
+/** Return a display label for a product. */
+function deriveProductLabel(p, id) {
+  if (typeof p === "string") return id;
+  return String(p?.label || p?.name || id || "").trim();
+}
+
+/** Normalises product list arrays of varying shapes to [{id,label,buyers?,path?, modes?}, ...]. */
+function normaliseProducts(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(p => {
+    if (p == null) return null;
+
+    // string → { id, label }
+    if (typeof p === "string") {
+      const id = p.trim();
+      if (!id) return null;
+      return { id, label: id };
+    }
+
+    // object
+    const id = deriveProductId(p);
+    if (!id) return null;
+
+    const label = deriveProductLabel(p, id);
+
+    // buyers → [{ id, label }]
+    let buyers = [];
+    if (Array.isArray(p?.buyers)) {
+      buyers = p.buyers.map(b => {
+        if (typeof b === "string") {
+          const bid = canonicalBuyerId(b);
+          return { id: bid, label: b };
+        }
+        const bid = canonicalBuyerId(b?.id || b?.label || "");
+        const blabel = b?.label || b?.id || bid;
+        return { id: bid, label: blabel };
+      }).filter(x => x?.id);
+    }
+
+    // optional hints to help client-side mode filtering
+    const modes =
+      Array.isArray(p?.modes) ? p.modes.map(String).map(s => s.toLowerCase()) :
+      p?.mode ? [String(p.mode).toLowerCase()] :
+      undefined;
+
+    const path = typeof p?.path === "string" ? p.path : undefined;
+
+    return { id, label, buyers, path, modes };
+  }).filter(Boolean);
+}
+
+/** Decide if a product matches the requested mode using hints (modes/mode or path). */
+function productMatchesMode(product, mode /* "direct" | "partner" */) {
+  const m = String(mode).toLowerCase() === "partner" ? "partner" : "direct";
+  // explicit modes array or single mode
+  if (Array.isArray(product?.modes) && product.modes.length) {
+    return product.modes.includes(m);
+  }
+  if (product?.modes === undefined && typeof product?.mode === "string") {
+    return String(product.mode).toLowerCase() === m;
+  }
+  // infer from path segment .../direct/... or .../partner/...
+  if (typeof product?.path === "string") {
+    const seg = `/${m}/`;
+    if (product.path.includes(seg)) return true;
+  }
+  // no hint → include (don’t hide products by guessing)
+  return true;
 }
 
 /**
- * Load the product index for a mode.
- * Returns { mode, products: [{id, label, path}, ...] }
+ * Fetches the unified product index and returns { products, buyer_types } for a given mode.
+ * Prefers /content/call-library/v1/index.json with { products:{direct,partner}, buyer_types }.
+ * Falls back gracefully if the file uses older shapes.
  */
 export async function getIndex(mode = "direct") {
   const m = (String(mode).toLowerCase() === "partner") ? "partner" : "direct";
+  const url = `${LIBRARY_BASE}/index.json`;
 
-  // Try mode-scoped index first
-  const modeUrl = `./content/call-library/v1/${m}/index.json`;
-  const modeJson = await safeFetchJson(modeUrl);
-  if (modeJson && Array.isArray(modeJson.products)) {
-    // Normalise paths to be mode-relative (no double prefixing later)
-    const products = modeJson.products.map(p => ({
-      id: p.id,
-      label: p.label || p.id,
-      // keep as given; we'll re-normalise when constructing the final md path
-      path: (p.path || "").replace(/^\//, "")
-    }));
-    return { mode: m, products };
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    console.error(`[Index] ${res.status} for`, url);
+    return { products: [], buyer_types: DEFAULT_BUYER_TYPES.slice() };
+    }
+  const ctype = String(res.headers.get("content-type") || "").toLowerCase();
+  // Allow parameters like "; charset=utf-8"
+  if (!ctype.includes("application/json")) {
+    console.error(`[Index] Wrong MIME (${ctype}) for`, url);
+    return { products: [], buyer_types: DEFAULT_BUYER_TYPES.slice() };
   }
 
-  // Fall back to single-file index with products[mode]
-  const singleUrl = `./content/call-library/v1/index.json`;
-  const singleJson = await safeFetchJson(singleUrl);
-  if (singleJson && singleJson.products && Array.isArray(singleJson.products[m])) {
-    const list = singleJson.products[m].map(p => ({
-      id: p.id,
-      label: p.label || p.id,
-      path: (p.path || "").replace(/^\//, "") // may include 'content/call-library/v1/...'
-    }));
-    return { mode: m, products: list };
+  const data = await res.json().catch(() => ({}));
+
+  // Primary shape: { products: { direct:[...], partner:[...] }, buyer_types:[...] }
+  let rawProducts = Array.isArray(data?.products?.[m]) ? data.products[m] : null;
+
+  // Secondary shapes:
+  if (!rawProducts) {
+    // { products:[...] } or { items:[...] } or bare array
+    rawProducts = Array.isArray(data?.products) ? data.products
+              : Array.isArray(data?.items)    ? data.items
+              : Array.isArray(data)           ? data
+              : [];
   }
 
-  console.error(`[contentLoader] Could not load product index (mode="${m}"). Tried:`, modeUrl, "and", singleUrl);
-  return { mode: m, products: [] };
+  // Normalise then filter by mode using hints (modes/mode/path)
+  const all = normaliseProducts(rawProducts);
+  const products = all.filter(p => productMatchesMode(p, m));
+
+  const buyer_types = normaliseBuyerTypes(data?.buyer_types);
+
+  return { products, buyer_types };
 }
 
-/**
- * Compute the markdown template URL for {mode, productId, buyerId}.
- * If indexJson has products with 'path', we prefer that; otherwise fallback to {mode}/{productId}/.
- * Always returns a RELATIVE URL like: ./content/call-library/v1/direct/connectivity/early-adopter.md
- */
-export function getTemplatePath({ mode = "direct", productId = "", buyerId = "", indexJson = null }) {
+/** Returns full template path for a given selection. */
+export function getTemplatePath({ mode, productId, buyerId }) {
   const m = (String(mode).toLowerCase() === "partner") ? "partner" : "direct";
-  const buyer = canonicaliseBuyerId(buyerId);
-  const prod = slugify(productId);
-
-  let baseRel = null;
-
-  // indexJson.products can be an array (preferred return from getIndex)
-  if (indexJson && Array.isArray(indexJson.products)) {
-    const match = indexJson.products.find(p => slugify(p.id) === prod);
-    if (match) baseRel = normaliseProductBasePath(match.path || "", m, prod);
-  }
-
-  // Fallback if not found / no index passed
-  if (!baseRel) baseRel = `${m}/${prod}/`;
-
-  // If baseRel still includes full content prefix, strip it
-  baseRel = baseRel.replace(/^content\/call-library\/v1\//, "");
-  if (!baseRel.endsWith("/")) baseRel += "/";
-
-  return `./content/call-library/v1/${baseRel}${buyer}.md`;
+  const id = String(productId || "").trim();
+  const b  = canonicalBuyerId(buyerId);
+  return `${LIBRARY_BASE}/${m}/${id}/${b}.md`;
 }
 
-/** Fetch the markdown template text; returns { path, text|null } */
-export async function loadTemplate({ mode = "direct", productId = "", buyerId = "", indexJson = null }) {
-  const path = getTemplatePath({ mode, productId, buyerId, indexJson });
-  try {
-    const res = await fetch(path, { cache: "no-store" });
-    if (!res.ok) return { path, text: null };
-    const text = await res.text();
-    return { path, text };
-  } catch (e) {
-    console.error("[contentLoader] Failed to fetch template:", path, e);
-    return { path, text: null };
-  }
+/** Loads the Markdown template text with strict MIME guard (prevents SPA fallback). */
+export async function loadTemplate({ mode, productId, buyerId }) {
+  const path = getTemplatePath({ mode, productId, buyerId });
+  const res = await fetch(path, { cache: "no-store" });
+  if (!res.ok) throw new Error(`TemplateNotFound: HTTP ${res.status} for ${path}`);
+
+  const ct = String(res.headers.get("content-type") || "").toLowerCase();
+  // Accept text/markdown or text/plain, with optional parameters (e.g., charset)
+  const okMime = /(^(?:text\/markdown|text\/plain))(;|$)/.test(ct) ||
+                 ct.includes("text/markdown") || ct.includes("text/plain");
+  if (!okMime) throw new Error(`TemplateInvalidMime: got ${ct || "<none>"} for ${path}`);
+
+  return await res.text();
 }
