@@ -1,4 +1,4 @@
-//--- api/ch-strategic/start/index.js 01-10-2025 v5 (size guard + preflight + output binding)
+//--- api/ch-strategic/start/index.js 10-10-2025 v6 (size guard + preflight + output binding)
 "use strict";
 const Busboy = require("busboy");
 const crypto = require("crypto");
@@ -29,6 +29,7 @@ async function putJson(containerName, blobPath, obj) {
   });
 }
 
+// ✅ FIX: define a proper helper instead of the invalid `module.exports` function
 async function writeStatus(runId, patch) {
   await putJson(CHS_STATUS_CONTAINER, `${runId}.json`, {
     runId, updatedAt: nowIso(), ...(patch || {})
@@ -75,7 +76,7 @@ module.exports = async function (context, req) {
     let fileTooLarge = false;
 
     const parsed = new Promise((resolve, reject) => {
-      bb.on("file", (_field, file, info = {}) => {
+      bb.on("file", (_field, file /*, info = {} */) => {
         const chunks = [];
         file.on("limit", () => { fileTooLarge = true; file.resume(); });
         file.on("data", d => chunks.push(d));
@@ -130,16 +131,50 @@ module.exports = async function (context, req) {
       limits: { maxRows: CH_STRATEGIC_MAX_ROWS, chunkSize: CH_STRATEGIC_CHUNK_SIZE }
     });
 
-    // Enqueue via output binding (defined in function.json)
-    const msg = {
-      runId,
-      cacheKey: runId,
-      evidenceTag,
-      totalRows: clippedRows,
+    // --- Chunk planning (rows) ---
+    const chunkSize = Math.max(1, Math.min(
+      Number(CH_STRATEGIC_CHUNK_SIZE) || 5000,   // desired chunk rows (configurable)
+      CH_STRATEGIC_MAX_ROWS                      // never exceed max rows per run
+    ));
+    const totalChunks = Math.max(1, Math.ceil(clippedRows / chunkSize));
+
+    // Child runIds: parentRunId + suffix, e.g. "8fa…-c1of5"
+    const parentRunId = runId;
+    const childRunIds = [];
+    const messages = [];
+
+    for (let i = 0; i < totalChunks; i++) {
+      const rowOffset = i * chunkSize;
+      const rowLimit = Math.min(chunkSize, clippedRows - rowOffset);
+      const childRunId = `${parentRunId}-c${i + 1}of${totalChunks}`;
+      childRunIds.push(childRunId);
+
+      messages.push(JSON.stringify({
+        runId: childRunId,             // <-- child runId (unique result files per chunk)
+        parentRunId,                   // <-- to correlate chunks
+        cacheKey: parentRunId,         // <-- ALL children read the same uploaded CSV
+        evidenceTag,
+        totalRows: clippedRows,        // global total (for display)
+        rowOffset,                     // <-- start row (0-based, excluding header)
+        rowLimit,                      // <-- max rows for this chunk
+        submittedAt: nowIso(),
+        correlationId: context.invocationId
+      }));
+    }
+
+    // IMPORTANT: output binding can take an array of queue messages
+    context.bindings.outJobs = messages;
+
+    // Update initial status to reflect chunked plan
+    await writeStatus(parentRunId, {
+      state: "Queued",
       submittedAt: nowIso(),
-      correlationId: context.invocationId
-    };
-    context.bindings.outJobs = JSON.stringify(msg);
+      message: `Queued ${clippedRows} rows in ${totalChunks} chunk(s) of ${chunkSize}`,
+      totalRows: clippedRows,
+      chunkPlan: { chunkSize, totalChunks, childRunIds },
+      evidenceTag,
+      limits: { maxRows: CH_STRATEGIC_MAX_ROWS, chunkSize: CH_STRATEGIC_CHUNK_SIZE }
+    });
 
     context.res = {
       status: 202,

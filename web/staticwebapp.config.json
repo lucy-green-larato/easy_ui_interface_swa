@@ -5,15 +5,20 @@
       "/content/*",
       "/src/*",
       "/vendor/*",
-      "/assets/*",
-      "/intel.json"
+      "/assets/*"
     ]
   },
-  "routes": [
-    { "route": "/ch-strategic/*", "rewrite": "/ch-strategic/index.html" }
+   "routes": [
+    { "route": "/api/*", "allowedRoles": ["anonymous"] },
+    { "route": "/call-script/*", "rewrite": "/call-script/index.html" },
+    { "route": "/qualification/*", "rewrite": "/qualification/index.html" },
+    { "route": "/engagement/*", "rewrite": "/engagement/index.html" }
   ],
   "mimeTypes": {
     ".md": "text/markdown",
     ".json": "application/json"
+  },
+   "responseOverrides": {
+    "404": { "rewrite": "/index.html" }
   }
 }

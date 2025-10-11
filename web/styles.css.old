@@ -1,0 +1,2608 @@
+/* ====== web/styles.css 05-10-2025 v10 ======================================
+   Inside Track Tools — UI Styles (Design-compliant refresh)
+   - Light (default) & Dark modes with warm neutrals, amethyst accents, GOLD CTAs
+   - Tokenised, resilient, accessible; minimal specificity; theme-by-token swap
+   ========================================================================== */
+
+/* ----------------------------- CASCADE LAYERS ---------------------------- */
+@layer tokens, base, components, utilities;
+
+/* ================================ TOKENS ================================= */
+/* ---- Reference palette (brand) ---- */
+@layer tokens {
+  :root {
+    /* Advertise both schemes; LIGHT is default (dark only when [data-theme="dark"]) */
+    color-scheme: light dark;
+
+    /* Light neutrals */
+    --c-bg: #FFF9F2;
+    --c-card: #FFFFFF;
+    --c-surface1: #FFFFFF;
+    --c-border: #E5E2DD;
+    --c-border-2: #E7E4DF;
+
+    /* Copy */
+    --c-text-1: #1E1B1B;
+    --c-text-2: #4A4650;
+    --c-heading: #151316;
+    --c-muted: #706B75;
+
+    /* Brand */
+    --c-accent: #461E5C;
+    /* amethyst */
+    --c-accent-pressed: #72369D;
+    /* pressed */
+    --c-gold: #FFC243;
+    /* gold */
+    --c-gold-pressed: #D9981E;
+    --c-gold-soft: #FFAD03;
+    --c-teal: #28A2B5;
+    /* teal */
+    --c-teal-soft: #4EBDBE;
+
+    /* States */
+    --c-danger: #C43D4B;
+    --c-ok: #1B8F5A;
+
+    /* Dark palette */
+    --d-bg: #1C1A21;
+    --d-card: #25212A;
+    --d-surface1: #201B23;
+    --d-border: #37313D;
+    --d-border-2: #3B3542;
+
+    --d-text-1: #ECE9EF;
+    --d-text-2: #BBB4C1;
+    --d-heading: #F7F4FA;
+    --d-muted: #A49EAA;
+
+    --d-accent: #7A3DC2;
+    --d-accent-pressed: #6C31B2;
+
+    --d-gold: #FFC243;
+    /* matches brand gold */
+    --d-gold-pressed: #D9981E;
+    --d-gold-soft: #FFAD03;
+
+    --d-teal: #20C997;
+    --d-teal-soft: #78E3C8;
+
+    --d-danger: #E05B67;
+    --d-ok: #29A06B;
+
+    /* Dark main menu tile colours (exact spec) */
+    --sales-card-bg-dark: #461E5C;
+    --sales-card-bdr-dark: #72369D;
+    --sales-card-fg-dark: #FFFFFF;
+    --sales-card-title-dark: #FFFFFF;
+
+    --mkt-card-bg-dark: #92652E;
+    --mkt-card-bdr-dark: #A57234;
+    --mkt-card-fg-dark: #FFFFFF;
+    --mkt-card-title-dark: #FFBF40;
+  }
+
+  /* ---- Semantic tokens (LIGHT default) ---- */
+  :root {
+    --bg: var(--c-bg);
+    --card-bg: var(--c-card);
+    --surface-1: var(--c-surface1);
+    --border: var(--c-border);
+    --border-2: var(--c-border-2);
+
+    --text-1: var(--c-text-1);
+    --text-2: var(--c-text-2);
+    --heading: var(--c-heading);
+    --muted: var(--c-muted);
+
+    --accent: var(--c-accent);
+    --accent-pressed: var(--c-accent-pressed);
+
+    --brand-gold: var(--c-gold);
+    --brand-gold-pressed: var(--c-gold-pressed);
+    --brand-gold-soft: var(--c-gold-soft);
+
+    --brand-teal: var(--c-teal);
+    --brand-teal-soft: var(--c-teal-soft);
+
+    --danger: var(--c-danger);
+    --ok: var(--c-ok);
+
+    /* NEW: global link colour token (mirrors accent) */
+    --link-accent: var(--accent);
+
+    /* Elevation & focus */
+    --radius: 12px;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 6px 24px rgba(0, 0, 0, .06);
+    --ring-outline: 3px solid color-mix(in srgb, var(--accent) 80%, white);
+    --ring-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+
+    /* Type & spacing */
+    --fs-base: clamp(15px, .28vw + 14px, 18px);
+    --fs-h1: clamp(22px, 1.2vw + 18px, 30px);
+    --fs-h2: clamp(18px, .9vw + 14px, 22px);
+    --fs-h3: clamp(16px, .7vw + 12px, 18px);
+    --fs-field: clamp(14px, .26vw + 12px, 16px);
+    --fs-output: clamp(14px, .22vw + 12px, 16px);
+    --fs-output-h3: clamp(15px, .26vw + 13px, 18px);
+    --s-1: 4px;
+    --s-2: 8px;
+    --s-3: 12px;
+    --s-4: 16px;
+    --s-5: 24px;
+    --s-6: 32px;
+    --gap: var(--s-6);
+    --stage-max: 100vw;
+    --header-h: 64px;
+    --left-min: 480px;
+    --right-min: 220px;
+    --field-h: 44px;
+    --chip-h: 44px;
+    --logo-h: clamp(34px, 2.6vw, 44px);
+    --radius-sm: 8px;
+    --radius-lg: 16px;
+    --pill: 999px;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .06);
+    --shadow-lg: 0 8px 30px rgba(0, 0, 0, .12);
+
+    /* Tile semantics (neutral in light) */
+    --tile-bg: var(--card-bg);
+    --tile-border: var(--border);
+    --tile-title: var(--heading);
+    --tile-text: var(--text-1);
+    --tile-muted: var(--text-2);
+
+    /* Motion & z-index */
+    --dur-1: 70ms;
+    --dur-2: 150ms;
+    --dur-3: 250ms;
+    --dur-4: 400ms;
+    --ease-standard: cubic-bezier(.2, 0, 0, 1);
+    --ease-decelerate: cubic-bezier(0, 0, .2, 1);
+    --ease-accelerate: cubic-bezier(.4, 0, 1, 1);
+    --z-header: 100;
+    --z-toolbar: 40;
+    --z-sticky: 10;
+    --z-overlay: 1000;
+    --z-modal: 1100;
+    --z-toast: 1200;
+  }
+
+  /* ---- Explicit dark (no OS mirroring) ---- */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --bg: var(--d-bg);
+    --card-bg: var(--d-card);
+    --surface-1: var(--d-surface1);
+    --border: var(--d-border);
+    --border-2: var(--d-border-2);
+
+    --text-1: var(--d-text-1);
+    --text-2: var(--d-text-2);
+    --heading: var(--d-heading);
+    --muted: var(--d-muted);
+
+    --accent: var(--d-accent);
+    --accent-pressed: var(--d-accent-pressed);
+
+    --brand-gold: var(--d-gold);
+    --brand-gold-pressed: var(--d-gold-pressed);
+    --brand-gold-soft: var(--d-gold-soft);
+
+    --brand-teal: var(--d-teal);
+    --brand-teal-soft: var(--d-teal-soft);
+
+    --danger: var(--d-danger);
+    --ok: var(--d-ok);
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .25);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .25), 0 8px 30px rgba(0, 0, 0, .35);
+    --shadow-lg: 0 10px 36px rgba(0, 0, 0, .45);
+
+    /* Keep link colour token aligned in dark */
+    --link-accent: var(--accent);
+  }
+}
+
+/* ================= Progressive enhancement & fallbacks ================== */
+
+/* Baseline fallbacks (no color-mix support) — updated to new brand hexes */
+:root {
+  /* Accent #461E5C → ~80% towards white (approx) */
+  --ring-outline: 3px solid #7A5590;
+  --ring-shadow: 0 0 0 2px rgba(70, 30, 92, .35);
+
+  /* Gold button glow from #FFC243 */
+  --gold-glow: 0 8px 18px rgba(255, 194, 67, .28);
+
+  /* Light-mode hover tints (new brand) */
+  --hover-tint-accent-6: rgba(70, 30, 92, .06);
+  /* 6% of accent */
+  --hover-tint-gold-10: rgba(255, 194, 67, .10);
+  /* 10% of gold */
+
+  /* Teal pills from #28A2B5 */
+  --pill-bg-teal-12: rgba(40, 162, 181, .12);
+  --pill-bd-teal-32: rgba(40, 162, 181, .32);
+}
+
+:root[data-theme="dark"] {
+  /* Dark accent #7A3DC2 → ~80% towards white (approx) */
+  --ring-outline: 3px solid #9A68CF;
+  --ring-shadow: 0 0 0 2px rgba(122, 61, 194, .35);
+
+  /* Dark gold glow */
+  --gold-glow: 0 8px 18px rgba(255, 194, 67, .28);
+
+  /* Teal pills in dark */
+  --pill-bg-teal-12: rgba(32, 201, 151, .18);
+  --pill-bd-teal-32: rgba(32, 201, 151, .40);
+}
+
+/* Upgrade to exact mixes when supported */
+@supports (color: color-mix(in srgb, white, black)) {
+  :root {
+    --ring-outline: 3px solid color-mix(in srgb, var(--accent) 80%, white);
+    --ring-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+    --gold-glow: 0 8px 18px color-mix(in srgb, var(--brand-gold) 28%, transparent);
+    --pill-bg-teal-12: color-mix(in srgb, var(--brand-teal) 12%, transparent);
+    --pill-bd-teal-32: color-mix(in srgb, var(--brand-teal) 32%, transparent);
+  }
+
+  :root[data-theme="dark"] {
+    --ring-outline: 3px solid color-mix(in srgb, var(--accent) 80%, white);
+    --ring-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+    --gold-glow: 0 8px 18px color-mix(in srgb, var(--brand-gold) 28%, transparent);
+    --pill-bg-teal-12: color-mix(in srgb, var(--brand-teal) 18%, transparent);
+    --pill-bd-teal-32: color-mix(in srgb, var(--brand-teal) 40%, transparent);
+  }
+}
+
+/* ===== Hover tints (light only) and safe hovers (dark) ================== */
+@media (hover: hover) {
+  :root:not([data-theme="dark"]) .group-sales .tool:hover {
+    background: color-mix(in srgb, var(--accent) 6%, var(--card-bg));
+    transform: translateY(-1px);
+  }
+
+  :root:not([data-theme="dark"]) .group-marketing .tool:hover {
+    background: color-mix(in srgb, var(--brand-gold) 10%, var(--card-bg));
+    transform: translateY(-1px);
+  }
+
+  /* Subtle lift in dark (don’t tint brand tiles) */
+  :root[data-theme="dark"] :is(.group-sales .tool, .group-marketing .tool):hover {
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+  }
+}
+
+/* =============================== BASE =================================== */
+@layer base {
+  * {
+    box-sizing: border-box
+  }
+
+  html {
+    scroll-behavior: smooth
+  }
+
+  body {
+    margin: 0;
+    font: var(--fs-base)/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans";
+    background: var(--bg);
+    color: var(--text-1);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    margin: 0 0 var(--s-2);
+    line-height: 1.2;
+    font-weight: 500
+  }
+
+  h1 {
+    font-size: var(--fs-h1)
+  }
+
+  h2 {
+    font-size: var(--fs-h2)
+  }
+
+  h3 {
+    font-size: var(--fs-h3)
+  }
+
+  :where(a, button, [role="button"], [tabindex]:not(input):not(select):not(textarea)):focus-visible {
+    outline: var(--ring-outline);
+    outline-offset: 2px;
+    border-radius: 10px;
+  }
+
+  /* Forced-colors/HC support */
+  @media (forced-colors:active) {
+    :where(a, button, [role="button"], input, select, textarea) {
+      outline: 1px solid CanvasText;
+    }
+  }
+}
+
+/* ============================ COMPONENTS ================================ */
+@layer components {
+
+  /* --- Header --- */
+  .app-header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    min-height: var(--header-h);
+    padding: 12px 24px;
+    background: var(--card-bg);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 1px 2px rgba(16, 24, 40, .08), 0 1px 1px rgba(16, 24, 40, .06);
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1 1 auto
+  }
+
+  .logo {
+    height: var(--logo-h);
+    width: auto;
+    display: block;
+    object-fit: contain;
+    flex-shrink: 0
+  }
+
+  .brand-text {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    line-height: 1.1
+  }
+
+  .app-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: clamp(18px, .6vw+16px, 22px);
+    font-weight: 600
+  }
+
+  .kicker {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--text-2)
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: nowrap
+  }
+
+  .header-right>* {
+    flex-shrink: 0
+  }
+
+  /* Badges */
+  .badge,
+  .model-note,
+  .calltype-mini {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    height: var(--chip-h);
+    /* 44px */
+    padding: 0 16px;
+    border-radius: 999px;
+    background: #EEF0F4;
+    border: 1px solid var(--border);
+    font-size: .95rem;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .badge svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2
+  }
+
+  .badge.is-hidden {
+    display: none
+  }
+
+  .calltype-mini .mini-label {
+    font-weight: 500
+  }
+
+  .calltype-mini select {
+    height: 36px;
+    padding: 0 12px;
+    line-height: 36px;
+    border-radius: 8px;
+    border: 1px solid #CFD7EB;
+    background: #fff;
+  }
+
+  .calltype-mini .remember {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 4px
+  }
+
+  .calltype-mini .remember input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    /* increase tap size */
+  }
+
+  /* Narrow header tweaks */
+  @media (max-width:480px) {
+    .app-header {
+      padding: 8px 12px
+    }
+
+    .header-right {
+      gap: 8px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch
+    }
+  }
+
+  @media (max-width:420px) {
+    .kicker {
+      display: none
+    }
+
+    .app-title {
+      font-size: clamp(17px, 3.5vw, 20px)
+    }
+  }
+
+  /* --- Stage / Panels --- */
+  .stage {
+    width: 100%;
+    max-width: var(--stage-max);
+    margin-inline: auto
+  }
+
+  .layout {
+    display: grid;
+    gap: var(--gap);
+    padding: var(--gap);
+    align-items: start;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 2.65fr) minmax(var(--right-min), clamp(260px, 14vw, 300px));
+  }
+
+  .panel {
+    position: relative;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+    box-shadow: var(--shadow);
+    min-width: 0;
+  }
+
+  .panel.left {
+    grid-column: 1
+  }
+
+  .panel.middle {
+    grid-column: 2
+  }
+
+  .panel.right {
+    grid-column: 3;
+    max-width: 300px
+  }
+
+  /* Left column specifics */
+  .panel.left {
+    max-height: calc(100vh - var(--header-h) - var(--gap)*1.2);
+    overflow: auto;
+    scroll-snap-type: y proximity;
+    background:
+      linear-gradient(var(--card-bg), var(--card-bg)) padding-box,
+      linear-gradient(to bottom, rgba(0, 0, 0, .06), transparent) top/100% 10px no-repeat,
+      linear-gradient(to top, rgba(0, 0, 0, .06), transparent) bottom/100% 10px no-repeat;
+    background-attachment: local, scroll, scroll;
+    counter-reset: section;
+  }
+
+  fieldset {
+    border: 0;
+    margin: 0;
+    padding: 0
+  }
+
+  .card {
+    scroll-snap-align: start
+  }
+
+  .panel.left .card {
+    padding-top: 6px;
+    margin-top: 6px;
+    border-top: 0
+  }
+
+  .panel.left .card:first-of-type {
+    margin-top: 0;
+    padding-top: 0
+  }
+
+  .card>legend {
+    display: block;
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 0 0 var(--s-2)
+  }
+
+  .panel.left .card>legend {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 6px 0 8px;
+    background: linear-gradient(var(--card-bg), var(--card-bg));
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel.left .card>legend::before {
+    counter-increment: section;
+    content: counter(section) ". ";
+    color: var(--accent);
+    font-weight: 600
+  }
+
+  /* Form grid & fields */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 16px;
+    row-gap: 8px
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 6px
+  }
+
+  label {
+    font-size: .95rem;
+    font-weight: 500
+  }
+
+  input,
+  select,
+  textarea {
+    width: 100%;
+    min-height: var(--field-h);
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border-2);
+    background: var(--surface-1);
+    color: var(--text-1);
+    font: var(--fs-field)/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    transition: border-color .15s, box-shadow .15s;
+  }
+
+  textarea {
+    min-height: 110px;
+    resize: vertical
+  }
+
+  select {
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: none
+  }
+
+  input:focus,
+  select:focus,
+  textarea:focus {
+    border-color: var(--accent);
+    box-shadow: var(--ring-shadow)
+  }
+
+  input.invalid,
+  select.invalid,
+  textarea.invalid {
+    border-color: var(--danger)
+  }
+
+  .help {
+    margin: .35rem 0 0;
+    color: var(--text-2);
+    font-size: .85rem
+  }
+
+  /* Sticky footer actions (left) */
+  .panel.left .actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    gap: var(--s-3);
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: var(--s-4);
+    padding-top: 8px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0, var(--card-bg) 24px);
+    border-top: 1px solid var(--border);
+  }
+
+  /* Buttons */
+  /* Buttons — base */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    /* ≥44px tap target */
+    padding: 12px 18px;
+    border-radius: var(--pill, 999px);
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    color: var(--text-1);
+    font-weight: 600;
+    cursor: pointer;
+    /* base elevation (pixel parity across themes via dark override below) */
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .06);
+    transition:
+      transform var(--dur-1, 70ms) var(--ease-standard, ease),
+      box-shadow var(--dur-2, 150ms) var(--ease-standard, ease),
+      background-color var(--dur-2, 150ms) var(--ease-standard, ease),
+      border-color var(--dur-2, 150ms) var(--ease-standard, ease);
+  }
+
+  :root[data-theme="dark"] .btn {
+    /* same geometry; stronger alpha for dark */
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+  }
+
+  .btn.small {
+    min-height: 36px;
+    padding: 8px 12px;
+    font-size: .9rem;
+  }
+
+  .btn[disabled] {
+    opacity: .55;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* Focus ring (separate from elevation) */
+  .btn:focus-visible {
+    outline: var(--ring-outline);
+    outline-offset: 2px;
+    box-shadow: var(--ring-shadow);
+  }
+
+  /* ---------------------- Variants ---------------------- */
+
+  /* Primary / CTA (gold) — bigger glow */
+  :is(.btn.primary, .btn-primary, .btn-cta) {
+    background: var(--brand-gold);
+    color: #111;
+    /* readable on gold */
+    border-color: transparent;
+    box-shadow:
+      0 1px 1px rgba(0, 0, 0, .04),
+      var(--gold-glow, 0 8px 18px rgba(255, 194, 67, .28));
+  }
+
+  :root[data-theme="dark"] :is(.btn.primary, .btn-primary, .btn-cta) {
+    box-shadow:
+      0 1px 1px rgba(0, 0, 0, .24),
+      0 8px 18px color-mix(in srgb, var(--brand-gold) 22%, transparent);
+  }
+
+  @media (hover:hover) {
+    :is(.btn.primary, .btn-primary, .btn-cta):hover {
+      background: var(--brand-gold-pressed);
+    }
+  }
+
+  /* Accent (amethyst) */
+  .btn-accent {
+    background: var(--accent);
+    color: #fff;
+    border-color: transparent;
+  }
+
+  @media (hover:hover) {
+    .btn-accent:hover {
+      background: var(--accent-pressed);
+    }
+  }
+
+  /* Tertiary (soft, token-safe) */
+  .btn-tertiary {
+    background: var(--chip-bg);
+    color: var(--accent);
+    border-color: var(--chip-bd);
+  }
+
+  /* Optional hover lift for all non-disabled buttons */
+  @media (hover:hover) {
+    .btn:not([disabled]):hover {
+      transform: translateY(-1px);
+    }
+  }
+
+  /* Info icon button (≥44x44, keeps your visuals) */
+  .btn.info {
+    --icon-size: 44px;
+    display: inline-grid;
+    place-items: center;
+    width: var(--icon-size);
+    height: var(--icon-size);
+    padding: 0;
+    line-height: 1;
+    border-radius: 9999px;
+    background: var(--accent);
+    color: #fff;
+    border: 0;
+  }
+
+  .btn.info svg,
+  .btn.info .icon-info {
+    width: 60%;
+    height: 60%;
+    display: block;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  @media (hover:hover) {
+    .btn.info:hover {
+      filter: brightness(1.05);
+    }
+  }
+
+  .btn.info:focus-visible {
+    outline: 3px solid color-mix(in oklab, var(--accent) 55%, white);
+    outline-offset: 2px;
+  }
+
+  /* Pressed state feedback (optional) */
+  .btn[aria-pressed="true"] {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  /* High-contrast users: flatten elevation for clarity */
+  @media (prefers-contrast: more) {
+
+    .btn,
+    :is(.btn.primary, .btn-primary, .btn-cta) {
+      box-shadow: none !important;
+    }
+
+    .btn {
+      border-color: currentColor;
+    }
+  }
+
+  /* Middle column */
+  .panel.middle {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--s-4)
+  }
+
+  .output-card .output-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-2)
+  }
+
+  .output-card .meta {
+    color: var(--text-2);
+    font-size: .9rem
+  }
+
+  .output {
+    white-space: pre-wrap;
+    color: var(--text-1);
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    padding: 14px;
+    border-radius: 12px;
+    min-height: 260px;
+    outline: none;
+    resize: vertical;
+    font-variant-ligatures: contextual;
+  }
+
+  .panel.middle .output-card {
+    position: sticky;
+    top: calc(var(--header-h) + 12px);
+    z-index: 5
+  }
+
+  .output-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: 8px
+  }
+
+  .panel.middle .output-head :where(button, .btn) {
+    display: none !important
+  }
+
+  /* Right column / intel */
+  .intel .intel-head {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    position: sticky;
+    top: calc(var(--header-h) + 8px);
+    background: var(--card-bg);
+    z-index: 4;
+    padding-top: 6px;
+    border-bottom: 0;
+    padding-bottom: 6px;
+  }
+
+  .intel .intel-head> :last-child {
+    margin-inline-start: auto;
+  }
+
+  .intel .intel-head :where(button, .btn) {
+    height: var(--chip-h);
+    padding: 0 16px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: #EEF0F4;
+    font-size: .95rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .intel-grid {
+    display: grid;
+    grid-template-columns: 1fr !important;
+    gap: 10px
+  }
+
+  .intel-grid section {
+    background: transparent;
+    padding: 0
+  }
+
+  .intel-slot {
+    background: transparent;
+    padding: 8px 0 10px;
+    color: var(--text-2);
+    border: 0;
+    border-radius: 0
+  }
+
+  .intel-grid h3 {
+    font-size: .95rem;
+    font-weight: 600;
+    margin: 0 0 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border)
+  }
+
+  .intel-slot p {
+    font-size: .92rem;
+    line-height: 1.35;
+    margin: 4px 0
+  }
+
+  .intel-grid ul {
+    list-style: none;
+    padding-inline-start: 0;
+    margin: 6px 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px
+  }
+
+  .intel-grid li,
+  .intel-chip {
+    display: inline-block;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card-bg);
+    font-size: .9rem;
+    color: var(--text-2);
+  }
+
+  /* Tips */
+  .tips-card {
+    padding-top: 6px
+  }
+
+  .tips-card h3 {
+    font-size: .95rem;
+    font-weight: 600;
+    margin: 0 0 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border)
+  }
+
+  .tips-card ul {
+    margin: 6px 0 0;
+    padding-inline-start: 1.15rem
+  }
+
+  .tips-card li {
+    font-size: .92rem;
+    line-height: 1.35;
+    margin: 4px 0
+  }
+
+  .tips-card :where(button, .btn) {
+    height: var(--chip-h);
+    padding: 0 16px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: #EEF0F4;
+    font-size: .95rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* Select caret */
+  select:not([multiple]) {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    /* RTL-friendly: position from the end edge */
+    background-size: 14px 14px;
+    padding-inline-end: 36px;
+  }
+
+  /* Dark inputs/outputs (explicit dark) */
+  :root[data-theme="dark"] .output {
+    background: var(--card-bg);
+    border-color: var(--border);
+    color: var(--text-1)
+  }
+
+  :root[data-theme="dark"] input,
+  :root[data-theme="dark"] select,
+  :root[data-theme="dark"] textarea {
+    background: #19151B;
+    color: #ECE9EF;
+    border-color: #37313D;
+  }
+
+  :root[data-theme="dark"] .intel-grid li,
+  :root[data-theme="dark"] .intel-chip {
+    background: #2C2631;
+    color: var(--text-2);
+    border-color: #37313D;
+  }
+
+  /* Extra-wide */
+  @media (min-width:1800px) {
+    .layout {
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 3fr) minmax(var(--right-min), 300px)
+    }
+  }
+
+  /* Responsive */
+  @media (max-width:1200px) {
+    .layout {
+      grid-template-columns: 1fr 1fr
+    }
+
+    .panel.left {
+      grid-column: 1;
+      max-height: none
+    }
+
+    .panel.middle {
+      grid-column: 2
+    }
+
+    .panel.right {
+      grid-column: 1 / -1;
+      max-width: none
+    }
+  }
+
+  @media (max-width:860px) {
+    .layout {
+      grid-template-columns: 1fr
+    }
+
+    .panel.left,
+    .panel.middle,
+    .panel.right {
+      grid-column: 1
+    }
+
+    .panel.middle {
+      grid-template-columns: 1fr
+    }
+
+    .grid-2 {
+      grid-template-columns: 1fr
+    }
+  }
+
+  /* === Logical properties & RTL resilience ================================ */
+
+  /* Header + page bars: use logical paddings */
+  .app-header {
+    padding-block: 12px;
+    padding-inline: 24px;
+  }
+
+  .suite-pagebar .container {
+    padding-block: 12px;
+    padding-inline: 16px;
+  }
+
+  .suite-toolbar .container {
+    padding-block: 10px;
+  }
+
+  /* “Push to the end” should be writing-mode safe */
+  .tips-card .row-between> :last-child {
+    margin-inline-start: auto;
+  }
+
+  .intel .intel-head> :last-child {
+    margin-inline-start: auto;
+  }
+
+  /* Lists that previously hard-coded left margin */
+  .output ul {
+    margin: 6px 0 0 0;
+    margin-inline-start: 1.1rem;
+  }
+
+  /* Chips grid spacing already uses gap; ensure no left bias */
+  #tips-list,
+  .intel-grid ul {
+    padding-inline-start: 0;
+  }
+
+  /* Select caret: logical padding and RTL caret flip */
+  :root:dir(rtl) select:not([multiple]) {
+    background-position: left 12px center;
+  }
+
+  .header-right {
+    gap: 12px;
+  }
+
+  /* === Hover-only effects ================================================== */
+  @media (hover: hover) {
+
+    /* Light mode tile lifts/tints */
+    :root:not([data-theme="dark"]) .group-sales .tool:hover {
+      background: color-mix(in srgb, var(--accent) 6%, var(--card-bg));
+      transform: translateY(-1px);
+    }
+
+    :root:not([data-theme="dark"]) .group-marketing .tool:hover {
+      background: color-mix(in srgb, var(--brand-gold) 10%, var(--card-bg));
+      transform: translateY(-1px);
+    }
+
+    /* Dark mode tile lift */
+    :root[data-theme="dark"] .group-sales .tool:hover,
+    :root[data-theme="dark"] .group-marketing .tool:hover {
+      filter: brightness(1.06);
+      transform: translateY(-1px);
+    }
+
+    /* Button hovers (unchanged colours, just gated) */
+    .btn.primary:hover,
+    .btn-primary:hover,
+    .btn-cta:hover {
+      background: var(--brand-gold-pressed);
+    }
+
+    .btn-accent:hover {
+      background: var(--accent-pressed);
+    }
+  }
+
+  /* On touch/no-hover devices, neutralise :hover so taps don’t “stick” */
+  @media (hover: none) {
+
+    .tool:hover,
+    .group-sales .tool:hover,
+    .group-marketing .tool:hover {
+      transform: none !important;
+      filter: none !important;
+    }
+
+    /* Restore base backgrounds explicitly to avoid any UA quirks */
+    :root:not([data-theme="dark"]) .group-sales .tool:hover,
+    :root:not([data-theme="dark"]) .group-marketing .tool:hover {
+      background: var(--card-bg) !important;
+    }
+
+    /* Buttons fall back to their base colours */
+    .btn.primary:hover,
+    .btn-primary:hover,
+    .btn-cta:hover {
+      background: var(--brand-gold) !important;
+    }
+
+    .btn-accent:hover {
+      background: var(--accent) !important;
+    }
+
+    .btn-tertiary:hover {
+      background: #ECE7E0 !important;
+    }
+
+    :root[data-theme="dark"] .btn-tertiary:hover {
+      background: #3A3440 !important;
+    }
+  }
+
+  /* Print */
+  @media print {
+    @page {
+      margin: 16mm
+    }
+
+    body {
+      background: #fff;
+      color: #000
+    }
+
+    .app-header,
+    .panel.left,
+    .panel.right,
+    .actions,
+    #diagnostics,
+    .status {
+      display: none !important
+    }
+
+    .layout {
+      display: block;
+      padding: 0;
+      max-width: none
+    }
+
+    .output-card,
+    .output {
+      box-shadow: none;
+      border: 0;
+      padding: 0
+    }
+
+    #output-title {
+      margin: 0 0 6mm;
+      font-size: 20pt
+    }
+
+    #output {
+      font: 12pt/1.4 "Segoe UI", Roboto, Arial, sans-serif;
+      white-space: pre-wrap
+    }
+  }
+
+  /* Header logo alignment */
+  .app-header .header-left {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    column-gap: 14px
+  }
+
+  .app-header .logo {
+    height: var(--logo-h) !important;
+    width: auto;
+    object-fit: contain;
+    flex-shrink: 0
+  }
+
+  .app-header .brand-text {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    line-height: 1.1
+  }
+
+  .app-header .app-title {
+    margin-bottom: 2px
+  }
+
+  /* Left column scroll/focus offsets */
+  .panel.left {
+    scroll-padding-top: 48px
+  }
+
+  .panel.left .card>legend {
+    top: 0
+  }
+
+  .panel.left .card>legend+* {
+    margin-top: 8px
+  }
+
+  .panel.left :is(.field, input, select, textarea) {
+    scroll-margin-top: 48px
+  }
+
+  /* Tips header layout */
+  .tips-card .row-between {
+    display: flex;
+    align-items: center;
+    gap: .5rem
+  }
+
+  .tips-card .row-between> :last-child {
+    margin-left: auto
+  }
+
+  /* Helpful tips chips */
+  #tips-list {
+    list-style: none;
+    margin: 6px 0 0;
+    padding-inline-start: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px
+  }
+
+  #tips-list li {
+    display: inline-block;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card-bg);
+    font-size: .9rem;
+    color: var(--text-2);
+  }
+
+  /* Generated guide output sizing */
+  .output {
+    font-size: var(--fs-output) !important;
+    line-height: 1.45;
+    padding-top: var(--s-3);
+    white-space: normal !important
+  }
+
+  .output .script-sec>h3 {
+    font-size: var(--fs-output-h3) !important;
+    margin: 0 0 6px
+  }
+
+  .output p {
+    margin: 6px 0
+  }
+
+  .output ul {
+    margin: 6px 0 0;
+    margin-inline-start: 1.1rem;
+  }
+
+  .output li {
+    margin: 3px 0
+  }
+
+  .output h3 {
+    margin-top: var(--s-5);
+    margin-bottom: var(--s-2)
+  }
+
+  .output h3:first-child {
+    margin-top: 0
+  }
+
+  .output .script-body>.script-sec:first-child {
+    margin-top: 0
+  }
+
+  .output .script-body>.script-sec:first-child>*:first-child {
+    margin-top: 0
+  }
+
+  .output .script-body>.script-sec:first-child>*:last-child {
+    margin-bottom: 0
+  }
+
+  .output .script-body .script-sec.preface {
+    padding: 0;
+    margin: 0 0 var(--s-3);
+    background: transparent;
+    border: 0
+  }
+
+  /* Openers */
+  #openers-body {
+    padding: 0
+  }
+
+  #openers-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--s-2);
+  }
+
+  #openers-list li {
+    border: 1px solid var(--border-2);
+    border-radius: 12px;
+    padding: .55rem .7rem;
+    background: var(--surface-1);
+    font-size: .95rem;
+    line-height: 1.35;
+  }
+
+  #openers-list li.muted {
+    opacity: .7
+  }
+
+  /* Highlighter */
+  .output mark.hl {
+    background: #FFF59D;
+    padding: 0 .08em;
+    border-radius: .18em
+  }
+
+  /* ===== Reusable tile grid + cards ===== */
+  .grid {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    margin-top: 12px;
+  }
+
+  /* Base card styles (driven by tokens) */
+  .tool {
+    display: block;
+    position: relative;
+    background: var(--tile-bg);
+    border: 1px solid var(--tile-border);
+    border-radius: 14px;
+    padding: 16px 16px 18px;
+    box-shadow: var(--shadow);
+    transition: transform .06s ease, box-shadow .15s ease, background .15s ease;
+    font-weight: 600;
+    color: var(--tile-text);
+  }
+
+  .tool h1,
+  .tool h2,
+  .tool h3,
+  .tool h4 {
+    color: var(--tile-title);
+  }
+
+  :where(a.tool) {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .tool .tool-title {
+    color: var(--tile-title);
+    font-weight: 600;
+    line-height: 1.25;
+  }
+
+  .tool small {
+    color: var(--tile-muted);
+    display: block;
+    margin-top: 6px;
+    line-height: 1.35;
+  }
+
+  /* LIGHT hover tint only (guarded) */
+  :root:not([data-theme="dark"]) .group-sales .tool:hover {
+    background: color-mix(in srgb, var(--accent) 6%, var(--card-bg));
+    transform: translateY(-1px);
+  }
+
+  :root:not([data-theme="dark"]) .group-marketing .tool:hover {
+    background: color-mix(in srgb, var(--brand-gold) 10%, var(--card-bg));
+    transform: translateY(-1px);
+  }
+
+  .tool:focus-visible {
+    outline: var(--ring-outline);
+    outline-offset: 2px;
+  }
+
+  /* LIGHT only: brand-colour headings for section titles & tile headings */
+  :root:not([data-theme="dark"]) .group-sales>h3,
+  :root:not([data-theme="dark"]) .group-sales .tool h4,
+  :root:not([data-theme="dark"]) .group-sales .tool h3 {
+    color: var(--accent);
+  }
+
+  :root:not([data-theme="dark"]) .group-marketing>h3,
+  :root:not([data-theme="dark"]) .group-marketing .tool h4,
+  :root:not([data-theme="dark"]) .group-marketing .tool h3 {
+    color: var(--brand-gold);
+  }
+
+  /* Dark-mode hover lift (no colour changes here) */
+  :root[data-theme="dark"] .group-sales .tool:hover,
+  :root[data-theme="dark"] .group-marketing .tool:hover {
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+  }
+
+  /* Pill semantics */
+  .pill {
+    display: inline-block;
+    font-size: 12px;
+    line-height: 1;
+    padding: 6px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--brand-teal) 12%, transparent);
+    color: var(--brand-teal);
+    border: 1px solid color-mix(in srgb, var(--brand-teal) 32%, transparent);
+    margin-top: 10px;
+  }
+
+  :root[data-theme="dark"] .pill {
+    background: color-mix(in srgb, var(--brand-teal) 18%, transparent);
+    color: color-mix(in srgb, var(--brand-teal) 80%, white);
+    border-color: color-mix(in srgb, var(--brand-teal) 40%, transparent);
+  }
+
+  /* Disabled tiles */
+  .tool.disabled {
+    cursor: not-allowed;
+    color: color-mix(in srgb, var(--tile-text) 65%, transparent);
+    background: linear-gradient(180deg, var(--card-bg), color-mix(in srgb, var(--border-2) 40%, transparent));
+    opacity: .72;
+    box-shadow: none;
+  }
+
+  .tool.disabled:hover {
+    transform: none
+  }
+
+  .tool.disabled:focus {
+    outline: none
+  }
+
+  /* ===== Suite: page title band ===== */
+  .suite-pagebar {
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--brand-teal) 22%, #fff 78%), transparent),
+      linear-gradient(90deg, color-mix(in srgb, var(--brand-teal) 20%, transparent), color-mix(in srgb, var(--accent) 20%, transparent));
+    border-bottom: 1px solid var(--border);
+  }
+
+  :root[data-theme="dark"] .suite-pagebar {
+    background: var(--card-bg);
+  }
+
+  .suite-pagebar .container {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .suite-pagebar .page-title {
+    margin: 0;
+    font-weight: 500;
+    font-size: clamp(22px, 2.2vw, 28px);
+    color: var(--heading);
+  }
+
+  /* Suite Shell */
+  .suite-topbar {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .suite-topbar .container {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .suite-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .suite-title {
+    text-align: center;
+    font-weight: 600;
+    color: var(--heading);
+  }
+
+  .suite-chips {
+    display: flex;
+    justify-content: end;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .suite-topbar::after {
+    content: "";
+    display: block;
+    height: 2px;
+    width: 100%;
+    background-image: linear-gradient(90deg,
+        color-mix(in srgb, var(--brand-teal) 35%, transparent),
+        color-mix(in srgb, var(--accent) 35%, transparent));
+  }
+
+  :root[data-theme="dark"] .suite-topbar::after {
+    background-image: linear-gradient(90deg, rgba(255, 255, 255, .06), rgba(255, 255, 255, .02));
+  }
+
+  /* Suite Toolbar */
+  .suite-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: var(--card-bg);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, .03);
+  }
+
+  .suite-toolbar .container {
+    padding-block: 10px;
+  }
+
+  .toolbar-grid {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .toolbar-left,
+  .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .calltype-mini {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .calltype-mini .mini-label {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .calltype-mini select {
+    min-width: 140px;
+  }
+
+  .calltype-mini .remember {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .model-note {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .model-note .label {
+    opacity: .9
+  }
+
+  /* Workboard */
+  .workboard {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 16px;
+    display: grid;
+    gap: 16px;
+    grid-template-columns: 360px minmax(680px, 1fr) 320px;
+    align-items: start;
+  }
+
+  .setup-panel,
+  .work-canvas,
+  .assist-rail {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 16px;
+  }
+
+  .setup-panel,
+  .assist-rail {
+    max-height: calc(100dvh - 140px);
+    overflow: auto;
+  }
+
+  @media (max-width:1279px) {
+    .workboard {
+      grid-template-columns: 340px 1fr
+    }
+
+    .assist-rail {
+      display: none
+    }
+  }
+
+  @media (max-width:900px) {
+    .workboard {
+      grid-template-columns: 1fr
+    }
+
+    .setup-panel {
+      order: 2
+    }
+  }
+
+  @media (hover:hover) {
+
+    :root[data-theme="dark"] .group-sales .tool:hover,
+    :root[data-theme="dark"] .group-marketing .tool:hover {
+      filter: brightness(1.06);
+      transform: translateY(-1px);
+    }
+  }
+
+  /* Hover effects only on devices that actually support hover */
+  @media (hover: hover) and (pointer: fine) {
+
+    /* Light: subtle tinted hover */
+    :root:not([data-theme="dark"]) .group-sales .tool:hover {
+      background: color-mix(in srgb, var(--accent) 6%, var(--card-bg));
+      transform: translateY(-1px);
+    }
+
+    :root:not([data-theme="dark"]) .group-marketing .tool:hover {
+      background: color-mix(in srgb, var(--brand-gold) 10%, var(--card-bg));
+      transform: translateY(-1px);
+    }
+
+    /* Dark: keep exact colours; just add a gentle lift */
+    :root[data-theme="dark"] :is(.group-sales .tool, .group-marketing .tool):hover {
+      filter: brightness(1.06);
+      transform: translateY(-1px);
+    }
+
+    /* Buttons */
+    .btn.primary:hover,
+    .btn-primary:hover,
+    .btn-cta:hover {
+      background: var(--brand-gold-pressed);
+    }
+
+    .btn-accent:hover {
+      background: var(--accent-pressed);
+    }
+  }
+
+  /* No-hover environments: neutralise hover-only transforms/filters */
+  @media (hover: none) {
+    .tool:hover {
+      transform: none;
+      filter: none;
+    }
+  }
+
+  /* Fallback when color-mix() isn’t supported: keep the lift without the tint */
+  @supports not (color: color-mix(in srgb, white 50%, black)) {
+    @media (hover: hover) and (pointer: fine) {
+
+      :root:not([data-theme="dark"]) .group-sales .tool:hover,
+      :root:not([data-theme="dark"]) .group-marketing .tool:hover {
+        background: var(--card-bg);
+      }
+    }
+  }
+
+  /* === color-mix() fallbacks (progressive enhancement) =================== */
+  /* Use the same supports test everywhere */
+  @supports not (color: color-mix(in srgb, white, black)) {
+
+    /* Focus ring tokens from NEW brand colours */
+    :root {
+      /* Accent #461E5C ~ 80% towards white handled by solid accent outline; keep soft shadow */
+      --ring-outline: 3px solid var(--accent);
+      --ring-shadow: 0 0 0 2px rgba(70, 30, 92, .35);
+      /* 35% of #461E5C */
+    }
+
+    :root[data-theme="dark"] {
+      --ring-outline: 3px solid var(--accent);
+      --ring-shadow: 0 0 0 2px rgba(122, 61, 194, .35);
+      /* 35% of #7A3DC2 */
+    }
+
+    /* Gold button glow from #FFC243 (not the old #FFB400) */
+    .btn.primary,
+    .btn-primary,
+    .btn-cta {
+      box-shadow: 0 1px 1px rgba(0, 0, 0, .04), 0 8px 18px rgba(255, 194, 67, .28);
+    }
+
+    /* Teal pill fallbacks from #28A2B5 (light) and #20C997 (dark) */
+    .pill {
+      background: rgba(40, 162, 181, .12);
+      /* 12% of #28A2B5 */
+      color: var(--brand-teal);
+      border-color: rgba(40, 162, 181, .32);
+      /* 32% */
+    }
+
+    :root[data-theme="dark"] .pill {
+      background: rgba(32, 201, 151, .18);
+      /* 18% of #20C997 */
+      color: color-mix(in srgb, white 80%, black);
+      /* harmless if unsupported; UA keeps text readable */
+      border-color: rgba(32, 201, 151, .40);
+    }
+
+    /* Light-mode tile hover tints: no mix available → keep base bg, only lift */
+    :root:not([data-theme="dark"]) .group-sales .tool:hover,
+    :root:not([data-theme="dark"]) .group-marketing .tool:hover {
+      background: var(--card-bg);
+    }
+
+    /* Hairline / neutral fallbacks */
+    .suite-topbar::after {
+      background-image: none;
+      background: rgba(0, 0, 0, .06);
+    }
+
+    #openers-list li {
+      background: var(--surface-1);
+      border-color: var(--border-2);
+    }
+  }
+
+  /* ===== High-contrast & forced-colors support ===== */
+  @media (forced-colors: active) {
+
+    * {
+      forced-color-adjust: auto;
+    }
+
+    :where(a, button, [role="button"], [tabindex]:not(input):not(select):not(textarea)):focus-visible,
+    .tool:focus-visible,
+    .chip:focus-visible {
+      outline: var(--ring-outline);
+      outline-offset: 2px;
+      box-shadow: var(--ring-shadow);
+    }
+
+    .panel,
+    .tool,
+    .intel-grid li,
+    .intel-chip,
+    #openers-list li {
+      background: Canvas !important;
+      color: CanvasText !important;
+      border-color: CanvasText !important;
+      box-shadow: none !important;
+    }
+
+    .btn,
+    .btn.primary,
+    .btn-primary,
+    .btn-cta,
+    .btn-accent,
+    .btn-tertiary {
+      background: ButtonFace !important;
+      color: ButtonText !important;
+      border-color: ButtonText !important;
+      box-shadow: none !important;
+    }
+
+    .btn[disabled] {
+      opacity: 1;
+    }
+
+    /* avoid dimming in forced colors */
+
+    select:not([multiple]) {
+      background-image: none !important;
+    }
+
+    .pill,
+    .badge,
+    .intel-grid li,
+    .intel-chip {
+      background: Canvas !important;
+      color: CanvasText !important;
+      border-color: CanvasText !important;
+    }
+
+    .tool :where(a) {
+      color: LinkText !important;
+      text-decoration: underline;
+    }
+
+    .tool:hover {
+      transform: none !important;
+      filter: none !important;
+    }
+  }
+
+  /* Prefer more contrast: strengthen borders/text and focus cues */
+  @media (prefers-contrast: more) {
+
+    .kicker,
+    .output-card .meta,
+    .intel-slot,
+    .tool small,
+    .help,
+    .model-note,
+    .calltype-mini .mini-label {
+      color: var(--text-1) !important;
+    }
+
+    .panel,
+    .tool,
+    .intel-grid li,
+    .intel-chip,
+    #openers-list li,
+    .output,
+    .badge,
+    .pill {
+      border-color: currentColor !important;
+      box-shadow: none;
+    }
+
+    :where(a, button, [role="button"], [tabindex]:not(input):not(select):not(textarea)):focus-visible {
+      outline-width: 4px;
+      box-shadow: none;
+    }
+
+    .suite-topbar::after {
+      background-image: none;
+      background: rgba(0, 0, 0, .20);
+    }
+
+    :root[data-theme="dark"] .suite-topbar::after {
+      background: rgba(255, 255, 255, .25);
+    }
+  }
+
+  /* Avatar */
+  .user-avatar,
+  .profile-avatar,
+  .avatar {
+    --sz: 72px;
+    width: var(--sz);
+    height: var(--sz);
+    border-radius: 999px;
+    flex: 0 0 var(--sz);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--brand-gold) 20%, #fff);
+    border: 2px solid color-mix(in srgb, var(--brand-gold) 50%, transparent);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
+  }
+
+  .user-avatar img,
+  .profile-avatar img,
+  .avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block
+  }
+
+  :root[data-theme="dark"] .user-avatar,
+  :root[data-theme="dark"] .profile-avatar,
+  :root[data-theme="dark"] .avatar {
+    background: color-mix(in srgb, var(--brand-gold) 18%, #2A242C);
+    border-color: color-mix(in srgb, var(--brand-gold) 40%, transparent);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, .5);
+  }
+}
+
+/* Motion preferences: honor users who choose "Reduce Motion" */
+@media (prefers-reduced-motion: reduce) {
+
+  html {
+    scroll-behavior: auto !important;
+  }
+
+  /* Greatly reduce motion (keep events firing) */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+
+  /* Stop explicit spinners */
+  .btn.busy .spinner {
+    animation: none !important;
+  }
+
+  /* Neutralize hover lifts/filters */
+  .tool:hover,
+  .group-sales .tool:hover,
+  .group-marketing .tool:hover {
+    transform: none !important;
+    filter: none !important;
+  }
+
+  /* Avoid snap jumps in the left panel */
+  .panel.left {
+    scroll-snap-type: none !important;
+  }
+}
+
+/* =============================== UTILITIES ============================== */
+@layer utilities {
+  .readable {
+    max-width: 820px;
+    margin: 0 auto;
+    line-height: 1.55;
+  }
+
+  .chip {
+    border-radius: 999px
+  }
+}
+
+/* ---- Fallbacks when color-mix() isn't supported ----------------------- */
+@supports not (color: color-mix(in srgb, #000 50%, #fff)) {
+
+  :root {
+    --ring-outline: 3px solid #8A4FB3;
+    /* ~80% of #602080 toward white */
+    --ring-shadow: 0 0 0 2px rgba(96, 32, 128, .35);
+    /* accent @35% */
+    --pill-bg: rgba(42, 157, 143, .12);
+    /* bg: 12% tint */
+    --pill-border: rgba(42, 157, 143, .32);
+    /* border: 32% */
+  }
+
+  :root[data-theme="dark"] {
+    --pill-bg: rgba(42, 157, 143, .18);
+    --pill-border: rgba(42, 157, 143, .40);
+  }
+
+  .pill {
+    background: var(--pill-bg);
+    border-color: var(--pill-border);
+  }
+
+  .btn.primary,
+  .btn-primary,
+  .btn-cta {
+    box-shadow: 0 1px 1px rgba(0, 0, 0, .04), 0 8px 18px rgba(255, 180, 0, .28);
+    /* brand-gold @28% */
+  }
+
+  :root:not([data-theme="dark"]) .group-sales .tool:hover {
+    background: rgba(96, 32, 128, .06);
+  }
+
+  /* accent @6% */
+  :root:not([data-theme="dark"]) .group-marketing .tool:hover {
+    background: rgba(255, 180, 0, .10);
+  }
+
+  /* brand-gold @10% */
+
+  :where(a, button, [role="button"], [tabindex]:not(input):not(select):not(textarea)):focus-visible {
+    outline: var(--ring-outline);
+    box-shadow: none;
+    /* rely on ring-shadow only where supported */
+  }
+}
+
+/* ---- High-contrast & forced-colors support (redundant guard for legacy) */
+@media (forced-colors: active) {
+  :root {
+    color-scheme: light dark;
+  }
+
+  .tool,
+  .btn,
+  .panel,
+  .output {
+    box-shadow: none !important;
+    filter: none !important;
+    background: Canvas !important;
+    color: CanvasText !important;
+    border-color: CanvasText !important;
+  }
+
+  :where(a, button, [role="button"], [tabindex]:not(input):not(select):not(textarea)):focus-visible,
+  .btn:focus-visible,
+  .tool:focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px;
+    box-shadow: none !important;
+  }
+
+  input,
+  select,
+  textarea {
+    background: Canvas !important;
+    color: CanvasText !important;
+    border: 1px solid CanvasText !important;
+  }
+
+  .pill,
+  .badge,
+  .intel-grid li,
+  .intel-chip {
+    background: Canvas !important;
+    color: CanvasText !important;
+    border-color: CanvasText !important;
+  }
+
+  .tool:hover {
+    transform: none !important;
+  }
+}
+
+/* Prefer higher contrast when requested (non-forced) */
+@media (prefers-contrast: more) {
+  :root {
+    --ring-outline: 3px solid currentColor;
+    --ring-shadow: 0 0 0 3px rgba(0, 0, 0, .4);
+  }
+
+  .tool,
+  .panel,
+  .output {
+    box-shadow: none;
+    border-color: var(--text-1);
+  }
+
+  .btn {
+    border-color: currentColor;
+  }
+}
+
+body.fs-lock {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .tool:hover {
+    transform: none;
+    filter: none;
+  }
+
+  .spinner {
+    animation: none !important;
+  }
+
+  .snap,
+  [style*="scroll-snap"],
+  [class*="snap"] {
+    scroll-snap-type: none !important;
+  }
+}
+
+/* === Tiles – unified, token-driven override (wins by cascade order) === */
+
+/* Semantic tile tokens (defaults = LIGHT) */
+:root {
+  --tile-bg: var(--c-card);
+  --tile-fg: var(--c-text-1);
+  --tile-bd: var(--c-border);
+  --tile-title: var(--c-heading);
+  --tile-muted: var(--c-text-2);
+  --tile-hover-bg: color-mix(in srgb, var(--c-accent) 5%, var(--tile-bg));
+  --tile-hover-bd: color-mix(in srgb, var(--c-accent) 16%, var(--tile-bd));
+}
+
+/* Dark overrides */
+:root[data-theme="dark"] {
+  --tile-bg: var(--d-card);
+  --tile-fg: var(--d-text-1);
+  --tile-bd: var(--d-border);
+  --tile-title: var(--d-heading);
+  --tile-muted: var(--d-text-2);
+  --tile-hover-bg: color-mix(in srgb, var(--d-accent) 7%, var(--tile-bg));
+  --tile-hover-bd: color-mix(in srgb, var(--d-accent) 18%, var(--tile-bd));
+}
+
+/* Component */
+:where(a.tool) {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: var(--tile-min-h, 172px);
+  padding: 14px;
+  border-radius: 12px;
+  text-decoration: none;
+  background: var(--tile-bg);
+  color: var(--tile-fg);
+  border: 1px solid var(--tile-bd);
+  box-shadow: var(--shadow, 0 1px 2px rgba(0, 0, 0, .06));
+  transform: none;
+  filter: none;
+  /* neutralize legacy hover filters */
+}
+
+:where(a.tool) .tool-title {
+  color: var(--tile-title);
+  font-weight: 600;
+  line-height: 1.25;
+  text-decoration: none;
+}
+
+:where(a.tool) small {
+  color: var(--tile-muted);
+  display: block;
+  margin-top: 6px;
+  line-height: 1.35;
+  font-weight: 500;
+}
+
+/* Accessible focus */
+:where(a.tool):focus-visible {
+  outline: var(--ring-outline, 2px solid color-mix(in srgb, var(--c-accent) 60%, transparent));
+  outline-offset: 2px;
+  box-shadow: var(--ring-shadow, 0 0 0 4px color-mix(in srgb, var(--c-accent) 24%, transparent));
+}
+
+/* Disabled state */
+:where(a.tool).disabled,
+:where(a.tool)[aria-disabled="true"] {
+  opacity: var(--disabled, .45);
+  pointer-events: none;
+  cursor: default;
+}
+
+/* Hover: only on hover-capable pointers */
+@media (hover: hover) and (pointer: fine) {
+  :where(a.tool):hover {
+    background: var(--tile-hover-bg);
+    border-color: var(--tile-hover-bd);
+    text-decoration: none;
+    transform: none;
+    filter: none;
+  }
+
+  :where(a.tool):hover .tool-title {
+    text-decoration: underline;
+  }
+}
+
+/* Final guard to neutralize legacy hover filters/transforms */
+:root .group-sales a.tool:hover,
+:root .group-marketing a.tool:hover {
+  filter: none !important;
+  transform: none !important;
+}
+
+/* ===== Buttons — unified, token-driven override (authoritative) ===== */
+
+/* Map buttons to brand tokens (light) */
+:root {
+  --btn-rad: 999px;
+  --btn-fs: 14px;
+  --btn-py: 8px;
+  --btn-px: 12px;
+
+  /* Base (ghost-ish) */
+  --btn-bg: var(--c-card);
+  --btn-fg: var(--c-text-1);
+  --btn-bd: var(--c-border);
+
+  /* Primary (amethyst) */
+  --btn-primary-bg: var(--c-accent);
+  --btn-primary-bd: var(--c-accent);
+  --btn-primary-fg: #fff;
+  --btn-primary-bg-h: var(--c-accent-pressed);
+  --btn-primary-bd-h: var(--c-accent-pressed);
+
+  /* Accent (gold) */
+  --btn-accent-bg: var(--c-gold);
+  --btn-accent-bd: var(--c-gold);
+  --btn-accent-fg: #1E1B1B;
+  --btn-accent-bg-h: var(--c-gold-pressed);
+  --btn-accent-bd-h: var(--c-gold-pressed);
+
+  /* Tertiary (ghost) */
+  --btn-tertiary-bg: transparent;
+  --btn-tertiary-bd: var(--c-border);
+  --btn-tertiary-fg: var(--c-text-1);
+  --btn-tertiary-bd-h: var(--c-text-2);
+}
+
+/* Dark mapping */
+:root[data-theme="dark"] {
+  --btn-bg: var(--d-card);
+  --btn-fg: var(--d-text-1);
+  --btn-bd: var(--d-border);
+
+  --btn-primary-bg: var(--d-accent);
+  --btn-primary-bd: var(--d-accent);
+  --btn-primary-fg: #fff;
+  --btn-primary-bg-h: var(--d-accent-pressed);
+  --btn-primary-bd-h: var(--d-accent-pressed);
+
+  --btn-accent-bg: var(--d-gold);
+  --btn-accent-bd: var(--d-gold);
+  --btn-accent-fg: #1E1B1B;
+  /* readable on gold */
+  --btn-accent-bg-h: var(--d-gold-pressed);
+  --btn-accent-bd-h: var(--d-gold-pressed);
+
+  --btn-tertiary-bg: transparent;
+  --btn-tertiary-bd: var(--d-border);
+  --btn-tertiary-fg: var(--d-text-1);
+  --btn-tertiary-bd-h: var(--d-text-2);
+}
+
+/* Base button (wins by order; applies to both <button class=btn> and <a class=btn>) */
+:root :where(button.btn, .btn) {
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: var(--btn-py) var(--btn-px);
+  font-size: var(--btn-fs);
+  line-height: 1;
+  border-radius: var(--btn-rad);
+  border: 1px solid var(--btn-bd);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Primary / CTA */
+:root :is(.btn.primary, .btn-primary, .btn-cta) {
+  background: var(--btn-primary-bg);
+  border-color: var(--btn-primary-bd);
+  color: var(--btn-primary-fg);
+}
+
+:root :is(.btn.primary, .btn-primary, .btn-cta):hover {
+  background: var(--btn-primary-bg-h);
+  border-color: var(--btn-primary-bd-h);
+}
+
+/* Accent (gold) */
+:root .btn-accent {
+  background: var(--btn-accent-bg);
+  border-color: var(--btn-accent-bd);
+  color: var(--btn-accent-fg);
+}
+
+:root .btn-accent:hover {
+  background: var(--btn-accent-bg-h);
+  border-color: var(--btn-accent-bd-h);
+}
+
+/* Tertiary (ghost) */
+:root .btn-tertiary {
+  background: var(--btn-tertiary-bg);
+  border-color: var(--btn-tertiary-bd);
+  color: var(--btn-tertiary-fg);
+}
+
+:root .btn-tertiary:hover {
+  border-color: var(--btn-tertiary-bd-h);
+}
+
+/* Focus, disabled, pressed */
+:root :where(button.btn, .btn):focus-visible {
+  outline: var(--ring-outline);
+  box-shadow: var(--ring-shadow);
+}
+
+:root :where(button.btn, .btn)[disabled],
+:root :where(button.btn, .btn)[aria-disabled="true"] {
+  opacity: .55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+:root :where(button.btn, .btn)[aria-pressed="true"] {
+  filter: brightness(.98);
+}
+
+/* Final guard against any old hover filters/transforms */
+:root :where(button.btn, .btn):hover {
+  filter: none !important;
+  transform: none !important;
+}
+
+/* ===== Unified Header — make .app-header match .topbar (brand + dark mode) ===== */
+:root {
+  --hdr-pad-y: 10px;
+  --hdr-pad-x: 20px;
+  --hdr-gap: 14px;
+}
+
+/* Surface + divider */
+.topbar,
+.app-header {
+  background: var(--c-surface1);
+  border-bottom: 1px solid var(--c-border);
+}
+
+:root[data-theme="dark"] .topbar,
+:root[data-theme="dark"] .app-header {
+  background: var(--d-surface1);
+  border-bottom-color: var(--d-border);
+}
+
+/* Shared inner layout */
+.topbar .container,
+.app-header .header-left,
+/* many tool pages wrap left/right inside .app-header */
+.app-header .header-right {
+  /* ensure flex alignment & spacing */
+  display: flex;
+  align-items: center;
+  gap: var(--hdr-gap);
+}
+
+/* Distribute space like the main menu: left brand, right chips */
+.topbar .container {
+  justify-content: space-between;
+  padding: var(--hdr-pad-y) var(--hdr-pad-x);
+  max-width: var(--stage-max);
+  margin: 0 auto;
+}
+
+/* Tools pages often place left/right siblings under .app-header; normalize that row */
+.app-header {
+  padding: var(--hdr-pad-y) var(--hdr-pad-x);
+}
+
+.app-header>.header-left,
+.app-header>.header-right {
+  flex: 0 0 auto;
+}
+
+.app-header {
+  /* create a row container that behaves like .topbar .container */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--hdr-gap);
+}
+
+/* Brand block (logo + titles) — reuse main menu look */
+.brand,
+.app-header .header-left .brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand .logo,
+.app-header .header-left .brand .logo {
+  height: var(--logo-h);
+  width: auto;
+  display: block;
+}
+
+.brand .titles .title,
+.app-header .header-left .titles .title {
+  color: var(--c-heading);
+  font-weight: 680;
+  letter-spacing: .2px;
+  font-size: clamp(18px, .8vw + 16px, 22px);
+}
+
+:root[data-theme="dark"] .brand .titles .title,
+:root[data-theme="dark"] .app-header .header-left .titles .title {
+  color: var(--d-heading);
+}
+
+.brand .titles .sub,
+.app-header .header-left .titles .sub {
+  color: var(--c-muted);
+  font-size: 12px;
+}
+
+:root[data-theme="dark"] .brand .titles .sub,
+:root[data-theme="dark"] .app-header .header-left .titles .sub {
+  color: var(--d-muted);
+}
+
+/* Right-side chips area (sign-in state, theme toggle, user chip) */
+#authButtons,
+.app-header .header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Make any stray buttons in the header use the chip look */
+.app-header .header-right :where(.btn, button, a) {
+  border-radius: 999px;
+}
+
+/* Kill any legacy header-specific shadows/borders that fight the design */
+.app-header .shadow,
+.app-header .divider {
+  box-shadow: none !important;
+  border: 0 !important;
+}
+
+/* ===== Main menu cards: coloured by default, subtle light hover =====
+   Drop this at the END of web/styles.css so it overrides older rules. */
+
+/* 1) Token hookup for the cards themselves */
+.group-sales .tool,
+.group-marketing .tool {
+  /* use the group-scoped tokens (set below) */
+  background: var(--tile-bg);
+  color: var(--tile-text);
+  border: 1px solid var(--tile-bd);
+}
+
+.group-sales .tool .tool-title,
+.group-marketing .tool .tool-title {
+  color: var(--tile-title);
+}
+
+.group-sales .tool small,
+.group-marketing .tool small {
+  color: var(--tile-muted);
+}
+
+/* 2) LIGHT MODE — coloured by default */
+:root:not([data-theme="dark"]) .group-sales {
+  /* << change these 5 values to your preferred light “sales” card colours */
+  --tile-bg: #F9F2F6;
+  /* light amethyst wash */
+  --tile-bd: #D8CCE8;
+  /* border tint */
+  --tile-text: #2E1240;
+  /* body text on card */
+  --tile-title: #72369D;
+  /* title on card */
+  --tile-muted: #4A4650;
+  /* small/secondary text */
+}
+
+:root:not([data-theme="dark"]) .group-marketing {
+  /* << change these 5 values to your preferred light “marketing” card colours */
+  --tile-bg: #F7EBDD;
+  /* warm gold wash */
+  --tile-bd: #EAD9C6;
+  --tile-text: #4A3A28;
+  --tile-title: #6B3E00;
+  --tile-muted: #4A4650;
+}
+
+/* 3) DARK MODE — exact palette you supplied */
+:root[data-theme="dark"] .group-sales {
+  --tile-bg: #4F3F6C;
+  /* sales-card-bg-dark  */
+  --tile-bd: #72369D;
+  /* sales-card-bdr-dark */
+  --tile-text: #FFFFFF;
+  /* sales-card-fg-dark  */
+  --tile-title: #FFFFFF;
+  /* sales-card-title-dark */
+  --tile-muted: #BBB4C1;
+  /* readable secondary   */
+}
+
+:root[data-theme="dark"] .group-marketing {
+  --tile-bg: #514134;
+  /* mkt-card-bg-dark  */
+  --tile-bd: #A57234;
+  /* mkt-card-bdr-dark */
+  --tile-text: #FFFFFF;
+  /* mkt-card-fg-dark  */
+  --tile-title: #FFBF40;
+  /* mkt-card-title-dark */
+  --tile-muted: #BBB4C1;
+}
+
+/* 4) Hover: lighten in light mode; soft lift in dark mode */
+@media (hover:hover) and (pointer:fine) {
+
+  :root:not([data-theme="dark"]) .group-sales .tool:hover,
+  :root:not([data-theme="dark"]) .group-marketing .tool:hover {
+    /* gentle 8–10% lighten; tweak % to taste */
+    background: color-mix(in srgb, var(--tile-bg) 50%, white 50%);
+    border-color: color-mix(in srgb, var(--tile-bd) 85%, white 15%);
+  }
+
+  :root[data-theme="dark"] .group-sales .tool:hover,
+  :root[data-theme="dark"] .group-marketing .tool:hover {
+    filter: brightness(1.06);
+  }
+}
+
+/* 5) De-fang older hover rules that were forcing neutral/filters */
+:where(.group-sales .tool, .group-marketing .tool):hover {
+  transform: none;
+  /* keep it calm; prevents earlier transform rules */
+}
+
+/* Softer title weights (light & dark) */
+.group-sales .tool .tool-title,
+.group-marketing .tool .tool-title {
+  font-weight: 700;
+  /* was 800 */
+  letter-spacing: .1px;
+}
+
+/* If you also want the page/section headings slightly softer: */
+.page-title {
+  font-weight: 700;
+}
+
+/* was 800 */
+.section-title {
+  font-weight: 600;
+}
+
+/* was 700 */

@@ -1,3 +1,4 @@
+// api-generate-call-script.js 11-10-2025 v1. For campaign app?
 import OpenAI from 'openai'
 
 const openai = new OpenAI({

@@ -1,6 +1,7 @@
-// /web/src/js/engagement/render.js 2025-10-11 v3 --------//
+// /web/src/js/engagement/render.js 2025-10-11 v3
 
-import { initMotivation, getRandomQuote } from "./motivation.js";
+// Single motivation import (absolute path) — NO other imports of getRandomQuote anywhere
+import { initMotivation, getRandomQuote } from "/src/js/engagement/motivation.js";
 
 // Basic escaper for text nodes
 export const esc = (s) =>
@@ -8,12 +9,10 @@ export const esc = (s) =>
 
 /**
  * Preface card shown above the guide.
- * Pulls a motivational line from motivation.js.
- * Kept **synchronous** for compatibility: we trigger initMotivation() without await;
- * getRandomQuote() will return a sensible fallback until quotes are loaded.
+ * We kick off initMotivation() without await; getRandomQuote() has a safe fallback.
  */
 export function buildPreface({ sellerName }) {
-  // kick off async load (no await to keep this function sync)
+  // Fire-and-forget load of quotes
   initMotivation().catch(() => { /* non-fatal */ });
 
   const who = String(sellerName || "").trim() || "there";
@@ -61,34 +60,61 @@ function blockToHTML(txt) {
  * Render the script JSON into sectioned HTML.
  * Input shape:
  *   { sections:{opening,buyer_pain,buyer_desire,example_illustration,handling_objections,next_step},
- *     tips?: string[], summary_bullets?: string[] }
+ *     tips?: string[], summary_bullets?: string[], integration_notes?: {usps_used?, other_points_used?} }
  */
-export function renderScriptFromJson(json) {
+export function renderScriptFromJson(json, opts = {}) {
   if (!json || !json.sections) return "";
-
+  const sellerName = String(opts.sellerName || "").trim() || "there";
   const s = json.sections;
 
+  const escTxt = (t) => String(t ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
   const section = (title, body, extraClass = "") =>
     `<section class="script-sec ${extraClass}">
-      <h3>${esc(title)}</h3>
-      <div class="sec-body">${blockToHTML(body)}</div>
-    </section>`;
+       <h3>${escTxt(title)}</h3>
+       <div class="sec-body">${blockToHTML(body)}</div>
+     </section>`;
 
-  const html =
-    [
-      section("Overview", s.opening),
-      section("Buyer Pain", s.buyer_pain),
-      section("Buyer Desire", s.buyer_desire),
-      section("Example Illustration", s.example_illustration),
-      section("Handling Objections", s.handling_objections),
-      section("Next Step", s.next_step),
-    ].join("") +
-    (Array.isArray(json.tips) && json.tips.filter(Boolean).length
+  // Preface (friendly encouragement + quote)
+  // (buildPreface does the init + quote selection)
+  const pre = buildPreface({ sellerName });
+  const prefaceHTML = `
+    <section class="script-preface">
+      ${pre.html}
+    </section>
+  `;
+
+  const sectionsHtml = [
+    section("Overview", s.opening),
+    section("Buyer Pain", s.buyer_pain),
+    section("Buyer Desire", s.buyer_desire),
+    section("Example Illustration", s.example_illustration),
+    section("Handling Objections", s.handling_objections),
+    section("Next Step", s.next_step),
+  ].join("");
+
+  // tips (optional, up to 3)
+  const tipsHtml =
+    Array.isArray(json.tips) && json.tips.filter(Boolean).length
       ? `<section class="script-sec tips">
            <h3>Sales tips for colleagues conducting similar calls</h3>
-           <ol>${json.tips.filter(Boolean).slice(0, 3).map((t) => `<li>${esc(t)}</li>`).join("")}</ol>
+           <ol>${json.tips.filter(Boolean).slice(0, 3).map(t => `<li>${escTxt(t)}</li>`).join("")}</ol>
          </section>`
-      : "");
+      : "";
 
-  return html;
+  // Which inputs were woven (from integration_notes)
+  const used = [];
+  const usedUsps = json?.integration_notes?.usps_used;
+  const usedOther = json?.integration_notes?.other_points_used;
+  if (Array.isArray(usedUsps) && usedUsps.length) used.push(`<span class="pill">USPs: ${escTxt(usedUsps.join(", "))}</span>`);
+  if (Array.isArray(usedOther) && usedOther.length) used.push(`<span class="pill">Other: ${escTxt(usedOther.join(", "))}</span>`);
+  const usedHtml = used.length ? `<div class="used-inputs muted">${used.join("")}</div>` : "";
+
+  return (
+  prefaceHTML +
+  `<div class="script-body">` +
+    sectionsHtml +
+    tipsHtml +
+    usedHtml +
+  `</div>`
+);
 }

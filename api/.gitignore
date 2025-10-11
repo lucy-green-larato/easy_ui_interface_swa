@@ -1,16 +1,69 @@
-# Local dev settings (Azure Functions)
+# -------------------------
+# OS / Editor cruft
+# -------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.history/
+
+# -------------------------
+# Environment & secrets
+# -------------------------
+.env
+.env.*.local
 local.settings.json
+api/local.settings.json
+
+# -------------------------
+# Node / JS
+# -------------------------
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# -------------------------
+# Build / cache / coverage
+# -------------------------
+dist/
+build/
+.out/
+.next/
+.cache/
+coverage/
+
+# -------------------------
+# Azure Functions / SWA
+# -------------------------
 bin/
-# --- local artifacts (do not commit) ---
-*.zip
-.chstrategic.paths
 api-worker/
 .swa/
-.vscode/
-.devcontainer/
-node_modules/
-api/local.settings.json
-results.json
+
+# -------------------------
+# Python (if any)
+# -------------------------
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# -------------------------
+# Logs & artifacts
+# -------------------------
+*.log
 run.log.json
+results.json
+*.zip
+
+# -------------------------
+# Dev containers
+# -------------------------
+.devcontainer/
+
+# -------------------------
+# Project-specific
+# -------------------------
+.chstrategic.paths
 samples/too_big.csv

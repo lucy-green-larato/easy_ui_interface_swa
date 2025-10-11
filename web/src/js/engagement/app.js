@@ -36,6 +36,30 @@ function canonicalTone(val) {
   return "Professional";
 }
 
+// Generic show/hide binder for a button + a body element
+function bindToggle({ buttonId, bodyId, defaultExpanded = false }) {
+  const btn = document.getElementById(buttonId);
+  const body = document.getElementById(bodyId);
+  if (!btn || !body) return;
+
+  // Initial state
+  const initExpanded = (btn.getAttribute("aria-expanded") || "").toLowerCase() === "true"
+    ? true
+    : defaultExpanded;
+  apply(initExpanded);
+
+  btn.addEventListener("click", () => {
+    const expanded = btn.getAttribute("aria-expanded") === "true";
+    apply(!expanded);
+  });
+
+  function apply(expanded) {
+    btn.setAttribute("aria-expanded", String(expanded));
+    btn.textContent = expanded ? "Hide" : "Show";
+    body.hidden = !expanded;
+  }
+}
+
 // Split textarea lines/CSV/semicolon into array
 function splitPoints(s) {
   return String(s || "")
@@ -92,6 +116,38 @@ const els = {
 // ---------- Status helper ----------
 function setStatus(msg) {
   if (els.status) els.status.textContent = msg || "";
+}
+
+// log activity helpers 
+let _lastRender = null;
+
+function logActivity({ productId, buyerId, length }) {
+  const ol = document.getElementById("activity-log");
+  if (!ol) return;
+  const li = document.createElement("li");
+  const when = new Date().toLocaleString();
+  li.textContent = `${when} – Product: ${productId} · Buyer: ${buyerId} · ~${length} words`;
+  ol.prepend(li);
+}
+
+function logDelta(prev, curr) {
+  const ul = document.getElementById("delta-log");
+  if (!ul || !prev) return;
+  const sectionKeys = ["opening", "buyer_pain", "buyer_desire", "example_illustration", "handling_objections", "next_step"];
+  const diffs = [];
+  for (const k of sectionKeys) {
+    const a = String(prev.sections?.[k] || "");
+    const b = String(curr.sections?.[k] || "");
+    if (a !== b) {
+      const d = b.length - a.length;
+      const dir = d > 0 ? "↑" : "↓";
+      diffs.push(`${k.replace(/_/g, " ")} ${dir}${Math.abs(d)}`);
+    }
+  }
+  if (!diffs.length) return;
+  const li = document.createElement("li");
+  li.textContent = diffs.join(" · ");
+  ul.prepend(li);
 }
 
 // ---------- User badge ----------
@@ -172,7 +228,28 @@ async function setMode(mode, { persist = true } = {}) {
   }
   // Repopulate products; only apply latest fetch (race-safe)
   await populateProductsRaceSafe(m);
+  const productId = els.product?.value || "";
+  const buyerId = canonicalBuyerId(els.buyer?.value || "");
+  if (productId && buyerId) {
+    loadBuyerIntelFromTemplate({ mode: m, productId, buyerId });
+  }
   updateGenerateState();
+}
+
+function populateTipsFromJson(json) {
+  const list = document.getElementById("tips-list");
+  if (!list) return;
+  const tips = Array.isArray(json?.tips) ? json.tips.filter(Boolean) : [];
+  list.innerHTML = tips.length
+    ? tips.map(t => `<li>${String(t)}</li>`).join("")
+    : "<li>(no tips provided)</li>";
+  const btn = document.getElementById("toggle-tips");
+  if (btn) {
+    // ensure tips panel is visible when we have content
+    btn.setAttribute("aria-expanded", "true");
+    const body = document.getElementById("tips-body");
+    if (body) body.hidden = false;
+  }
 }
 
 async function populateProductsRaceSafe(mode) {
@@ -282,42 +359,86 @@ function injectRememberButtons() {
 }
 
 // ---------- Buyer intel (right rail) ----------
-// Reads optional buyer_intel from the library index. No extra HTTPs to /intel/*.json.
-async function loadBuyerIntel(buyerId) {
-  const b = (buyerId || "").toLowerCase();
+async function loadBuyerIntelFromTemplate({ mode, productId, buyerId }) {
   const intelBody = document.getElementById("intel-body");
   if (!intelBody) return;
+  if (!mode || !productId || !buyerId) { intelBody.hidden = true; return; }
+
+  // ---- helpers ----
+  const setList = (slotId, items) => {
+    const el = document.getElementById(slotId);
+    if (!el) return;
+    const arr = (items || []).filter(Boolean);
+    el.innerHTML = arr.length
+      ? `<ul>${arr.map(s => `<li>${String(s)}</li>`).join("")}</ul>`
+      : `<ul><li>(none)</li></ul>`;
+    el.parentElement?.classList?.add("loaded");
+  };
+
+  const mdSection = (md, name) => {
+    // match "## Name" (case-insensitive), optional colon, capture until the next "##" or end
+    const re = new RegExp(
+      String.raw`^##\s*${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\s*:?\s*\n([\s\S]*?)(?=^##\s|\Z)`,
+      "mi"
+    );
+    const m = String(md || "").match(re);
+    return m ? m[1].trim() : "";
+  };
+
+  const stripMd = (s) =>
+    String(s || "")
+      .replace(/`{1,3}[^`]*`{1,3}/g, "")       // inline code
+      .replace(/\*\*([^*]+)\*\*/g, "$1")       // **bold**
+      .replace(/\*([^*]+)\*/g, "$1")           // *italic*
+      .replace(/[_~>]/g, "")                   // misc md chars
+      .replace(/^>\s?/gm, "");                 // blockquotes
+
+  const bulletise = (txt, max = 5) => {
+    const src = stripMd(txt).trim();
+    if (!src) return [];
+    const lines = src.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+
+    // Prefer existing bullets in the template
+    const bulletLines = lines.filter(l => /^[-*•]\s+/.test(l));
+    if (bulletLines.length >= 2) {
+      return bulletLines
+        .map(l => l.replace(/^[-*•]\s+/, "").trim())
+        .filter(Boolean)
+        .slice(0, max);
+    }
+
+    // Fallback: split into sentence-ish chunks
+    return src
+      .replace(/\n+/g, " ")
+      .split(/(?<=[.!?])\s+/)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .slice(0, max);
+  };
 
   try {
-    const r = await fetch("/content/call-library/v1/index.json", { cache: "no-store" });
-    if (!r.ok) { intelBody.hidden = true; return; }
+    const templateMd = await loadTemplate({ mode, productId, buyerId });
 
-    const data = await r.json().catch(() => ({}));
-    // Expected optional shape:
-    // { buyer_intel: { "innovator": { priorities:[], pains:[], triggers:[], value_proof:[], objections:[], ctas:[] }, ... } }
-    const pack = data?.buyer_intel?.[b];
-    if (!pack) { intelBody.hidden = true; return; }
+    // Map to the six rail slots
+    const prioritiesTxt = mdSection(templateMd, "Overview");               // 1) Buyer Priorities
+    const painsTxt = mdSection(templateMd, "Buyer Pain");             // 2) Typical Pains
+    const triggersTxt = mdSection(templateMd, "Buyer Desire");           // 3) Triggers
+    const proofTxt = mdSection(templateMd, "Example Illustration");   // 4) Value Proof
+    const objectionsTxt = mdSection(templateMd, "Handling Objections");    // 5) Objections
+    const ctasTxt = mdSection(templateMd, "Next Step");              // 6) CTAs
 
-    const map = {
-      "intel-priorities": ["priorities", "buyer_priorities"],
-      "intel-pains": ["pains", "typical_pains"],
-      "intel-triggers": ["triggers"],
-      "intel-proof": ["value_proof", "proof"],
-      "intel-objections": ["objections"],
-      "intel-ctas": ["ctas"],
-    };
-
-    Object.entries(map).forEach(([id, keys]) => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      const arr = keys.map(k => pack?.[k]).find(v => Array.isArray(v)) || [];
-      el.innerHTML = arr.map(s => `<li>${String(s)}</li>`).join("") || "<li>(none)</li>";
-      el.parentElement?.classList?.add("loaded");
-    });
+    setList("intel-priorities", bulletise(prioritiesTxt));
+    setList("intel-pains", bulletise(painsTxt));
+    setList("intel-triggers", bulletise(triggersTxt));
+    setList("intel-proof", bulletise(proofTxt));
+    setList("intel-objections", bulletise(objectionsTxt));
+    setList("intel-ctas", bulletise(ctasTxt));
 
     intelBody.hidden = false;
   } catch {
-    intelBody.hidden = true;
+    ["intel-priorities", "intel-pains", "intel-triggers", "intel-proof", "intel-objections", "intel-ctas"]
+      .forEach(id => setList(id, []));
+    intelBody.hidden = false;
   }
 }
 
@@ -341,41 +462,83 @@ function updateGenerateState() {
 }
 
 async function onMakeFollowupEmail() {
-  if (!els.output) return;
-  const scriptMdText = els.output.textContent || "";
+  setStatus("Building follow-up email…");
+
+  // Use the rendered guide (plain text) as “prepared talking points”
+  const scriptMdText = (els.output?.textContent || "").trim();
 
   const payload = {
     op: "email",
     tone: els.tone?.value || "Professional (corporate)",
     seller: { name: els.seller_name?.value || "", company: els.seller_company?.value || "" },
     prospect: { name: els.prospect_name?.value || "", role: els.prospect_role?.value || "", company: els.prospect_company?.value || "" },
-    scriptMdText: (els.output?.textContent || "").trim(),
-    callNotes: (document.getElementById("notes")?.value || "").trim()
+    scriptMdText,
+    callNotes: (document.getElementById("notes")?.value || "")
   };
 
-  setStatus("Building follow-up email…");
-  const res = await fetch("/api/engagement-generate", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+  try {
+    const res = await fetch("/api/engagement-generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    });
 
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    setStatus(`API ${res.status}: ${txt.slice(0, 800)}`);
-    return;
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      setStatus(`API ${res.status}: ${txt.slice(0, 800)}`);
+      return;
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const emailText = String(data?.email || "").trim() || "(No email returned)";
+
+    // Show in the existing modal as a textarea to copy
+    const dlg = document.getElementById("script-modal");
+    const target = document.getElementById("modal-script");
+    if (target) {
+      const escaped = emailText
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+      target.innerHTML = `
+    <div class="email-modal">
+      <header class="modal-head">
+        <h3>Follow-up email</h3>
+        <div class="spacer"></div>
+        <button id="copy-email" class="btn small" type="button">Copy</button>
+        <button id="close-modal" class="btn small" type="button">Close</button>
+      </header>
+
+      <pre id="email-preview" class="email-preview" role="document">${escaped}</pre>
+    </div>
+  `;
+
+      const preview = target.querySelector("#email-preview");
+      const btnCopy = target.querySelector("#copy-email");
+
+      btnCopy?.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(preview?.textContent || "");
+          btnCopy.textContent = "Copied ✓";
+          setTimeout(() => (btnCopy.textContent = "Copy"), 1200);
+        } catch { }
+      });
+
+      // Ensure it opens tall enough to read most of the email
+      requestAnimationFrame(() => {
+        if (!preview) return;
+        // no-op here because CSS handles sizing, but this hook is kept in case you
+        // want to programmatically adjust in future
+      });
+    }
+    dlg?.showModal();
+
+    dlg?.querySelector("#close-modal")?.addEventListener("click", () => dlg.close());
+    setStatus("");
+  } catch (err) {
+    setStatus(`Network error: ${String(err?.message || err)}`);
   }
-
-  const data = await res.json().catch(() => ({}));
-  const emailText = String(data?.email || "").trim() || "(No email returned)";
-
-  // Show in pop-out window (consistent with your Pop-out handler)
-  const w = window.open("", "followup_email", "width=820,height=900");
-  const safe = emailText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  w.document.write(`<!doctype html><meta charset="utf-8"><title>Conversation Guide</title>...`);
-  w.document.close();
-
-  setStatus("");
 }
 
 // ---------- Generate pipeline ----------
@@ -459,17 +622,20 @@ async function onGenerate() {
     }
 
     // 4) Render response
-    const html = renderScriptFromJson(data);
-    const preface = buildPreface({ sellerName: els.seller_name?.value || "" });
-    const prefaceHTML = preface?.html || "";
+    const html = renderScriptFromJson(data, { sellerName: variables?.seller?.name });
     if (els.output) {
-      els.output.innerHTML = prefaceHTML + (html || "<p>(No content returned)</p>");
-      DIAG.set({ kind: "ok", productId, buyerId, length: variables.length, time: new Date().toISOString() });
+      els.output.innerHTML = html || "<p>(No content returned)</p>";
     }
-    // Enable actions
-    if (els.btnCopy) els.btnCopy.disabled = !html;
-    if (els.btnDownload) els.btnDownload.disabled = !html;
+    logDelta(_lastRender, data);
+    logActivity({ productId, buyerId, length: variables.length });
+    _lastRender = data;
+    // Enable actions (copy/download read from the rendered card)
+    const hasContent = !!html;
+    if (els.btnCopy) els.btnCopy.disabled = !hasContent;
+    if (els.btnDownload) els.btnDownload.disabled = !hasContent;
 
+    // Also populate the tips panel
+    populateTipsFromJson(data);
     setStatus("");
   } catch (e) {
     const message = String(e?.message || e);
@@ -479,6 +645,49 @@ async function onGenerate() {
     if (els.submit) { els.submit.disabled = !computeValidity(); els.submit.classList.remove("busy"); }
   }
 }
+
+function wireTogglePanels() {
+  // Buyer needs (intel)
+  const btnIntel = document.getElementById("toggle-intel");
+  const intelBody = document.getElementById("intel-body");
+  if (btnIntel && intelBody) {
+    btnIntel.addEventListener("click", async () => {
+      const expanded = btnIntel.getAttribute("aria-expanded") === "true";
+      if (expanded) {
+        intelBody.hidden = true;
+        btnIntel.textContent = "Show";
+        btnIntel.setAttribute("aria-expanded", "false");
+      } else {
+        // ensure content exists (loads if not already)
+        const buyerId = canonicalBuyerId(els.buyer?.value || "");
+        await loadBuyerIntel(buyerId);
+        intelBody.hidden = false;
+        btnIntel.textContent = "Hide";
+        btnIntel.setAttribute("aria-expanded", "true");
+      }
+    });
+  }
+
+  // Sales tips
+  const btnTips = document.getElementById("toggle-tips");
+  const tipsBody = document.getElementById("tips-body");
+  if (btnTips && tipsBody) {
+    btnTips.addEventListener("click", () => {
+      const expanded = btnTips.getAttribute("aria-expanded") === "true";
+      if (expanded) {
+        tipsBody.hidden = true;
+        btnTips.textContent = "Show";
+        btnTips.setAttribute("aria-expanded", "false");
+      } else {
+        tipsBody.hidden = false;
+        btnTips.textContent = "Hide";
+        btnTips.setAttribute("aria-expanded", "true");
+      }
+    });
+  }
+}
+
+
 
 // ---------- Highlighter ----------
 let highlightOn = false;
@@ -501,11 +710,26 @@ function clearHighlights(container) {
 
 // ---------- Wiring ----------
 function wire() {
+  // --- Show/Hide toggles ---
+  bindToggle({ buttonId: "toggle-intel", bodyId: "intel-body", defaultExpanded: false });
+  bindToggle({ buttonId: "toggle-tips", bodyId: "tips-body", defaultExpanded: true });
+
   // Header -> mode
   if (els.buyer) {
     els.buyer.addEventListener("change", () => {
       const buyerId = canonicalBuyerId(els.buyer.value || "");
-      loadBuyerIntel(buyerId);             // populate right-rail
+      const mode = canonicalMode(getHeaderMode() || getFormModeXS() || currentMode || "direct");
+      const productId = els.product?.value || "";
+      loadBuyerIntelFromTemplate({ mode, productId, buyerId });
+      updateGenerateState();
+    });
+  }
+  if (els.product) {
+    els.product.addEventListener("change", () => {
+      const buyerId = canonicalBuyerId(els.buyer?.value || "");
+      const mode = canonicalMode(getHeaderMode() || getFormModeXS() || currentMode || "direct");
+      const productId = els.product?.value || "";
+      loadBuyerIntelFromTemplate({ mode, productId, buyerId });
       updateGenerateState();
     });
   }
@@ -602,7 +826,6 @@ function wire() {
     });
   }
 }
-
 // ---------- Bootstrap ----------
 (async function bootstrap() {
   // 1) Badge
@@ -613,7 +836,25 @@ function wire() {
   await setMode(currentMode); // populates product list and updates chip; persists if Remember checked
 
   // 3) Keep helpful tips in synch
-  if (els.buyer) loadBuyerIntel(canonicalBuyerId(els.buyer.value || ""));
+  if (els.buyer) {
+    const mode = currentMode;
+    const productId = els.product?.value || "";
+    const buyerId = canonicalBuyerId(els.buyer.value || "");
+    if (productId && buyerId) {
+      loadBuyerIntelFromTemplate({ mode, productId, buyerId });
+    }
+  }
+  if (els.product) {
+    els.product.addEventListener("change", () => {
+      const mode = canonicalMode(getHeaderMode() || getFormModeXS() || currentMode || "direct");
+      const buyerId = canonicalBuyerId(els.buyer?.value || "");
+      const productId = els.product?.value || "";
+      if (productId && buyerId) {
+        loadBuyerIntelFromTemplate({ mode, productId, buyerId });
+      }
+    });
+  }
+  wireTogglePanels();
 
   // 4) Remembered fields row & restore
   injectRememberButtons();

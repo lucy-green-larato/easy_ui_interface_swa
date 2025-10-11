@@ -139,27 +139,36 @@ function buildJsonPrompt({ templateMd, variables, policy, tone, length }) {
     targetWords,
   } = variables;
 
-  // Canonical fallbacks
+  // Canonical fallbacks (keep these as you have them above)
   const productLabelStr = String(productLabel || productId || "").trim();
   const buyerTypeStr = String(buyerType || buyerId || "").trim();
-  const uspsStr = String(
-    valueProposition || (Array.isArray(usps) ? usps.join(", ") : "") || ""
-  ).trim();
-  const otherStr = String(
-    context || (Array.isArray(other_points) ? other_points.join(", ") : "") || ""
-  ).trim();
+
+  // Keep the raw arrays as arrays for numbered listing
+  const uspsArr = Array.isArray(usps) ? usps : (String(valueProposition || "").split(/[,;\n]+/).map(s => s.trim()).filter(Boolean));
+  const otherArr = Array.isArray(other_points) ? other_points : (String(context || "").split(/[,;\n]+/).map(s => s.trim()).filter(Boolean));
+
   const nextStepStr = String(nextStep || chosen_next_step || "").trim();
   const targetLen = Number(targetWords || length || 0);
 
-  // Tone guidance
+  // Tone guidance (keep as-is)
   const style = toneStyles(String(tone || "Professional"));
   const readability = `Readability: ${style.sentences}. Vocabulary: ${style.vocab}.`;
   const lengthHint = targetLen ? `Aim for about ${targetLen} words (±10%).` : "";
 
-  // Template hint
+  // Template hint (keep as-is)
   const suggestedNext = extractSuggestedNext(templateMd);
 
-  return `You are a top UK sales coach. Produce **instructional advice for the salesperson** (not a spoken script).
+  // Turn inputs into numbered lists the model can reference
+  const fmtList = (arr, label) => {
+    if (!Array.isArray(arr) || arr.length === 0) return `(none)`;
+    return arr.map((v, i) => `${label}[${i + 1}]: ${v}`).join("\n");
+  };
+
+  const uspsList = fmtList(uspsArr, "USP");
+  const otherList = fmtList(otherArr, "POINT");
+
+  return (
+    `You are a top UK sales coach. Produce **instructional advice for the salesperson** (not a spoken script).
 
 Write **valid JSON only** (no markdown; no prose outside JSON). Address the salesperson directly ("you") in the requested tone.
 Language: ${policy.language || "en-GB"}.
@@ -179,60 +188,90 @@ Your advice must use these six sections (these map to our UI and must ALL be pre
     "next_step": string                // The exact next step you should propose and how to ask for it.
   },
   "integration_notes": {
-    "usps_used": string[]?,
-    "other_points_used": string[]?,
+    "usps_used": string[]?,            // List the exact USP[...] items you actually used
+    "other_points_used": string[]?,    // List the exact POINT[...] items you actually used
     "next_step_source": "salesperson" | "template" | "assistant"?
   },
   "tips": [string, string, string],
   "summary_bullets": string[]
 }
 
-Constraints:
+HARD CONSTRAINTS:
 - UK business English. No pleasantries. **Adhere to the tone/style above** so tone affects vocabulary and sentence length.
-- **Weave** the salesperson inputs (USPs & Other points) into the most relevant sections as natural guidance.
-- Next step precedence: (1) salesperson-provided; else (2) template <!-- suggested_next_step -->; else (3) a clear, low-friction next step.
+- **Weave** the salesperson inputs naturally into the most relevant sections:
+   • From USPs and Other points below, **use at least two specific items** that materially help the guidance.
+   • When you use an item, **quote its exact label once** (e.g., "USP[2] ...") and incorporate its substance in your own wording.
+   • In "integration_notes.usps_used"/"integration_notes.other_points_used", repeat the **exact** referenced labels (e.g., ["USP[2]", "POINT[1]"]).
+- Next step precedence:
+   1) If the salesperson provided a next step (see **NEXT STEP (from salesperson)**), use it (rephrase for clarity if needed).
+   2) Else, if the template contains <!-- suggested_next_step -->, use it.
+   3) Else propose a clear, low-friction next step.
 - Include one specific, relevant customer example with measurable results; show how and **when** the salesperson should use it.
 - Return "summary_bullets" with **6–12** short bullets (**5–10 words** each) summarising the advice.
 - Use the template **for ideas only**. **Do NOT copy or paraphrase** its wording.
 
-Context to incorporate:
+CONTEXT
 - Product: ${productLabelStr}
 - Buyer type: ${buyerTypeStr}
-- Salesperson USPs (optional): ${uspsStr || "(none)"}
-- Other points to cover (optional): ${otherStr || "(none)"}
-- Salesperson requested next step (optional): ${nextStepStr || "(none)"}
-- Template suggested next step (optional): ${suggestedNext || "(none)"}
 
-Template to mine for ideas (don’t copy headings or wording; your output is JSON):
+INPUTS
+USPs:
+${uspsList}
+
+Other points:
+${otherList}
+
+NEXT STEP (from salesperson, optional):
+${nextStepStr || "(none)"}
+
+NEXT STEP (from template, optional):
+${suggestedNext || "(none)"}
+
+TEMPLATE to mine for ideas (don’t copy wording; your output is JSON):
 --- TEMPLATE START ---
 ${templateMd}
 --- TEMPLATE END ---
-`;
+`
+  );
 }
 
-// FOLLOW-UP EMAIL (plain text) — uses your proposed prompt verbatim
-function buildFollowupPrompt({
-  seller,
-  prospect,
-  tone,
-  scriptMdText,
-  callNotes,
-}) {
-  return `You are a UK B2B salesperson. Draft a concise follow-up email after a discovery call.
+// FOLLOW-UP EMAIL (plain text) — grounded in call notes, no assumptions
+function buildFollowupPrompt({ seller, prospect, tone, scriptMdText, callNotes }) {
+  // Try to surface a candidate next step from the prepared talking points
+  // (we only hint this to the model; it still must keep the language non-assumptive)
+  const nextStepHint = (() => {
+    const m = String(scriptMdText || "").match(/(?:^|\n)\s*Next Step\s*\n+([\s\S]*?)$/i);
+    return m ? m[1].trim().slice(0, 400) : "";
+  })();
+
+  return (
+    `You are a UK B2B salesperson. Draft a concise follow-up email after a sales call.
 
 Tone: ${tone || "Professional (corporate)"}.
-Output: Plain text email with:
-- Subject line
+Output: Plain text email (no markdown). Include:
+- Subject line starting "Subject: ..."
 - Greeting ("Hello ${prospect?.name || ""},")
-- 2–3 short paragraphs that stitch together (1) the prepared call talking points and (2) the salesperson's call notes (prioritise the notes)
-- A single clear next step
+- 2 short paragraphs MAX that reference ONLY what is in "Salesperson's notes" below.
+- A single clear next step that is low-friction and **non-assumptive** (ask, don't presume).
 - Signature as "${seller?.name || ""}, ${seller?.company || ""}"
 
-Prepared talking points (from the script the rep used on the call):
-${scriptMdText || "(none)"}
+Rules (very important):
+- Ground EVERYTHING in the Salesperson's notes. Do NOT invent or infer needs, opinions, or desires.
+- If something is not present in the notes, avoid statements like "you are looking for", "you liked", "I noted your desire".
+- Prefer neutral, factual phrasing such as "From our discussion…" or "We covered…".
+- If the notes contain a reaction (e.g. "enjoyed the portal demo"), phrase it neutrally: "You mentioned you enjoyed the portal demo", not "I was glad to hear…".
+- Keep sentences simple and clear; no marketing fluff.
+- If a next step is hinted below, you may use it but phrase it as an invitation (not an assumption).
 
-Salesperson's notes (verbatim):
-${callNotes || "(none)"}`;
+Optional next step hint (use only if suitable; keep it non-assumptive):
+${nextStepHint || "(none)"}
+
+Prepared talking points (context, do NOT copy or assume):
+${(scriptMdText || "(none)")}
+
+Salesperson's notes (the only source of truth):
+${callNotes || "(none)"}`
+  );
 }
 
 /* ============================ HELPERS ============================ */

@@ -1,0 +1,31 @@
+{
+  "version": "2.0",
+  "functionTimeout": "00:06:00",
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[4.*, 5.0.0)"
+  },
+  "extensions": {
+    "durableTask": {
+      "hubName": "CampaignHub"
+    }
+  },
+  "logging": {
+    "logLevel": {
+      "Function": "Information",
+      "Host.Results": "Information"
+    }
+  },
+  "functions": [
+    "auth",
+    "generate",
+    "campaign-start",
+    "campaign-status",
+    "campaignFetch",
+    "campaign-regenerate",
+    "ch-strategic",
+    "ch-strategic-worker",
+    "runs",
+    "pbi_token"
+  ]
+}

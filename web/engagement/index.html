@@ -247,6 +247,21 @@
       <div id="modal-script" class="output" style="min-height:auto"></div>
     </dialog>
 
+    <!-- Follow-up Email Modal -->
+    <dialog id="email-modal" class="modal">
+      <div class="card" style="max-width:760px">
+        <div class="row-between" style="align-items:center;gap:8px">
+          <h3 style="margin:0">Follow-up email</h3>
+          <button id="email-close" class="btn inline" type="button">Close ×</button>
+        </div>
+        <textarea id="email-text" rows="14" style="width:100%;margin-top:12px" aria-label="Follow-up email"></textarea>
+        <div class="row-between" style="gap:8px;margin-top:12px">
+          <button id="email-copy" class="btn inline" type="button">Copy to clipboard</button>
+          <button id="email-download" class="btn inline" type="button">Download .txt</button>
+        </div>
+      </div>
+    </dialog>
+
     <!-- Help Modal -->
     <dialog id="help-modal" class="modal">
       <div class="card" style="max-width:700px">
@@ -330,55 +345,56 @@
     <!-- RIGHT -->
     <section class="panel right" aria-labelledby="helpers-title">
       <div class="row-between output-head">
-        <h2 id="helpers-title">Helpers</h2>
+        <h2 id="helpers-title">More winning info</h2>
+        <aside class="intel card">
+          <div class="intel-head">
+            <h2 id="intel-title">Buyer needs</h2>
+            <button id="toggle-intel" class="btn small" type="button" aria-expanded="false"
+              aria-controls="intel-body">Show</button>
+          </div>
+          <div id="intel-body" hidden>
+            <div class="intel-grid">
+              <section>
+                <h3>1) Buyer Priorities</h3>
+                <ul id="intel-priorities" class="intel-slot"></ul>
+              </section>
+              <section>
+                <h3>2) Typical Pains</h3>
+                <ul id="intel-pains" class="intel-slot"></ul>
+              </section>
+              <section>
+                <h3>3) Triggers</h3>
+                <ul id="intel-triggers" class="intel-slot"></ul>
+              </section>
+              <section>
+                <h3>4) Value Proof</h3>
+                <ul id="intel-proof" class="intel-slot"></ul>
+              </section>
+              <section>
+                <h3>5) Objections</h3>
+                <ul id="intel-objections" class="intel-slot"></ul>
+              </section>
+              <section>
+                <h3>6) CTAs</h3>
+                <ul id="intel-ctas" class="intel-slot"></ul>
+              </section>
+            </div>
+          </div>
+        </aside>
+
+        <aside class="intel card" style="margin-top:var(--s-4)">
+          <div class="intel-head">
+            <h2 id="tips-title">Sales tips</h2>
+            <button id="toggle-tips" class="btn small" type="button" aria-expanded="true"
+              aria-controls="tips-body">Hide</button>
+          </div>
+          <div id="tips-body">
+            <ul id="tips-list"></ul>
+          </div>
+        </aside>
       </div>
 
-      <aside class="intel card">
-        <div class="intel-head">
-          <h2 id="intel-title">Buyer needs</h2>
-          <button id="toggle-intel" class="btn small" type="button" aria-expanded="false"
-            aria-controls="intel-body">Show</button>
-        </div>
-        <div id="intel-body" hidden>
-          <div class="intel-grid">
-            <section>
-              <h3>1) Buyer Priorities</h3>
-              <div id="intel-priorities" class="intel-slot"></div>
-            </section>
-            <section>
-              <h3>2) Typical Pains</h3>
-              <div id="intel-pains" class="intel-slot"></div>
-            </section>
-            <section>
-              <h3>3) Triggers</h3>
-              <div id="intel-triggers" class="intel-slot"></div>
-            </section>
-            <section>
-              <h3>4) Value Proof</h3>
-              <div id="intel-proof" class="intel-slot"></div>
-            </section>
-            <section>
-              <h3>5) Objections</h3>
-              <div id="intel-objections" class="intel-slot"></div>
-            </section>
-            <section>
-              <h3>6) CTAs</h3>
-              <div id="intel-ctas" class="intel-slot"></div>
-            </section>
-          </div>
-        </div>
-      </aside>
 
-      <aside class="intel card" style="margin-top:var(--s-4)">
-        <div class="intel-head">
-          <h2 id="tips-title">Helpful tips</h2>
-          <button id="toggle-tips" class="btn small" type="button" aria-expanded="true"
-            aria-controls="tips-body">Hide</button>
-        </div>
-        <div id="tips-body">
-          <ul id="tips-list"></ul>
-        </div>
-      </aside>
     </section>
   </main>
 

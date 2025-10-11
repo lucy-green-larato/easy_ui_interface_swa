@@ -1,4 +1,4 @@
-// index.js – Azure Function handler for /api/generate
+// index.js – Azure Function handler for /api/generate (sales engagement app)
 // Version: v3-markdown-first-2025-09-08-1 json compatibility
 
 const VERSION = "DEV-verify-2025-09-10-1"; // <-- bump this every edit

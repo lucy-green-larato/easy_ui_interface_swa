@@ -617,6 +617,26 @@
     background-image: none
   }
 
+  .remember-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s-2, 8px);
+    margin-top: var(--s-2, 8px);
+  }
+
+  .remember-row .btn.small {
+    /* keep these subtle and compact */
+    padding: 0.25rem 0.5rem;
+    line-height: 1.2;
+  }
+
+  .remember-row .muted {
+    margin-left: 0.25rem;
+    font-size: 0.9rem;
+    color: var(--text-3, #6b7280);
+  }
+
   input:focus,
   select:focus,
   textarea:focus {
@@ -825,7 +845,8 @@
 
   /* Single source of truth for the output surface */
   .output {
-    white-space: pre-wrap;
+    white-space: normal;
+    overflow-wrap: anywhere; 
     color: var(--text-1);
     background: var(--card-bg);
     border: 1px solid var(--border);
@@ -833,7 +854,6 @@
     border-radius: 12px;
     min-height: 260px;
     outline: none;
-    resize: vertical;
     font-variant-ligatures: contextual;
   }
 
@@ -1163,11 +1183,11 @@
   .tips-card .row-between {
     display: flex;
     align-items: center;
-    gap: .5rem
+    gap: .5rem;
   }
 
   .tips-card .row-between> :last-child {
-    margin-left: auto
+    margin-left: auto;
   }
 
   /* Helpful tips chips */
@@ -1190,45 +1210,63 @@
     color: var(--text-2);
   }
 
-  .output .script-sec>h3 {
-    font-size: var(--fs-output-h3) !important;
-    margin: 0 0 6px;
+  /* ---------- Conversation Guide (scoped) ---------- */
+  .output {
+    font-size: .9rem;
+    line-height: 1.5;
   }
 
-  .output p {
-    margin: 6px 0;
-  }
-
-  .output li {
-    margin: 3px 0;
-  }
-
-  .output h3 {
-    margin-top: var(--s-5);
-    margin-bottom: var(--s-2);
-  }
-
-  .output h3:first-child {
-    margin-top: 0;
-  }
-
-  .output .script-body>.script-sec:first-child {
-    margin-top: 0;
-  }
-
-  .output .script-body>.script-sec:first-child>*:first-child {
-    margin-top: 0;
-  }
-
-  .output .script-body>.script-sec:first-child>*:last-child {
-    margin-bottom: 0;
-  }
-
-  .output .script-body .script-sec.preface {
-    padding: 0;
-    margin: 0 0 var(--s-3);
+  /* Preface (hello + motivation) */
+  .output .script-preface {
+    padding: var(--s-3);
+    padding-bottom: var(--s-2);
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 var(--s-2);
     background: transparent;
-    border: 0;
+  }
+
+  .output .script-preface .hello {
+    margin: 0 0 .25rem;
+    font-weight: 600;
+  }
+
+  .output .script-preface .muted {
+    margin: 0;
+    /*color: var(--text-2);*/
+  }
+
+  /* Section card */
+  .output .script-sec {
+    margin: var(--s-1) 0;
+    padding: var(--s-2);
+    background: var(--card-bg);
+    /*border: 1px solid var(--border);
+    border-radius: 10px;*/
+  }
+
+  .output .script-sec>h3 {
+    font-size: calc(var(--fs-output-h3) * 0.9);
+    line-height: 1.25;
+    /*margin: 0 0 6px;*/
+    color: var(--text-1);
+  }
+
+  .output .script-sec .sec-body p {
+    margin: 2px 0;
+  }
+
+  .output .script-sec .sec-body li {
+    margin: 2px 0;
+  }
+
+  /* Tips section inside the guide */
+  .output .script-sec.tips ol {
+    margin: .25rem 0 .5rem 1.25rem;
+  }
+
+  /* Remove legacy/global spacing that caused big gaps */
+  .output h3 {
+    margin: 0;
   }
 
   /* Openers */
@@ -2101,4 +2139,55 @@ html[data-theme="dark"] .group-marketing .tool {
   line-height: 1.15;
   font-size: 0.95rem;
   color: var(--text-muted, #666);
+}
+
+/* ===== Follow-up email modal (WIDE variant) ===== */
+#script-modal.modal-wide {
+  width: min(98vw, 1100px);     /* nice and wide on desktop */
+  max-width: 1100px;
+  max-height: 90vh;             /* keep within viewport height */
+  padding: var(--s-4);
+}
+
+#script-modal.modal-wide::backdrop {
+  background: rgba(0,0,0,.35);
+}
+
+/* Sticky header with actions (Copy / Close) */
+#script-modal .email-modal .modal-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding-bottom: var(--s-2);
+  margin-bottom: var(--s-2);
+  background: var(--panel-bg, #fff);
+  z-index: 1;
+  border-bottom: 1px solid var(--border);
+}
+
+#script-modal .email-modal .modal-head h3 {
+  font-size: calc(var(--fs-output-h3) * 0.95);
+  margin: 0;
+}
+#script-modal .email-modal .modal-head .spacer { flex: 1; }
+
+/* Large, readable preview area (no cramped textarea) */
+#script-modal .email-preview {
+  white-space: pre-wrap;
+  font: 400 1rem/1.6 var(--font-sans, system-ui, sans-serif);
+  color: var(--text-1);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: var(--s-3);
+  margin: 0;
+  max-height: calc(90vh - 4rem);   /* allow the header + padding */
+  overflow: auto;                   /* scroll only if truly long */
+}
+
+/* Buttons look neat inside the head */
+#script-modal .email-modal .btn.small {
+  padding: .35rem .65rem;
 }
