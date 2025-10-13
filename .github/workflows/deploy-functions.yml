@@ -1,4 +1,5 @@
 name: deploy-functions
+
 on:
   push:
     branches: [ main ]
@@ -7,6 +8,11 @@ on:
       - '.github/workflows/deploy-functions.yml'
   workflow_dispatch:
 
+# Required for OIDC login
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -14,14 +20,18 @@ jobs:
       AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
       AZURE_RESOURCE_GROUP:  ${{ vars.AZURE_RESOURCE_GROUP }}
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Azure Login
+      # OIDC-based login (no client secret needed)
+      - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          client-id:        ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id:        ${{ vars.AZURE_TENANT_ID }}
+          subscription-id:  ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -35,7 +45,7 @@ jobs:
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
         with:
-          app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
-          package: ./api
+          app-name:     ${{ env.AZURE_FUNCTIONAPP_NAME }}
+          package:      ./api
           node-version: '20'
-          slot-name: Production
+          slot-name:    Production
