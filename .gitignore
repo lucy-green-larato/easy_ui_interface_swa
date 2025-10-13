@@ -6,6 +6,14 @@ api/local.settings.json
 api-python/local.settings.json
 web/staticwebapp.config.local.json
 
+# Old files and zips
+*.zip
+web/styles.css.old
+web/staticwebapp.config.backup.json
+web/staticwebapp.config.json.off
+api/local.settings realblob copy.json
+api/host.json.bak
+
 # Azurite (local storage emulator)
 .azurite/
 _azurite/
@@ -19,8 +27,10 @@ _azurite/
 *.py[cod]
 *.pyo
 .venv/
+_venv
 venv/
 env/
+venv/\n.venv/\n
 
 # OS/editor
 .DS_Store
