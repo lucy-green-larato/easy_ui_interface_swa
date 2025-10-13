@@ -25,3 +25,4 @@ jobs:
           api_location: ""           # <- you deploy Functions separately
           output_location: ""        # <- none for plain static
           production_branch: main    # <- be explicit
+          deployment_action: upload
