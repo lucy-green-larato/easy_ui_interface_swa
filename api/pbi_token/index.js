@@ -12,25 +12,48 @@ function readEnv() {
   const REPORT_ID     = process.env.PBI_REPORT_ID     ?? process.env.REPORT_ID;
   const DEV_STATIC    = process.env.PBI_DEV_STATIC_TOKEN ?? process.env.PBI_DEV_EMBED_TOKEN; // optional
 
+  // Scope (your setting name first, with safe fallbacks)
+  const SCOPE = process.env.PBI_AUTH_SCOPE
+    ?? process.env.PBI_SCOPE
+    ?? "https://analysis.windows.net/powerbi/api/.default";
+
   const missing = ![TENANT_ID, CLIENT_ID, CLIENT_SECRET, WORKSPACE_ID, REPORT_ID].every(Boolean);
-  return { TENANT_ID, CLIENT_ID, CLIENT_SECRET, WORKSPACE_ID, REPORT_ID, DEV_STATIC, missing };
+  return { TENANT_ID, CLIENT_ID, CLIENT_SECRET, WORKSPACE_ID, REPORT_ID, DEV_STATIC, SCOPE, missing };
 }
 
 module.exports = async function (context, req) {
   try {
-    const { TENANT_ID, CLIENT_ID, CLIENT_SECRET, WORKSPACE_ID, REPORT_ID, DEV_STATIC, missing } = readEnv();
+    const {
+      TENANT_ID,
+      CLIENT_ID,
+      CLIENT_SECRET,
+      WORKSPACE_ID,
+      REPORT_ID,
+      DEV_STATIC,
+      SCOPE,
+      missing
+    } = readEnv();
 
     // Local/dev behaviour: allow static token or cleanly disable without 500.
     if (DEV_STATIC) {
       context.res = {
         status: 200,
         headers: { "Content-Type": "application/json" },
-        body: { disabled: false, mode: "dev-static", embedToken: { token: DEV_STATIC, tokenId: "dev-static" } }
+        body: {
+          disabled: false,
+          mode: "dev-static",
+          embedToken: { token: DEV_STATIC, tokenId: "dev-static" }
+        }
       };
       return;
     }
+
     if (missing) {
-      context.res = { status: 200, headers: { "Content-Type": "application/json" }, body: { disabled: true } };
+      context.res = {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+        body: { disabled: true }
+      };
       return;
     }
 
@@ -44,13 +67,16 @@ module.exports = async function (context, req) {
     });
 
     const aad = await cca.acquireTokenByClientCredential({
-      scopes: ["https://analysis.windows.net/powerbi/api/.default"]
+      scopes: [SCOPE]
     });
 
     const accessToken = aad?.accessToken;
     if (!accessToken) throw new Error("Failed to acquire AAD access token");
 
-    const headers = { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" };
+    const headers = {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    };
 
     // Fetch report metadata (embedUrl, datasetId)
     const rep = await axios.get(
