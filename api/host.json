@@ -6,10 +6,8 @@
     "version": "[3.*, 4.0.0)"
   },
   "extensions": {
-    "http": {"routePrefix": "api"},
-    "durableTask": {
-      "hubName": "CampaignHub"
-    }
+    "http": { "routePrefix": "api" },
+    "durableTask": { "hubName": "CampaignHub" }
   },
   "logging": {
     "logLevel": {
@@ -27,6 +25,7 @@
     "pbi_token",
     "ixbrl-financials",
     "qualification-generate",
-    "engagement-generate"
+    "engagement-generate",
+    "health"                   
   ]
 }
