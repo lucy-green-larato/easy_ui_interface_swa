@@ -9,11 +9,12 @@
     ]
   },
    "routes": [
-    { "route": "/api/*", "allowedRoles": ["anonymous"] },
+    { "route": "/api/*", "allowedRoles": ["authenticated"] },
     { "route": "/call-script/*", "rewrite": "/call-script/index.html" },
     { "route": "/qualification/*", "rewrite": "/qualification/index.html" },
     { "route": "/engagement/*", "rewrite": "/engagement/index.html" }
   ],
+  "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/{*path}",
   "mimeTypes": {
     ".md": "text/markdown",
     ".json": "application/json"

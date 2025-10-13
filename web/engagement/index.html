@@ -227,7 +227,7 @@
           </div>
         </div>
         <textarea id="notes" rows="6"
-          placeholder="Type notes during the call. Saved locally on this device;"></textarea>
+          placeholder="Type your notes here. Click on any button in the Buyer Needs to add to your notes. Use the look up to find information that may be missing. Your notes (only) are used to create the follow-up email."></textarea>
         <p class="muted" style="margin-top:.5rem">Notes are stored locally (this browser only).</p>
       </div>
 
@@ -346,12 +346,16 @@
     <section class="panel right" aria-labelledby="helpers-title">
       <div class="row-between output-head">
         <h2 id="helpers-title">More winning info</h2>
+
+        <!-- Buyer needs -->
         <aside class="intel card">
           <div class="intel-head">
             <h2 id="intel-title">Buyer needs</h2>
-            <button id="toggle-intel" class="btn small" type="button" aria-expanded="false"
-              aria-controls="intel-body">Show</button>
+            <button id="toggle-intel" class="btn small" type="button" aria-expanded="false" aria-controls="intel-body">
+              Show
+            </button>
           </div>
+
           <div id="intel-body" hidden>
             <div class="intel-grid">
               <section>
@@ -382,19 +386,20 @@
           </div>
         </aside>
 
-        <aside class="intel card" style="margin-top:var(--s-4)">
+        <!-- Sales tips -->
+        <aside class="intel card">
           <div class="intel-head">
             <h2 id="tips-title">Sales tips</h2>
-            <button id="toggle-tips" class="btn small" type="button" aria-expanded="true"
-              aria-controls="tips-body">Hide</button>
+            <button id="toggle-tips" class="btn small" type="button" aria-expanded="true" aria-controls="tips-body">
+              Hide
+            </button>
           </div>
           <div id="tips-body">
             <ul id="tips-list"></ul>
           </div>
         </aside>
       </div>
-
-
+    </section>
     </section>
   </main>
 

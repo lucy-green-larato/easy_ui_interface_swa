@@ -846,7 +846,7 @@
   /* Single source of truth for the output surface */
   .output {
     white-space: normal;
-    overflow-wrap: anywhere; 
+    overflow-wrap: anywhere;
     color: var(--text-1);
     background: var(--card-bg);
     border: 1px solid var(--border);
@@ -2143,14 +2143,16 @@ html[data-theme="dark"] .group-marketing .tool {
 
 /* ===== Follow-up email modal (WIDE variant) ===== */
 #script-modal.modal-wide {
-  width: min(98vw, 1100px);     /* nice and wide on desktop */
+  width: min(98vw, 1100px);
+  /* nice and wide on desktop */
   max-width: 1100px;
-  max-height: 90vh;             /* keep within viewport height */
+  max-height: 90vh;
+  /* keep within viewport height */
   padding: var(--s-4);
 }
 
 #script-modal.modal-wide::backdrop {
-  background: rgba(0,0,0,.35);
+  background: rgba(0, 0, 0, .35);
 }
 
 /* Sticky header with actions (Copy / Close) */
@@ -2171,7 +2173,10 @@ html[data-theme="dark"] .group-marketing .tool {
   font-size: calc(var(--fs-output-h3) * 0.95);
   margin: 0;
 }
-#script-modal .email-modal .modal-head .spacer { flex: 1; }
+
+#script-modal .email-modal .modal-head .spacer {
+  flex: 1;
+}
 
 /* Large, readable preview area (no cramped textarea) */
 #script-modal .email-preview {
@@ -2183,11 +2188,109 @@ html[data-theme="dark"] .group-marketing .tool {
   border-radius: 10px;
   padding: var(--s-3);
   margin: 0;
-  max-height: calc(90vh - 4rem);   /* allow the header + padding */
-  overflow: auto;                   /* scroll only if truly long */
+  max-height: calc(90vh - 4rem);
+  /* allow the header + padding */
+  overflow: auto;
+  /* scroll only if truly long */
 }
 
 /* Buttons look neat inside the head */
 #script-modal .email-modal .btn.small {
   padding: .35rem .65rem;
+}
+
+@layer components {
+
+  /* Tools panel under the guide */
+  .script-tools.card {
+    margin-top: var(--s-4);
+    padding: var(--s-3);
+  }
+
+  .script-tools .row-gap-top {
+    margin-top: 10px;
+  }
+
+  .script-tools .row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .script-tools .row-wrap {
+    flex-wrap: wrap;
+  }
+
+  .script-tools .between {
+    justify-content: space-between;
+  }
+
+  .script-tools .actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  #lookup-q {
+    flex: 1;
+    min-width: 240px;
+  }
+
+  #lookup-results {
+    margin-top: 6px;
+  }
+
+  /* Optional: dim modal header controls while regenerating */
+  [aria-busy="true"] .btn {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+}
+
+
+/* Chips for sources (scoped so header/right-rail chips keep their look) */
+.script-tools .chip,
+#lookup-results .chip {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  text-decoration: underline;
+  font-size: 12px;
+  line-height: 1.2;
+  background: var(--chip-bg);
+  color: var(--chip-fg);
+}
+
+/* Optional: dim modal header controls while regenerating */
+[aria-busy="true"] .btn {
+  opacity: 0.6;
+  pointer-events: none;
+}
+/* --- Warmer header background (overrides) --- */
+
+/* Tokens so you can tweak later from one place */
+:root {
+  --header-bg: #F7EBDD;      /* warm sand */
+  --header-border: #E7D8C6;  /* soft tan */
+}
+
+/* If your app toggles dark mode with [data-theme="dark"] */
+:root[data-theme="dark"] {
+  --header-bg: #2B2330;      /* warm plum */
+  --header-border: #3A303B;  /* deeper border */
+}
+
+/* Apply just to the top bar with the logo */
+.app-header {
+  background: var(--header-bg) !important;
+  border-bottom-color: var(--header-border) !important;
+}
+
+/* Fallback for systems that rely on OS dark mode instead of data-theme */
+@media (prefers-color-scheme: dark) {
+  .app-header {
+    background: #2B2330;
+    border-bottom-color: #3A303B;
+  }
 }

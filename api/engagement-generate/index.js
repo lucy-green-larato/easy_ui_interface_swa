@@ -1,4 +1,4 @@
-// /api/engagement-generate/index.js 2025-10-11 v4.8 (CommonJS)
+// /api/engagement-generate/index.js 2025-10-12 v5.0 (CommonJS)
 // Secure generation for the Engagement app.
 // Modes:
 //   - script  : JSON-only coach guidance (sections/tips/summary_bullets)
@@ -29,24 +29,31 @@ module.exports = async function (context, req) {
     // Triggered by either mode:"followup" OR op:"email"
     const isFollowup =
       mode === "followup" || String(body.op || "").toLowerCase() === "email";
+    const isLookup = String(body.op || "").toLowerCase() === "lookup";
 
     if (isFollowup) {
       const seller = body.seller || { name: "", company: "" };
       const prospect = body.prospect || { name: "", role: "", company: "" };
-      const tone = String(body.tone || "Professional (corporate)");
+      const toneReq = normalizeTone(body.tone || "Professional");
       const scriptMdText = String(body.scriptMdText || body.scriptMd || "");
       const callNotes = String(body.callNotes || "");
+      const usps = Array.isArray(body.usps) ? body.usps : [];
+      const nextStep = String(body.nextStep || "").trim();
+      const targetWords = clampInt(body.targetWords, 80, 600, 180);
 
-      const prompt = buildFollowupPrompt({
+      const prompt = buildFollowupPromptJSON({
         seller,
         prospect,
-        tone,
+        toneReq,
         scriptMdText,
         callNotes,
+        usps,
+        nextStep,
+        targetWords,
       });
 
-      const text = await callModelJson(prompt, {
-        json: false, // plain text email
+      const jsonStr = await callModelJson(prompt, {
+        json: true, // expect strict JSON back
         model: process.env.OPENAI_MODEL || "gpt-4o-mini",
         timeoutMs: clampInt(
           process.env.LLM_TIMEOUT_MS || 30000,
@@ -57,11 +64,87 @@ module.exports = async function (context, req) {
         context,
       });
 
-      context.log(
-        `[engagement-generate][followup] ok in ${Date.now() - t0} ms`
-      );
-      // IMPORTANT: return JSON object to match client expectations
-      return send(context, 200, { email: String(text || "").trim() });
+      const obj = safeParseJson(jsonStr);
+
+      // --- Server-side guarantees ---
+      if (normalizeTone(obj.tone_used) !== toneReq) obj.tone_used = toneReq;
+      if (usps.length && (!Array.isArray(obj.usps_used) || obj.usps_used.length === 0)) {
+        obj.usps_used = [usps[0]];
+      }
+      if (nextStep && !obj.next_step) obj.next_step = nextStep;
+
+      const email = renderFollowupEmailPlainText(obj, { seller, prospect });
+
+      context.log(`[engagement-generate][followup] ok in ${Date.now() - t0} ms`);
+      return send(context, 200, {
+        email: String(email || "").trim(),
+        meta: {
+          tone_requested: toneReq,
+          tone_used: obj.tone_used || toneReq,
+          usps_used: obj.usps_used || [],
+          next_step: obj.next_step || "",
+          subject_alternatives: Array.isArray(obj.alt_subjects) ? obj.alt_subjects.slice(0, 3) : [],
+          actions: [
+            { label: "Rewrite: Longer", mode: "followup", targetWords: Math.min(targetWords + 120, 600) },
+            { label: "Rewrite: Shorter", mode: "followup", targetWords: Math.max(targetWords - 80, 100) },
+            { label: "Try: Professional tone", mode: "followup", tone: "Professional" },
+            { label: "Try: Warm tone", mode: "followup", tone: "Warm" },
+            { label: "Try: Straightforward tone", mode: "followup", tone: "Straightforward" }
+          ]
+        }
+      });
+    } else if (isLookup) {
+
+      // -------- LOOKUP (JSON response with { note_text, sources, caution }) --------
+      const seller = body.seller || { name: "", company: "" };
+      const prospect = body.prospect || { name: "", role: "", company: "" };
+      const toneReq = normalizeTone(body.tone || "Professional");
+      const query = String(body.query || "").trim(); // what the rep typed
+      const contextHints = String(body.context || "");  // optional extra context from UI (product, buyer, scenario)
+
+      if (!query) return send(context, 400, "query is required for op=lookup");
+
+      // Optional retrieval (safe no-op if not configured)
+      let kbSnippets = [];
+      try {
+        if (hasAzureSearchConfig() && body.allowSearch !== false) {
+          kbSnippets = await queryAzureSearch(query, clampInt(body.topN, 1, 10, 5));
+        }
+      } catch (e) {
+        context.log.warn("[lookup] search error, continuing LLM-only:", e?.message || String(e));
+      }
+
+      const prompt = buildLookupPrompt({
+        seller, prospect, toneReq, query, contextHints, kbSnippets
+      });
+
+      const jsonStr = await callModelJson(prompt, {
+        json: true,
+        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+        timeoutMs: clampInt(process.env.LLM_TIMEOUT_MS || 30000, 5000, 120000, 30000),
+        context,
+      });
+
+      const obj = safeParseJson(jsonStr) || {};
+      // Basic shape guardrails
+      const out = {
+        note_text: String(obj.note_text || "").trim(),
+        sources: Array.isArray(obj.sources) ? obj.sources.slice(0, 8).map(s => ({
+          title: String(s.title || "").slice(0, 160),
+          url: String(s.url || ""),
+          confidence: String(s.confidence || "")
+        })) : [],
+        caution: !!obj.caution
+      };
+
+      // Ensure note_text present; if nothing meaningful, return a helpful stub
+      if (!out.note_text) {
+        out.note_text = `Note: Unable to find reliable information on "${query}". Consider rephrasing, narrowing the scope, or checking internal sources.`;
+        out.caution = true;
+      }
+
+      context.log(`[engagement-lookup] ok in ${Date.now() - t0} ms`);
+      return send(context, 200, out);
     }
 
     // -------- SCRIPT (JSON-only) --------
@@ -116,6 +199,55 @@ function extractSuggestedNext(md) {
     /<!--\s*suggested_next_step:\s*([\s\S]*?)\s*-->/i
   );
   return m ? m[1].trim() : "";
+}
+
+// LOOKUP (returns note_text to append into call notes)
+// Accepts optional kbSnippets: [{title, url, chunk}] from any retrieval layer (can be empty)
+function buildLookupPrompt({ seller, prospect, toneReq, query, contextHints, kbSnippets }) {
+  const sellerLine = [seller?.name, seller?.company].filter(Boolean).join(", ");
+  const prospectLine = [prospect?.name, prospect?.role && `(${prospect.role})`, prospect?.company]
+    .filter(Boolean).join(" ");
+
+  const kb = Array.isArray(kbSnippets) && kbSnippets.length
+    ? kbSnippets.slice(0, 6).map((s, i) => {
+      const title = String(s.title || s.url || "Untitled").slice(0, 160);
+      const url = String(s.url || "");
+      const body = String(s.chunk || "").slice(0, 400); // <-- uses 'chunk' to match your mapper
+      return `SRC[${i + 1}]: ${title} — ${url}\n${body}`;
+    }).join("\n\n")
+    : "(none)";
+
+  return `
+You are a UK B2B sales assistant. Produce a short, factual note the salesperson can paste into **call notes**.
+
+Tone: ${toneReq || "Professional"}.
+Language: en-GB.
+
+Return **JSON only** with this shape:
+{
+  "note_text": string,          // 1–3 short sentences; neutral; no assumptions.
+  "sources": [{"title": string, "url": string, "confidence": "high|medium|low"}]?, // 0–3 items.
+  "caution": string?            // include only if confidence is low or data is uncertain.
+}
+
+Rules:
+- Base content strictly on the **Query**, optional **Context**, and **Known snippets** below.
+- If snippets are empty or weak, keep "sources" as [] and include a brief "caution".
+- Keep "note_text" concise; suitable for a notes textbox.
+- No marketing fluff. No made-up figures.
+
+Query:
+${query}
+
+Context (product/buyer/scenario):
+${contextHints || "(none)"}
+
+Salesperson: ${sellerLine || "(anon)"}
+Prospect: ${prospectLine || "(anon)"}
+
+Known snippets (may be empty):
+${kb}
+`;
 }
 
 // JSON-only coach guidance (script)
@@ -180,13 +312,14 @@ Your advice must use these six sections (these map to our UI and must ALL be pre
 
 {
   "sections": {
-    "opening": string,                 // What you should do first and how to set context.
-    "buyer_pain": string,              // How to uncover pains for this buyer type; what to listen for.
-    "buyer_desire": string,            // How to test for desired outcomes and decision criteria.
-    "example_illustration": string,    // A relevant customer example to draw on; how to use it.
-    "handling_objections": string,     // Specific objection patterns + how you should respond (in this tone).
-    "next_step": string                // The exact next step you should propose and how to ask for it.
-  },
+  "opening": string,                 // Start with 2–4 sentences to set context, THEN a "Coaching cues:" list (3–5 bullets).
+                                     // Each bullet ties a USP to either [Pain] or [Desire], e.g. "- [Pain] If they mention onboarding delays, bring in USP[2] for time-to-value".
+  "buyer_pain": string,              // How to uncover pains for this buyer type; what to listen for.
+  "buyer_desire": string,            // How to test for desired outcomes and decision criteria.
+  "example_illustration": string,    // A relevant customer example to draw on; how to use it.
+  "handling_objections": string,     // Specific objection patterns + how you should respond (in this tone).
+  "next_step": string                // The exact next step you should propose and how to ask for it.
+},
   "integration_notes": {
     "usps_used": string[]?,            // List the exact USP[...] items you actually used
     "other_points_used": string[]?,    // List the exact POINT[...] items you actually used
@@ -198,10 +331,12 @@ Your advice must use these six sections (these map to our UI and must ALL be pre
 
 HARD CONSTRAINTS:
 - UK business English. No pleasantries. **Adhere to the tone/style above** so tone affects vocabulary and sentence length.
-- **Weave** the salesperson inputs naturally into the most relevant sections:
-   • From USPs and Other points below, **use at least two specific items** that materially help the guidance.
-   • When you use an item, **quote its exact label once** (e.g., "USP[2] ...") and incorporate its substance in your own wording.
-   • In "integration_notes.usps_used"/"integration_notes.other_points_used", repeat the **exact** referenced labels (e.g., ["USP[2]", "POINT[1]"]).
+- **Weave** the salesperson inputs into the **Overview** and other sections:
+   • In **opening**, after the framing sentences, include a **"Coaching cues:"** list with **3–5 bullets**.
+   • Each cue ties a specific **USP[...]** (and optionally a **POINT[...]**) to either **[Pain]** (problem alleviating) or **[Desire]** (outcome enabling).
+   • Across the whole guide, **use at least two specific items** (prefer USPs; add Other points if helpful).
+   • When you use an item, **quote its label once** (e.g., "USP[2]") and integrate the substance in your words.
+   • In "integration_notes.usps_used"/"integration_notes.other_points_used", repeat the **exact** labels used (e.g., ["USP[2]", "POINT[1]"]).
 - Next step precedence:
    1) If the salesperson provided a next step (see **NEXT STEP (from salesperson)**), use it (rephrase for clarity if needed).
    2) Else, if the template contains <!-- suggested_next_step -->, use it.
@@ -209,6 +344,8 @@ HARD CONSTRAINTS:
 - Include one specific, relevant customer example with measurable results; show how and **when** the salesperson should use it.
 - Return "summary_bullets" with **6–12** short bullets (**5–10 words** each) summarising the advice.
 - Use the template **for ideas only**. **Do NOT copy or paraphrase** its wording.
+- Provide "alt_subjects" with 3 concise alternatives (3–8 words each) and **no exclamation marks**.
+- Never use pleasantries such as “I hope you are well”, “I hope this finds you well”, “I trust you are well”, or similar openers.
 
 CONTEXT
 - Product: ${productLabelStr}
@@ -227,12 +364,86 @@ ${nextStepStr || "(none)"}
 NEXT STEP (from template, optional):
 ${suggestedNext || "(none)"}
 
+Before finalising JSON, verify:
+- **opening** contains 2–4 context sentences **followed by** a "Coaching cues:" list with **3–5 bullets**.
+- The cues each link a **USP[...]** to **[Pain]** or **[Desire]** with a specific trigger and how to deploy it.
+- At least **two** specific items were used overall; record them in "integration_notes.usps_used"/"integration_notes.other_points_used".
+- You used the salesperson’s next step if provided; else template; else a clear low-friction step.
+- Tone matches: ${style.tone}.
+- "summary_bullets" contains 6–12 bullets, 5–10 words each.
+
 TEMPLATE to mine for ideas (don’t copy wording; your output is JSON):
 --- TEMPLATE START ---
 ${templateMd}
---- TEMPLATE END ---
-`
+--- TEMPLATE END --- `
   );
+}
+// FOLLOW-UP EMAIL (JSON-first)
+function buildFollowupPromptJSON({ seller, prospect, toneReq, scriptMdText, callNotes, usps, nextStep, targetWords }) {
+  const style = toneStyles(toneReq);
+  const uspList = Array.isArray(usps) && usps.length
+    ? usps.map((v, i) => `USP[${i + 1}]: ${String(v).trim()}`).join("\n")
+    : "(none)";
+  const lengthHint = targetWords ? `Aim for about ${targetWords} words (±10%).` : "";
+
+  // Optional next step hint mined from script (same approach as your existing builder)
+  const nextStepHint = (() => {
+    const m = String(scriptMdText || "").match(/(?:^|\n)\s*Next Step\s*\n+([\s\S]*?)$/i);
+    return m ? m[1].trim().slice(0, 400) : "";
+  })();
+
+  return `
+You are a UK B2B salesperson. Produce a follow-up email as **strict JSON** (no markdown, no prose outside JSON).
+
+TONE (lock this):
+- Label: ${toneReq}
+- Sentences: ${style.sentences}
+- Vocabulary: ${style.vocab}
+
+${lengthHint}
+Rules (must follow all):
+- Ground EVERYTHING in Salesperson's notes. Do NOT invent needs, opinions, or outcomes.
+- If "Provided next step" is present, you MUST use it (rephrased non-assumptively).
+- If USPs are provided, you MUST include at least one **specific** USP in the body (weave it naturally; do not paste label verbatim).
+- Keep the email concise and businesslike; no marketing fluff; UK business English.
+
+Return exactly this JSON shape:
+{
+  "subject": string,                    // plain, starts without "Subject:" prefix
+  "greeting": string,                   // e.g., "Hello <first name>,"
+  "body_paragraphs": [string, string?], // 1–2 paragraphs max
+  "next_step": string,                  // single clear, low-friction, non-assumptive ask
+  "signature": string,                  // "${seller?.name || ""}, ${seller?.company || ""}"
+  "tone_used": "Professional" | "Warm" | "Straightforward",
+  "usps_used": string[]                 // the exact USP[...] labels you drew on, or [],
+  "alt_subjects": [string, string, string]   // 3 alternative subject lines (no exclamation marks)
+}
+
+Context (do NOT copy wording blindly):
+Prepared talking points:
+${scriptMdText || "(none)"}
+
+Salesperson's notes (ONLY source of truth for facts):
+${callNotes || "(none)"}
+
+Provided next step (use if present):
+${nextStep || "(none)"}
+
+Optional next step hint (use only if suitable; keep it non-assumptive):
+${nextStepHint || "(none)"}
+
+USPs (choose at least one if available):
+${uspList}
+
+Prospect:
+- Name: ${prospect?.name || ""}
+- Role: ${prospect?.role || ""}
+- Company: ${prospect?.company || ""}
+
+Seller:
+- Name: ${seller?.name || ""}
+- Company: ${seller?.company || ""}
+`;
 }
 
 // FOLLOW-UP EMAIL (plain text) — grounded in call notes, no assumptions
@@ -275,6 +486,55 @@ ${callNotes || "(none)"}`
 }
 
 /* ============================ HELPERS ============================ */
+// Optional Azure AI Search integration (safe no-op if not configured)
+function hasAzureSearchConfig() {
+  return !!(process.env.AZ_SEARCH_ENDPOINT && process.env.AZ_SEARCH_INDEX && process.env.AZ_SEARCH_KEY);
+}
+
+/**
+ * Minimal Azure AI Search REST query (top N text snippets).
+ * Returns: [{ title, url, chunk, score }]
+ */
+async function queryAzureSearch(q, topN = 5) {
+  if (!hasAzureSearchConfig()) return [];
+  const endpoint = String(process.env.AZ_SEARCH_ENDPOINT).replace(/\/+$/, '');
+  const index = process.env.AZ_SEARCH_INDEX;
+  const key = process.env.AZ_SEARCH_KEY;
+
+  const url = `${endpoint}/indexes/${encodeURIComponent(index)}/docs/search?api-version=2021-04-30-Preview`;
+  const payload = {
+    search: q,
+    top: Math.max(1, Math.min(topN, 10)),
+    queryType: "simple"
+  };
+
+  const res = await fetchFn(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", "api-key": key },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`Azure Search ${res.status}: ${txt?.slice(0, 500)}`);
+  }
+
+  const data = await res.json();
+  const items = Array.isArray(data?.value) ? data.value : [];
+  return items.map(d => ({
+    title: String(d.title || d.name || d.id || "Result").slice(0, 120),
+    url: String(d.url || d.link || ""),
+    chunk: String(d.content || d.text || d.summary || "").slice(0, 1000),
+    score: typeof d['@search.score'] === 'number' ? d['@search.score'] : null
+  }));
+}
+
+function normalizeTone(s) {
+  const t = String(s || "").toLowerCase();
+  if (t.startsWith("warm")) return "Warm";
+  if (t.startsWith("straight")) return "Straightforward";
+  return "Professional";
+}
 
 function toneStyles(tone) {
   const t = String(tone).toLowerCase();
@@ -442,6 +702,55 @@ function validateSections(data) {
 
   return out;
 }
+
+function renderFollowupEmailPlainText(obj, { seller, prospect }) {
+  // Helper: remove platitude openers like "I hope you are well" (and variants/typos)
+  function isPlatitude(s) {
+    const t = String(s || "").trim();
+    if (!t) return false;
+    const re = new RegExp(
+      [
+        String.raw`^i\s*ho+pe\s*(?:this\s*(?:message|email)\s*)?finds\s*you\s*well`, // "I hope this (message/email) finds you well"
+        String.raw`^i\s*ho+pe\s*you(?:'|’)?re?\s*well`,                            // "I hope you're well" / "I hope youre well"
+        String.raw`^i\s*ho+pe\s*you\s*a+re\s*well`,                                // "I hope you aare well" (typo tolerant)
+        String.raw`^i\s*ho+pe\s*you\s*are\s*doing\s*well`,                         // "I hope you are doing well"
+        String.raw`^i\s*trust\s*(?:this\s*(?:message|email)\s*)?finds\s*you\s*well`,
+        String.raw`^i\s*trust\s*you\s*are\s*well`,
+        String.raw`^hope\s*you\s*are\s*well`,                                      // missing "I"
+        String.raw`^hope\s*this\s*(?:message|email)\s*finds\s*you\s*well`,
+        String.raw`^i\s*ho+pe\s*all\s*is\s*well`
+      ].join("|"),
+      "i"
+    );
+    return re.test(t);
+  }
+
+  // Build core fields
+  const subject = (obj.subject || "").trim();
+  const greeting = (obj.greeting || `Hello ${prospect?.name || ""},`).trim();
+  const parasRaw = Array.isArray(obj.body_paragraphs) ? obj.body_paragraphs.filter(Boolean) : [];
+  const nextStep = (obj.next_step || "").trim();
+  const sig = (obj.signature || `${seller?.name || ""}, ${seller?.company || ""}`).trim();
+
+  // Remove any leading platitude paragraph(s)
+  const paras = [...parasRaw];
+  while (paras.length && isPlatitude(paras[0])) paras.shift();
+
+  const parts = [
+    `Subject: ${subject || "Follow-up"}`,
+    "",
+    greeting,
+    "",
+    ...paras,
+    "",
+    nextStep ? nextStep : "",
+    "",
+    sig
+  ].filter(Boolean);
+
+  return parts.join("\n");
+}
+
 
 function trimStr(s) {
   return String(s || "").trim();
