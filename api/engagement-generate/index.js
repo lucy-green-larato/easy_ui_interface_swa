@@ -14,6 +14,18 @@ const fetchFn = (url, opts) => {
 };
 
 module.exports = async function (context, req) {
+  // --- quick diag: POST /api/engagement-generate?diag=1 returns what the app can see
+  if (String(req?.query?.diag || "") === "1") {
+    return send(context, 200, {
+      provider: "azure",
+      hasEndpoint: !!process.env.AZURE_OPENAI_ENDPOINT,
+      hasDeployment: !!process.env.AZURE_OPENAI_DEPLOYMENT,
+      hasKey: !!process.env.AZURE_OPENAI_API_KEY || !!process.env.AZURE_OPEN_API_KEY,
+      apiVersion: process.env.AZURE_OPENAI_API_VERSION || "(defaulted)",
+      forceOpenAI: process.env.FORCE_OPENAI || "",
+      alsoHasPublicKey: !!process.env.OPENAI_API_KEY
+    });
+  }
   const t0 = Date.now();
 
   try {
