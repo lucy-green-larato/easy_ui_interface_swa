@@ -24,5 +24,15 @@
       "Function": "Information",
       "Host.Results": "Information"
     }
-  }
+  },
+   "functions": [
+    "auth",
+    "ch-strategic-start",
+    "ch-strategic-worker",
+    "engagement-generate",
+    "health",
+    "ixbrl-financials",
+    "pbi_token",
+    "qualification-generate"
+  ]
 }
