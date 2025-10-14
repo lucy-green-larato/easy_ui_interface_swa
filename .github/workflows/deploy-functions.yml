@@ -46,3 +46,11 @@ jobs:
           app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
           package:  ./api
           slot-name: Production
+          
+      - name: Restart Function App
+        run: az functionapp restart -g "${{ env.AZURE_RESOURCE_GROUP }}" -n "${{ env.AZURE_FUNCTIONAPP_NAME }}"
+
+      - name: Force Sync Triggers
+        run: |
+          az rest --method post \
+            --uri "https://management.azure.com/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Web/sites/${{ env.AZURE_FUNCTIONAPP_NAME }}/functions/synctriggers?api-version=2022-03-01"
