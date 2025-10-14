@@ -1,31 +1,15 @@
 {
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": [
-      "/api/*",
-      "/func/*",
-      "/content/*",
-      "/src/*",
-      "/vendor/*",
-      "/assets/*"
-    ]
+    "exclude": ["/api/*", "/assets/*", "/vendor/*", "/content/*", "/src/*"]
   },
   "routes": [
-    {
-      "route": "/api/health",
-      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/health"
-    },
-    {
-      "route": "/api/pbi-token",
-      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/pbi-token"
-    },
-    {
-      "route": "/api/*",
-      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/{*path}"
-    }
+    { "route": "/api/health",    "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/health" },
+    { "route": "/api/pbi-token", "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/pbi-token" },
+    { "route": "/api/*",         "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/{*path}" }
   ],
   "mimeTypes": {
-    ".md": "text/markdown",
-    ".json": "application/json"
+    ".json": "application/json",
+    ".md": "text/markdown"
   }
 }
