@@ -404,7 +404,7 @@ module.exports = async function (context, queueItem) {
   }
 
   // Mark Processing
-  await await writeParentProgress(statusC, parentRunId, {
+  await writeParentProgress(statusC, parentRunId, {
     lastChild: runId,
     child: { runId, processedRows, matched, skipped }
   }); writeStatus(statusC, runId, {
@@ -481,7 +481,8 @@ module.exports = async function (context, queueItem) {
     const endMax = Math.min(rowsArr.length, hardCap);
     const endByLimit = rowLimit ? Math.min(start + rowLimit, endMax) : endMax;
     const cappedRows = rowsArr.slice(start, endByLimit);
-    const totalPlanned = cappedRows.length;
+    totalPlanned = cappedRows.length;
+
 
     const normKey = (h) =>
       String(h || "")
