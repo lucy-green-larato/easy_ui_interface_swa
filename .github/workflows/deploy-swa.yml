@@ -24,4 +24,4 @@ jobs:
           output_location: ""
           skip_app_build: true
           production_branch: "main"
-          deployment_environment: "production"
+          deployment_environment: "Production"
