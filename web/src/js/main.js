@@ -1,7 +1,4 @@
-// web/src/js/main.js 14-10-2025 v2 -----
-
-// --- one-time boot guard (prevents duplicate wiring if the script is loaded twice) ---
-if (!window.__SWA_MAIN_BOOTED__) window.__SWA_MAIN_BOOTED__ = true;
+// web/src/js/main.js 14-10-2025 v3 ----
 
 // --- global resize nudge throttle (prevents event storms) ---
 let __resizeTimer;
