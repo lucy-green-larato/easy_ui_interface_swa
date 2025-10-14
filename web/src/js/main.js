@@ -1,4 +1,4 @@
-// web/src/js/main.js 08-10-2025 v1 -----
+// web/src/js/main.js 14-10-2025 v2 -----
 
 // --- one-time boot guard (prevents duplicate wiring if the script is loaded twice) ---
 if (!window.__SWA_MAIN_BOOTED__) window.__SWA_MAIN_BOOTED__ = true;
@@ -76,13 +76,29 @@ window.wireToolLinks = wireToolLinks;
 
 // ===== Power BI embed helpers =====
 let pbiReport = null;
+async function getJsonFromApi(path) {
+  const url = `${path}${path.includes("?") ? "&" : "?"}ts=${Date.now()}`; // cache-buster
+  const resp = await fetch(url, { credentials: "include", cache: "no-store" });
+
+  const ct = resp.headers.get("content-type") || "";
+  const text = await resp.text(); // always read text so we can diagnose
+
+  if (!resp.ok) {
+    throw new Error(`${path} HTTP ${resp.status} | ${ct} | ${text.slice(0, 400)}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Non-JSON from ${path} (${ct}). First 200 chars: ${text.slice(0, 200)}`);
+  }
+}
 
 function scheduleTokenRefresh(report) {
   setTimeout(async () => {
     try {
       const r = await fetch("/api/pbi-token", { credentials: "include", cache: "no-store" });
       if (!r.ok) throw new Error(await r.text());
-      const data = await r.json();
+      const data = await getJsonFromApi("/api/pbi-token");
       const token =
         data.token ??
         (data.embedToken && data.embedToken.token) ??
@@ -119,7 +135,7 @@ async function renderReport() {
   try {
     const res = await fetch("/api/pbi-token", { credentials: "include", cache: "no-store" });
     if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
+    const data = await getJsonFromApi("/api/pbi-token");
 
     // Compute fields first; proceed if we have the essentials even if `disabled` is present.
     const embedUrl = data?.embedUrl ?? null;
