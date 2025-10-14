@@ -6,7 +6,7 @@
       "direction": "in",
       "name": "req",
       "methods": ["get"],
-      "route": ".auth"
+      "route": "auth/me"
     },
     {
       "type": "http",
@@ -16,4 +16,5 @@
   ],
   "scriptFile": "index.js"
 }
+
 

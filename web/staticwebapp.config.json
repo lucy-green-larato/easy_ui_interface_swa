@@ -12,25 +12,8 @@
   },
   "routes": [
     {
-      "route": "/api/health",
-      "allowedRoles": [
-        "authenticated"
-      ],
-      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/health"
-    },
-    {
-      "route": "/api/pbi-token",
-      "allowedRoles": [
-        "authenticated"
-      ],
-      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/pbi-token"
-    },
-    {
       "route": "/api/*",
-      "allowedRoles": [
-        "authenticated"
-      ],
-      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/{*path}"
+      "allowedRoles": ["authenticated"]
     },
     {
       "route": "/engagement/*",
@@ -44,5 +27,5 @@
   "mimeTypes": {
     ".json": "application/json",
     ".md": "text/markdown"
-  }
+    }
 }
