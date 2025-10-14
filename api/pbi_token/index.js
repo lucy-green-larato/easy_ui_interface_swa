@@ -1,4 +1,7 @@
-// /api/pbi-token/index.js  (tolerant, never 500s when unconfigured) 14-10-2025 v1
+// /api/pbi-token/index.js
+// Tolerant Power BI embed token helper (never 500s when unconfigured)
+// 14-10-2025 v2
+
 const msal = require("@azure/msal-node");
 const axios = require("axios");
 
@@ -9,13 +12,33 @@ const pbi = axios.create({
   validateStatus: (s) => s >= 200 && s < 300 // treat non-2xx as errors
 });
 
+// Generate/echo a correlation id for tracing this request end-to-end
+function getCorrelationId(req) {
+  return (
+    req?.headers?.["x-correlation-id"] ||
+    req?.headers?.["x-request-id"] ||
+    `pbi-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  );
+}
+
+// Trim potentially large error bodies for logging
+function snippet(data, n = 300) {
+  if (data == null) return "";
+  try {
+    const s = typeof data === "string" ? data : JSON.stringify(data);
+    return s.length > n ? `${s.slice(0, n)}…` : s;
+  } catch {
+    return "[unserializable]";
+  }
+}
+
 // Map to YOUR environment variable names first (PBI_*), then fall back.
 // Optional local-only shortcut: PBI_DEV_STATIC_TOKEN (or PBI_DEV_EMBED_TOKEN).
 function readEnv() {
   const TENANT_ID     = process.env.PBI_TENANT_ID     ?? process.env.TENANT_ID;
   const CLIENT_ID     = process.env.PBI_CLIENT_ID     ?? process.env.CLIENT_ID;
   const CLIENT_SECRET = process.env.PBI_CLIENT_SECRET ?? process.env.CLIENT_SECRET;
-  const WORKSPACE_ID  = process.env.PBI_WORKSPACE_ID  ?? process.env.WORKSPACE_ID;
+  const WORKSPACE_ID  = process.env.PBI_WORKSPACE_ID  ?? process.env.PBI_WORKSPACE_ID?.trim() ?? process.env.WORKSPACE_ID;
   const REPORT_ID     = process.env.PBI_REPORT_ID     ?? process.env.REPORT_ID;
   const DEV_STATIC    = process.env.PBI_DEV_STATIC_TOKEN ?? process.env.PBI_DEV_EMBED_TOKEN; // optional
 
@@ -29,6 +52,23 @@ function readEnv() {
 }
 
 module.exports = async function (context, req) {
+  const corrId = getCorrelationId(req);
+  const started = Date.now();
+  const logBase = { fn: "pbi_token", corrId, v: "2" };
+
+  // Helper to set the response consistently and include correlation id
+  function reply(status, body) {
+    context.res = {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "x-correlation-id": corrId
+      },
+      body
+    };
+  }
+
   try {
     const {
       TENANT_ID,
@@ -41,36 +81,29 @@ module.exports = async function (context, req) {
       missing
     } = readEnv();
 
+    context.log({ ...logBase, evt: "start", hasDevStatic: Boolean(DEV_STATIC), missing });
+
     // Quick diagnostic: keep the pipe JSON-only without external calls
     if (req?.query?.debug === "1") {
-      context.res = {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-        body: { ok: true, source: "pbi_token", debug: true, time: new Date().toISOString() }
-      };
+      context.log({ ...logBase, evt: "debug" });
+      reply(200, { ok: true, source: "pbi_token", debug: true, time: new Date().toISOString() });
       return;
     }
 
     // Local/dev behaviour: allow static token or cleanly disable without 500.
     if (DEV_STATIC) {
-      context.res = {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-        body: {
-          disabled: false,
-          mode: "dev-static",
-          embedToken: { token: DEV_STATIC, tokenId: "dev-static" }
-        }
-      };
+      context.log({ ...logBase, evt: "dev-static" });
+      reply(200, {
+        disabled: false,
+        mode: "dev-static",
+        embedToken: { token: DEV_STATIC, tokenId: "dev-static" }
+      });
       return;
     }
 
     if (missing) {
-      context.res = {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-        body: { disabled: true }
-      };
+      context.log.warn({ ...logBase, evt: "env-missing" });
+      reply(200, { disabled: true });
       return;
     }
 
@@ -83,25 +116,31 @@ module.exports = async function (context, req) {
       }
     });
 
+    const t0 = Date.now();
     const aad = await cca.acquireTokenByClientCredential({ scopes: [SCOPE] });
+    const t1 = Date.now();
     const accessToken = aad?.accessToken;
     if (!accessToken) throw new Error("Failed to acquire AAD access token");
+    context.log({ ...logBase, evt: "aad-ok", ms: t1 - t0 });
 
     const headers = {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
-      Accept: "application/json"
+      Accept: "application/json",
+      "x-correlation-id": corrId
     };
 
     // Fetch report metadata (embedUrl, datasetId)
     let rep;
     try {
+      const tR0 = Date.now();
       rep = await pbi.get(`/groups/${WORKSPACE_ID}/reports/${REPORT_ID}`, { headers });
+      context.log({ ...logBase, evt: "report-get-ok", ms: Date.now() - tR0 });
     } catch (e) {
       const status = e?.response?.status || "net";
-      const d = e?.response?.data;
-      const msg = typeof d === "string" ? d.slice(0, 300) : JSON.stringify(d);
-      throw new Error(`Report GET failed (${status}): ${msg}`);
+      const body = snippet(e?.response?.data);
+      context.log.error({ ...logBase, evt: "report-get-fail", status, body });
+      throw new Error(`Report GET failed (${status}): ${body}`);
     }
 
     const { embedUrl, datasetId } = rep?.data || {};
@@ -110,30 +149,38 @@ module.exports = async function (context, req) {
     // Create embed token
     let tok;
     try {
+      const tT0 = Date.now();
       tok = await pbi.post(
         `/groups/${WORKSPACE_ID}/reports/${REPORT_ID}/GenerateToken`,
         { accessLevel: "View" },
         { headers }
       );
+      context.log({ ...logBase, evt: "token-ok", ms: Date.now() - tT0 });
     } catch (e) {
       const status = e?.response?.status || "net";
-      const d = e?.response?.data;
-      const msg = typeof d === "string" ? d.slice(0, 300) : JSON.stringify(d);
-      throw new Error(`GenerateToken failed (${status}): ${msg}`);
+      const body = snippet(e?.response?.data);
+      context.log.error({ ...logBase, evt: "token-fail", status, body });
+      throw new Error(`GenerateToken failed (${status}): ${body}`);
     }
 
-    context.res = {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-      body: { disabled: false, embedUrl, datasetId, embedToken: tok.data }
-    };
+    reply(200, {
+      disabled: false,
+      embedUrl,
+      datasetId,
+      embedToken: tok.data
+    });
+    context.log({ ...logBase, evt: "done", totalMs: Date.now() - started });
   } catch (err) {
-    context.log.error("pbi-token error:", err?.response?.data || err?.message || err);
+    // Log a compact error object (status + snippet if we have it)
+    const status = err?.response?.status;
+    const body = snippet(err?.response?.data);
+    context.log.error({ ...logBase, evt: "error", msg: err?.message, status, body, totalMs: Date.now() - started });
+
     // Never gate the app: still return 200 with disabled:true so the UI stays healthy
-    context.res = {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-      body: { disabled: true, error: "PBITokenError", message: err?.message || "Unknown error" }
-    };
+    reply(200, {
+      disabled: true,
+      error: "PBITokenError",
+      message: err?.message || "Unknown error"
+    });
   }
 };
