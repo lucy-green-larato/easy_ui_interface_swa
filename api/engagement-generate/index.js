@@ -6,12 +6,12 @@
 // Strict Azure OpenAI vs public OpenAI separation. No forced sign-off.
 
 // --- Fetch shim (works on Node 16/18/20, Azure Functions) ---
-const fetchFn =
-  typeof globalThis.fetch === "function"
-    ? (url, opts) => globalThis.fetch(url, opts) // ensure correct signature
-    : (url, opts) =>
-      import("node-fetch").then(({ default: f }) => f(url, opts)); // works with node-fetch v3 ESM
-
+const fetchFn = (url, opts) => {
+  if (typeof globalThis.fetch !== "function") {
+    throw new Error("global fetch is not available; ensure Node 18+ runtime");
+  }
+  return globalThis.fetch(url, opts);
+};
 
 module.exports = async function (context, req) {
   const t0 = Date.now();
