@@ -27,8 +27,6 @@
   },
    "functions": [
     "auth",
-    "ch-strategic-start",
-    "ch-strategic-worker",
     "engagement-generate",
     "health",
     "ixbrl-financials",
