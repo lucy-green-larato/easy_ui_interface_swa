@@ -569,27 +569,38 @@ function clampInt(n, min, max, dflt) {
  *  - Public OpenAI requires: OPENAI_API_KEY (and optional OPENAI_API_URL base)
  * No key reuse across providers. json=true -> response_format=json_object.
  */
-// Single, correct implementation. No fallback magic, no caller/callee access.
 async function callModelJson(prompt, { json, model, timeoutMs, context }) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs || 30000);
 
-  // Provider selection (strict separation)
   const forcePublic = String(process.env.FORCE_OPENAI || "").trim() === "1";
 
   // Azure
   const azureEndpoint = String(process.env.AZURE_OPENAI_ENDPOINT || "").trim();
   const azureDeployment = String(process.env.AZURE_OPENAI_DEPLOYMENT || "").trim();
-  const azureApiVersion = String(process.env.AZURE_OPENAI_API_VERSION || "").trim();
+  const azureApiVersion = String(process.env.AZURE_OPENAI_API_VERSION || "").trim() || "2024-08-01-preview";
   const azureKey = String(process.env.AZURE_OPENAI_API_KEY || process.env.AZURE_OPEN_API_KEY || "").trim();
 
   // Public OpenAI
   const openaiBase = String(process.env.OPENAI_API_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
   const publicKey = String(process.env.OPENAI_API_KEY || "").trim();
 
-  const canUseAzure = !!azureEndpoint && !!azureDeployment && !!azureKey;
+  const canUseAzure = !!(azureEndpoint && azureDeployment && azureKey);
   const canUsePublic = !!publicKey;
   const useAzure = !forcePublic && canUseAzure;
+
+  // Helpful runtime log (masked)
+  try {
+    context?.log?.({
+      evt: "llm_config_seen",
+      useAzure,
+      hasEndpoint: !!azureEndpoint,
+      hasDeployment: !!azureDeployment,
+      hasKey: !!azureKey,
+      apiVersion: azureApiVersion,
+      canUsePublic
+    });
+  } catch { }
 
   if (!useAzure && !canUsePublic) {
     clearTimeout(id);
@@ -600,12 +611,18 @@ async function callModelJson(prompt, { json, model, timeoutMs, context }) {
     throw new Error("FORCE_OPENAI=1 but OPENAI_API_KEY is not set.");
   }
 
+  // Helper: decide if Azure version supports response_format json_object
+  const supportsJsonFormat = (() => {
+    // very loose compare: treat any preview >= 2024-07-01 or 2024-08-01-preview as supporting
+    const v = azureApiVersion.replace("-preview", ""); // "2024-08-01" etc
+    return v >= "2024-07-01";
+  })();
+
   try {
     let url, headers, payload;
 
     if (useAzure) {
-      const ver = azureApiVersion || "2024-08-01-preview";
-      url = `${azureEndpoint.replace(/\/+$/, "")}/openai/deployments/${encodeURIComponent(azureDeployment)}/chat/completions?api-version=${encodeURIComponent(ver)}`;
+      url = `${azureEndpoint.replace(/\/+$/, "")}/openai/deployments/${encodeURIComponent(azureDeployment)}/chat/completions?api-version=${encodeURIComponent(azureApiVersion)}`;
       headers = { "content-type": "application/json", "api-key": azureKey };
       payload = {
         messages: [
@@ -613,7 +630,7 @@ async function callModelJson(prompt, { json, model, timeoutMs, context }) {
           { role: "user", content: prompt },
         ],
         temperature: 0.4,
-        ...(json ? { response_format: { type: "json_object" } } : {})
+        ...(json && supportsJsonFormat ? { response_format: { type: "json_object" } } : {})
       };
     } else {
       url = `${openaiBase}/chat/completions`;
@@ -629,7 +646,6 @@ async function callModelJson(prompt, { json, model, timeoutMs, context }) {
       };
     }
 
-    // ✅ Correct fetch signature
     const res = await fetchFn(url, {
       method: "POST",
       headers,
@@ -640,28 +656,22 @@ async function callModelJson(prompt, { json, model, timeoutMs, context }) {
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       const where = useAzure ? "Azure OpenAI" : "OpenAI";
-      if (context && context.log) {
-        context.log.error("[engagement-generate] upstream error", {
-          provider: where,
-          status: res.status,
-          url,
-          body: body?.slice(0, 2000),
-        });
-      }
+      context?.log?.error?.("[engagement-generate] upstream error", {
+        provider: where,
+        status: res.status,
+        url,
+        body: body?.slice(0, 1200),
+      });
       throw new Error(`LLM ${res.status} (${where}): ${body?.slice(0, 800)}`);
     }
 
     const data = await res.json();
-
-    // ✅ Guarded parsing; never touches forbidden properties
     const choice = data?.choices?.[0];
     let text = choice?.message?.content ?? "";
-
     const fc = choice?.message?.function_call;
     if (!text && fc && typeof fc === "object" && fc !== null && Object.prototype.hasOwnProperty.call(fc, "arguments")) {
       text = fc.arguments || "";
     }
-
     return text || "";
   } finally {
     clearTimeout(id);
