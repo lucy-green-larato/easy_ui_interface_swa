@@ -1,28 +1,29 @@
 name: Deploy SWA
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
     paths:
-      - 'web/**'
-      - '.github/workflows/deploy-swa.yml'
+      - "web/**"
+      - "web/staticwebapp.config.json"
+      - ".github/workflows/deploy-swa.yml"
+  workflow_dispatch:
 
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # No build step needed for plain static assets in /web
-
+      # No build step needed (plain HTML/JS). If you later add a build, remove skip_app_build.
       - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
-          app_location: web          # <- your static files
-          api_location: ""           # <- you deploy Functions separately
-          output_location: ""        # <- none for plain static
-          production_branch: main    # <- be explicit
-          deployment_action: upload
+          action: upload
+          app_location: "web"            # your site lives in /web
+          output_location: ""            # no build output dir
+          skip_app_build: true           # skip npm/yarn build
+          production_branch: "main"
