@@ -8,7 +8,6 @@ on:
       - '.github/workflows/deploy-functions.yml'
   workflow_dispatch:
 
-# Required for OIDC login
 permissions:
   id-token: write
   contents: read
@@ -25,27 +24,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # OIDC-based login (no client secret needed)
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
-          client-id:        ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id:        ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id:  ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Setup Node
+      - name: Setup Node (for npm install)
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install production deps (Functions)
+      - name: Install production deps
         working-directory: api
         run: npm ci --omit=dev
 
       - name: Deploy to Azure Functions
         uses: Azure/functions-action@v1
         with:
-          app-name:     ${{ env.AZURE_FUNCTIONAPP_NAME }}
-          package:      ./api
-          node-version: '20'
-          slot-name:    Production
+          app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
+          package:  ./api
+          slot-name: Production
