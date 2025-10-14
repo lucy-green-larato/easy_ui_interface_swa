@@ -295,8 +295,11 @@ window.renderReport = renderReport;
 })();
 
 // ===== Auth & bootstrap =====
-// main.js — init (deterministic light default, resilient UI boot)
 (async function init() {
+  // --- one-time boot guard (prevents double bootstrap) ---
+  if (window.__SWA_MAIN_BOOTED__) return;
+  window.__SWA_MAIN_BOOTED__ = true;
+
   // ---------------- THEME (local, no external helpers) -------------------
   const root = document.documentElement;
   const STORAGE_KEY = 'theme'; // 'light' | 'dark'
@@ -369,6 +372,10 @@ window.renderReport = renderReport;
   const nameEl = document.getElementById('userName');
   const authButtons = document.getElementById('authButtons');
   const brandLogo = document.getElementById('brandLogo');
+
+  function setLikelyAuthed(flag) {
+    document.documentElement.setAttribute("data-likely-authed", flag ? "1" : "0");
+  }
 
   // Logo fallback
   brandLogo?.addEventListener('error', () => {
@@ -507,14 +514,17 @@ window.renderReport = renderReport;
   try {
     const princ = await getClientPrincipal();
     if (princ) {
+      setLikelyAuthed(true);                    // <<< added
       showSignedIn(princ.userDetails);
       if (typeof window.renderReport === 'function') {
         try { await window.renderReport(); } catch { }
       }
     } else {
+      setLikelyAuthed(false);                   // <<< added
       showSignIn();
     }
   } catch {
+    setLikelyAuthed(false);                     // <<< added
     // If auth probe fails, show sign-in so the user can try again
     showSignIn();
   } finally {

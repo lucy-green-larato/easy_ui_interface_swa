@@ -10,31 +10,26 @@
   <base href="/" />
   <!-- First-paint guard: decide visibility before styles/js load -->
   <style>
-    /* Default: hide both to avoid any flash on first paint */
-    #welcome {
-      display: none !important;
+    /* Hide both only during the pre-auth phase to avoid flashes */
+    body.preauth #welcome,
+    body.preauth #dashboard {
+      display: none;
     }
 
+    /* Default after boot: keep both hidden until an auth flag is set */
+    #welcome,
     #dashboard {
-      display: none !important;
+      display: none;
     }
 
-    /* If cookie check says "authed", show dashboard, hide welcome */
+    /* Authenticated → show dashboard */
     html[data-likely-authed="1"] #dashboard {
-      display: block !important;
+      display: block;
     }
 
-    html[data-likely-authed="1"] #welcome {
-      display: none !important;
-    }
-
-    /* If cookie check says "not authed", show welcome, hide dashboard */
+    /* Not authenticated → show welcome */
     html[data-likely-authed="0"] #welcome {
-      display: block !important;
-    }
-
-    html[data-likely-authed="0"] #dashboard {
-      display: none !important;
+      display: block;
     }
   </style>
   <!-- Decide initial state synchronously, before CSS/JS execute -->
@@ -228,7 +223,7 @@
 
       .group-sales .tool:hover .tool-title,
       .group-sales .tool:hover small {
-        color: #fff !important;
+        color: #fff;
       }
 
       .group-marketing .tool:hover {
@@ -299,7 +294,7 @@
 
     /* ---------- STATE TOGGLES ---------- */
     .hide {
-      display: none !important;
+      display: none;
     }
 
     body.preauth #dashboard {
@@ -350,7 +345,7 @@
 
       .home .group-sales .tool:hover .tool-title,
       .home .group-sales .tool:hover small {
-        color: #fff !important;
+        color: #fff;
       }
 
       .home .group-marketing .tool:hover {
@@ -364,14 +359,14 @@
     }
 
     #pbiSection.hide {
-      display: block !important;
+      display: block;
     }
 
     @media (hover:hover) {
 
       .group-sales .tool:hover,
       .group-marketing .tool:hover {
-        filter: none !important;
+        filter: none;
       }
     }
   </style>
