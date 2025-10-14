@@ -1,6 +1,13 @@
-// /api/pbi-token/index.js  (tolerant, never 500s when unconfigured)
+// /api/pbi-token/index.js  (tolerant, never 500s when unconfigured) 14-10-2025 v1
 const msal = require("@azure/msal-node");
 const axios = require("axios");
+
+// ---- Axios instance (timeouts + strict status handling)
+const pbi = axios.create({
+  baseURL: "https://api.powerbi.com/v1.0/myorg",
+  timeout: 15000, // 15s network timeout
+  validateStatus: (s) => s >= 200 && s < 300 // treat non-2xx as errors
+});
 
 // Map to YOUR environment variable names first (PBI_*), then fall back.
 // Optional local-only shortcut: PBI_DEV_STATIC_TOKEN (or PBI_DEV_EMBED_TOKEN).
@@ -34,6 +41,16 @@ module.exports = async function (context, req) {
       missing
     } = readEnv();
 
+    // Quick diagnostic: keep the pipe JSON-only without external calls
+    if (req?.query?.debug === "1") {
+      context.res = {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+        body: { ok: true, source: "pbi_token", debug: true, time: new Date().toISOString() }
+      };
+      return;
+    }
+
     // Local/dev behaviour: allow static token or cleanly disable without 500.
     if (DEV_STATIC) {
       context.res = {
@@ -66,32 +83,44 @@ module.exports = async function (context, req) {
       }
     });
 
-    const aad = await cca.acquireTokenByClientCredential({
-      scopes: [SCOPE]
-    });
-
+    const aad = await cca.acquireTokenByClientCredential({ scopes: [SCOPE] });
     const accessToken = aad?.accessToken;
     if (!accessToken) throw new Error("Failed to acquire AAD access token");
 
     const headers = {
       Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      Accept: "application/json"
     };
 
     // Fetch report metadata (embedUrl, datasetId)
-    const rep = await axios.get(
-      `https://api.powerbi.com/v1.0/myorg/groups/${WORKSPACE_ID}/reports/${REPORT_ID}`,
-      { headers }
-    );
-    const { embedUrl, datasetId } = rep.data || {};
-    if (!embedUrl || !datasetId) throw new Error("Report metadata missing");
+    let rep;
+    try {
+      rep = await pbi.get(`/groups/${WORKSPACE_ID}/reports/${REPORT_ID}`, { headers });
+    } catch (e) {
+      const status = e?.response?.status || "net";
+      const d = e?.response?.data;
+      const msg = typeof d === "string" ? d.slice(0, 300) : JSON.stringify(d);
+      throw new Error(`Report GET failed (${status}): ${msg}`);
+    }
+
+    const { embedUrl, datasetId } = rep?.data || {};
+    if (!embedUrl || !datasetId) throw new Error("Report metadata missing (no embedUrl/datasetId)");
 
     // Create embed token
-    const tok = await axios.post(
-      `https://api.powerbi.com/v1.0/myorg/groups/${WORKSPACE_ID}/reports/${REPORT_ID}/GenerateToken`,
-      { accessLevel: "View" },
-      { headers }
-    );
+    let tok;
+    try {
+      tok = await pbi.post(
+        `/groups/${WORKSPACE_ID}/reports/${REPORT_ID}/GenerateToken`,
+        { accessLevel: "View" },
+        { headers }
+      );
+    } catch (e) {
+      const status = e?.response?.status || "net";
+      const d = e?.response?.data;
+      const msg = typeof d === "string" ? d.slice(0, 300) : JSON.stringify(d);
+      throw new Error(`GenerateToken failed (${status}): ${msg}`);
+    }
 
     context.res = {
       status: 200,
