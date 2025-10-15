@@ -1,6 +1,18 @@
 {
   "bindings": [
-    { "authLevel": "anonymous", "type": "httpTrigger", "direction": "in", "methods": ["post", "options"], "name": "req" },
-    { "type": "http", "direction": "out", "name": "res" }
+    {
+      "authLevel": "anonymous",
+      "type": "httpTrigger",
+      "direction": "in",
+      "name": "req",
+      "methods": [ "post", "options" ],
+      "route": "engagement-generate"
+    },
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "res"
+    }
   ]
 }
+
