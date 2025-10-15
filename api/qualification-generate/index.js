@@ -156,6 +156,9 @@ function makeValidator(schema) {
 function buildPrompt({ companyName, website, notes }) {
   return `
 You are a UK B2B/channel salesperson. Produce a **lead qualification** report as VALID JSON ONLY that STRICTLY matches the provided JSON schema.
+
+**All fields in the schema are required. If a fact is unknown, provide an empty string "" (for string fields) or an empty array [] (for arrays). Do not omit fields. Do not invent facts.**
+
 - UK business English; no speculation; only concise, evidenced statements.
 - If evidence is missing, state "No public evidence found".
 
@@ -164,8 +167,74 @@ Inputs:
 - Website: ${website || "(not provided)"} 
 - Notes from salesperson: ${notes || "(none)"}
 
-Return JSON ONLY; do not include markdown fences or prose outside JSON.
-If you cite, include a "citations" array under report where each item has "label" and optional "url".`;
+Return JSON ONLY (no markdown fences, no prose).
+If you cite, include a "citations" array under report where each item has "label" and optional "url".
+`;
+}
+
+// ---------- Normalizers (coerce model output into required shape) ----------
+function asStr(v, d = "") { return (typeof v === "string" ? v : d); }
+function asArr(v) { return Array.isArray(v) ? v : []; }
+function asInt(v, d = undefined) {
+  const n = Number(v);
+  return Number.isInteger(n) ? n : d;
+}
+function mapStrArr(v) { return asArr(v).map(x => asStr(x, "")); }
+
+/**
+ * Coerce any partial/omitted fields into your required JSON Schema shape.
+ * Returns a NEW object you can safely validate and send to the client.
+ */
+function normalizeQualification(obj) {
+  const out = (obj && typeof obj === "object") ? { ...obj } : {};
+
+  // companyProfile (required object)
+  const cp = (out.companyProfile && typeof out.companyProfile === "object") ? out.companyProfile : {};
+  const size = (cp.size && typeof cp.size === "object") ? cp.size : {};
+  const gtm = (cp.gtm && typeof cp.gtm === "object") ? cp.gtm : {};
+
+  const trade = asArr(cp.tradeShows).map(t => {
+    t = (t && typeof t === "object") ? t : {};
+    return {
+      name: asStr(t.name, ""),
+      year: asInt(t.year, undefined),
+      notes: asStr(t.notes, ""),
+      estimatedBudget: asStr(t.estimatedBudget, ""),
+      estimatedOpportunities: asStr(t.estimatedOpportunities, "")
+    };
+  });
+
+  out.companyProfile = {
+    founded: asStr(cp.founded, ""),
+    industry: asStr(cp.industry, ""),
+    size: {
+      employees: asStr(size.employees, ""),
+      revenue: asStr(size.revenue, "")
+    },
+    gtm: {
+      model: asStr(gtm.model, ""),
+      segments: mapStrArr(gtm.segments)
+    },
+    recentPerformance: mapStrArr(cp.recentPerformance),
+    leaders: mapStrArr(cp.leaders),
+    tradeShows: trade
+  };
+
+  // root arrays/fields (all required by your schema)
+  out.painPoints = mapStrArr(out.painPoints);
+  out.relationshipValue = mapStrArr(out.relationshipValue);
+  out.decisionMaking = mapStrArr(out.decisionMaking);
+  out.competition = mapStrArr(out.competition);
+  out.bottomLine = asStr(out.bottomLine, "");
+  out.notEvidenced = mapStrArr(out.notEvidenced);
+
+  // optional but typed
+  out.citations = asArr(out.citations).map(c => {
+    c = (c && typeof c === "object") ? c : {};
+    return { label: asStr(c.label, ""), url: asStr(c.url, "") };
+  });
+
+  return out;
 }
 
 // ---------- Azure Function entry ----------
@@ -213,6 +282,8 @@ module.exports = async function (context, req) {
       context.res = { status: 400, headers: headersBase, body: { error: "validation_failed", message: "Model did not return valid JSON", details: { raw: raw.slice(0, 300) } } };
       return;
     }
+    // Coerce into required shape so validation is stable
+    data = normalizeQualification(data);
 
     let valid, errors;
     if (ajv) {
