@@ -245,52 +245,72 @@ function hasFinancialSignals(text) {
   return rx.test(text);
 }
 
+function normalizeFinancialText(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/\r/g, '')
+    .replace(/Â£/g, '£')                       // mis-encoded pound
+    .replace(/[‐-–—−]/g, '-')                  // various minus/dashes → hyphen
+    .replace(/\((\s*\d[\d,\s]*\s*)\)/g, '-$1') // (123) → -123
+    .replace(/(\d)\s+(?=\d)/g, '$1')           // 1 2 3 456 → 123456
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function hasFinancialSignals(text) {
+  if (!text) return false;
+  const t = String(text);
+  const labelRx =
+    /(turnover|revenue|gross\s+profit|operating\s+(?:profit|loss)|profit\s*(?:\/|\(?)\s*loss\s*before\s*tax|balance\s*sheet|cash\s*(?:at\s*bank|and\s*in\s*hand|equivalents)|current\s+assets|current\s+liabilities|net\s+(?:assets|liabilities)|average\s+(?:monthly\s+)?(?:number\s+of\s+)?employees)/i;
+  const numberRx = /(?:£|gbp)\s*\d|\b\d{1,3}(?:,\d{3}){1,3}\b/i;
+  return labelRx.test(t) && numberRx.test(t);
+}
+
 async function extractPdfTexts(files) {
   const out = [];
   if (!pdfParse || !Array.isArray(files)) return out;
 
+  const caps = PDF_PAGE_CAPS.length ? PDF_PAGE_CAPS : [10, 25, 50, 200]; // widen if needed
+
   for (const f of files) {
-    let pickedText = "";
+    let pickedText = '';
     let usedCap = 0;
 
-    // Try progressively wider page windows (e.g., 10 then 25). Stop early if we see financial signals.
-    const caps = PDF_PAGE_CAPS.length ? PDF_PAGE_CAPS : [10];
+    // Pass 1: progressive caps with custom pagerender
     for (const cap of caps) {
       try {
         const parsed = await pdfParse(f.data, {
           max: cap,
           pagerender: page =>
-            page.getTextContent().then(tc => tc.items.map(i => i.str).join(" "))
+            page.getTextContent().then(tc => tc.items.map(i => i.str).join(' '))
         });
-
-        const raw = (parsed?.text || "").replace(/\r/g, "").trim();
-        const sliced = raw.slice(0, PDF_CHAR_CAP);
-        pickedText = sliced;
+        const norm = normalizeFinancialText(parsed?.text || '');
+        pickedText = norm.slice(0, PDF_CHAR_CAP);
         usedCap = cap;
-
-        if (hasFinancialSignals(sliced)) {
-          // good enough — we saw the kind of numbers/labels we care about
-          break;
-        }
-      } catch (e) {
-        // if limited parse fails (rare), try full parse once then bail
-        try {
-          const parsedFull = await pdfParse(f.data);
-          const rawFull = (parsedFull?.text || "").replace(/\r/g, "").trim();
-          pickedText = rawFull.slice(0, PDF_CHAR_CAP);
-          usedCap = 0; // 0 == full
-        } catch {
-          pickedText = "";
-        }
-        break; // stop widening on hard errors
+        if (hasFinancialSignals(pickedText)) break; // good enough
+      } catch (_) {
+        // ignore and try next strategy
       }
+    }
+
+    // Pass 2: full parse with default pagerender (some PDFs extract better this way)
+    if (!hasFinancialSignals(pickedText)) {
+      try {
+        const parsedFull = await pdfParse(f.data); // no options
+        const normFull = normalizeFinancialText(parsedFull?.text || '');
+        const sliced = normFull.slice(0, PDF_CHAR_CAP);
+        if (sliced.length > pickedText.length) {
+          pickedText = sliced;
+          usedCap = 0;
+        }
+      } catch (_) { /* ignore */ }
     }
 
     if (pickedText && pickedText.trim()) {
       out.push({
-        filename: f.filename || "report.pdf",
+        filename: f.filename || 'report.pdf',
         text: pickedText,
-        pagesTried: usedCap || undefined // diagnostic only
+        pagesTried: usedCap || undefined
       });
     }
   }
@@ -555,6 +575,36 @@ function validateReportStructure(md, { isSummary, callType } = {}) {
   };
 }
 
+function makeFinancialsDigest(pdfs) {
+  const labels = [
+    { key: 'Revenue/Turnover', rx: /(turnover|revenue)/i },
+    { key: 'Gross profit', rx: /gross\s+profit/i },
+    { key: 'Operating profit/(loss)', rx: /operating\s+(?:profit|loss)/i },
+    { key: 'Profit/(loss) before tax', rx: /(?:profit|loss)\s+before\s+tax/i },
+    { key: 'Cash (bank and in hand)', rx: /cash\s+(?:at\s*bank|and\s*in\s*hand|equivalents)/i },
+    { key: 'Current assets', rx: /current\s+assets/i },
+    { key: 'Current liabilities', rx: /current\s+liabilities/i },
+    { key: 'Net assets/(liabilities)', rx: /net\s+(?:assets|liabilities)/i },
+    { key: 'Average employees', rx: /average\s+(?:monthly\s+)?(?:number\s+of\s+)?employees/i }
+  ];
+  const numberRx = /(?:£|gbp)\s*\d|\b\d{1,3}(?:,\d{3}){1,3}\b/i;
+
+  const blocks = [];
+  for (const p of (pdfs || [])) {
+    if (!p.text) continue;
+    const lines = String(p.text).split(/\n+/);
+    const picks = [];
+    for (const lab of labels) {
+      const hit = lines.find(line => lab.rx.test(line) && numberRx.test(line));
+      if (hit) picks.push(`- ${lab.key}: ${hit.trim().slice(0, 180)}`);
+    }
+    if (picks.length) {
+      blocks.push(`--- FINANCIAL CANDIDATES from ${p.filename} ---\n${picks.join('\n')}`);
+    }
+  }
+  return blocks.join('\n\n');
+}
+
 // ------------------------------
 // Prompt assembly
 // ------------------------------
@@ -698,6 +748,8 @@ function buildQualificationJsonPrompt(args) {
     pdfTagList
   ].join("\n");
 
+  const financeCandidates = makeFinancialsDigest(pdfs);
+
   return [
     role,
     "",
@@ -718,6 +770,7 @@ function buildQualificationJsonPrompt(args) {
     "",
     citationLists,
     "",
+    (financeCandidates ? "FINANCIALS EXTRACTION CANDIDATES:\n" + financeCandidates + "\n" : ""),
     "iXBRL summary (most recent first):",
     ixBrief,
     "",
@@ -1035,9 +1088,11 @@ module.exports = async function (context, req) {
       return bannedRx.test(md || "");
     }
     function hasEvidenceMarks(md) {
-      const pounds = (md.match(/£\s?\d/gi) || []).length;
-      const fy = /FY\d{2}/i.test(md);
-      return pounds >= 2 && fy;
+      const kw = /(turnover|revenue|gross profit|operating (?:profit|loss)|profit before tax|net assets|current assets|current liabilities|employees)/i.test(md || '');
+      const bigNum = /\b\d{1,3}(?:,\d{3}){1,3}\b/.test(md || ''); // e.g., 20,760,000
+      const fy = /FY\d{2}/i.test(md || '');
+      const poundLike = /(?:£|GBP)\s*\d/.test(md || '');
+      return fy && kw && (bigNum || poundLike);
     }
     function hasInlineCitations(md) {
       if (typeof md !== 'string') return false;
