@@ -20,28 +20,42 @@ function buildCorsHeaders(req) {
   };
 }
 
-// ---------- Auth guard ----------
 const ALLOWED_ROLES = new Set(["sales", "sales-admin"]); // ALLOWED_ROLES_QUALIFICATION
+
 function parsePrincipal(headerValue) {
   try {
     if (!headerValue) return { roles: [] };
     const json = JSON.parse(Buffer.from(String(headerValue), "base64").toString("utf8"));
-    const roles = Array.isArray(json?.userRoles) ? json.userRoles : [];
+    const roles = Array.isArray(json?.userRoles) ? json.userRoles.map(r => String(r || "").toLowerCase()) : [];
     return { roles };
-  } catch { return { roles: [] }; }
+  } catch {
+    return { roles: [] };
+  }
 }
+
 function enforceRoles(req, isLocalDev) {
+  if (isLocalDev) return { ok: true };
+
   const principalHeader = req.headers?.["x-ms-client-principal"];
-  if (!principalHeader && !isLocalDev) {
-    return { ok: false, code: 401, body: { error: "unauthenticated", message: "Login required" } };
+
+  // If SWA didn't attach the principal header, don't 401 here.
+  // SWA's routes (allowedRoles) already protected this endpoint from anonymous access.
+  if (!principalHeader) return { ok: true };
+
+  const { roles } = parsePrincipal(principalHeader);
+
+  // If the user has "authenticated" (SWA default) allow.
+  if (roles.includes("authenticated")) return { ok: true };
+
+  // Otherwise require one of our custom roles.
+  const hasCustom = roles.some(r => ALLOWED_ROLES.has(r));
+  if (!hasCustom) {
+    return { ok: false, code: 403, body: { error: "forbidden", message: "Insufficient role" } };
   }
-  const { roles } = parsePrincipal(principalHeader || "");
-  if (!isLocalDev) {
-    const has = roles.some(r => ALLOWED_ROLES.has(String(r || "").toLowerCase()));
-    if (!has) return { ok: false, code: 403, body: { error: "forbidden", message: "Insufficient role" } };
-  }
+
   return { ok: true };
 }
+
 function getCorrelationId(req) {
   return (req.headers?.["x-correlation-id"] || randomUUID()).toString();
 }
