@@ -1,8 +1,8 @@
-// /api/qualification-generate/index.js 15-10-2025 v1
+// /api/qualification-generate/index.js 15-10-2025 v2
 // Node 20. Auth: anonymous; role-enforced in code.
 // Structured Lead Qualification -> JSON validated against /api/schemas/qualification.v2.json
 
-const VERSION = "qualification-generate-2025-09-25-1";
+const VERSION = "qualification-generate-2025-10-15-2";
 
 const DEFAULT_LLM_TIMEOUT = Number(process.env.LLM_TIMEOUT_MS || "45000");
 const { randomUUID } = require("crypto");
@@ -128,7 +128,7 @@ async function callModel({ system, prompt, temperature = 0.5, response_format })
 function loadSchema() {
   const p = path.join(__dirname, "..", "schemas", "qualification.v2.json");
   const raw = fs.readFileSync(p, "utf8");
-  return JSON.parse(raw);
+  return { object: JSON.parse(raw), text: raw };
 }
 
 // ---------- Lightweight validator using Ajv if available, else native draft 2020-12 via node:vm fallback ----------
@@ -153,30 +153,43 @@ function makeValidator(schema) {
 }
 
 // ---------- Prompt builder ----------
-function buildPrompt({ companyName, website, notes }) {
+function buildPrompt({ companyName, website, notes, schemaText }) {
   return `
-You are a UK B2B/channel salesperson. Produce a **lead qualification** report as VALID JSON ONLY that STRICTLY matches the provided JSON schema.
-- UK business English; no speculation; only concise, evidenced statements.
-- If evidence is missing, write the literal string "Unknown" (not an empty string).
-- Never leave a field empty. Avoid "" and [] for required properties; use "Unknown" or a short note.
+You are a UK B2B/channel salesperson generating a structured **lead qualification** report.
 
-Inputs:
+Return **VALID JSON ONLY** that **STRICTLY** conforms to the JSON Schema below.
+- UK business English; concise, evidenced statements only.
+- If evidence is missing, use the literal string **"Unknown"** (never "" or null).
+- **Never** leave a required field empty.
+- Do **not** include markdown fences or any prose outside the JSON.
+
+Context (free text from salesperson may be partial):
 - Company: ${companyName || "(unknown)"} 
 - Website: ${website || "(not provided)"} 
-- Notes from salesperson: ${notes || "(none)"}
+- Notes: ${notes || "(none)"}
 
-Return JSON ONLY; do not include markdown fences or prose outside JSON.
-If you cite, include a "citations" array under report where each item has "label" and optional "url".`;
+Checklist to cover inside the JSON (use if/then style reasoning inline with the schema fields):
+- Financial/traction signals (funding, revenue, growth, layoffs): indicate clearly if present or "Unknown".
+- Buying group & decision process: who, how, typical cycle, blockers.
+- Pain points vs our offer; competition in account; timing & budget clues.
+- Trade shows/public activity; GTM model; recent performance highlights.
+- Bottom-line recommendation (1–2 sentences max).
+
+JSON Schema to follow **exactly**:
+${schemaText}
+
+Remember: output **JSON only**; no backticks, no explanations.`;
 }
 
 // ---------- Normalizers (coerce model output into required shape) ----------
-function asStr(v, d = "") { return (typeof v === "string" ? v : d); }
+function nz(v) { return (typeof v === "string" && v.trim() !== "") ? v : "Unknown"; }
+function asStr(v, d = "Unknown") { return (typeof v === "string" ? (v.trim() || d) : d); }
 function asArr(v) { return Array.isArray(v) ? v : []; }
 function asInt(v, d = undefined) {
   const n = Number(v);
   return Number.isInteger(n) ? n : d;
 }
-function mapStrArr(v) { return asArr(v).map(x => asStr(x, "")); }
+function mapStrArr(v) { return asArr(v).map(x => asStr(x, "Unknown")); }
 
 /**
  * Coerce any partial/omitted fields into your required JSON Schema shape.
@@ -184,6 +197,13 @@ function mapStrArr(v) { return asArr(v).map(x => asStr(x, "")); }
  */
 function normalizeQualification(obj) {
   const out = (obj && typeof obj === "object") ? { ...obj } : {};
+
+  // Ensure report object w/ md present
+  const reportIn = (out.report && typeof out.report === "object") ? out.report : {};
+  out.report = {
+    ...reportIn,
+    md: asStr(reportIn.md, "Unknown")
+  };
 
   // companyProfile (required object)
   const cp = (out.companyProfile && typeof out.companyProfile === "object") ? out.companyProfile : {};
@@ -193,23 +213,23 @@ function normalizeQualification(obj) {
   const trade = asArr(cp.tradeShows).map(t => {
     t = (t && typeof t === "object") ? t : {};
     return {
-      name: asStr(t.name, ""),
+      name: asStr(t.name, "Unknown"),
       year: asInt(t.year, undefined),
-      notes: asStr(t.notes, ""),
-      estimatedBudget: asStr(t.estimatedBudget, ""),
-      estimatedOpportunities: asStr(t.estimatedOpportunities, "")
+      notes: asStr(t.notes, "Unknown"),
+      estimatedBudget: asStr(t.estimatedBudget, "Unknown"),
+      estimatedOpportunities: asStr(t.estimatedOpportunities, "Unknown")
     };
   });
 
   out.companyProfile = {
-    founded: asStr(cp.founded, ""),
-    industry: asStr(cp.industry, ""),
+    founded: asStr(cp.founded, "Unknown"),
+    industry: asStr(cp.industry, "Unknown"),
     size: {
-      employees: asStr(size.employees, ""),
-      revenue: asStr(size.revenue, "")
+      employees: asStr(size.employees, "Unknown"),
+      revenue: asStr(size.revenue, "Unknown")
     },
     gtm: {
-      model: asStr(gtm.model, ""),
+      model: asStr(gtm.model, "Unknown"),
       segments: mapStrArr(gtm.segments)
     },
     recentPerformance: mapStrArr(cp.recentPerformance),
@@ -222,14 +242,17 @@ function normalizeQualification(obj) {
   out.relationshipValue = mapStrArr(out.relationshipValue);
   out.decisionMaking = mapStrArr(out.decisionMaking);
   out.competition = mapStrArr(out.competition);
-  out.bottomLine = asStr(out.bottomLine, "");
+  out.bottomLine = asStr(out.bottomLine, "Unknown");
   out.notEvidenced = mapStrArr(out.notEvidenced);
 
-  // optional but typed
+  // citations (root-level to match current schema/code usage)
   out.citations = asArr(out.citations).map(c => {
     c = (c && typeof c === "object") ? c : {};
-    return { label: asStr(c.label, ""), url: asStr(c.url, "") };
+    return { label: asStr(c.label, "Unknown"), url: asStr(c.url, "") };
   });
+
+  // tips (required array in schema; keep as array of strings)
+  out.tips = mapStrArr(out.tips);
 
   return out;
 }
@@ -255,15 +278,15 @@ module.exports = async function (context, req) {
   const notes = String(b.notes || "").trim();
 
   // Build prompt + schema-enforced response
-  const schema = loadSchema();
-  const validate = makeValidator(schema);
+  const { object: schemaObj, text: schemaText } = loadSchema();
+  const validate = makeValidator(schemaObj);
 
-  const prompt = buildPrompt({ companyName, website, notes });
+  const prompt = buildPrompt({ companyName, website, notes, schemaText });
 
   const started = Date.now();
   try {
     const llmRes = await callModel({
-      system: "Return JSON that strictly conforms to the given JSON Schema. Do not output anything else.",
+      system: "You must return JSON that strictly conforms to the provided JSON Schema. Output JSON only.",
       prompt,
       temperature: 0.4,
       response_format: { type: "json_object" } // model-side structure enforcement
@@ -279,7 +302,7 @@ module.exports = async function (context, req) {
       context.res = { status: 400, headers: headersBase, body: { error: "validation_failed", message: "Model did not return valid JSON", details: { raw: raw.slice(0, 300) } } };
       return;
     }
-    // Coerce into required shape so validation is stable
+    // Coerce into required shape so validation is stable and non-empty
     data = normalizeQualification(data);
 
     let valid, errors;
@@ -304,7 +327,7 @@ module.exports = async function (context, req) {
     context.res = {
       status: 200,
       headers: headersBase,
-      body: { ...data, meta: { model: llmRes?._provider || "unknown", durationMs } }
+      body: { ...data, meta: { model: llmRes?._provider || "unknown", durationMs, version: VERSION } }
     };
   } catch (e) {
     context.log.error(`[${VERSION}] ${e?.stack || e}`);
