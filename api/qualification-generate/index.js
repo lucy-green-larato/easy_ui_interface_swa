@@ -304,7 +304,7 @@ module.exports = async function (context, req) {
     context.res = {
       status: 200,
       headers: headersBase,
-      body: { report: data.report, tips: data.tips, meta: { model: llmRes?._provider || "unknown", durationMs } }
+      body: { ...data, meta: { model: llmRes?._provider || "unknown", durationMs } }
     };
   } catch (e) {
     context.log.error(`[${VERSION}] ${e?.stack || e}`);
