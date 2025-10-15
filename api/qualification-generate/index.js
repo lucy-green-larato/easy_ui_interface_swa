@@ -1,4 +1,4 @@
-// /api/qualification-generate/index.js
+// /api/qualification-generate/index.js 15-10-2025 v1
 // Node 20. Auth: anonymous; role-enforced in code.
 // Structured Lead Qualification -> JSON validated against /api/schemas/qualification.v2.json
 
