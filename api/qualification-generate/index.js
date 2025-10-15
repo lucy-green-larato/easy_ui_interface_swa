@@ -1,10 +1,9 @@
-// api/qualification-generate/index.js 15-10-2025 v5
+// api/qualification-generate/index.js 15-10-2025 v8
 // Azure Function: qualification-generate
 // Goal: unify the recent (incomplete) generator with the archive's full feature set
 // Notes:
 // - Preserves current names/shape; augments with optional multipart + PDF + website bundling
 // - Degrades gracefully if optional deps (busboy, pdf-parse, ajv) are not installed
-// - No repo renames; single-file implementation
 
 // ------------------------------
 // Utilities
@@ -17,10 +16,24 @@ const toInt = (v, d) => {
 const DEFAULT_TIMEOUT_MS = toInt(process.env.FETCH_TIMEOUT, 60_000);
 const MODEL_TIMEOUT_MS = toInt(process.env.LLM_TIMEOUT_MS, 120_000);
 const PER_PAGE_CAP = toInt(process.env.PDF_CHAR_CAP, 12_000);
-const MAX_PDF_PER_FILE = toInt(process.env.MAX_UPLOAD_BYTES, 10 * 1024 * 1024);
-const MAX_PDFS = toInt(process.env.QUAL_MAX_PDFS, 2);
 const TEXT_CAP = toInt(process.env.QUAL_TEXT_CAP, PER_PAGE_CAP * 10);
-const MAX_PDF_BYTES = toInt(process.env.QUAL_MAX_PDF_BYTES, MAX_PDF_PER_FILE * MAX_PDFS);
+const PDF_PAGE_CAPS = (process.env.PDF_PAGE_CAPS || "10,25")
+  .split(",")
+  .map(n => Number(String(n).trim()))
+  .filter(Boolean); // e.g., [10,25]
+const PDF_CHAR_CAP = toInt(process.env.PDF_CHAR_CAP, 120000);
+const QUAL_MAX_PDFS = toInt(process.env.QUAL_MAX_PDFS, 2);
+const QUAL_MAX_PDF_PER_FILE_BYTES = toInt(
+  process.env.QUAL_MAX_PDF_PER_FILE_BYTES || process.env.MAX_UPLOAD_BYTES,
+  10 * 1024 * 1024 // 10MB per file default
+);
+const QUAL_TOTAL_PDF_BYTES = toInt(
+  process.env.QUAL_TOTAL_PDF_BYTES || process.env.QUAL_MAX_PDF_BYTES,
+  QUAL_MAX_PDF_PER_FILE_BYTES * QUAL_MAX_PDFS // default combined cap
+);
+const DEDUP_NGRAM = toInt(process.env.QUAL_DEDUP_NGRAM, 12);
+const MIN_PAGE_UNIQUE_PCT = Math.max(0, Math.min(1, Number(process.env.QUAL_MIN_PAGE_UNIQUE_PCT || '0.25')));
+
 
 // Best-effort optional deps
 let Ajv = null;
@@ -91,23 +104,72 @@ function htmlToText(html) {
 }
 
 function take(str, n) { return (str || '').slice(0, n); }
+function tokenizeWords(s) {
+  // Lowercase, keep letters/numbers, split on non-word
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9£€$%\.\-\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function djb2(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) + h) + str.charCodeAt(i);
+    h = h >>> 0; // unsigned 32
+  }
+  return h;
+}
+
+function shingles(words, n) {
+  if (!Array.isArray(words) || words.length < n) return [];
+  const out = [];
+  for (let i = 0; i <= words.length - n; i++) {
+    // join a short window; hashing avoids big memory
+    const sh = djb2(words.slice(i, i + n).join(' '));
+    out.push(sh);
+  }
+  return out;
+}
+
+/**
+ * Compute unique contribution of `text` given a set of seen shingles.
+ * Returns { uniquePct: number (0..1), acceptedShingles: number[], total: number }
+ */
+function measureUniqueContribution(text, seen, n = DEDUP_NGRAM) {
+  const words = tokenizeWords(text);
+  const grams = shingles(words, n);
+  if (grams.length === 0) return { uniquePct: 0, acceptedShingles: [], total: 0 };
+
+  let uniqueCount = 0;
+  const newOnes = [];
+  for (const g of grams) {
+    if (!seen.has(g)) {
+      uniqueCount++;
+      newOnes.push(g);
+    }
+  }
+  const uniquePct = uniqueCount / grams.length;
+  return { uniquePct, acceptedShingles: newOnes, total: grams.length };
+}
 
 // ------------------------------
 // Multipart (optional)
 // ------------------------------
 
 async function parseMultipart(req) {
-  if (!Busboy) return { fields: {}, files: [] };
+  if (!Busboy) {
+    throw new Error('Multipart parser unavailable: install "busboy" to accept file uploads.');
+  }
 
   // defensively get a Buffer for the request body
   const bodyBuf = (() => {
     if (Buffer.isBuffer(req.body)) return req.body;
     if (typeof req.body === 'string') return Buffer.from(req.body, 'utf8');
-    // sometimes body can come as { data: <Uint8Array> } when proxied
     if (req.body && req.body.data && Array.isArray(req.body.data)) {
       return Buffer.from(req.body.data);
     }
-    // last resort: nothing usable
     return null;
   })();
 
@@ -123,8 +185,8 @@ async function parseMultipart(req) {
   const bb = Busboy({
     headers: req.headers,
     limits: {
-      fileSize: MAX_PDF_PER_FILE, // per-file cap
-      files: MAX_PDFS              // how many files we’ll process
+      fileSize: QUAL_MAX_PDF_PER_FILE_BYTES, // per-file cap
+      files: QUAL_MAX_PDFS                 // number of files processed
     }
   });
 
@@ -141,23 +203,19 @@ async function parseMultipart(req) {
       let truncated = false;
 
       file.on('data', d => {
-        // enforce total cap (combined)
         totalBytes += d.length;
-        if (totalBytes > MAX_PDF_BYTES) {
+        if (totalBytes > QUAL_TOTAL_PDF_BYTES) {
           return; // drain but don't buffer beyond the total budget
         }
-        if (isPdf && !truncated) {
-          chunks.push(d);
-        }
+        if (isPdf && !truncated) chunks.push(d);
       });
 
-      file.on('limit', () => { truncated = true; }); // per-file cap hit
+      file.on('limit', () => { truncated = true; });
 
       file.on('end', () => {
         if (isPdf && !truncated) {
           files.push({ filename, mime: mimeType, data: Buffer.concat(chunks) });
         }
-        // oversize or non-PDF -> silently ignored
       });
     });
 
@@ -171,10 +229,9 @@ async function parseMultipart(req) {
 
   await done;
 
-  // final safety filter & slice
   const pdfs = files
     .filter(f => /pdf$/i.test(f.mime) || /application\/pdf/i.test(f.mime))
-    .slice(0, MAX_PDFS);
+    .slice(0, QUAL_MAX_PDFS);
 
   return { fields, files: pdfs };
 }
@@ -182,19 +239,62 @@ async function parseMultipart(req) {
 // ------------------------------
 // PDF extraction (optional)
 // ------------------------------
+function hasFinancialSignals(text) {
+  if (!text) return false;
+  const rx = /(turnover|revenue|gross\s+profit|operating\s+profit|profit\s+and\s+loss|statement\s+of\s+comprehensive\s+income|balance\s+sheet|cash\s*(?:at\s*bank|and\s*in\s*hand)|current\s+assets|current\s+liabilities|net\s+assets|£\s?\d|\d{1,3}(?:,\d{3}){1,3})/i;
+  return rx.test(text);
+}
 
 async function extractPdfTexts(files) {
   const out = [];
   if (!pdfParse || !Array.isArray(files)) return out;
+
   for (const f of files) {
-    try {
-      const res = await pdfParse(f.data);
-      const text = take(res.text || '', PER_PAGE_CAP * 5); // pragmatic cap
-      if (text?.trim()) out.push({ filename: f.filename, text });
-    } catch (e) {
-      // ignore this file; continue
+    let pickedText = "";
+    let usedCap = 0;
+
+    // Try progressively wider page windows (e.g., 10 then 25). Stop early if we see financial signals.
+    const caps = PDF_PAGE_CAPS.length ? PDF_PAGE_CAPS : [10];
+    for (const cap of caps) {
+      try {
+        const parsed = await pdfParse(f.data, {
+          max: cap,
+          pagerender: page =>
+            page.getTextContent().then(tc => tc.items.map(i => i.str).join(" "))
+        });
+
+        const raw = (parsed?.text || "").replace(/\r/g, "").trim();
+        const sliced = raw.slice(0, PDF_CHAR_CAP);
+        pickedText = sliced;
+        usedCap = cap;
+
+        if (hasFinancialSignals(sliced)) {
+          // good enough — we saw the kind of numbers/labels we care about
+          break;
+        }
+      } catch (e) {
+        // if limited parse fails (rare), try full parse once then bail
+        try {
+          const parsedFull = await pdfParse(f.data);
+          const rawFull = (parsedFull?.text || "").replace(/\r/g, "").trim();
+          pickedText = rawFull.slice(0, PDF_CHAR_CAP);
+          usedCap = 0; // 0 == full
+        } catch {
+          pickedText = "";
+        }
+        break; // stop widening on hard errors
+      }
+    }
+
+    if (pickedText && pickedText.trim()) {
+      out.push({
+        filename: f.filename || "report.pdf",
+        text: pickedText,
+        pagesTried: usedCap || undefined // diagnostic only
+      });
     }
   }
+
   return out;
 }
 
@@ -222,12 +322,10 @@ async function sampleFromSitemap(base, max = 12) {
     const res = await timedFetch(`${base}/sitemap.xml`, { method: 'GET' }, DEFAULT_TIMEOUT_MS);
     if (!res.ok) return [];
     const xml = await res.text();
-    // Pull <loc> values
     const locs = Array.from(xml.matchAll(/<loc>(.*?)<\/loc>/gi))
       .map(m => m[1])
       .filter(Boolean);
 
-    // Same-host, https, skip images/other sitemaps
     const sameHost = [];
     for (const u of locs) {
       try {
@@ -239,14 +337,13 @@ async function sampleFromSitemap(base, max = 12) {
       } catch { /* ignore bad URLs */ }
     }
 
-    // Prefer pages likely to be rich in company info
     const priority = ['case', 'customer', 'leadership', 'team', 'board', 'about', 'partner',
       'solution', 'service', 'industry', 'sector', 'news', 'press', 'blog',
       'security', 'compliance', 'resource', 'insight'];
     sameHost.sort((a, b) => {
       const sa = priority.some(k => a.includes(k)) ? 1 : 0;
       const sb = priority.some(k => b.includes(k)) ? 1 : 0;
-      return sb - sa; // rich first
+      return sb - sa;
     });
 
     return Array.from(new Set(sameHost)).slice(0, max);
@@ -275,20 +372,37 @@ async function bundleWebsite(website, extraPaths = []) {
 
   const pages = [];
   let text = '';
-  const MAX_PAGES = 18; // gentle cap on page count
+  const MAX_PAGES = 18;
+
+  // Global shingle set to suppress repeats across pages
+  const seen = new Set();
 
   for (const url of candidates) {
     try {
       const res = await timedFetch(url, { method: 'GET' }, DEFAULT_TIMEOUT_MS);
       if (!res.ok) continue;
       const html = await res.text();
-      const chunk = htmlToText(html);
-      if (!chunk) continue;
+      const chunkRaw = htmlToText(html);
+      if (!chunkRaw) continue;
 
-      pages.push(url);
-      text += ' \n---\n' + take(chunk, PER_PAGE_CAP);
+      // Cap per page first (cheap) then measure contribution
+      const chunk = take(chunkRaw, PER_PAGE_CAP);
 
-      if (text.length >= TEXT_CAP || pages.length >= MAX_PAGES) break;
+      const { uniquePct, acceptedShingles } = measureUniqueContribution(chunk, seen, DEDUP_NGRAM);
+
+      // Only accept pages that add enough genuinely new content
+      if (uniquePct >= MIN_PAGE_UNIQUE_PCT) {
+        // Merge shingles into seen set
+        for (const g of acceptedShingles) seen.add(g);
+
+        pages.push(url);
+        text += ' \n---\n' + chunk;
+
+        if (text.length >= TEXT_CAP || pages.length >= MAX_PAGES) break;
+      } else {
+        // Skip largely-duplicate page silently
+        continue;
+      }
     } catch {
       // skip bad/slow pages
     }
@@ -315,7 +429,7 @@ async function loadSchema(req) {
               type: "object",
               properties: {
                 label: { type: "string", minLength: 1 },
-                url:   { type: "string" }
+                url: { type: "string" }
               },
               required: ["label"],
               additionalProperties: false
@@ -352,155 +466,205 @@ function getValidator(schema) {
   };
 }
 
+// Ensure all required headings appear in order (using markdown '## ' anchors)
+function headingsInOrder(md, headings) {
+  if (typeof md !== 'string' || !md.trim()) return { ok: false, missing: headings.slice(0) };
+  const idxs = [];
+  const missing = [];
+  let lastIdx = -1;
+
+  for (const h of headings) {
+    // escape regex special chars in heading
+    const pat = new RegExp('^\\s*' + h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'mi');
+    const m = md.match(pat);
+    if (!m) {
+      missing.push(h);
+      idxs.push(-1);
+      continue;
+    }
+    const pos = m.index;
+    idxs.push(pos);
+    if (pos <= lastIdx) {
+      // order violation
+      return { ok: false, missing: [], order: false };
+    }
+    lastIdx = pos;
+  }
+
+  return { ok: missing.length === 0, missing, order: true };
+}
+
 // ------------------------------
 // Prompt assembly
 // ------------------------------
+function buildQualificationJsonPrompt(args) {
+  const v = args.values || {};
+  const callType = String(v.call_type || "").toLowerCase().startsWith("p") ? "Partner" : "Direct";
+  const sellerNotes = String(args.sellerNotes || '').trim();
+  const detailMode = (args.detailMode === "summary") ? "summary" : "full";
+  const targetWords = Number(args.targetWords || 0);
+  const targetWordsLine = targetWords
+    ? `TARGET LENGTH: Aim for about ${targetWords} words (±10%). HARD CAP: Do not exceed ${Math.round(targetWords * 1.06)} words.`
+    : "";
+  const modeLine =
+    (detailMode === "summary")
+      ? [
+        "OUTPUT MODE: EXECUTIVE SUMMARY.",
+        "- Keep each section to 1–2 crisp sentences maximum.",
+        "- Include only the highest-signal facts with figures and year labels (e.g., “FY24: £20.76m”).",
+        "- If a point lacks evidence in the provided sources, write “No public evidence found.” Do NOT speculate.",
+        "- No softeners or generalisations; be direct and specific."
+      ].join("\n")
+      : [
+        "OUTPUT MODE: FULL DETAIL.",
+        "- Provide complete, evidenced detail across all sections.",
+        "- Quote figures with year labels; include relevant operational context from sources.",
+        "- Still avoid speculation; if unknown, state it explicitly."
+      ].join("\n");
+  const banlist = [
+    "well-positioned", "decades of experience", "cybersecurity landscape",
+    "market differentiation", "client-centric", "cutting-edge",
+    "robust posture", "holistic", "industry-leading", "best-in-class"
+  ];
 
-// --- helpers used by your legacy prompt ---
-function readabilityLineFor(tone) {
-  // keep this lightweight; expand if you had a richer map before
-  if (!tone) return 'Write with short, plain sentences.';
-  return /executive|board/i.test(tone)
-    ? 'Write with short, plain sentences for senior readers.'
-    : 'Write with short, plain sentences.';
-}
-function toneStyleGuide(tone) {
-  if (!tone) return 'UK business English. Neutral, precise, confident.';
-  return `UK business English. ${tone}. Neutral, precise, confident.`;
-}
+  const banlistLine =
+    "BANNED WORDING (do not use any of these): " + banlist.join(", ") + ".";
 
-function buildPromptFromMarkdown(args) {
-  const templateMdText = args.templateMdText || "";
-  const seller = args.seller || { name: "", company: "" };
-  const prospect = args.prospect || { name: "", role: "", company: "" };
-  const productLabel = args.productLabel || "";
-  const buyerType = args.buyerType || "";
-  const valueProposition = (args.valueProposition || "").trim();
-  const context = (args.context || "").trim();
-  const nextStep = (args.nextStep || "").trim();
-  const suggestedNext = (args.suggestedNext || "").trim();
-  const tone = args.tone || "";
-  const targetWords = args.targetWords || 0;
+  const evidDensityRules = [
+    "EVIDENCE DENSITY:",
+    "- Company profile MUST include labelled figures where available (e.g., “FY24: £20.76m revenue; Loss before tax £824k; Average employees 92”).",
+    "- If a required number is not present in the provided sources, write a one-line ‘No public evidence found’ under that section—do NOT generalise.",
+    "- Only list partners/technologies if explicitly present in the provided WEBSITE TEXT or PDFs you’ve been given.",
+    "- Trade shows: list only those explicitly evidenced in WEBSITE TEXT; otherwise write ‘No public evidence found this calendar year.’",
+  ].join("\n");
+  const ix = args.ixbrl || {};
+  const ixBrief = JSON.stringify(ix && ix.years ? ix.years : (ix.summary && ix.summary.years) || ix);
 
-  const toneLine = tone ? 'Write in a "' + tone + '" tone.\n' : "";
-  const lengthLine = targetWords ? "Aim for about " + targetWords + " words (±10%).\n" : "";
-  const readability = readabilityLineFor(tone);
-  const styleGuide = toneStyleGuide(tone);
+  const pdfs = Array.isArray(args.pdfs) ? args.pdfs : []; // [{filename,text}]
+  const pdfBundle = pdfs.map(p => (`--- PDF: ${p.filename || "report.pdf"} ---\n${p.text || ""}`)).join("\n\n");
 
-  const headingRules =
-    "Use these exact markdown headings, in this order, each on its own line:\n" +
-    "## Opening\n" +
-    "## Buyer Pain\n" +
-    "## Buyer Desire\n" +
-    "## Example Illustration\n" +
-    "## Handling Objections\n" +
-    "## Next Step\n" +
-    "Do not rename or add headings.\n\n";
+  const websiteText = args.websiteText || "";
+  const seller = args.seller || { name: "", company: "", url: "" };
+  const offer = args.ourOffer || { product: "", otherContext: "" };
 
-  return (
-    "You are a top UK sales coach creating **instructional advice for the salesperson** (not a spoken script).\n\n" +
-    toneLine + readability + "\n" + styleGuide + "\n" + lengthLine + headingRules +
-    "Under each heading, write clear, imperative guidance telling the salesperson what to do, what to listen for, and how to phrase key moments.\n" +
-    "MANDATES:\n" +
-    "- UK business English. No pleasantries or small talk. No Americanisms.\n" +
-    "- **Adhere to the STYLE above** so tone drives vocabulary and sentence length.\n" +
-    "- Weave the salesperson’s USPs/Other points naturally into the most relevant sections.\n" +
-    "- Include one specific, relevant customer example with measurable results and when to use it.\n" +
-    "- For \"Next Step\": if the salesperson provided one, use it; else if the template contains <!-- suggested_next_step: ... -->, use that; else propose a clear, low-friction next step.\n" +
-    "Buyer type: " + buyerType + "\n" +
-    "Product: " + productLabel + "\n\n" +
-    "USPs (from salesperson): " + (valueProposition || "(none provided)") + "\n" +
-    "Other points to consider: " + (context || "(none provided)") + "\n" +
-    "Requested Next Step (from salesperson, if any): " + (nextStep || "(none)") + "\n" +
-    "Suggested Next Step (from template, if any): " + (suggestedNext || "(none)") + "\n\n" +
-    "--- TEMPLATE (for ideas only) ---\n" +
-    templateMdText +
-    "\n--- END TEMPLATE ---\n\n" +
-    "After the advice, add this heading and content:\n" +
-    "**Sales tips for colleagues conducting similar calls**\n" +
-    "Provide exactly 3 concise, practical tips (numbered 1., 2., 3.).\n"
-  );
-}
+  const websiteBlock = websiteText ? (`--- WEBSITE TEXT (multiple pages) ---\n${websiteText}`) : "";
+  const notesBlock = sellerNotes
+    ? ("--- SELLER NOTES (verbatim; context only — not evidence) ---\n" + sellerNotes)
+    : "";
 
-function buildPrompt({
-  variables = {},
-  notes = '',
-  websiteText = '',
-  pdfs = [],
-  pages = [],
-  schemaText = ''
-}) {
-  const v = variables || {};
+  const role = [
+    "You are a top-performing UK B2B/channel salesperson and GTM strategist.",
+    "You are a CMO-level operator focused on partner recruitment and enablement.",
+    "Write **valid JSON only** (no markdown outside JSON).",
+    "All insights must be specific and evidenced from the provided sources only."
+  ].join("\n");
 
-  // Map variables → your legacy prompt fields (tweak keys to your actual form names)
-  const styleGuideMarkdown = buildPromptFromMarkdown({
-    templateMdText: v.templateMdText || '',
-    seller: { name: v.your_name || v.seller_name || '', company: v.your_company || '' },
-    prospect: { name: v.prospect_name || '', role: v.prospect_role || '', company: v.prospect_company || '' },
-    productLabel: v.product_label || v.product || v['Product / service offered'] || '',
-    buyerType: v.sales_model || v.buyerType || '',
-    valueProposition: v.valueProposition || v.usps || '',
-    context: notes || v.context || '',
-    nextStep: v.nextStep || '',
-    suggestedNext: v.suggestedNext || '',
-    tone: v.tone || 'Decisive, board-ready',
-    targetWords: v.QUAL_FULL_TARGET_WORDS || parseInt(process.env.QUAL_FULL_TARGET_WORDS || '0', 10)
-  });
+  const schema = [
+    "JSON schema (shape & content rules — follow exactly):",
+    "{",
+    '  "report": {',
+    '    "md": string,              // Markdown with these EXACT section headings in this EXACT order:',
+    '                               // "Here is your evidence-based qualification for your opportunity with {Company}..."',
+    '                               // ## Company profile (what can be evidenced)',
+    '                               // ## Pain points',
+    '                               // ## Relationship value',
+    '                               // ## Decision-making process',
+    '                               // ## Competition & differentiation',
+    '                               // ## Bottom line for you',
+    '                               // ## What we could not evidence (and why)',
+    '                               // If CALL_TYPE = Partner, ALSO include (anywhere after the above):',
+    '                               // ## Potential partnership risks and mitigations',
+    '                               // Inline evidence tags: use [S#] for website, [P#] for PDFs when claims rely on evidence.',
+    '    "citations": [              // Provide any citations the model used (server will add more).',
+    '      { "label": string, "url"?: string }',
+    "    ]",
+    "  },",
+    '  "tips": [string, string, string]   // Exactly three concise, practical tips',
+    "}"
+  ].join("\n");
 
-  // Evidence blocks to force grounding
-  const pdfLines = pdfs.map((p, i) => `[P${i + 1}] ${p.filename} — ${take(p.text, 400)}`).join('\n');
-  const siteSnippet = take(websiteText, 6000);
-  const siteSources = (Array.isArray(pages) ? pages : [])
-    .map((u, i) => `[S${i + 1}] ${u}`)
-    .join('\n');
+  const constraints = [
+    "CONSTRAINTS:",
+    "- UK business English; no generalisations; no assumptions.",
+    "- Cite only from the PDFs, iXBRL summary and website text provided here.",
+    "- If something is not evidenced, write a clear “No public evidence found” line.",
+    "- Seller notes are context ONLY; do not assert them as facts unless corroborated by WEBSITE TEXT or PDFs.",
+    "",
+    "FINANCIALS (MANDATORY if present in sources):",
+    "- Search PDFs/iXBRL for: Revenue/Turnover, Gross profit, Operating profit/loss, Cash (bank and in hand),",
+    "  Current assets, Current liabilities, Net assets/liabilities, Average monthly employees.",
+    "- Quote figures with currency symbols and YEAR LABELS (e.g., “FY24: £20.76m”).",
+    "- If the income statement is not filed (small companies regime), state that explicitly and use balance-sheet items you DO have.",
+    "- If no numbers are in the sources, you MUST say so in “What we could not evidence”.",
+    "",
+    "DECISION MAKERS & PARTNERS (if in website text):",
+    "- Extract named roles/titles (CEO, CFO, Directors, etc.) and partner/vendor logos/lists where visible.",
+    "- If none are present in the scraped pages, say “No public evidence in provided sources.”",
+    "",
+    "TRADE SHOWS:",
+    "- Only list attendance this calendar year if present in the provided website text; otherwise say none and DO NOT estimate budgets.",
+    "",
+    "TIE TO THE SALESPERSON’S COMPANY:",
+    `- Salesperson: ${seller.name || "(unknown)"} · Company: ${seller.company || "(unknown)"} ${seller.url ? "· URL: " + seller.url : ""}`,
+    `- Offer/product focus: ${offer.product || "(unspecified)"}`,
+    `- Other context from seller: ${offer.otherContext || "(none)"}`,
+    "- In “Relationship value” and/or “Competition & differentiation”, explicitly map how the seller’s company can add value to the prospect’s stack. If it cannot, say why."
+  ].join("\n");
 
-  const system = [
-    'You are an expert B2B qualification analyst for UK technology MSP/channel deals.',
-    'Use only the evidence provided (website bundle text, PDF extracts, variables, notes).',
-    'Return JSON only; it MUST validate against the provided schema.'
-  ].join(' ');
+  // ---- Inline evidence tagging guidance and numbered source lists ----
+  const sitePages = Array.isArray(args.sitePages) ? args.sitePages : [];
+  const siteTagList = sitePages.length
+    ? sitePages.map((u, i) => `[S${i + 1}] ${u}`).join("\n")
+    : "None.";
+  const pdfTagList = pdfs.length
+    ? pdfs.map((p, i) => `[P${i + 1}] ${p.filename || "report.pdf"}`).join("\n")
+    : "None.";
 
-  const outline = `
-Write a decisive, evidence-anchored report in report.md with these sections:
-- Prospect Overview
-- Current Provider
-- Competitors
-- Business Context
-- Company Information
-- Financial Reports
-- Risks & Mitigations
-- Bottom line
-Use "Unknown" where evidence is absent. Cite sources inline as [S#] (website) and [P#] (PDF) when claims depend on evidence. Output exactly 3 actionable tips.`;
+  const citationRules = [
+    "EVIDENCE TAGGING (MANDATORY):",
+    "- When a claim depends on evidence, add inline tags in report.md:",
+    "  · [S#] for Website sources (see list below)",
+    "  · [P#] for PDF sources (see list below)",
+    "- Use the correct # that corresponds to the lists below.",
+    "- If there are no relevant sources for a claim, do not invent a tag; write “No public evidence found.”"
+  ].join("\n");
 
-  const user = [
-    'STYLE & TONE GUIDANCE (do not output this; use it to shape writing):',
-    styleGuideMarkdown,
-    '',
-    'TASK: produce the qualification JSON per the schema below.',
-    outline,
-    '',
-    `Variables (JSON): ${JSON.stringify(v)}`,
-    `Notes: ${notes || ''}`,
-    '',
-    'WEBSITE SOURCES (use [S#] to cite):',
-    siteSources || 'None.',
-    '',
-    'WEBSITE BUNDLE (first chars for context):',
-    siteSnippet || 'No website text captured.',
-    '',
-    'PDF EXTRACTS (use [P#] to cite):',
-    pdfLines || 'None.',
-    '',
-    'SCHEMA (verbatim; follow strictly):',
-    schemaText,
-    '',
-    'JSON RULES:',
-    '- Respond with JSON ONLY (no code fences).',
-    '- All sections must be present in report.md; use "Unknown" when needed.',
-    '- Include [S#]/[P#] tags in report.md where claims use evidence.'
-  ].join('\n');
+  const citationLists = [
+    "Website sources (S#):",
+    siteTagList,
+    "",
+    "PDF sources (P#):",
+    pdfTagList
+  ].join("\n");
 
-  return { system, user };
+  return [
+    role,
+    "",
+    `CALL_TYPE: ${callType}`,
+    `MODE: ${detailMode.toUpperCase()}`,
+    modeLine,
+    targetWordsLine,
+    banlistLine,
+    evidDensityRules,
+    `Prospect website (scraped pages included): ${v.prospect_website || "(not provided)"}`,
+    `LinkedIn (URL only, content not scraped): ${v.company_linkedin || "(not provided)"}`,
+    "",
+    schema,
+    "",
+    constraints,
+    "",
+    citationRules,
+    "",
+    citationLists,
+    "",
+    "iXBRL summary (most recent first):",
+    ixBrief,
+    "",
+    notesBlock,
+    websiteBlock,
+    "",
+    pdfBundle
+  ].join("\n");
 }
 
 // ------------------------------
@@ -595,26 +759,34 @@ function stripFences(s) {
 
 function salvageJson(s) {
   const x = stripFences(s);
-  // find outermost braces
   const first = x.indexOf('{');
   const last = x.lastIndexOf('}');
-  if (first >= 0 && last > first) {
-    return x.slice(first, last + 1);
-  }
-  return x; // best effort
+  if (first >= 0 && last > first) return x.slice(first, last + 1);
+  return x;
 }
 
 function ensureArray(a) { return Array.isArray(a) ? a : (a == null ? [] : [a]); }
 
+// Archive-shape normalisation: tips=3 and citations nested under report.citations
 function normalizeQualification(q) {
   const out = q && typeof q === 'object' ? { ...q } : {};
   out.report = out.report || { md: 'Unknown' };
   if (typeof out.report.md !== 'string' || !out.report.md.trim()) out.report.md = 'Unknown';
-  out.tips = ensureArray(out.tips).map(s => String(s)).filter(Boolean);
-  // enforce exactly 3 tips if schema expects that; pad with 'Unknown'
-  while (out.tips.length < 3) out.tips.push('Unknown');
-  if (out.tips.length > 3) out.tips = out.tips.slice(0, 3);
-  out.citations = ensureArray(out.citations).map(s => String(s)).filter(Boolean);
+
+  const tips = ensureArray(out.tips).map(s => String(s)).filter(Boolean);
+  while (tips.length < 3) tips.push('Unknown');
+  out.tips = tips.slice(0, 3);
+
+  // Ensure citations nested under report.citations as [{label,url?}]
+  const rc = Array.isArray(out.report?.citations) ? out.report.citations : [];
+  out.report.citations = rc
+    .map(c => (typeof c === 'string' ? { label: c } : c))
+    .filter(c => c && typeof c.label === 'string' && c.label.trim())
+    .map(c => ({ label: c.label.trim(), ...(c.url ? { url: String(c.url) } : {}) }));
+
+  // Remove any stray top-level citations
+  if (Array.isArray(out.citations)) delete out.citations;
+
   out.meta = Object.assign({ generatedAt: new Date().toISOString() }, out.meta || {});
   return out;
 }
@@ -635,7 +807,6 @@ module.exports = async function (context, req) {
   }
 
   if (req.method === 'GET') {
-    // Diagnostics (lightweight)
     return ok(context, {
       status: 'ok',
       version: 'qualification-generate/merged-1',
@@ -659,12 +830,26 @@ module.exports = async function (context, req) {
   let pdfFiles = [];
 
   const ct = (req.headers['content-type'] || '').toLowerCase();
+  // Explicit guard: client sent multipart but this deployment lacks busboy support
+  const isMultipart = /^multipart\/form-data/i.test(ct);
+  if (isMultipart && !Busboy) {
+    return err(
+      context,
+      'Multipart uploads are not supported on this deployment (missing "busboy"). ' +
+      'Either deploy with the "busboy" dependency to enable file uploads (e.g., PDFs) or send JSON without files.',
+      501,
+      {
+        hint: 'Install busboy in your function app',
+        npm: 'npm i busboy --save',
+        contentType: ct
+      }
+    );
+  }
 
   if (ct.startsWith('multipart/form-data') && Busboy) {
     try {
       const { fields, files } = await parseMultipart(req);
       pdfFiles = files || [];
-      // Fields: variables may arrive as JSON string
       if (fields.variables) {
         try { variables = JSON.parse(fields.variables); } catch { variables = {}; }
       }
@@ -678,7 +863,6 @@ module.exports = async function (context, req) {
       return err(context, 'Failed to parse multipart input', 400, { message: String(e?.message || e) });
     }
   } else {
-    // JSON body
     const body = req.body || {};
     variables = body.variables || {};
     notes = body.notes || body.free_text || '';
@@ -687,7 +871,6 @@ module.exports = async function (context, req) {
       .map(s => String(s).trim())
       .filter(Boolean)
       .map(s => s.startsWith('/') || s.startsWith('http') ? s : '/' + s);
-    // No PDFs in JSON mode
   }
 
   // --------------------------
@@ -707,31 +890,63 @@ module.exports = async function (context, req) {
   // --------------------------
   const schema = await loadSchema(req);
   const validator = getValidator(schema);
-  const schemaText = JSON.stringify(schema);
 
   // --------------------------
-  // Prompt build
+  // Prompt build (archive)
   // --------------------------
-  const { system, user } = buildPrompt({ variables, notes, websiteText, pdfs, pages, schemaText });
+  const detailRaw = String((variables.detail || variables.detail_level || '')).toLowerCase();
+  const isSummary = /^(summary|short|exec|brief)$/.test(detailRaw);
+  const FULL_TARGET_WORDS = Number(process.env.QUAL_FULL_TARGET_WORDS || '1750');
+  const targetWords = isSummary ? 0 : FULL_TARGET_WORDS;
+
+  const user = buildQualificationJsonPrompt({
+  values: variables,
+  ixbrl: variables.ixbrlSummary || {},
+  pdfs,
+  websiteText,
+  seller: {
+    name: String(variables.seller_name || variables.your_name || ''),
+    company: String(variables.seller_company || variables.your_company || ''),
+    url: String(variables.seller_company_url || variables.your_website || '')
+  },
+  ourOffer: {
+    product: String(variables.product_service || variables['Product / service offered'] || ''),
+    otherContext: String(variables.context || '')
+  },
+  sellerNotes: String((notes || variables.notes || variables.free_text || '').toString()).trim(),
+  detailMode: isSummary ? 'summary' : 'full',
+  targetWords,
+  sitePages: pages            // <-- add this line
+});
+
+  const system = 'You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.';
 
   const messages = [
     { role: 'system', content: system },
     { role: 'user', content: user }
   ];
 
+  // Token budget (allow full-depth outputs)
+  const max_tokens = isSummary
+    ? 2000
+    : Math.min(6000, Math.ceil((targetWords || 1750) * 1.8) + 600);
+
+  // --------------------------
+  // Model call
+  // --------------------------
   const { provider } = pickModel();
   if (provider === 'none') {
     return err(context, 'No LLM configured: set Azure (AZURE_OPENAI_*) or OPENAI_API_KEY.', 500);
   }
 
-  async function onemodel(msgs) {
-    if (provider === 'azure') return callAzureChatJSON({ messages: msgs, max_tokens: 1400 });
-    return callOpenAIChatJSON({ messages: msgs, max_tokens: 1400 });
+  async function onemodel(msgs, maxTok) {
+    if (provider === 'azure') return callAzureChatJSON({ messages: msgs, max_tokens: maxTok });
+    return callOpenAIChatJSON({ messages: msgs, max_tokens: maxTok });
   }
 
   let first;
   try {
-    first = await onemodel(messages);
+    first = await onemodel(messages, max_tokens);
   } catch (e) {
     return err(context, 'Model call failed', 502, { message: String(e?.message || e) });
   }
@@ -740,53 +955,185 @@ module.exports = async function (context, req) {
     try {
       const raw = salvageJson(content);
       return JSON.parse(raw);
-    } catch (e) { return null; }
+    } catch { return null; }
   }
 
   let parsed = tryParse(first.content);
   let normalized = normalizeQualification(parsed || {});
+  // JSON shape valid?
   let valid = !!validator(normalized);
 
-  // Quality/redo gate: if invalid or looks generic (no citations and report is short), try one redo
+  // --------------------------
+  // Structure helpers (must be defined BEFORE first use)
+  // --------------------------
+  function requiredHeadingsFor(callType) {
+    const base = REQUIRED_HEADINGS_BASE.slice();
+    if (/^partner$/i.test(String(callType || ''))) {
+      base.push('## Potential partnership risks and mitigations');
+    }
+    return base;
+  }
+
+  /**
+   * Validate that all required headings are present and in order.
+   * Returns { ok, missing, order, partnerRequired, partnerPresent }.
+   * Depends on `headingsInOrder` (object-returning version) being defined elsewhere.
+   */
+  function validateReportStructure(md, { isSummary, callType } = {}) {
+    const expected = requiredHeadingsFor(callType);
+    const res = headingsInOrder(md, expected); // { ok, missing, order }
+    const partnerRequired = /^partner$/i.test(String(callType || ''));
+    const partnerPresent = /##\s*Potential partnership risks and mitigations/i.test(md);
+    const ok = !!res && res.ok === true && (!partnerRequired || partnerPresent);
+    return {
+      ok,
+      missing: Array.isArray(res?.missing) ? res.missing : [],
+      order: res?.order !== false,
+      partnerRequired,
+      partnerPresent
+    };
+  }
+
+  function hasInlineCitations(md) {
+    if (typeof md !== 'string') return false;
+    // Accept either website or PDF tags somewhere in the body
+    return /\[S\d+\]/.test(md) || /\[P\d+\]/.test(md);
+  }
+
+  // --------------------------
+  // Compute structural & evidence checks
+  // --------------------------
+  const callType = String(variables.call_type || '').toLowerCase().startsWith('p') ? 'Partner' : 'Direct';
+
+  // Structural (headings) valid?
+  const struct1 = validateReportStructure(normalized.report?.md || '', { isSummary, callType });
+  valid = valid && struct1.ok;
+
+  // --------------------------
+  // Quality/redo gate helpers
+  // --------------------------
+  function looksGeneric(md) {
+    const bannedRx = /\b(well-positioned|decades of experience|cybersecurity landscape|market differentiation|client-centric|cutting-edge|holistic|industry-leading|best-in-class)\b/i;
+    return bannedRx.test(md || "");
+  }
+  function hasEvidenceMarks(md) {
+    const pounds = (md.match(/£\s?\d/gi) || []).length;
+    const fy = /FY\d{2}/i.test(md);
+    return pounds >= 2 && fy;
+  }
+
   let redoApplied = false;
-  if (!valid || (!normalized.citations?.length && normalized.report?.md?.length < 400)) {
-    const addendum = 'ADDENDUM: The previous output failed validation or was too generic. Strengthen evidence ties (cite website page themes and PDF filenames), and ensure the JSON strictly matches the schema.';
-    const messages2 = [...messages, { role: 'user', content: addendum }];
-    let second;
+  const tooShortFull = !isSummary && ((normalized.report?.md || '').length < 900);
+  const structureFailed = !struct1.ok;
+
+  // Only require inline tags if we actually supplied evidence (site pages or pdfs) and we're in FULL mode
+  const evidenceExists = (!isSummary) && ((pages && pages.length) || (pdfs && pdfs.length));
+  const citationsMissing = evidenceExists && !hasInlineCitations(normalized.report?.md || '');
+
+  if (!valid
+    || looksGeneric(normalized.report?.md)
+    || !hasEvidenceMarks(normalized.report?.md)
+    || tooShortFull
+    || structureFailed
+    || citationsMissing) {
+
+    const requiredHeadingsList = requiredHeadingsFor(callType).map(h => '- ' + h).join('\n');
+    const addendum = [
+      "=== STRICT REWRITE INSTRUCTIONS ===",
+      "Your previous draft contained generic wording, insufficient evidence, or failed structural rules.",
+      "Rewrite the ENTIRE report now:",
+      "- Use these EXACT headings in this EXACT order (verbatim):",
+      requiredHeadingsList,
+      "- Include labelled figures with YEAR tags (e.g., “FY24: £… revenue; Loss before tax £…; Average employees …”).",
+      "- Remove ALL generic wording (banlist in prompt).",
+      "- If a data point is NOT evidenced, write exactly: “No public evidence found.”",
+      "- Add inline [S#]/[P#] evidence tags wherever a claim depends on website/PDF evidence, using the lists provided.",
+      "- Keep the JSON shape as previously instructed."
+    ].join("\n");
+
+    const messages2 = [
+      { role: 'system', content: system },
+      { role: 'user', content: user + "\n\n" + addendum }
+    ];
+
     try {
-      second = await onemodel(messages2);
-    } catch (_) { /* ignore */ }
-    if (second?.content) {
+      const second = await onemodel(messages2, max_tokens);
       const parsed2 = tryParse(second.content);
       const normalized2 = normalizeQualification(parsed2 || {});
       const valid2 = !!validator(normalized2);
-      if (valid2) {
+      const struct2 = validateReportStructure(normalized2.report?.md || '', { isSummary, callType });
+      const longEnough = isSummary || (normalized2.report?.md || '').length >= 900;
+      const citesOk = (!evidenceExists) || hasInlineCitations(normalized2.report?.md || '');
+
+      if (valid2
+        && !looksGeneric(normalized2.report?.md)
+        && hasEvidenceMarks(normalized2.report?.md)
+        && longEnough
+        && struct2.ok
+        && citesOk) {
         normalized = normalized2;
         valid = true;
         redoApplied = true;
       }
-    }
+    } catch { /* keep first draft */ }
   }
 
-  // Merge server-known citations
-  const serverCitations = [
-    ...pages,
-    ...(pdfs || []).map(p => `pdf:${p.filename}`)
-  ];
+  // --------------------------
+  // Merge server-known citations into report.citations (archive shape)
+  // --------------------------
   const final = { ...normalized };
-  final.citations = Array.from(new Set([...(final.citations || []), ...serverCitations]));
+
+  const serverCitations = [];
+
+  // Website pages as [S#]
+  for (let i = 0; i < (pages || []).length; i++) {
+    serverCitations.push({ label: `Website: [S${i + 1}]`, url: pages[i] });
+  }
+  // PDFs
+  for (const p of (pdfs || [])) {
+    serverCitations.push({ label: `Annual report: ${p.filename || 'report.pdf'}` });
+  }
+  // Companies House, if provided
+  const chNum = String(variables.ch_number || variables.company_number || variables.companies_house_number || '').trim();
+  if (chNum) {
+    serverCitations.push({
+      label: 'Companies House (filings)',
+      url: 'https://find-and-update.company-information.service.gov.uk/company/' + encodeURIComponent(chNum)
+    });
+  }
+  // LinkedIn
+  const linkedin = String(variables.company_linkedin || variables.linkedin_company || '').trim();
+  if (linkedin) {
+    serverCitations.push({ label: 'Company LinkedIn', url: linkedin });
+  }
+
+  // Deduplicate by (url normalized) or label
+  const seen = new Set();
+  function normUrl(u) { try { const x = new URL(u); x.hash = ''; return x.href.replace(/\/+$/, '').toLowerCase(); } catch { return ''; } }
+  final.report.citations = [...(final.report.citations || []), ...serverCitations].filter(c => {
+    const key = c.url ? 'u:' + normUrl(c.url) : 'l:' + (c.label || '').trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  // Attach meta (optional)
   final.meta = Object.assign({}, final.meta || {}, {
     provider,
-    durationMs: undefined, // not measured precisely here
     redoApplied,
     website: website || null,
-    pageCount: pages.length,
+    pageCount: (pages || []).length,
     pdfCount: (pdfs || []).length,
   });
 
   if (!valid) {
-    return err(context, 'Output failed schema validation', 422, { sample: take(final?.report?.md, 400), tips: final?.tips });
+    const struct = validateReportStructure(final?.report?.md || '', { isSummary, callType });
+    return err(context, 'Output failed schema/structure validation', 422, {
+      sample: take(final?.report?.md, 400),
+      tips: final?.tips,
+    });
   }
 
+  // Return archive-shaped object
   return ok(context, final);
 };
