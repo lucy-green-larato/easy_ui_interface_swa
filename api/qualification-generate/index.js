@@ -59,7 +59,7 @@ function extractText(res) {
     if (res.choices?.[0]?.message?.content) return String(res.choices[0].message.content);
     if (res.output_text) return String(res.output_text);
     if (res.text) return String(res.text);
-  } catch {}
+  } catch { }
   return "";
 }
 async function callModel({ system, prompt, temperature = 0.5, response_format }) {
@@ -153,6 +153,20 @@ Inputs:
 Return JSON ONLY; do not include markdown fences or prose outside JSON.
 If you cite, include a "citations" array under report where each item has "label" and optional "url".`;
 }
+// --- SWA gate: allow only requests that came through Static Web Apps (signed-in UI) ---
+function cameViaSWA(req) {
+  // SWA injects x-ms-client-principal (base64 JSON) when it forwards authenticated requests
+  const hdr = req?.headers?.["x-ms-client-principal"];
+  if (!hdr) return false;
+  try {
+    const json = JSON.parse(Buffer.from(hdr, "base64").toString("utf8"));
+    // If SWA auth is enabled, one of these will be present
+    return Boolean(json?.userId || json?.userDetails);
+  } catch {
+    // If it’s present but unparsable, still treat as from SWA
+    return true;
+  }
+}
 
 // ---------- Azure Function entry ----------
 module.exports = async function (context, req) {
@@ -181,6 +195,9 @@ module.exports = async function (context, req) {
   const prompt = buildPrompt({ companyName, website, notes });
 
   const started = Date.now();
+  if (!cameViaSWA(req)) {
+    context.res = { status: 401, body: { disabled: true, error: "Unauthorized (SWA only)" } };
+    return;}
   try {
     const llmRes = await callModel({
       system: "Return JSON that strictly conforms to the given JSON Schema. Do not output anything else.",
