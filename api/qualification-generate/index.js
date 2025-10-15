@@ -156,20 +156,17 @@ function makeValidator(schema) {
 function buildPrompt({ companyName, website, notes }) {
   return `
 You are a UK B2B/channel salesperson. Produce a **lead qualification** report as VALID JSON ONLY that STRICTLY matches the provided JSON schema.
-
-**All fields in the schema are required. If a fact is unknown, provide an empty string "" (for string fields) or an empty array [] (for arrays). Do not omit fields. Do not invent facts.**
-
 - UK business English; no speculation; only concise, evidenced statements.
-- If evidence is missing, state "No public evidence found".
+- If evidence is missing, write the literal string "Unknown" (not an empty string).
+- Never leave a field empty. Avoid "" and [] for required properties; use "Unknown" or a short note.
 
 Inputs:
 - Company: ${companyName || "(unknown)"} 
 - Website: ${website || "(not provided)"} 
 - Notes from salesperson: ${notes || "(none)"}
 
-Return JSON ONLY (no markdown fences, no prose).
-If you cite, include a "citations" array under report where each item has "label" and optional "url".
-`;
+Return JSON ONLY; do not include markdown fences or prose outside JSON.
+If you cite, include a "citations" array under report where each item has "label" and optional "url".`;
 }
 
 // ---------- Normalizers (coerce model output into required shape) ----------
