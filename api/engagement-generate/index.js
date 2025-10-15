@@ -13,21 +13,6 @@ const fetchFn = (url, opts) => {
   return globalThis.fetch(url, opts);
 };
 
-// --- SWA gate: allow only requests that came through Static Web Apps (signed-in UI) ---
-function cameViaSWA(req) {
-  // SWA injects x-ms-client-principal (base64 JSON) when it forwards authenticated requests
-  const hdr = req?.headers?.["x-ms-client-principal"];
-  if (!hdr) return false;
-  try {
-    const json = JSON.parse(Buffer.from(hdr, "base64").toString("utf8"));
-    // If SWA auth is enabled, one of these will be present
-    return Boolean(json?.userId || json?.userDetails);
-  } catch {
-    // If it’s present but unparsable, still treat as from SWA
-    return true;
-  }
-}
-
 module.exports = async function (context, req) {
   // --- quick diag: POST /api/engagement-generate?diag=1 returns what the app can see
   if (String(req?.query?.diag || "") === "1") {
@@ -47,7 +32,6 @@ module.exports = async function (context, req) {
     // CORS / preflight
     if (req.method === "OPTIONS") return send(context, 204, "");
     if (req.method !== "POST") return send(context, 405, "Only POST supported");
-    if (!cameViaSWA(req)) return send(context, 401, "Unauthorized (SWA only)");
 
     const body = req.body || {};
     const mode = String(body.mode || "script").toLowerCase(); // "script" | "followup"
