@@ -241,7 +241,7 @@ async function parseMultipart(req) {
 // ------------------------------
 function hasFinancialSignals(text) {
   if (!text) return false;
-  const rx = /(turnover|revenue|gross\s+profit|operating\s+profit|profit\s+and\s+loss|statement\s+of\s+comprehensive\s+income|balance\s+sheet|cash\s*(?:at\s*bank|and\s*in\s*hand)|current\s+assets|current\s+liabilities|net\s+assets|£\s?\d|\d{1,3}(?:,\d{3}){1,3})/i;
+  const rx = /(turnover|revenue|gross\s+profit|operating\s+profit|operating\s+loss|profit\s+before\s+tax|loss\s+before\s+tax|statement\s+of\s+comprehensive\s+income|balance\s+sheet|cash\s*(?:at\s*bank|and\s*in\s*hand)|current\s+assets|current\s+liabilities|net\s+assets|\bARR\b|average\s+(?:number\s+of\s+)?employees|\bRCF\b|revolving\s+credit)/i;
   return rx.test(text);
 }
 
@@ -464,6 +464,33 @@ function getValidator(schema) {
     if (!Array.isArray(data.tips) || data.tips.length < 1) return false;
     return true;
   };
+}
+// Require that the '### Financials (evidenced)' subsection exists and that
+// at least three core financial lines with YEAR labels are present.
+function hasFinancialsSection(md) {
+  if (typeof md !== 'string') return false;
+  return /^###\s*Financials\s*\(evidenced\)\s*$/mi.test(md);
+}
+
+function hasFinancialLines(md) {
+  if (typeof md !== 'string') return false;
+  // Look for at least three different labelled metrics with FYyy and a currency/number
+  const tests = [
+    /(revenue|turnover)[^\n]*FY\d{2}[^£\n]*£?\s?\d/i,
+    /gross\s+profit[^\n]*FY\d{2}[^£\n]*£?\s?\d/i,
+    /(operating\s+profit|operating\s+loss)[^\n]*FY\d{2}[^£\n]*£?\s?\d/i,
+    /(profit|loss)\s+before\s+tax[^\n]*FY\d{2}[^£\n]*£?\s?\d/i,
+    /cash[^\n]*\b(bank\b|in\s*hand)\b[^\n]*FY\d{2}[^£\n]*£?\s?\d/i,
+    /current\s+assets[^\n]*FY\d{2}[^£\n]*£?\s?\d/i,
+    /current\s+liabilities[^\n]*FY\d{2}[^£\n]*£?\s?\d/i,
+    /net\s+assets?[^\n]*FY\d{2}[^£\n]*£?\s?\d/i,
+    /(average|avg\.?)\s+(monthly\s+)?employees?[^\n]*FY\d{2}[^0-9\n]*\d+/i,
+    /\bARR\b[^\n]*\bFY\d{2}\b/i,
+    /(undrawn|revolving|rcf)[^\n]*\bFY\d{2}\b/i
+  ];
+  let hits = 0;
+  for (const rx of tests) if (rx.test(md)) hits++;
+  return hits >= 3;
 }
 
 // Ensure all required headings appear in order (using markdown '## ' anchors)
@@ -1037,26 +1064,35 @@ module.exports = async function (context, req) {
     const structureFailed = !struct1.ok;
     const evidenceExists = (!isSummary) && ((pages && pages.length) || (pdfs && pdfs.length));
     const citationsMissing = evidenceExists && !hasInlineCitations(normalized.report?.md || '');
+    const financialsSectionMissing = evidenceExists && !hasFinancialsSection(normalized.report?.md || '');
+    const financialLinesMissing = evidenceExists && !hasFinancialLines(normalized.report?.md || '');
 
     if (!valid
       || looksGeneric(normalized.report?.md)
       || !hasEvidenceMarks(normalized.report?.md)
       || tooShortFull
       || structureFailed
+      || financialsSectionMissing
+      || financialLinesMissing
       || citationsMissing) {
 
       const requiredHeadingsList = requiredHeadingsFor(callType).map(h => '- ' + h).join('\n');
       const addendum = [
         "=== STRICT REWRITE INSTRUCTIONS ===",
-        "Your previous draft contained generic wording, insufficient evidence, or failed structural rules.",
-        "Rewrite the ENTIRE report now:",
+        "The previous draft failed structural and/or evidence rules.",
+        "Rewrite the ENTIRE report now and fix ALL of the following:",
         "- Use these EXACT headings in this EXACT order (verbatim):",
         requiredHeadingsList,
-        "- Include labelled figures with YEAR tags (e.g., “FY24: £… revenue; Loss before tax £…; Average employees …”).",
-        "- Remove ALL generic wording (banlist in prompt).",
-        "- If a data point is NOT evidenced, write exactly: “No public evidence found.”",
-        "- Add inline [S#]/[P#] evidence tags wherever a claim depends on website/PDF evidence, using the lists provided.",
-        "- Keep the JSON shape as previously instructed."
+        "- INSIDE “## Company profile (what can be evidenced)”, add the subsection exactly named:",
+        "  ### Financials (evidenced)",
+        "- Under that subsection, include bullet lines for at least the following with YEAR labels and numbers:",
+        "  • Revenue/Turnover   • Gross profit   • Operating profit/loss   • Profit/Loss before tax",
+        "  • Cash at bank and in hand   • Current assets   • Current liabilities   • Net assets/(liabilities)   • Average employees",
+        "- If ARR, multi-year contracts/TCV, or undrawn facilities are stated in the PDFs, include them too.",
+        "- Add inline [P#] tags next to each financial figure you cite.",
+        "- Add inline [S#] or [P#] tags for every other claim that depends on evidence.",
+        "- If a data point cannot be found in the provided sources, write exactly: “No public evidence found.”",
+        "- Keep the schema and JSON shape exactly as instructed (no markdown fences)."
       ].join("\n");
 
       const messages2 = [
