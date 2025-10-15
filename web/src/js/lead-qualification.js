@@ -515,7 +515,7 @@ docxBtn?.addEventListener("click", () => {
       html: outputEl?.innerHTML || "",
       citations: safeJson(outputEl?.getAttribute("data-citations")) || []
     };
-    fetch("/api/generate", {
+    fetch("/api/qualification-generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -564,7 +564,7 @@ emailBtn?.addEventListener("click", () => {
       notes: (notesArea?.value || "")
     };
     setStatus("Building email…");
-    fetch("/api/generate", {
+    fetch("/api/qualification-generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -758,7 +758,7 @@ document.addEventListener("input", (e) => {
   }
 });
 
-// Submit: build payload and call /api/generate
+// Submit: build payload and call /api/qualification-generate
 form?.addEventListener("submit", (e) => {
   e.preventDefault();
   if (!allRequiredFilled()) return;
@@ -836,7 +836,7 @@ form?.addEventListener("submit", (e) => {
     fd.append("policy", JSON.stringify(policy));
     files.forEach((f, i) => fd.append("files", f, f?.name || `report-${i + 1}.pdf`));
 
-    fetch("/api/generate", { method: "POST", body: fd })
+    fetch("/api/qualification-generate", { method: "POST", body: fd })
       .then(resp => resp.json().catch(() => ({})).then(data => { if (!resp.ok) throw new Error(data?.error || ("API " + resp.status)); return data; }))
       .then(handleData)
       .catch(handleError)
@@ -849,7 +849,7 @@ form?.addEventListener("submit", (e) => {
       ixbrlSummary: ixbrlSummary || {},
       policy
     };
-    fetch("/api/generate", {
+    fetch("/api/qualification-generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
