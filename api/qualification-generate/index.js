@@ -216,26 +216,84 @@ const DEFAULT_SLUGS = [
   '/solutions', '/services', '/products', '/industries', '/sectors', '/news', '/blog', '/customers', '/case-studies', '/security'
 ];
 
+// Crawl-lite: sample a handful of useful URLs from /sitemap.xml on the same host
+async function sampleFromSitemap(base, max = 12) {
+  try {
+    const res = await timedFetch(`${base}/sitemap.xml`, { method: 'GET' }, DEFAULT_TIMEOUT_MS);
+    if (!res.ok) return [];
+    const xml = await res.text();
+    // Pull <loc> values
+    const locs = Array.from(xml.matchAll(/<loc>(.*?)<\/loc>/gi))
+      .map(m => m[1])
+      .filter(Boolean);
+
+    // Same-host, https, skip images/other sitemaps
+    const sameHost = [];
+    for (const u of locs) {
+      try {
+        const uu = new URL(u);
+        if (uu.protocol !== 'https:') continue;
+        if (uu.host !== new URL(base).host) continue;
+        if (/\.(xml|jpg|jpeg|png|gif|webp|svg)$/i.test(uu.pathname)) continue;
+        sameHost.push(u);
+      } catch { /* ignore bad URLs */ }
+    }
+
+    // Prefer pages likely to be rich in company info
+    const priority = ['case', 'customer', 'leadership', 'team', 'board', 'about', 'partner',
+      'solution', 'service', 'industry', 'sector', 'news', 'press', 'blog',
+      'security', 'compliance', 'resource', 'insight'];
+    sameHost.sort((a, b) => {
+      const sa = priority.some(k => a.includes(k)) ? 1 : 0;
+      const sb = priority.some(k => b.includes(k)) ? 1 : 0;
+      return sb - sa; // rich first
+    });
+
+    return Array.from(new Set(sameHost)).slice(0, max);
+  } catch {
+    return [];
+  }
+}
+
 async function bundleWebsite(website, extraPaths = []) {
   if (!website) return { pages: [], text: '' };
   const base = normalizeBase(website);
   if (!base) return { pages: [], text: '' };
-  const slugs = Array.from(new Set([...(extraPaths || []), ...DEFAULT_SLUGS]));
+
+  // Normalize extra paths to absolute URLs on same host
+  const normalizedExtras = (extraPaths || [])
+    .map(s => String(s).trim())
+    .filter(Boolean)
+    .map(s => (s.startsWith('http') ? s : (s.startsWith('/') ? base + s : `${base}/${s}`)));
+
+  // Sample from sitemap + known slugs
+  const fromSitemap = await sampleFromSitemap(base, 12);
+  const fromSlugs = DEFAULT_SLUGS.map(s => (s.startsWith('http') ? s : base + s));
+
+  // Candidate list (deduped)
+  const candidates = Array.from(new Set([...fromSitemap, ...normalizedExtras, ...fromSlugs]));
+
   const pages = [];
   let text = '';
-  for (const slug of slugs) {
-    const url = slug.startsWith('http') ? slug : base + slug;
+  const MAX_PAGES = 18; // gentle cap on page count
+
+  for (const url of candidates) {
     try {
       const res = await timedFetch(url, { method: 'GET' }, DEFAULT_TIMEOUT_MS);
       if (!res.ok) continue;
       const html = await res.text();
       const chunk = htmlToText(html);
       if (!chunk) continue;
+
       pages.push(url);
       text += ' \n---\n' + take(chunk, PER_PAGE_CAP);
-      if (text.length >= TEXT_CAP) break;
-    } catch { /* skip */ }
+
+      if (text.length >= TEXT_CAP || pages.length >= MAX_PAGES) break;
+    } catch {
+      // skip bad/slow pages
+    }
   }
+
   return { pages, text: take(text, TEXT_CAP) };
 }
 
@@ -286,38 +344,151 @@ function getValidator(schema) {
 // Prompt assembly
 // ------------------------------
 
-function buildPrompt({ variables = {}, notes = '', websiteText = '', pdfs = [], schemaText = '' }) {
-  const v = variables || {};
-  const pdfNote = pdfs.length ? `PDF extracts (filename: first chars):\n${pdfs.map(p => `- ${p.filename}: ${take(p.text, 800)}`).join('\n')}` : 'No PDFs provided.';
-  const siteNote = websiteText ? `Website bundle (first chars):\n${take(websiteText, 4000)}` : 'No website pages fetched or site text empty.';
+// --- helpers used by your legacy prompt ---
+function readabilityLineFor(tone) {
+  // keep this lightweight; expand if you had a richer map before
+  if (!tone) return 'Write with short, plain sentences.';
+  return /executive|board/i.test(tone)
+    ? 'Write with short, plain sentences for senior readers.'
+    : 'Write with short, plain sentences.';
+}
+function toneStyleGuide(tone) {
+  if (!tone) return 'UK business English. Neutral, precise, confident.';
+  return `UK business English. ${tone}. Neutral, precise, confident.`;
+}
 
-  const sys = [
+function buildPromptFromMarkdown(args) {
+  const templateMdText = args.templateMdText || "";
+  const seller = args.seller || { name: "", company: "" };
+  const prospect = args.prospect || { name: "", role: "", company: "" };
+  const productLabel = args.productLabel || "";
+  const buyerType = args.buyerType || "";
+  const valueProposition = (args.valueProposition || "").trim();
+  const context = (args.context || "").trim();
+  const nextStep = (args.nextStep || "").trim();
+  const suggestedNext = (args.suggestedNext || "").trim();
+  const tone = args.tone || "";
+  const targetWords = args.targetWords || 0;
+
+  const toneLine = tone ? 'Write in a "' + tone + '" tone.\n' : "";
+  const lengthLine = targetWords ? "Aim for about " + targetWords + " words (±10%).\n" : "";
+  const readability = readabilityLineFor(tone);
+  const styleGuide = toneStyleGuide(tone);
+
+  const headingRules =
+    "Use these exact markdown headings, in this order, each on its own line:\n" +
+    "## Opening\n" +
+    "## Buyer Pain\n" +
+    "## Buyer Desire\n" +
+    "## Example Illustration\n" +
+    "## Handling Objections\n" +
+    "## Next Step\n" +
+    "Do not rename or add headings.\n\n";
+
+  return (
+    "You are a top UK sales coach creating **instructional advice for the salesperson** (not a spoken script).\n\n" +
+    toneLine + readability + "\n" + styleGuide + "\n" + lengthLine + headingRules +
+    "Under each heading, write clear, imperative guidance telling the salesperson what to do, what to listen for, and how to phrase key moments.\n" +
+    "MANDATES:\n" +
+    "- UK business English. No pleasantries or small talk. No Americanisms.\n" +
+    "- **Adhere to the STYLE above** so tone drives vocabulary and sentence length.\n" +
+    "- Weave the salesperson’s USPs/Other points naturally into the most relevant sections.\n" +
+    "- Include one specific, relevant customer example with measurable results and when to use it.\n" +
+    "- For \"Next Step\": if the salesperson provided one, use it; else if the template contains <!-- suggested_next_step: ... -->, use that; else propose a clear, low-friction next step.\n" +
+    "Buyer type: " + buyerType + "\n" +
+    "Product: " + productLabel + "\n\n" +
+    "USPs (from salesperson): " + (valueProposition || "(none provided)") + "\n" +
+    "Other points to consider: " + (context || "(none provided)") + "\n" +
+    "Requested Next Step (from salesperson, if any): " + (nextStep || "(none)") + "\n" +
+    "Suggested Next Step (from template, if any): " + (suggestedNext || "(none)") + "\n\n" +
+    "--- TEMPLATE (for ideas only) ---\n" +
+    templateMdText +
+    "\n--- END TEMPLATE ---\n\n" +
+    "After the advice, add this heading and content:\n" +
+    "**Sales tips for colleagues conducting similar calls**\n" +
+    "Provide exactly 3 concise, practical tips (numbered 1., 2., 3.).\n"
+  );
+}
+
+function buildPrompt({
+  variables = {},
+  notes = '',
+  websiteText = '',
+  pdfs = [],
+  pages = [],
+  schemaText = ''
+}) {
+  const v = variables || {};
+
+  // Map variables → your legacy prompt fields (tweak keys to your actual form names)
+  const styleGuideMarkdown = buildPromptFromMarkdown({
+    templateMdText: v.templateMdText || '',
+    seller: { name: v.your_name || v.seller_name || '', company: v.your_company || '' },
+    prospect: { name: v.prospect_name || '', role: v.prospect_role || '', company: v.prospect_company || '' },
+    productLabel: v.product_label || v.product || v['Product / service offered'] || '',
+    buyerType: v.sales_model || v.buyerType || '',
+    valueProposition: v.valueProposition || v.usps || '',
+    context: notes || v.context || '',
+    nextStep: v.nextStep || '',
+    suggestedNext: v.suggestedNext || '',
+    tone: v.tone || 'Decisive, board-ready',
+    targetWords: v.QUAL_FULL_TARGET_WORDS || parseInt(process.env.QUAL_FULL_TARGET_WORDS || '0', 10)
+  });
+
+  // Evidence blocks to force grounding
+  const pdfLines = pdfs.map((p, i) => `[P${i + 1}] ${p.filename} — ${take(p.text, 400)}`).join('\n');
+  const siteSnippet = take(websiteText, 6000);
+  const siteSources = (Array.isArray(pages) ? pages : [])
+    .map((u, i) => `[S${i + 1}] ${u}`)
+    .join('\n');
+
+  const system = [
     'You are an expert B2B qualification analyst for UK technology MSP/channel deals.',
-    'Write UK business English. Be precise, neutral, and verifiable. Avoid fluff.',
-    'Use only the evidence provided below (website bundle + PDFs + variables + notes).',
-    'Never invent facts; use "Unknown" where evidence is absent.',
-    'Output must be valid JSON that conforms exactly to the schema provided.'
+    'Use only the evidence provided (website bundle text, PDF extracts, variables, notes).',
+    'Return JSON only; it MUST validate against the provided schema.'
   ].join(' ');
 
+  const outline = `
+Write a decisive, evidence-anchored report in report.md with these sections:
+- Prospect Overview
+- Current Provider
+- Competitors
+- Business Context
+- Company Information
+- Financial Reports
+- Risks & Mitigations
+- Bottom line
+Use "Unknown" where evidence is absent. Cite sources inline as [S#] (website) and [P#] (PDF) when claims depend on evidence. Output exactly 3 actionable tips.`;
+
   const user = [
-    'Task: produce a buyer-ready qualification report with crisp bullets and a decisive bottom line.',
+    'STYLE & TONE GUIDANCE (do not output this; use it to shape writing):',
+    styleGuideMarkdown,
     '',
-    'Evidence:',
-    `Variables: ${JSON.stringify(v)}`,
+    'TASK: produce the qualification JSON per the schema below.',
+    outline,
+    '',
+    `Variables (JSON): ${JSON.stringify(v)}`,
     `Notes: ${notes || ''}`,
-    siteNote,
-    pdfNote,
     '',
-    'Schema (verbatim, follow strictly):',
+    'WEBSITE SOURCES (use [S#] to cite):',
+    siteSources || 'None.',
+    '',
+    'WEBSITE BUNDLE (first chars for context):',
+    siteSnippet || 'No website text captured.',
+    '',
+    'PDF EXTRACTS (use [P#] to cite):',
+    pdfLines || 'None.',
+    '',
+    'SCHEMA (verbatim; follow strictly):',
     schemaText,
     '',
-    'Important JSON rules:',
-    '- Respond with JSON ONLY. No code fences, no backticks, no prose before/after.',
-    '- Use "Unknown" for any missing values.',
-    '- Keep report.md tightly written and evidence-anchored; avoid generic statements.',
+    'JSON RULES:',
+    '- Respond with JSON ONLY (no code fences).',
+    '- All sections must be present in report.md; use "Unknown" when needed.',
+    '- Include [S#]/[P#] tags in report.md where claims use evidence.'
   ].join('\n');
 
-  return { system: sys, user };
+  return { system, user };
 }
 
 // ------------------------------
@@ -500,17 +671,24 @@ module.exports = async function (context, req) {
     variables = body.variables || {};
     notes = body.notes || body.free_text || '';
     website = body.website || body.prospect_website || '';
-    extraPaths = Array.isArray(body.extraPaths) ? body.extraPaths : [];
+    extraPaths = (Array.isArray(body.extraPaths) ? body.extraPaths : [])
+      .map(s => String(s).trim())
+      .filter(Boolean)
+      .map(s => s.startsWith('/') || s.startsWith('http') ? s : '/' + s);
     // No PDFs in JSON mode
   }
 
   // --------------------------
-  // Evidence collection
+  // Evidence collection 
   // --------------------------
-  const [{ pages, text: websiteText }, pdfs] = await Promise.all([
-    bundleWebsite(website, extraPaths),
-    extractPdfTexts(pdfFiles)
+  const [siteBundle, pdfExtracts] = await Promise.all([
+    bundleWebsite(website, extraPaths).catch(() => ({ pages: [], text: '' })),
+    extractPdfTexts(pdfFiles).catch(() => [])
   ]);
+
+  const pages = Array.isArray(siteBundle?.pages) ? siteBundle.pages : [];
+  const websiteText = typeof siteBundle?.text === 'string' ? siteBundle.text : '';
+  const pdfs = Array.isArray(pdfExtracts) ? pdfExtracts : [];
 
   // --------------------------
   // Schema & validator
@@ -522,7 +700,7 @@ module.exports = async function (context, req) {
   // --------------------------
   // Prompt build
   // --------------------------
-  const { system, user } = buildPrompt({ variables, notes, websiteText, pdfs, schemaText });
+  const { system, user } = buildPrompt({ variables, notes, websiteText, pdfs, pages, schemaText });
 
   const messages = [
     { role: 'system', content: system },
