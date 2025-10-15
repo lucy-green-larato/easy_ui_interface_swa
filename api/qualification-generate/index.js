@@ -1,3 +1,4 @@
+// api/qualification-generate/index.js 15-10-2025 v5
 // Azure Function: qualification-generate
 // Goal: unify the recent (incomplete) generator with the archive's full feature set
 // Notes:
@@ -98,9 +99,33 @@ function take(str, n) { return (str || '').slice(0, n); }
 async function parseMultipart(req) {
   if (!Busboy) return { fields: {}, files: [] };
 
+  // defensively get a Buffer for the request body
+  const bodyBuf = (() => {
+    if (Buffer.isBuffer(req.body)) return req.body;
+    if (typeof req.body === 'string') return Buffer.from(req.body, 'utf8');
+    // sometimes body can come as { data: <Uint8Array> } when proxied
+    if (req.body && req.body.data && Array.isArray(req.body.data)) {
+      return Buffer.from(req.body.data);
+    }
+    // last resort: nothing usable
+    return null;
+  })();
+
+  if (!bodyBuf) {
+    throw new Error('multipart body not available as Buffer');
+  }
+
+  const contentType = String(req.headers['content-type'] || '');
+  if (!/^multipart\/form-data/i.test(contentType)) {
+    return { fields: {}, files: [] };
+  }
+
   const bb = Busboy({
     headers: req.headers,
-    limits: { fileSize: MAX_PDF_PER_FILE, files: MAX_PDFS }
+    limits: {
+      fileSize: MAX_PDF_PER_FILE, // per-file cap
+      files: MAX_PDFS              // how many files we’ll process
+    }
   });
 
   const fields = {};
@@ -111,38 +136,28 @@ async function parseMultipart(req) {
   const done = new Promise((resolve, reject) => {
     bb.on('file', (name, file, info) => {
       const { filename, mimeType } = info;
-
-      // Optional early MIME filter to avoid counting non-PDF bytes:
       const isPdf = /pdf$/i.test(mimeType) || /application\/pdf/i.test(mimeType);
       const chunks = [];
-      let fileBytes = 0;
       let truncated = false;
 
       file.on('data', d => {
-        fileBytes += d.length;
-        // Stop buffering this file if total cap exceeded
-        if (totalBytes + d.length > MAX_PDF_BYTES) {
-          // still need to drain the stream to the end:
-          return; // simply don't push; Busboy keeps reading
+        // enforce total cap (combined)
+        totalBytes += d.length;
+        if (totalBytes > MAX_PDF_BYTES) {
+          return; // drain but don't buffer beyond the total budget
         }
-        // Only buffer if it's a PDF and we haven't hit per-file cap (Busboy enforces per-file)
         if (isPdf && !truncated) {
           chunks.push(d);
         }
-        totalBytes += d.length;
       });
 
-      file.on('limit', () => {
-        truncated = true; // per-file cap reached (Busboy cut it)
-      });
+      file.on('limit', () => { truncated = true; }); // per-file cap hit
 
       file.on('end', () => {
-        // Only keep if it's a PDF and it wasn't truncated
         if (isPdf && !truncated) {
-          const data = Buffer.concat(chunks);
-          files.push({ filename, mime: mimeType, data });
+          files.push({ filename, mime: mimeType, data: Buffer.concat(chunks) });
         }
-        // else: oversize or non-PDF -> drop silently
+        // oversize or non-PDF -> silently ignored
       });
     });
 
@@ -151,11 +166,16 @@ async function parseMultipart(req) {
     bb.on('close', resolve);
   });
 
-  req.pipe(bb);
+  // IMPORTANT: in Functions v4, use bb.end(buffer) — do NOT req.pipe(bb)
+  bb.end(bodyBuf);
+
   await done;
 
-  // Safety: still filter to PDFs and cap count
-  const pdfs = files.filter(f => /pdf$/i.test(f.mime) || /application\/pdf/i.test(f.mime)).slice(0, MAX_PDFS);
+  // final safety filter & slice
+  const pdfs = files
+    .filter(f => /pdf$/i.test(f.mime) || /application\/pdf/i.test(f.mime))
+    .slice(0, MAX_PDFS);
+
   return { fields, files: pdfs };
 }
 
