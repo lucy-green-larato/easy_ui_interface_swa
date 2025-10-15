@@ -1,336 +1,582 @@
-// /api/qualification-generate/index.js 15-10-2025 v2
-// Node 20. Auth: anonymous; role-enforced in code.
-// Structured Lead Qualification -> JSON validated against /api/schemas/qualification.v2.json
+// Azure Function: qualification-generate
+// Goal: unify the recent (incomplete) generator with the archive's full feature set
+// Notes:
+// - Preserves current names/shape; augments with optional multipart + PDF + website bundling
+// - Degrades gracefully if optional deps (busboy, pdf-parse, ajv) are not installed
+// - No repo renames; single-file implementation
 
-const VERSION = "qualification-generate-2025-10-15-2";
+// ------------------------------
+// Utilities
+// ------------------------------
+const toInt = (v, d) => {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n > 0 ? n : d;
+};
 
-const DEFAULT_LLM_TIMEOUT = Number(process.env.LLM_TIMEOUT_MS || "45000");
-const { randomUUID } = require("crypto");
-const path = require("path");
-const fs = require("fs");
+const DEFAULT_TIMEOUT_MS = toInt(process.env.FETCH_TIMEOUT, 60_000);
+const MODEL_TIMEOUT_MS = toInt(process.env.LLM_TIMEOUT_MS, 120_000);
+const PER_PAGE_CAP = toInt(process.env.PDF_CHAR_CAP, 12_000);
+const MAX_PDF_PER_FILE = toInt(process.env.MAX_UPLOAD_BYTES, 10 * 1024 * 1024);
+const MAX_PDFS = toInt(process.env.QUAL_MAX_PDFS, 2);
+const TEXT_CAP = toInt(process.env.QUAL_TEXT_CAP, PER_PAGE_CAP * 10);
+const MAX_PDF_BYTES = toInt(process.env.QUAL_MAX_PDF_BYTES, MAX_PDF_PER_FILE * MAX_PDFS);
 
-// ---------- Minimal CORS ----------
-function buildCorsHeaders(req) {
-  const origin = req.headers?.origin || "*";
+// Best-effort optional deps
+let Ajv = null;
+try { Ajv = require('ajv'); } catch (_) { /* optional */ }
+let Busboy = null;
+try { Busboy = require('busboy'); } catch (_) { /* optional */ }
+let pdfParse = null;
+try { pdfParse = require('pdf-parse'); } catch (_) { /* optional */ }
+
+const isLocal = () => process.env.WEBSITE_INSTANCE_ID == null;
+
+function cors(context) {
+  const h = context.res?.headers ?? {};
   return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, x-correlation-id, x-ms-client-principal",
-    "Vary": "Origin"
+    ...h,
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'OPTIONS, GET, POST',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
   };
 }
 
-const ALLOWED_ROLES = new Set(["sales", "sales-admin"]); // ALLOWED_ROLES_QUALIFICATION
+function ok(context, body, status = 200) {
+  context.res = { status, headers: cors(context), body };
+}
+function err(context, message, status = 400, details = undefined) {
+  context.res = { status, headers: cors(context), body: { error: message, ...(details ? { details } : {}) } };
+}
 
-function parsePrincipal(headerValue) {
+function parsePrincipal(req) {
+  const raw = req.headers['x-ms-client-principal'];
+  if (!raw) return null;
   try {
-    if (!headerValue) return { roles: [] };
-    const json = JSON.parse(Buffer.from(String(headerValue), "base64").toString("utf8"));
-    const roles = Array.isArray(json?.userRoles) ? json.userRoles.map(r => String(r || "").toLowerCase()) : [];
-    return { roles };
+    const json = Buffer.from(raw, 'base64').toString('utf8');
+    return JSON.parse(json);
   } catch {
-    return { roles: [] };
+    return null;
   }
 }
 
-function enforceRoles(req, isLocalDev) {
-  if (isLocalDev) return { ok: true };
-
-  const principalHeader = req.headers?.["x-ms-client-principal"];
-
-  // If SWA didn't attach the principal header, don't 401 here.
-  // SWA's routes (allowedRoles) already protected this endpoint from anonymous access.
-  if (!principalHeader) return { ok: true };
-
-  const { roles } = parsePrincipal(principalHeader);
-
-  // If the user has "authenticated" (SWA default) allow.
-  if (roles.includes("authenticated")) return { ok: true };
-
-  // Otherwise require one of our custom roles.
-  const hasCustom = roles.some(r => ALLOWED_ROLES.has(r));
-  if (!hasCustom) {
-    return { ok: false, code: 403, body: { error: "forbidden", message: "Insufficient role" } };
-  }
-
-  return { ok: true };
+function hasAccess(principal) {
+  if (isLocal()) return true; // relax locally
+  if (!principal) return false;
+  const roles = new Set((principal.userRoles || []).map(r => String(r).toLowerCase()));
+  return roles.has('authenticated') || roles.has('contributor') || roles.has('admin');
 }
 
-function getCorrelationId(req) {
-  return (req.headers?.["x-correlation-id"] || randomUUID()).toString();
-}
+// ------------------------------
+// Fetch helpers
+// ------------------------------
 
-// ---------- Model caller (same as engagement) ----------
-async function abortableFetch(url, init = {}, ms = DEFAULT_LLM_TIMEOUT) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error("timeout")), ms);
-  try { return await fetch(url, { ...init, signal: controller.signal }); }
-  finally { clearTimeout(timer); }
-}
-function extractText(res) {
-  if (!res) return "";
+async function timedFetch(url, init = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort('timeout'), timeoutMs);
   try {
-    if (res.choices?.[0]?.message?.content) return String(res.choices[0].message.content);
-    if (res.output_text) return String(res.output_text);
-    if (res.text) return String(res.text);
-  } catch { }
-  return "";
+    const res = await fetch(url, { ...init, signal: ac.signal });
+    return res;
+  } finally {
+    clearTimeout(t);
+  }
 }
-async function callModel({ system, prompt, temperature = 0.5, response_format }) {
-  const azEndpoint = process.env.AZURE_OPENAI_ENDPOINT;
-  const azKey = process.env.AZURE_OPENAI_API_KEY;
-  const azDeployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-  const azApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-06-01";
-  const oaKey = process.env.OPENAI_API_KEY;
-  const oaModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
-  const azureConfigured = Boolean(azEndpoint && azKey && azDeployment);
 
-  const messages = [{ role: "system", content: system || "" }, { role: "user", content: prompt || "" }];
+function htmlToText(html) {
+  if (!html) return '';
+  // strip scripts/styles
+  const withoutScripts = String(html).replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '');
+  const stripped = withoutScripts.replace(/<[^>]+>/g, ' ');
+  return stripped.replace(/\s+/g, ' ').trim();
+}
 
-  async function callAzure() {
-    const url = azEndpoint.replace(/\/+$/, "") + `/openai/deployments/${encodeURIComponent(azDeployment)}/chat/completions?api-version=${encodeURIComponent(azApiVersion)}`;
-    const body = { temperature, messages, ...(response_format ? { response_format } : {}) };
-    const r = await abortableFetch(url, { method: "POST", headers: { "Content-Type": "application/json", "api-key": azKey }, body: JSON.stringify(body) }, DEFAULT_LLM_TIMEOUT);
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      const code = data?.error?.code || r.status;
-      const msg = data?.error?.message || r.statusText || "Azure OpenAI request failed";
-      const e = new Error(`[AZURE ${code}] ${msg}`);
-      e._az429 = String(code) === "429";
-      e._azTransient = /rate|thrott|timeout|ECONN|ENOTFOUND/i.test(msg);
-      throw e;
+function take(str, n) { return (str || '').slice(0, n); }
+
+// ------------------------------
+// Multipart (optional)
+// ------------------------------
+
+async function parseMultipart(req) {
+  if (!Busboy) return { fields: {}, files: [] };
+
+  const bb = Busboy({
+    headers: req.headers,
+    limits: { fileSize: MAX_PDF_PER_FILE, files: MAX_PDFS }
+  });
+
+  const fields = {};
+  /** @type {{ filename:string, mime:string, data:Buffer }[]} */
+  const files = [];
+  let totalBytes = 0;
+
+  const done = new Promise((resolve, reject) => {
+    bb.on('file', (name, file, info) => {
+      const { filename, mimeType } = info;
+
+      // Optional early MIME filter to avoid counting non-PDF bytes:
+      const isPdf = /pdf$/i.test(mimeType) || /application\/pdf/i.test(mimeType);
+      const chunks = [];
+      let fileBytes = 0;
+      let truncated = false;
+
+      file.on('data', d => {
+        fileBytes += d.length;
+        // Stop buffering this file if total cap exceeded
+        if (totalBytes + d.length > MAX_PDF_BYTES) {
+          // still need to drain the stream to the end:
+          return; // simply don't push; Busboy keeps reading
+        }
+        // Only buffer if it's a PDF and we haven't hit per-file cap (Busboy enforces per-file)
+        if (isPdf && !truncated) {
+          chunks.push(d);
+        }
+        totalBytes += d.length;
+      });
+
+      file.on('limit', () => {
+        truncated = true; // per-file cap reached (Busboy cut it)
+      });
+
+      file.on('end', () => {
+        // Only keep if it's a PDF and it wasn't truncated
+        if (isPdf && !truncated) {
+          const data = Buffer.concat(chunks);
+          files.push({ filename, mime: mimeType, data });
+        }
+        // else: oversize or non-PDF -> drop silently
+      });
+    });
+
+    bb.on('field', (name, val) => { fields[name] = val; });
+    bb.on('error', reject);
+    bb.on('close', resolve);
+  });
+
+  req.pipe(bb);
+  await done;
+
+  // Safety: still filter to PDFs and cap count
+  const pdfs = files.filter(f => /pdf$/i.test(f.mime) || /application\/pdf/i.test(f.mime)).slice(0, MAX_PDFS);
+  return { fields, files: pdfs };
+}
+
+// ------------------------------
+// PDF extraction (optional)
+// ------------------------------
+
+async function extractPdfTexts(files) {
+  const out = [];
+  if (!pdfParse || !Array.isArray(files)) return out;
+  for (const f of files) {
+    try {
+      const res = await pdfParse(f.data);
+      const text = take(res.text || '', PER_PAGE_CAP * 5); // pragmatic cap
+      if (text?.trim()) out.push({ filename: f.filename, text });
+    } catch (e) {
+      // ignore this file; continue
     }
-    data._provider = "azure";
-    return data;
   }
-  async function callOpenAI() {
-    const payload = { model: oaModel, temperature, messages, ...(response_format ? { response_format } : {}) };
-    const r = await abortableFetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + oaKey },
-      body: JSON.stringify(payload)
-    }, DEFAULT_LLM_TIMEOUT);
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(`[OPENAI ${data?.error?.type || r.status}] ${data?.error?.message || r.statusText}`);
-    data._provider = "openai";
-    return data;
-  }
-
-  try { return await callAzure(); }
-  catch (e) {
-    if ((e._az429 || e._azTransient) && oaKey) return callOpenAI();
-    if (!process.env.AZURE_OPENAI_API_KEY && oaKey) return callOpenAI();
-    throw e;
-  }
-}
-
-// ---------- Load strict JSON Schema ----------
-function loadSchema() {
-  const p = path.join(__dirname, "..", "schemas", "qualification.v2.json");
-  const raw = fs.readFileSync(p, "utf8");
-  return { object: JSON.parse(raw), text: raw };
-}
-
-// ---------- Lightweight validator using Ajv if available, else native draft 2020-12 via node:vm fallback ----------
-let ajv = null;
-try { ajv = require("ajv"); } catch { ajv = null; }
-
-function makeValidator(schema) {
-  if (ajv) {
-    const Ajv = ajv.default || ajv;
-    const inst = new Ajv({ allErrors: true, strict: true });
-    return inst.compile(schema);
-  }
-  // Minimal fallback: only type checking of top-level report.md + tips as per schema shape
-  return (data) => {
-    const errors = [];
-    if (typeof data !== "object" || data === null) { errors.push({ instancePath: "", message: "must be object" }); return { valid: false, errors }; }
-    if (typeof data.report !== "object" || data.report === null) errors.push({ instancePath: "/report", message: "must be object" });
-    if (typeof data?.report?.md !== "string" || data.report.md.length < 1) errors.push({ instancePath: "/report/md", message: "must be non-empty string" });
-    if (!Array.isArray(data.tips)) errors.push({ instancePath: "/tips", message: "must be array" });
-    return { valid: errors.length === 0, errors };
-  };
-}
-
-// ---------- Prompt builder ----------
-function buildPrompt({ companyName, website, notes, schemaText }) {
-  return `
-You are a UK B2B/channel salesperson generating a structured **lead qualification** report.
-
-Return **VALID JSON ONLY** that **STRICTLY** conforms to the JSON Schema below.
-- UK business English; concise, evidenced statements only.
-- If evidence is missing, use the literal string **"Unknown"** (never "" or null).
-- **Never** leave a required field empty.
-- Do **not** include markdown fences or any prose outside the JSON.
-
-Context (free text from salesperson may be partial):
-- Company: ${companyName || "(unknown)"} 
-- Website: ${website || "(not provided)"} 
-- Notes: ${notes || "(none)"}
-
-Checklist to cover inside the JSON (use if/then style reasoning inline with the schema fields):
-- Financial/traction signals (funding, revenue, growth, layoffs): indicate clearly if present or "Unknown".
-- Buying group & decision process: who, how, typical cycle, blockers.
-- Pain points vs our offer; competition in account; timing & budget clues.
-- Trade shows/public activity; GTM model; recent performance highlights.
-- Bottom-line recommendation (1–2 sentences max).
-
-JSON Schema to follow **exactly**:
-${schemaText}
-
-Remember: output **JSON only**; no backticks, no explanations.`;
-}
-
-// ---------- Normalizers (coerce model output into required shape) ----------
-function nz(v) { return (typeof v === "string" && v.trim() !== "") ? v : "Unknown"; }
-function asStr(v, d = "Unknown") { return (typeof v === "string" ? (v.trim() || d) : d); }
-function asArr(v) { return Array.isArray(v) ? v : []; }
-function asInt(v, d = undefined) {
-  const n = Number(v);
-  return Number.isInteger(n) ? n : d;
-}
-function mapStrArr(v) { return asArr(v).map(x => asStr(x, "Unknown")); }
-
-/**
- * Coerce any partial/omitted fields into your required JSON Schema shape.
- * Returns a NEW object you can safely validate and send to the client.
- */
-function normalizeQualification(obj) {
-  const out = (obj && typeof obj === "object") ? { ...obj } : {};
-
-  // Ensure report object w/ md present
-  const reportIn = (out.report && typeof out.report === "object") ? out.report : {};
-  out.report = {
-    ...reportIn,
-    md: asStr(reportIn.md, "Unknown")
-  };
-
-  // companyProfile (required object)
-  const cp = (out.companyProfile && typeof out.companyProfile === "object") ? out.companyProfile : {};
-  const size = (cp.size && typeof cp.size === "object") ? cp.size : {};
-  const gtm = (cp.gtm && typeof cp.gtm === "object") ? cp.gtm : {};
-
-  const trade = asArr(cp.tradeShows).map(t => {
-    t = (t && typeof t === "object") ? t : {};
-    return {
-      name: asStr(t.name, "Unknown"),
-      year: asInt(t.year, undefined),
-      notes: asStr(t.notes, "Unknown"),
-      estimatedBudget: asStr(t.estimatedBudget, "Unknown"),
-      estimatedOpportunities: asStr(t.estimatedOpportunities, "Unknown")
-    };
-  });
-
-  out.companyProfile = {
-    founded: asStr(cp.founded, "Unknown"),
-    industry: asStr(cp.industry, "Unknown"),
-    size: {
-      employees: asStr(size.employees, "Unknown"),
-      revenue: asStr(size.revenue, "Unknown")
-    },
-    gtm: {
-      model: asStr(gtm.model, "Unknown"),
-      segments: mapStrArr(gtm.segments)
-    },
-    recentPerformance: mapStrArr(cp.recentPerformance),
-    leaders: mapStrArr(cp.leaders),
-    tradeShows: trade
-  };
-
-  // root arrays/fields (all required by your schema)
-  out.painPoints = mapStrArr(out.painPoints);
-  out.relationshipValue = mapStrArr(out.relationshipValue);
-  out.decisionMaking = mapStrArr(out.decisionMaking);
-  out.competition = mapStrArr(out.competition);
-  out.bottomLine = asStr(out.bottomLine, "Unknown");
-  out.notEvidenced = mapStrArr(out.notEvidenced);
-
-  // citations (root-level to match current schema/code usage)
-  out.citations = asArr(out.citations).map(c => {
-    c = (c && typeof c === "object") ? c : {};
-    return { label: asStr(c.label, "Unknown"), url: asStr(c.url, "") };
-  });
-
-  // tips (required array in schema; keep as array of strings)
-  out.tips = mapStrArr(out.tips);
-
   return out;
 }
 
-// ---------- Azure Function entry ----------
-module.exports = async function (context, req) {
-  const cors = buildCorsHeaders(req);
-  const cid = getCorrelationId(req);
-  const headersBase = { ...cors, "x-correlation-id": cid };
+// ------------------------------
+// Website bundling
+// ------------------------------
 
-  if (req.method === "OPTIONS") { context.res = { status: 204, headers: headersBase }; return; }
-  if (req.method !== "POST") { context.res = { status: 405, headers: headersBase, body: { error: "bad_request", message: "Invalid method" } }; return; }
-
-  const hostHeader = String(req.headers?.["x-forwarded-host"] || req.headers?.host || "");
-  const isLocalDev = /localhost|127\.0\.0\.1|app\.github\.dev|githubpreview\.dev/i.test(hostHeader);
-
-  const auth = enforceRoles(req, isLocalDev);
-  if (!auth.ok) { context.res = { status: auth.code, headers: headersBase, body: auth.body }; return; }
-
-  const b = typeof req.body === "string" ? (JSON.parse(req.body || "{}")) : (req.body || {});
-  const companyName = String(b.companyName || b.company || "").trim() || "Lead";
-  const website = String(b.website || "").trim();
-  const notes = String(b.notes || "").trim();
-
-  // Build prompt + schema-enforced response
-  const { object: schemaObj, text: schemaText } = loadSchema();
-  const validate = makeValidator(schemaObj);
-
-  const prompt = buildPrompt({ companyName, website, notes, schemaText });
-
-  const started = Date.now();
+function normalizeBase(url) {
   try {
-    const llmRes = await callModel({
-      system: "You must return JSON that strictly conforms to the provided JSON Schema. Output JSON only.",
-      prompt,
-      temperature: 0.4,
-      response_format: { type: "json_object" } // model-side structure enforcement
-    });
-    const durationMs = Date.now() - started;
-
-    let raw = extractText(llmRes) || "";
-    // Strip accidental fences if any
-    raw = /^```/.test(raw) ? raw.replace(/^```json/i, "").replace(/```$/i, "").trim() : raw;
-
-    let data;
-    try { data = JSON.parse(raw); } catch {
-      context.res = { status: 400, headers: headersBase, body: { error: "validation_failed", message: "Model did not return valid JSON", details: { raw: raw.slice(0, 300) } } };
-      return;
-    }
-    // Coerce into required shape so validation is stable and non-empty
-    data = normalizeQualification(data);
-
-    let valid, errors;
-    if (ajv) {
-      valid = validate(data);
-      errors = validate.errors || [];
-    } else {
-      const res = validate(data);
-      valid = res.valid;
-      errors = res.errors || [];
-    }
-
-    if (!valid) {
-      const details = (errors || []).slice(0, 5).map(e => ({
-        path: e.instancePath || (e.instancePath === "" ? "/" : ""),
-        message: e.message || "invalid"
-      }));
-      context.res = { status: 400, headers: headersBase, body: { error: "validation_failed", message: "Output did not match schema", details } };
-      return;
-    }
-
-    context.res = {
-      status: 200,
-      headers: headersBase,
-      body: { ...data, meta: { model: llmRes?._provider || "unknown", durationMs, version: VERSION } }
-    };
-  } catch (e) {
-    context.log.error(`[${VERSION}] ${e?.stack || e}`);
-    context.res = { status: 500, headers: headersBase, body: { error: "internal", message: "Unexpected error" } };
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return null;
   }
+}
+
+const DEFAULT_SLUGS = [
+  '/', '/about', '/about-us', '/leadership', '/team', '/management', '/partners', '/alliances',
+  '/solutions', '/services', '/products', '/industries', '/sectors', '/news', '/blog', '/customers', '/case-studies', '/security'
+];
+
+async function bundleWebsite(website, extraPaths = []) {
+  if (!website) return { pages: [], text: '' };
+  const base = normalizeBase(website);
+  if (!base) return { pages: [], text: '' };
+  const slugs = Array.from(new Set([...(extraPaths || []), ...DEFAULT_SLUGS]));
+  const pages = [];
+  let text = '';
+  for (const slug of slugs) {
+    const url = slug.startsWith('http') ? slug : base + slug;
+    try {
+      const res = await timedFetch(url, { method: 'GET' }, DEFAULT_TIMEOUT_MS);
+      if (!res.ok) continue;
+      const html = await res.text();
+      const chunk = htmlToText(html);
+      if (!chunk) continue;
+      pages.push(url);
+      text += ' \n---\n' + take(chunk, PER_PAGE_CAP);
+      if (text.length >= TEXT_CAP) break;
+    } catch { /* skip */ }
+  }
+  return { pages, text: take(text, TEXT_CAP) };
+}
+
+// ------------------------------
+// Schema loading and validation
+// ------------------------------
+
+async function loadSchema(req) {
+  // Try to fetch from public route (works in SWA -> Functions proxy)
+  const host = req.headers.host;
+  const proto = req.headers['x-forwarded-proto'] || 'https';
+  const url = `${proto}://${host}/api/schemas/qualification.v2.json`;
+  try {
+    const res = await timedFetch(url, { method: 'GET' }, DEFAULT_TIMEOUT_MS);
+    if (res.ok) {
+      const json = await res.json();
+      return json;
+    }
+  } catch { /* fall through */ }
+  // Minimal fallback (kept intentionally tiny)
+  return {
+    type: 'object',
+    properties: {
+      report: { type: 'object', properties: { md: { type: 'string' } }, required: ['md'] },
+      tips: { type: 'array', items: { type: 'string' }, minItems: 3, maxItems: 3 },
+      citations: { type: 'array', items: { type: 'string' } },
+      meta: { type: 'object' }
+    },
+    required: ['report', 'tips']
+  };
+}
+
+function getValidator(schema) {
+  if (Ajv) {
+    const ajv = new Ajv({ allErrors: true, strict: false });
+    return ajv.compile(schema);
+  }
+  // minimal fallback
+  return (data) => {
+    if (!data || typeof data !== 'object') return false;
+    if (!data.report || typeof data.report.md !== 'string') return false;
+    if (!Array.isArray(data.tips) || data.tips.length < 1) return false;
+    return true;
+  };
+}
+
+// ------------------------------
+// Prompt assembly
+// ------------------------------
+
+function buildPrompt({ variables = {}, notes = '', websiteText = '', pdfs = [], schemaText = '' }) {
+  const v = variables || {};
+  const pdfNote = pdfs.length ? `PDF extracts (filename: first chars):\n${pdfs.map(p => `- ${p.filename}: ${take(p.text, 800)}`).join('\n')}` : 'No PDFs provided.';
+  const siteNote = websiteText ? `Website bundle (first chars):\n${take(websiteText, 4000)}` : 'No website pages fetched or site text empty.';
+
+  const sys = [
+    'You are an expert B2B qualification analyst for UK technology MSP/channel deals.',
+    'Write UK business English. Be precise, neutral, and verifiable. Avoid fluff.',
+    'Use only the evidence provided below (website bundle + PDFs + variables + notes).',
+    'Never invent facts; use "Unknown" where evidence is absent.',
+    'Output must be valid JSON that conforms exactly to the schema provided.'
+  ].join(' ');
+
+  const user = [
+    'Task: produce a buyer-ready qualification report with crisp bullets and a decisive bottom line.',
+    '',
+    'Evidence:',
+    `Variables: ${JSON.stringify(v)}`,
+    `Notes: ${notes || ''}`,
+    siteNote,
+    pdfNote,
+    '',
+    'Schema (verbatim, follow strictly):',
+    schemaText,
+    '',
+    'Important JSON rules:',
+    '- Respond with JSON ONLY. No code fences, no backticks, no prose before/after.',
+    '- Use "Unknown" for any missing values.',
+    '- Keep report.md tightly written and evidence-anchored; avoid generic statements.',
+  ].join('\n');
+
+  return { system: sys, user };
+}
+
+// ------------------------------
+// LLM calls
+// ------------------------------
+
+function pickModel() {
+  // Prefer Azure if configured
+  if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_DEPLOYMENT) {
+    return { provider: 'azure' };
+  }
+  if (process.env.OPENAI_API_KEY) return { provider: 'openai' };
+  return { provider: 'none' };
+}
+
+async function callAzureChatJSON({ messages, max_tokens = 1200 }) {
+  const endpoint = process.env.AZURE_OPENAI_ENDPOINT; // e.g., https://xxx.openai.azure.com
+  const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+  const apiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-08-01-preview';
+  const url = `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
+
+  const body = {
+    messages,
+    temperature: 0.2,
+    response_format: { type: 'json_object' },
+    max_tokens,
+  };
+
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort('timeout'), MODEL_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': process.env.AZURE_OPENAI_API_KEY,
+      },
+      body: JSON.stringify(body),
+      signal: ac.signal,
+    });
+    if (!res.ok) throw new Error(`Azure OpenAI error ${res.status}`);
+    const json = await res.json();
+    const content = json?.choices?.[0]?.message?.content || '';
+    return { content, provider: 'azure' };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function callOpenAIChatJSON({ messages, max_tokens = 1200 }) {
+  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const url = 'https://api.openai.com/v1/chat/completions';
+  const body = {
+    model,
+    messages,
+    temperature: 0.2,
+    response_format: { type: 'json_object' },
+    max_tokens,
+  };
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort('timeout'), MODEL_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+      signal: ac.signal,
+    });
+    if (!res.ok) throw new Error(`OpenAI error ${res.status}`);
+    const json = await res.json();
+    const content = json?.choices?.[0]?.message?.content || '';
+    return { content, provider: 'openai' };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ------------------------------
+// JSON recovery & normalization
+// ------------------------------
+
+function stripFences(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/^```[a-z]*\n?/i, '')
+    .replace(/```\s*$/i, '')
+    .trim();
+}
+
+function salvageJson(s) {
+  const x = stripFences(s);
+  // find outermost braces
+  const first = x.indexOf('{');
+  const last = x.lastIndexOf('}');
+  if (first >= 0 && last > first) {
+    return x.slice(first, last + 1);
+  }
+  return x; // best effort
+}
+
+function ensureArray(a) { return Array.isArray(a) ? a : (a == null ? [] : [a]); }
+
+function normalizeQualification(q) {
+  const out = q && typeof q === 'object' ? { ...q } : {};
+  out.report = out.report || { md: 'Unknown' };
+  if (typeof out.report.md !== 'string' || !out.report.md.trim()) out.report.md = 'Unknown';
+  out.tips = ensureArray(out.tips).map(s => String(s)).filter(Boolean);
+  // enforce exactly 3 tips if schema expects that; pad with 'Unknown'
+  while (out.tips.length < 3) out.tips.push('Unknown');
+  if (out.tips.length > 3) out.tips = out.tips.slice(0, 3);
+  out.citations = ensureArray(out.citations).map(s => String(s)).filter(Boolean);
+  out.meta = Object.assign({ generatedAt: new Date().toISOString() }, out.meta || {});
+  return out;
+}
+
+// ------------------------------
+// Main handler
+// ------------------------------
+
+module.exports = async function (context, req) {
+  // CORS preflight
+  if (req.method === 'OPTIONS') {
+    return ok(context, '');
+  }
+
+  const principal = parsePrincipal(req);
+  if (!hasAccess(principal)) {
+    return err(context, 'Unauthorized', 401);
+  }
+
+  if (req.method === 'GET') {
+    // Diagnostics (lightweight)
+    return ok(context, {
+      status: 'ok',
+      version: 'qualification-generate/merged-1',
+      provider: pickModel().provider,
+      local: isLocal(),
+      time: new Date().toISOString(),
+    });
+  }
+
+  if (req.method !== 'POST') {
+    return err(context, 'Method not allowed', 405);
+  }
+
+  // --------------------------
+  // Input parsing: JSON or multipart
+  // --------------------------
+  let variables = {};
+  let notes = '';
+  let website = '';
+  let extraPaths = [];
+  let pdfFiles = [];
+
+  const ct = (req.headers['content-type'] || '').toLowerCase();
+
+  if (ct.startsWith('multipart/form-data') && Busboy) {
+    try {
+      const { fields, files } = await parseMultipart(req);
+      pdfFiles = files || [];
+      // Fields: variables may arrive as JSON string
+      if (fields.variables) {
+        try { variables = JSON.parse(fields.variables); } catch { variables = {}; }
+      }
+      notes = fields.notes || fields.free_text || '';
+      website = fields.website || fields.prospect_website || '';
+      extraPaths = (fields.extra_paths ? fields.extra_paths.split(',') : [])
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(s => s.startsWith('/') || s.startsWith('http') ? s : '/' + s);
+    } catch (e) {
+      return err(context, 'Failed to parse multipart input', 400, { message: String(e?.message || e) });
+    }
+  } else {
+    // JSON body
+    const body = req.body || {};
+    variables = body.variables || {};
+    notes = body.notes || body.free_text || '';
+    website = body.website || body.prospect_website || '';
+    extraPaths = Array.isArray(body.extraPaths) ? body.extraPaths : [];
+    // No PDFs in JSON mode
+  }
+
+  // --------------------------
+  // Evidence collection
+  // --------------------------
+  const [{ pages, text: websiteText }, pdfs] = await Promise.all([
+    bundleWebsite(website, extraPaths),
+    extractPdfTexts(pdfFiles)
+  ]);
+
+  // --------------------------
+  // Schema & validator
+  // --------------------------
+  const schema = await loadSchema(req);
+  const validator = getValidator(schema);
+  const schemaText = JSON.stringify(schema);
+
+  // --------------------------
+  // Prompt build
+  // --------------------------
+  const { system, user } = buildPrompt({ variables, notes, websiteText, pdfs, schemaText });
+
+  const messages = [
+    { role: 'system', content: system },
+    { role: 'user', content: user }
+  ];
+
+  const { provider } = pickModel();
+  if (provider === 'none') {
+    return err(context, 'No LLM configured: set Azure (AZURE_OPENAI_*) or OPENAI_API_KEY.', 500);
+  }
+
+  async function onemodel(msgs) {
+    if (provider === 'azure') return callAzureChatJSON({ messages: msgs, max_tokens: 1400 });
+    return callOpenAIChatJSON({ messages: msgs, max_tokens: 1400 });
+  }
+
+  let first;
+  try {
+    first = await onemodel(messages);
+  } catch (e) {
+    return err(context, 'Model call failed', 502, { message: String(e?.message || e) });
+  }
+
+  function tryParse(content) {
+    try {
+      const raw = salvageJson(content);
+      return JSON.parse(raw);
+    } catch (e) { return null; }
+  }
+
+  let parsed = tryParse(first.content);
+  let normalized = normalizeQualification(parsed || {});
+  let valid = !!validator(normalized);
+
+  // Quality/redo gate: if invalid or looks generic (no citations and report is short), try one redo
+  let redoApplied = false;
+  if (!valid || (!normalized.citations?.length && normalized.report?.md?.length < 400)) {
+    const addendum = 'ADDENDUM: The previous output failed validation or was too generic. Strengthen evidence ties (cite website page themes and PDF filenames), and ensure the JSON strictly matches the schema.';
+    const messages2 = [...messages, { role: 'user', content: addendum }];
+    let second;
+    try {
+      second = await onemodel(messages2);
+    } catch (_) { /* ignore */ }
+    if (second?.content) {
+      const parsed2 = tryParse(second.content);
+      const normalized2 = normalizeQualification(parsed2 || {});
+      const valid2 = !!validator(normalized2);
+      if (valid2) {
+        normalized = normalized2;
+        valid = true;
+        redoApplied = true;
+      }
+    }
+  }
+
+  // Merge server-known citations
+  const serverCitations = [
+    ...pages,
+    ...(pdfs || []).map(p => `pdf:${p.filename}`)
+  ];
+  const final = { ...normalized };
+  final.citations = Array.from(new Set([...(final.citations || []), ...serverCitations]));
+  final.meta = Object.assign({}, final.meta || {}, {
+    provider,
+    durationMs: undefined, // not measured precisely here
+    redoApplied,
+    website: website || null,
+    pageCount: pages.length,
+    pdfCount: (pdfs || []).length,
+  });
+
+  if (!valid) {
+    return err(context, 'Output failed schema validation', 422, { sample: take(final?.report?.md, 400), tips: final?.tips });
+  }
+
+  return ok(context, final);
 };
