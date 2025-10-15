@@ -300,29 +300,41 @@ async function bundleWebsite(website, extraPaths = []) {
 // ------------------------------
 // Schema loading and validation
 // ------------------------------
-
 async function loadSchema(req) {
-  // Try to fetch from public route (works in SWA -> Functions proxy)
-  const host = req.headers.host;
-  const proto = req.headers['x-forwarded-proto'] || 'https';
-  const url = `${proto}://${host}/api/schemas/qualification.v2.json`;
-  try {
-    const res = await timedFetch(url, { method: 'GET' }, DEFAULT_TIMEOUT_MS);
-    if (res.ok) {
-      const json = await res.json();
-      return json;
-    }
-  } catch { /* fall through */ }
-  // Minimal fallback (kept intentionally tiny)
+  // Archive-compatible JSON shape
   return {
-    type: 'object',
+    type: "object",
     properties: {
-      report: { type: 'object', properties: { md: { type: 'string' } }, required: ['md'] },
-      tips: { type: 'array', items: { type: 'string' }, minItems: 3, maxItems: 3 },
-      citations: { type: 'array', items: { type: 'string' } },
-      meta: { type: 'object' }
+      report: {
+        type: "object",
+        properties: {
+          md: { type: "string", minLength: 1 },
+          citations: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string", minLength: 1 },
+                url:   { type: "string" }
+              },
+              required: ["label"],
+              additionalProperties: false
+            },
+            default: []
+          }
+        },
+        required: ["md"],
+        additionalProperties: true
+      },
+      tips: {
+        type: "array",
+        items: { type: "string", minLength: 1 },
+        minItems: 3,
+        maxItems: 3
+      }
     },
-    required: ['report', 'tips']
+    required: ["report", "tips"],
+    additionalProperties: true
   };
 }
 
