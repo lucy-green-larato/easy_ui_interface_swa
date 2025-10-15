@@ -494,6 +494,40 @@ function headingsInOrder(md, headings) {
   return { ok: missing.length === 0, missing, order: true };
 }
 
+// Required section headings
+const REQUIRED_HEADINGS_BASE = [
+  '## Company profile (what can be evidenced)',
+  '## Pain points',
+  '## Relationship value',
+  '## Decision-making process',
+  '## Competition & differentiation',
+  '## Bottom line for you',
+  '## What we could not evidence (and why)'
+];
+
+/**
+ * Validate that all required headings are present and appear in order.
+ * If callType === "Partner", the extra section is required (position may be after the base list).
+ * Returns: { ok:boolean, missing:string[], order:boolean, partnerRequired:boolean, partnerPresent:boolean }
+ */
+function validateReportStructure(md, { isSummary, callType } = {}) {
+  const partnerRequired = /^partner$/i.test(String(callType || ''));
+  const expected = REQUIRED_HEADINGS_BASE.slice();
+  if (partnerRequired) expected.push('## Potential partnership risks and mitigations');
+
+  const res = headingsInOrder(md, expected); // uses the object-returning helper above
+  const partnerPresent = /##\s*Potential partnership risks and mitigations/i.test(md);
+  const ok = !!res && res.ok === true && (!partnerRequired || partnerPresent);
+
+  return {
+    ok,
+    missing: Array.isArray(res?.missing) ? res.missing : [],
+    order: res?.order !== false,
+    partnerRequired,
+    partnerPresent
+  };
+}
+
 // ------------------------------
 // Prompt assembly
 // ------------------------------
@@ -801,262 +835,235 @@ module.exports = async function (context, req) {
     return ok(context, '');
   }
 
-  const principal = parsePrincipal(req);
-  if (!hasAccess(principal)) {
-    return err(context, 'Unauthorized', 401);
-  }
+  try {
+    // --------------------------
+    // Auth
+    // --------------------------
+    const principal = parsePrincipal(req);
+    if (!hasAccess(principal)) {
+      return err(context, 'Unauthorized', 401);
+    }
 
-  if (req.method === 'GET') {
-    return ok(context, {
-      status: 'ok',
-      version: 'qualification-generate/merged-1',
-      provider: pickModel().provider,
-      local: isLocal(),
-      time: new Date().toISOString(),
-    });
-  }
+    // --------------------------
+    // GET = diagnostics
+    // --------------------------
+    if (req.method === 'GET') {
+      return ok(context, {
+        status: 'ok',
+        version: 'qualification-generate/merged-1',
+        provider: pickModel().provider,
+        local: isLocal(),
+        time: new Date().toISOString(),
+      });
+    }
 
-  if (req.method !== 'POST') {
-    return err(context, 'Method not allowed', 405);
-  }
+    // --------------------------
+    // Only POST supported beyond this point
+    // --------------------------
+    if (req.method !== 'POST') {
+      return err(context, 'Method not allowed', 405);
+    }
 
-  // --------------------------
-  // Input parsing: JSON or multipart
-  // --------------------------
-  let variables = {};
-  let notes = '';
-  let website = '';
-  let extraPaths = [];
-  let pdfFiles = [];
+    // --------------------------
+    // Input parsing: JSON or multipart
+    // --------------------------
+    let variables = {};
+    let notes = '';
+    let website = '';
+    let extraPaths = [];
+    let pdfFiles = [];
 
-  const ct = (req.headers['content-type'] || '').toLowerCase();
-  // Explicit guard: client sent multipart but this deployment lacks busboy support
-  const isMultipart = /^multipart\/form-data/i.test(ct);
-  if (isMultipart && !Busboy) {
-    return err(
-      context,
-      'Multipart uploads are not supported on this deployment (missing "busboy"). ' +
-      'Either deploy with the "busboy" dependency to enable file uploads (e.g., PDFs) or send JSON without files.',
-      501,
-      {
-        hint: 'Install busboy in your function app',
-        npm: 'npm i busboy --save',
-        contentType: ct
+    const ct = (req.headers['content-type'] || '').toLowerCase();
+    context.log('[qual] POST start; content-type=%s', ct);
+
+    if (ct.startsWith('multipart/form-data')) {
+      try {
+        const { fields, files } = await parseMultipart(req); // will throw helpful error if Busboy missing
+        pdfFiles = files || [];
+        if (fields.variables) {
+          try { variables = JSON.parse(fields.variables); } catch { variables = {}; }
+        }
+        notes = fields.notes || fields.free_text || '';
+        website = fields.website || fields.prospect_website || '';
+        extraPaths = (fields.extra_paths ? fields.extra_paths.split(',') : [])
+          .map(s => s.trim()).filter(Boolean)
+          .map(s => s.startsWith('/') || s.startsWith('http') ? s : '/' + s);
+        context.log('[qual] multipart parsed: files=%d', (pdfFiles || []).length);
+      } catch (e) {
+        return err(context, 'Failed to parse multipart input', 400, { message: String(e?.message || e) });
       }
-    );
-  }
-
-  if (ct.startsWith('multipart/form-data') && Busboy) {
-    try {
-      const { fields, files } = await parseMultipart(req);
-      pdfFiles = files || [];
-      if (fields.variables) {
-        try { variables = JSON.parse(fields.variables); } catch { variables = {}; }
-      }
-      notes = fields.notes || fields.free_text || '';
-      website = fields.website || fields.prospect_website || '';
-      extraPaths = (fields.extra_paths ? fields.extra_paths.split(',') : [])
-        .map(s => s.trim())
+    } else {
+      // JSON body
+      const body = req.body || {};
+      variables = body.variables || {};
+      notes = body.notes || body.free_text || '';
+      website = body.website || body.prospect_website || '';
+      extraPaths = (Array.isArray(body.extraPaths) ? body.extraPaths : [])
+        .map(s => String(s).trim())
         .filter(Boolean)
         .map(s => s.startsWith('/') || s.startsWith('http') ? s : '/' + s);
-    } catch (e) {
-      return err(context, 'Failed to parse multipart input', 400, { message: String(e?.message || e) });
     }
-  } else {
-    const body = req.body || {};
-    variables = body.variables || {};
-    notes = body.notes || body.free_text || '';
-    website = body.website || body.prospect_website || '';
-    extraPaths = (Array.isArray(body.extraPaths) ? body.extraPaths : [])
-      .map(s => String(s).trim())
-      .filter(Boolean)
-      .map(s => s.startsWith('/') || s.startsWith('http') ? s : '/' + s);
-  }
 
-  // --------------------------
-  // Evidence collection 
-  // --------------------------
-  const [siteBundle, pdfExtracts] = await Promise.all([
-    bundleWebsite(website, extraPaths).catch(() => ({ pages: [], text: '' })),
-    extractPdfTexts(pdfFiles).catch(() => [])
-  ]);
+    // --------------------------
+    // Evidence collection
+    // --------------------------
+    const [siteBundle, pdfExtracts] = await Promise.all([
+      bundleWebsite(website, extraPaths).catch(() => ({ pages: [], text: '' })),
+      extractPdfTexts(pdfFiles).catch(() => [])
+    ]);
 
-  const pages = Array.isArray(siteBundle?.pages) ? siteBundle.pages : [];
-  const websiteText = typeof siteBundle?.text === 'string' ? siteBundle.text : '';
-  const pdfs = Array.isArray(pdfExtracts) ? pdfExtracts : [];
+    const pages = Array.isArray(siteBundle?.pages) ? siteBundle.pages : [];
+    const websiteText = typeof siteBundle?.text === 'string' ? siteBundle.text : '';
+    const pdfs = Array.isArray(pdfExtracts) ? pdfExtracts : [];
 
-  // --------------------------
-  // Schema & validator
-  // --------------------------
-  const schema = await loadSchema(req);
-  const validator = getValidator(schema);
+    context.log('[qual] website pages=%d, websiteTextChars=%d, pdfs=%d',
+      (pages || []).length, (websiteText || '').length, (pdfs || []).length);
 
-  // --------------------------
-  // Prompt build (archive)
-  // --------------------------
-  const detailRaw = String((variables.detail || variables.detail_level || '')).toLowerCase();
-  const isSummary = /^(summary|short|exec|brief)$/.test(detailRaw);
-  const FULL_TARGET_WORDS = Number(process.env.QUAL_FULL_TARGET_WORDS || '1750');
-  const targetWords = isSummary ? 0 : FULL_TARGET_WORDS;
+    // --------------------------
+    // Schema & validator
+    // --------------------------
+    const schema = await loadSchema(req);
+    const validator = getValidator(schema);
 
-  const user = buildQualificationJsonPrompt({
-  values: variables,
-  ixbrl: variables.ixbrlSummary || {},
-  pdfs,
-  websiteText,
-  seller: {
-    name: String(variables.seller_name || variables.your_name || ''),
-    company: String(variables.seller_company || variables.your_company || ''),
-    url: String(variables.seller_company_url || variables.your_website || '')
-  },
-  ourOffer: {
-    product: String(variables.product_service || variables['Product / service offered'] || ''),
-    otherContext: String(variables.context || '')
-  },
-  sellerNotes: String((notes || variables.notes || variables.free_text || '').toString()).trim(),
-  detailMode: isSummary ? 'summary' : 'full',
-  targetWords,
-  sitePages: pages            // <-- add this line
-});
+    // --------------------------
+    // Prompt build (archive)
+    // --------------------------
+    const detailRaw = String((variables.detail || variables.detail_level || '')).toLowerCase();
+    const isSummary = /^(summary|short|exec|brief)$/.test(detailRaw);
+    const FULL_TARGET_WORDS = Number(process.env.QUAL_FULL_TARGET_WORDS || '1750');
+    const targetWords = isSummary ? 0 : FULL_TARGET_WORDS;
 
-  const system = 'You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.';
+    const user = buildQualificationJsonPrompt({
+      values: variables,
+      ixbrl: variables.ixbrlSummary || {},
+      pdfs,
+      websiteText,
+      sitePages: pages,
+      sellerNotes: notes,
+      seller: {
+        name: String(variables.seller_name || variables.your_name || ''),
+        company: String(variables.seller_company || variables.your_company || ''),
+        url: String(variables.seller_company_url || variables.your_website || '')
+      },
+      ourOffer: {
+        product: String(variables.product_service || variables['Product / service offered'] || ''),
+        otherContext: String(notes || variables.context || '')
+      },
+      detailMode: isSummary ? 'summary' : 'full',
+      targetWords
+    });
 
-  const messages = [
-    { role: 'system', content: system },
-    { role: 'user', content: user }
-  ];
+    const system = 'You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.';
 
-  // Token budget (allow full-depth outputs)
-  const max_tokens = isSummary
-    ? 2000
-    : Math.min(6000, Math.ceil((targetWords || 1750) * 1.8) + 600);
-
-  // --------------------------
-  // Model call
-  // --------------------------
-  const { provider } = pickModel();
-  if (provider === 'none') {
-    return err(context, 'No LLM configured: set Azure (AZURE_OPENAI_*) or OPENAI_API_KEY.', 500);
-  }
-
-  async function onemodel(msgs, maxTok) {
-    if (provider === 'azure') return callAzureChatJSON({ messages: msgs, max_tokens: maxTok });
-    return callOpenAIChatJSON({ messages: msgs, max_tokens: maxTok });
-  }
-
-  let first;
-  try {
-    first = await onemodel(messages, max_tokens);
-  } catch (e) {
-    return err(context, 'Model call failed', 502, { message: String(e?.message || e) });
-  }
-
-  function tryParse(content) {
-    try {
-      const raw = salvageJson(content);
-      return JSON.parse(raw);
-    } catch { return null; }
-  }
-
-  let parsed = tryParse(first.content);
-  let normalized = normalizeQualification(parsed || {});
-  // JSON shape valid?
-  let valid = !!validator(normalized);
-
-  // --------------------------
-  // Structure helpers (must be defined BEFORE first use)
-  // --------------------------
-  function requiredHeadingsFor(callType) {
-    const base = REQUIRED_HEADINGS_BASE.slice();
-    if (/^partner$/i.test(String(callType || ''))) {
-      base.push('## Potential partnership risks and mitigations');
-    }
-    return base;
-  }
-
-  /**
-   * Validate that all required headings are present and in order.
-   * Returns { ok, missing, order, partnerRequired, partnerPresent }.
-   * Depends on `headingsInOrder` (object-returning version) being defined elsewhere.
-   */
-  function validateReportStructure(md, { isSummary, callType } = {}) {
-    const expected = requiredHeadingsFor(callType);
-    const res = headingsInOrder(md, expected); // { ok, missing, order }
-    const partnerRequired = /^partner$/i.test(String(callType || ''));
-    const partnerPresent = /##\s*Potential partnership risks and mitigations/i.test(md);
-    const ok = !!res && res.ok === true && (!partnerRequired || partnerPresent);
-    return {
-      ok,
-      missing: Array.isArray(res?.missing) ? res.missing : [],
-      order: res?.order !== false,
-      partnerRequired,
-      partnerPresent
-    };
-  }
-
-  function hasInlineCitations(md) {
-    if (typeof md !== 'string') return false;
-    // Accept either website or PDF tags somewhere in the body
-    return /\[S\d+\]/.test(md) || /\[P\d+\]/.test(md);
-  }
-
-  // --------------------------
-  // Compute structural & evidence checks
-  // --------------------------
-  const callType = String(variables.call_type || '').toLowerCase().startsWith('p') ? 'Partner' : 'Direct';
-
-  // Structural (headings) valid?
-  const struct1 = validateReportStructure(normalized.report?.md || '', { isSummary, callType });
-  valid = valid && struct1.ok;
-
-  // --------------------------
-  // Quality/redo gate helpers
-  // --------------------------
-  function looksGeneric(md) {
-    const bannedRx = /\b(well-positioned|decades of experience|cybersecurity landscape|market differentiation|client-centric|cutting-edge|holistic|industry-leading|best-in-class)\b/i;
-    return bannedRx.test(md || "");
-  }
-  function hasEvidenceMarks(md) {
-    const pounds = (md.match(/£\s?\d/gi) || []).length;
-    const fy = /FY\d{2}/i.test(md);
-    return pounds >= 2 && fy;
-  }
-
-  let redoApplied = false;
-  const tooShortFull = !isSummary && ((normalized.report?.md || '').length < 900);
-  const structureFailed = !struct1.ok;
-
-  // Only require inline tags if we actually supplied evidence (site pages or pdfs) and we're in FULL mode
-  const evidenceExists = (!isSummary) && ((pages && pages.length) || (pdfs && pdfs.length));
-  const citationsMissing = evidenceExists && !hasInlineCitations(normalized.report?.md || '');
-
-  if (!valid
-    || looksGeneric(normalized.report?.md)
-    || !hasEvidenceMarks(normalized.report?.md)
-    || tooShortFull
-    || structureFailed
-    || citationsMissing) {
-
-    const requiredHeadingsList = requiredHeadingsFor(callType).map(h => '- ' + h).join('\n');
-    const addendum = [
-      "=== STRICT REWRITE INSTRUCTIONS ===",
-      "Your previous draft contained generic wording, insufficient evidence, or failed structural rules.",
-      "Rewrite the ENTIRE report now:",
-      "- Use these EXACT headings in this EXACT order (verbatim):",
-      requiredHeadingsList,
-      "- Include labelled figures with YEAR tags (e.g., “FY24: £… revenue; Loss before tax £…; Average employees …”).",
-      "- Remove ALL generic wording (banlist in prompt).",
-      "- If a data point is NOT evidenced, write exactly: “No public evidence found.”",
-      "- Add inline [S#]/[P#] evidence tags wherever a claim depends on website/PDF evidence, using the lists provided.",
-      "- Keep the JSON shape as previously instructed."
-    ].join("\n");
-
-    const messages2 = [
+    const messages = [
       { role: 'system', content: system },
-      { role: 'user', content: user + "\n\n" + addendum }
+      { role: 'user', content: user }
     ];
 
-    try {
+    // Token budget
+    const max_tokens = isSummary
+      ? 2000
+      : Math.min(6000, Math.ceil((targetWords || 1750) * 1.8) + 600);
+
+    // --------------------------
+    // Model call
+    // --------------------------
+    const { provider } = pickModel();
+    if (provider === 'none') {
+      return err(context, 'No LLM configured: set Azure (AZURE_OPENAI_*) or OPENAI_API_KEY.', 500);
+    }
+    context.log('[qual] model provider=%s', provider);
+
+    async function onemodel(msgs, maxTok) {
+      if (provider === 'azure') return callAzureChatJSON({ messages: msgs, max_tokens: maxTok });
+      return callOpenAIChatJSON({ messages: msgs, max_tokens: maxTok });
+    }
+
+    const first = await onemodel(messages, max_tokens);
+    context.log('[qual] model returned chars=%d', (first && first.content ? first.content.length : 0));
+
+    function tryParse(content) {
+      try {
+        const raw = salvageJson(content);
+        return JSON.parse(raw);
+      } catch { return null; }
+    }
+
+    // --------------------------
+    // Parse & validate
+    // --------------------------
+    let parsed = tryParse(first.content);
+    let normalized = normalizeQualification(parsed || {});
+    let valid = !!validator(normalized);
+
+    const callType = String(variables.call_type || '').toLowerCase().startsWith('p') ? 'Partner' : 'Direct';
+
+    // structure & length rules
+    const struct1 = validateReportStructure(normalized.report?.md || '', { isSummary, callType });
+    valid = valid && struct1.ok;
+
+    // quality gate helpers
+    function looksGeneric(md) {
+      const bannedRx = /\b(well-positioned|decades of experience|cybersecurity landscape|market differentiation|client-centric|cutting-edge|holistic|industry-leading|best-in-class)\b/i;
+      return bannedRx.test(md || "");
+    }
+    function hasEvidenceMarks(md) {
+      const pounds = (md.match(/£\s?\d/gi) || []).length;
+      const fy = /FY\d{2}/i.test(md);
+      return pounds >= 2 && fy;
+    }
+    function hasInlineCitations(md) {
+      if (typeof md !== 'string') return false;
+      return /\[S\d+\]/.test(md) || /\[P\d+\]/.test(md);
+    }
+    function requiredHeadingsFor(callType) {
+      const base = [
+        '## Company profile (what can be evidenced)',
+        '## Pain points',
+        '## Relationship value',
+        '## Decision-making process',
+        '## Competition & differentiation',
+        '## Bottom line for you',
+        '## What we could not evidence (and why)'
+      ];
+      if (/^partner$/i.test(String(callType || ''))) {
+        base.push('## Potential partnership risks and mitigations');
+      }
+      return base;
+    }
+
+    let redoApplied = false;
+    const tooShortFull = !isSummary && ((normalized.report?.md || '').length < 900);
+    const structureFailed = !struct1.ok;
+    const evidenceExists = (!isSummary) && ((pages && pages.length) || (pdfs && pdfs.length));
+    const citationsMissing = evidenceExists && !hasInlineCitations(normalized.report?.md || '');
+
+    if (!valid
+      || looksGeneric(normalized.report?.md)
+      || !hasEvidenceMarks(normalized.report?.md)
+      || tooShortFull
+      || structureFailed
+      || citationsMissing) {
+
+      const requiredHeadingsList = requiredHeadingsFor(callType).map(h => '- ' + h).join('\n');
+      const addendum = [
+        "=== STRICT REWRITE INSTRUCTIONS ===",
+        "Your previous draft contained generic wording, insufficient evidence, or failed structural rules.",
+        "Rewrite the ENTIRE report now:",
+        "- Use these EXACT headings in this EXACT order (verbatim):",
+        requiredHeadingsList,
+        "- Include labelled figures with YEAR tags (e.g., “FY24: £… revenue; Loss before tax £…; Average employees …”).",
+        "- Remove ALL generic wording (banlist in prompt).",
+        "- If a data point is NOT evidenced, write exactly: “No public evidence found.”",
+        "- Add inline [S#]/[P#] evidence tags wherever a claim depends on website/PDF evidence, using the lists provided.",
+        "- Keep the JSON shape as previously instructed."
+      ].join("\n");
+
+      const messages2 = [
+        { role: 'system', content: system },
+        { role: 'user', content: user + "\n\n" + addendum }
+      ];
+
       const second = await onemodel(messages2, max_tokens);
       const parsed2 = tryParse(second.content);
       const normalized2 = normalizeQualification(parsed2 || {});
@@ -1065,75 +1072,67 @@ module.exports = async function (context, req) {
       const longEnough = isSummary || (normalized2.report?.md || '').length >= 900;
       const citesOk = (!evidenceExists) || hasInlineCitations(normalized2.report?.md || '');
 
-      if (valid2
-        && !looksGeneric(normalized2.report?.md)
-        && hasEvidenceMarks(normalized2.report?.md)
-        && longEnough
-        && struct2.ok
-        && citesOk) {
+      if (valid2 && struct2.ok && longEnough && citesOk && !looksGeneric(normalized2.report?.md) && hasEvidenceMarks(normalized2.report?.md)) {
         normalized = normalized2;
         valid = true;
         redoApplied = true;
       }
-    } catch { /* keep first draft */ }
-  }
+    }
 
-  // --------------------------
-  // Merge server-known citations into report.citations (archive shape)
-  // --------------------------
-  const final = { ...normalized };
+    // --------------------------
+    // Merge server citations
+    // --------------------------
+    const final = { ...normalized };
 
-  const serverCitations = [];
+    const serverCitations = [];
+    for (let i = 0; i < (pages || []).length; i++) {
+      serverCitations.push({ label: `Website: [S${i + 1}]`, url: pages[i] });
+    }
+    for (const p of (pdfs || [])) {
+      serverCitations.push({ label: `Annual report: ${p.filename || 'report.pdf'}` });
+    }
+    const chNum = String(variables.ch_number || variables.company_number || variables.companies_house_number || '').trim();
+    if (chNum) {
+      serverCitations.push({
+        label: 'Companies House (filings)',
+        url: 'https://find-and-update.company-information.service.gov.uk/company/' + encodeURIComponent(chNum)
+      });
+    }
+    const linkedin = String(variables.company_linkedin || variables.linkedin_company || '').trim();
+    if (linkedin) {
+      serverCitations.push({ label: 'Company LinkedIn', url: linkedin });
+    }
 
-  // Website pages as [S#]
-  for (let i = 0; i < (pages || []).length; i++) {
-    serverCitations.push({ label: `Website: [S${i + 1}]`, url: pages[i] });
-  }
-  // PDFs
-  for (const p of (pdfs || [])) {
-    serverCitations.push({ label: `Annual report: ${p.filename || 'report.pdf'}` });
-  }
-  // Companies House, if provided
-  const chNum = String(variables.ch_number || variables.company_number || variables.companies_house_number || '').trim();
-  if (chNum) {
-    serverCitations.push({
-      label: 'Companies House (filings)',
-      url: 'https://find-and-update.company-information.service.gov.uk/company/' + encodeURIComponent(chNum)
+    const seen = new Set();
+    function normUrl(u) { try { const x = new URL(u); x.hash = ''; return x.href.replace(/\/+$/, '').toLowerCase(); } catch { return ''; } }
+    final.report.citations = [...(final.report.citations || []), ...serverCitations].filter(c => {
+      const key = c.url ? 'u:' + normUrl(c.url) : 'l:' + (c.label || '').trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
-  }
-  // LinkedIn
-  const linkedin = String(variables.company_linkedin || variables.linkedin_company || '').trim();
-  if (linkedin) {
-    serverCitations.push({ label: 'Company LinkedIn', url: linkedin });
-  }
 
-  // Deduplicate by (url normalized) or label
-  const seen = new Set();
-  function normUrl(u) { try { const x = new URL(u); x.hash = ''; return x.href.replace(/\/+$/, '').toLowerCase(); } catch { return ''; } }
-  final.report.citations = [...(final.report.citations || []), ...serverCitations].filter(c => {
-    const key = c.url ? 'u:' + normUrl(c.url) : 'l:' + (c.label || '').trim().toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-
-  // Attach meta (optional)
-  final.meta = Object.assign({}, final.meta || {}, {
-    provider,
-    redoApplied,
-    website: website || null,
-    pageCount: (pages || []).length,
-    pdfCount: (pdfs || []).length,
-  });
-
-  if (!valid) {
-    const struct = validateReportStructure(final?.report?.md || '', { isSummary, callType });
-    return err(context, 'Output failed schema/structure validation', 422, {
-      sample: take(final?.report?.md, 400),
-      tips: final?.tips,
+    final.meta = Object.assign({}, final.meta || {}, {
+      provider,
+      redoApplied,
+      website: website || null,
+      pageCount: (pages || []).length,
+      pdfCount: (pdfs || []).length,
     });
-  }
 
-  // Return archive-shaped object
-  return ok(context, final);
+    if (!valid) {
+      return err(context, 'Output failed schema validation', 422, {
+        sample: take(final?.report?.md, 400),
+        tips: final?.tips
+      });
+    }
+
+    return ok(context, final);
+
+  } catch (e) {
+    // Never let the function fall through with a blank 500
+    try { context.log.error('[qualification-generate] Unhandled error', e && e.stack || e); } catch { }
+    return err(context, 'Internal error', 500, { message: String(e && e.message || e) });
+  }
 };
+
