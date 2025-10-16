@@ -467,11 +467,25 @@ async function loadBuyerIntelFromTemplate({ mode, productId, buyerId }) {
   };
 
   const mdSection = (md, name) => {
-    // Grab text under "## <name>" until the next "##"
-    const re = new RegExp(`^##\\s*${name}\\s*\\n([\\s\\S]*?)(?=^##\\s|\\Z)`, "mi");
+    // Tolerant matcher: accepts ## or ###, optional numbering/punctuation, and aliases
+    const ALIASES = {
+      "Overview": ["Overview", "Opening", "Opening:?", "Introduction"],
+      "Buyer Pain": ["Buyer Pain", "Pain", "Buyer Pain:?", "Challenges"],
+      "Buyer Desire": ["Buyer Desire", "Desire", "Buyer Goals", "Aligning with Business Goals"],
+      "Example Illustration": ["Example Illustration", "Example", "Illustration", "Case Study", "From Problem to Solution"],
+      "Handling Objections": ["Handling Objections", "Objections"],
+      "Next Step": ["Next Step", "Next Steps", "Call to Action", "Call to Action: Next Steps", "CTA", "CTAs"]
+    };
+    const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const names = (ALIASES[name] || [name]).map(esc).join("|");
+    const re = new RegExp(
+      `^#{2,3}\\s*(?:\\d+\\.\\s*)?(?:${names})\\b[^\\n]*\\n([\\s\\S]*?)(?=^#{2,3}\\s|\\Z)`,
+      "mi"
+    );
     const m = md.match(re);
     return m ? m[1].trim() : "";
   };
+
 
   const bulletise = (txt, max = 5) => {
     const src = String(txt || "").trim();
