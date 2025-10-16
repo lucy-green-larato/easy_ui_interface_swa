@@ -74,11 +74,28 @@ function parsePrincipal(req) {
   }
 }
 
-function hasAccess(principal) {
-  if (isLocal()) return true; // relax locally
+function hasAccess(principal, req) {
+  // 1) Local dev: always allow
+  if (isLocal()) return true;
+
+  // 2) Explicit server override for testing
+  if (process.env.ALLOW_ANON === '1') return true;
+
+  // 3) Allow a shared-secret API key (e.g., for server-to-server calls)
+  const auth = String(req?.headers?.authorization || '').trim();
+  if (process.env.QUAL_API_KEY && auth === `Bearer ${process.env.QUAL_API_KEY}`) {
+    return true;
+  }
+
+  // 4) Static Web Apps / App Service roles
   if (!principal) return false;
   const roles = new Set((principal.userRoles || []).map(r => String(r).toLowerCase()));
-  return roles.has('authenticated') || roles.has('contributor') || roles.has('admin');
+  if (roles.has('admin') || roles.has('contributor') || roles.has('authenticated')) return true;
+
+  // Optionally allow SWA 'anonymous' role when explicitly enabled
+  if (process.env.ALLOW_SWA_ANON === '1' && roles.has('anonymous')) return true;
+
+  return false;
 }
 
 // ------------------------------
@@ -742,7 +759,7 @@ function buildQualificationJsonPrompt(args) {
     "- If there are no relevant sources for a claim, do not invent a tag; write “No public evidence found.”"
   ].join("\n");
 
-    const tradeShows = Array.isArray(args.tradeShows) ? args.tradeShows : [];
+  const tradeShows = Array.isArray(args.tradeShows) ? args.tradeShows : [];
   const tradeShowScanBlock = [
     "TRADE SHOW SCAN (THIS CALENDAR YEAR):",
     tradeShows.length ? ("- Look specifically for: " + tradeShows.join(", ")) : "- No explicit trade show list provided.",
@@ -977,7 +994,7 @@ module.exports = async function (context, req) {
     // Auth
     // --------------------------
     const principal = parsePrincipal(req);
-    if (!hasAccess(principal)) {
+    if (!hasAccess(principal, req)) {
       return err(context, 'Unauthorized', 401);
     }
 
@@ -1242,7 +1259,7 @@ module.exports = async function (context, req) {
       const citesOk = (!evidenceExists) || hasInlineCitations(normalized2.report?.md || '');
       const notesAnswered2 = answeredSellerNotes(normalized2.report?.md || '');
 
-      if (valid2 && struct2.ok && longEnough && citesOk && !looksGeneric(normalized2.report?.md) && hasEvidenceMarks(normalized2.report?.md)&& notesAnswered2) {
+      if (valid2 && struct2.ok && longEnough && citesOk && !looksGeneric(normalized2.report?.md) && hasEvidenceMarks(normalized2.report?.md) && notesAnswered2) {
         normalized = normalized2;
         valid = true;
         redoApplied = true;
