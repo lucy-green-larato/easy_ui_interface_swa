@@ -1,4 +1,4 @@
-// /web/src/lib/contentLoader.js 2025-10-11 v2.1
+// /web/src/lib/contentLoader.js 16-10-2025 v3
 // Single place for content pathing + canonicalisation + fetches.
 // Works with a unified /content/call-library/v1/index.json (preferred),
 // but tolerates older shapes. Strict MIME checks prevent SPA fallback issues.
@@ -9,38 +9,64 @@ const DEFAULT_BUYER_TYPES = [
   "innovator", "early-adopter", "early-majority", "late-majority", "sceptic"
 ];
 
-/** Canonical buyer slug from any label. */
+/** Canonical buyer slug from any label (tolerant to spacing, hyphens, plurals, UK/US spelling). */
 export function canonicalBuyerId(label) {
-  const s = String(label || "").trim().toLowerCase();
+  let s = String(label || "").toLowerCase();
+
+  // normalise: underscores & punctuation -> space; collapse spaces; trim
+  s = s.replace(/[_/]+/g, " ").replace(/[^\p{L}\p{N}\s-]+/gu, " ");
+  s = s.replace(/\s+/g, " ").trim();
+
   if (!s) return "innovator";
-  if (s.startsWith("innov")) return "innovator";
-  if (s.startsWith("early ad")) return "early-adopter";
-  if (s.startsWith("early ma")) return "early-majority";
-  if (s.startsWith("late ma")) return "late-majority";
-  if (s.startsWith("skept") || s.startsWith("scept")) return "sceptic";
+
+  // make matching easier (remove spaces/hyphens for the tests below)
+  const flat = s.replace(/[\s-]+/g, "");
+
+  // Innovator
+  if (flat.startsWith("innovator") || flat.startsWith("innov")) return "innovator";
+
+  // Early adopter(s)
+  if (flat.startsWith("earlyadopter")) return "early-adopter";
+  if (/^early\s*adopt/.test(s)) return "early-adopter";
+
+  // Early majority
+  if (flat.startsWith("earlymajority")) return "early-majority";
+  if (/^early\s*major/.test(s)) return "early-majority";
+
+  // Late majority
+  if (flat.startsWith("latemajority")) return "late-majority";
+  if (/^late\s*major/.test(s)) return "late-majority";
+
+  // Sceptic / Skeptic / (sceptical/skeptical)
+  if (/^s[ck]ept/i.test(s) || /^s[ck]eptic/.test(flat)) return "sceptic";
+
+  // Fallback: convert spaces to hyphens
   return s.replace(/\s+/g, "-");
 }
 
-/** Normalises various possible buyer_types shapes to an array of canonical ids. */
+/** Normalises various possible buyer_types shapes to an array of canonical ids (deduped). */
 function normaliseBuyerTypes(bt) {
-  if (!bt) return DEFAULT_BUYER_TYPES.slice();
-  if (Array.isArray(bt)) {
-    return bt
-      .map(x => canonicalBuyerId(typeof x === "string" ? x : (x?.id || x?.label || "")))
-      .filter(Boolean);
+  const list = Array.isArray(bt)
+    ? bt.map(x => canonicalBuyerId(typeof x === "string" ? x : (x?.id || x?.label || ""))).filter(Boolean)
+    : DEFAULT_BUYER_TYPES.slice();
+
+  // de-dupe while preserving order; also ensure known defaults appear in a sensible order
+  const seen = new Set();
+  const out = [];
+  for (const id of list) {
+    if (!seen.has(id)) { seen.add(id); out.push(id); }
   }
-  return DEFAULT_BUYER_TYPES.slice();
+  // guarantee defaults at least once if nothing came through
+  return out.length ? out : DEFAULT_BUYER_TYPES.slice();
 }
 
-/** Return a safe string id from diverse product shapes. */
+/** Return a safe string id from diverse product shapes (tolerant). */
 function deriveProductId(p) {
   if (typeof p === "string") return p.trim();
   const id = p?.id || p?.slug || p?.name;
   if (id) return String(id).trim();
   // Try derive from path last segment
-  const fromPath = p?.path && typeof p.path === "string"
-    ? p.path.split("/").filter(Boolean).pop()
-    : "";
+  const fromPath = (typeof p?.path === "string") ? p.path.split("/").filter(Boolean).pop() : "";
   return String(fromPath || "").trim();
 }
 
@@ -50,7 +76,7 @@ function deriveProductLabel(p, id) {
   return String(p?.label || p?.name || id || "").trim();
 }
 
-/** Normalises product list arrays of varying shapes to [{id,label,buyers?,path?, modes?}, ...]. */
+/** Normalises product list arrays of varying shapes to [{id,label,buyers?,path?,modes?}, ...]. */
 function normaliseProducts(arr) {
   if (!Array.isArray(arr)) return [];
   return arr.map(p => {
@@ -127,7 +153,7 @@ export async function getIndex(mode = "direct") {
   if (!res.ok) {
     console.error(`[Index] ${res.status} for`, url);
     return { products: [], buyer_types: DEFAULT_BUYER_TYPES.slice() };
-    }
+  }
   const ctype = String(res.headers.get("content-type") || "").toLowerCase();
   // Allow parameters like "; charset=utf-8"
   if (!ctype.includes("application/json")) {
@@ -161,7 +187,7 @@ export async function getIndex(mode = "direct") {
 /** Returns full template path for a given selection. */
 export function getTemplatePath({ mode, productId, buyerId }) {
   const m = (String(mode).toLowerCase() === "partner") ? "partner" : "direct";
-  const id = String(productId || "").trim();
+  const id = String(productId || "").trim().toLowerCase();   // tolerate case differences
   const b  = canonicalBuyerId(buyerId);
   return `${LIBRARY_BASE}/${m}/${id}/${b}.md`;
 }
