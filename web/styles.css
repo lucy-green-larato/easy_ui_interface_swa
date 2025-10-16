@@ -2294,3 +2294,118 @@ html[data-theme="dark"] .group-marketing .tool {
     border-bottom-color: #3A303B;
   }
 }
+/* === Mobile header layout fix (stack + wrap) ============================= */
+/* Place at the very end of styles.css */
+
+@media (max-width: 640px) {
+  /* Make the header a two-row stack */
+  .app-header {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 8px;                /* tidy spacing between rows */
+    padding: 8px 12px;       /* reduce side padding on small screens */
+  }
+
+  /* Brand stays on its own row; truncate long titles safely */
+  .app-header .header-left .app-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Controls row: allow wrapping with good spacing */
+  .app-header .header-right {
+    display: flex;
+    flex-wrap: wrap;         /* allow chips to wrap to a new line */
+    row-gap: 8px;
+    column-gap: 8px;
+    overflow: visible;       /* remove the tiny horizontal scroller */
+  }
+
+  /* Hide the redundant “Sales model in use: …” note on mobile */
+  .app-header .model-note {
+    display: none;
+  }
+
+  /* Keep the call type group compact */
+  .app-header .calltype-mini {
+    max-width: 100%;
+  }
+}
+
+/* Extra-narrow handsets: drop the subtitle for space */
+@media (max-width: 420px) {
+  .app-header .kicker { display: none; }
+}
+/* Temporarily hide Sales model inside Call details (keep markup intact) */
+.field-calltype-xs { display: none !important; }
+/* Hide change log and activity (temporary) */
+.change-log,
+.activity {
+  display: none !important;
+}
+/* === Engage page only: right-rail intel chips (hover highlight + hand icon) */
+html[data-page="engagement"] .intel-chip {
+  position: relative;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease,
+              box-shadow .15s ease, transform .05s ease;
+  padding-left: 28px; /* space for the icon */
+}
+
+html[data-page="engagement"] .intel-chip::before {
+  content: "👆"; /* click hint */
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  line-height: 1;
+  opacity: .75;
+  font-size: .95em;
+  pointer-events: none; /* don’t block clicks */
+}
+
+html[data-page="engagement"] .intel-chip:hover,
+html[data-page="engagement"] .intel-chip:focus-visible {
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-1));
+  border-color: var(--accent);
+  box-shadow: var(--ring-shadow);
+  color: var(--text-1);
+  outline: none;
+}
+
+html[data-page="engagement"] .intel-chip:active {
+  transform: translateY(0) scale(.98);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-1));
+}
+/* === Engage app only — readable Objections (Q→A) ======================== */
+html[data-page="engagement"] #intel-objections .objections-text .qa {
+  padding: 10px 12px;
+  margin: 0 0 10px;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+
+html[data-page="engagement"] #intel-objections .objections-text .q,
+html[data-page="engagement"] #intel-objections .objections-text .a {
+  margin: 0;
+  line-height: 1.45;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 4px 2px;
+}
+
+html[data-page="engagement"] #intel-objections .objections-text .a.missing {
+  cursor: default;
+  opacity: .75;
+}
+
+html[data-page="engagement"] #intel-objections .objections-text .q:hover,
+html[data-page="engagement"] #intel-objections .objections-text .a:hover,
+html[data-page="engagement"] #intel-objections .objections-text .q:focus-visible,
+html[data-page="engagement"] #intel-objections .objections-text .a:focus-visible {
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-1));
+  outline: none;
+}

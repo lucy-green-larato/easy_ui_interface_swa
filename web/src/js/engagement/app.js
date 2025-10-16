@@ -28,6 +28,30 @@ function parseLength(val) {
   return m ? parseInt(m[0], 10) : 450;
 }
 
+// === Shared utility: copy text to clipboard (with fallback) ===
+async function copyToClipboard(text) {
+  text = String(text || "");
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    // Fallback for older browsers or blocked clipboard API
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "absolute";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } finally { document.body.removeChild(ta); }
+    return true;
+  }
+}
+
+// (Optionally expose for other modules/scripts if any)
+window.copyToClipboard = copyToClipboard;
+
+
 // Make “Professional (corporate)” → “Professional”, “Warm (professional)” → “Warm”, etc.
 function canonicalTone(val) {
   const s = norm(val);
@@ -390,6 +414,58 @@ async function loadBuyerIntelFromTemplate({ mode, productId, buyerId }) {
     }
   };
 
+  // Render Section 5) Objections as readable Q→A text pairs (still clickable)
+  const setObjections = (slotId, items) => {
+    const host = document.getElementById(slotId);
+    if (!host) return;
+    const arr = (items || []).filter(Boolean);
+
+    if (!arr.length) {
+      host.innerHTML = `<div class="muted">(none)</div>`;
+      host.parentElement?.classList?.add("loaded");
+      return;
+    }
+
+    // Group into [objection, response] pairs
+    const pairs = [];
+    for (let i = 0; i < arr.length; i += 2) {
+      pairs.push({ o: arr[i], r: arr[i + 1] || "" });
+    }
+
+    host.innerHTML =
+      `<div class="objections-text">` +
+      pairs.map(p => `
+        <div class="qa">
+          <div class="q" tabindex="0" title="Click to add to notes">Objection — ${p.o}</div>
+          ${p.r
+          ? `<div class="a" tabindex="0" title="Click to add to notes">Response — ${p.r}</div>`
+          : `<div class="a missing">Response — (add your response)</div>`}
+        </div>`).join("") +
+      `</div>`;
+
+    host.parentElement?.classList?.add("loaded");
+
+    // Keep “click to notes” behaviour
+    const notes = document.getElementById("notes");
+    if (notes) {
+      host.querySelectorAll(".objections-text .q, .objections-text .a:not(.missing)").forEach(el => {
+        const put = () => {
+          const val = (notes.value || "").trim();
+          const add = String(el.textContent || "")
+            .replace(/^Objection\s+—\s*/i, "")
+            .replace(/^Response\s+—\s*/i, "")
+            .trim();
+          notes.value = val ? `${val}\n${add}` : add;
+          notes.dispatchEvent(new Event("input", { bubbles: true }));
+        };
+        el.addEventListener("click", put);
+        el.addEventListener("keydown", e => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); put(); }
+        });
+      });
+    }
+  };
+
   const mdSection = (md, name) => {
     // Grab text under "## <name>" until the next "##"
     const re = new RegExp(`^##\\s*${name}\\s*\\n([\\s\\S]*?)(?=^##\\s|\\Z)`, "mi");
@@ -436,7 +512,7 @@ async function loadBuyerIntelFromTemplate({ mode, productId, buyerId }) {
     setList("intel-pains", bulletise(painsTxt));
     setList("intel-triggers", bulletise(triggersTxt));
     setList("intel-proof", bulletise(proofTxt));
-    setList("intel-objections", bulletise(objectionsTxt));
+    setObjections("intel-objections", bulletise(objectionsTxt));;
     setList("intel-ctas", bulletise(ctasTxt));
 
     intelBody.hidden = false;
@@ -592,8 +668,8 @@ async function onGenerate() {
     if (els.output) {
       els.output.innerHTML = html || "<p>(No content returned)</p>";
     }
-    
-        // Enable actions (copy/download read from the rendered card)
+
+    // Enable actions (copy/download read from the rendered card)
     const hasContent = !!html;
     if (els.btnCopy) els.btnCopy.disabled = !hasContent;
     if (els.btnDownload) els.btnDownload.disabled = !hasContent;
@@ -823,7 +899,7 @@ function wire() {
   if (els.btnCopy && els.output) {
     els.btnCopy.addEventListener("click", async () => {
       try {
-        await navigator.clipboard.writeText(els.output.textContent || "");
+        await copyToClipboard(els.output.textContent || "");
       } catch { }
     });
   }
@@ -847,6 +923,43 @@ function wire() {
     });
   }
 }
+// Call notes: reuse the shared clipboard helper
+const btnNotesCopy = document.getElementById("save-notes");
+if (btnNotesCopy) {
+  btnNotesCopy.addEventListener("click", async function () {
+    const ta = document.getElementById("notes");
+    if (!ta) return;
+    await copyToClipboard(ta.value);
+    const old = this.textContent;
+    this.textContent = "Copied!";
+    setTimeout(() => { this.textContent = old; }, 1200);
+  });
+  // Call notes: reuse the shared clipboard helper
+  const btnNotesCopy = document.getElementById("save-notes");
+  if (btnNotesCopy) {
+    btnNotesCopy.addEventListener("click", async function () {
+      const ta = document.getElementById("notes");
+      if (!ta) return;
+      await copyToClipboard(ta.value);
+      const old = this.textContent;
+      this.textContent = "Copied!";
+      setTimeout(() => { this.textContent = old; }, 1200);
+    });
+  }
+  // Follow-up email modal: reuse the same helper
+  const btnEmailCopy = document.getElementById("email-copy");
+  if (btnEmailCopy) {
+    btnEmailCopy.addEventListener("click", async function () {
+      const ta = document.getElementById("email-text");
+      if (!ta) return;
+      await copyToClipboard(ta.value);
+      const old = this.textContent;
+      this.textContent = "Copied!";
+      setTimeout(() => { this.textContent = old; }, 1200);
+    });
+  }
+}
+
 // ---------- Bootstrap ----------
 (async function bootstrap() {
   // 1) Badge
