@@ -42,6 +42,7 @@ let Busboy = null;
 try { Busboy = require('busboy'); } catch (_) { /* optional */ }
 let pdfParse = null;
 try { pdfParse = require('pdf-parse'); } catch (_) { /* optional */ }
+const fs = require('fs/promises');
 
 const isLocal = () => process.env.WEBSITE_INSTANCE_ID == null;
 
@@ -659,8 +660,9 @@ function buildQualificationJsonPrompt(args) {
   const offer = args.ourOffer || { product: "", otherContext: "" };
 
   const websiteBlock = websiteText ? (`--- WEBSITE TEXT (multiple pages) ---\n${websiteText}`) : "";
-  const notesBlock = sellerNotes
-    ? ("--- SELLER NOTES (verbatim; context only — not evidence) ---\n" + sellerNotes)
+  const notesText = take(String(sellerNotes || '').replace(/\r/g, ''), 4000);
+  const notesBlock = notesText
+    ? "--- SELLER NOTES (verbatim; context only — not evidence) ---\n" + notesText
     : "";
 
   const role = [
@@ -740,12 +742,34 @@ function buildQualificationJsonPrompt(args) {
     "- If there are no relevant sources for a claim, do not invent a tag; write “No public evidence found.”"
   ].join("\n");
 
+    const tradeShows = Array.isArray(args.tradeShows) ? args.tradeShows : [];
+  const tradeShowScanBlock = [
+    "TRADE SHOW SCAN (THIS CALENDAR YEAR):",
+    tradeShows.length ? ("- Look specifically for: " + tradeShows.join(", ")) : "- No explicit trade show list provided.",
+    "- Only list shows if attendance/sponsorship is evidenced in WEBSITE TEXT; otherwise write 'No public evidence found this calendar year.'"
+  ].join("\n");
+
   const citationLists = [
     "Website sources (S#):",
     siteTagList,
     "",
     "PDF sources (P#):",
     pdfTagList
+  ].join("\n");
+
+  const websiteUseRules = [
+    "WEBSITE USE (MANDATORY when pages are provided):",
+    "- You MUST incorporate insights from the prospect WEBSITE TEXT.",
+    "- Include at least two [S#] tags if two or more website pages are provided; otherwise include at least one [S#].",
+    "- When a claim derives from the website (leadership, services, partner logos, events, news), tag it with the correct [S#]."
+  ].join("\n");
+
+  const sellerNotesRules = [
+    "SELLER NOTES HANDLING (MANDATORY):",
+    "- Treat the Seller Notes as questions to ANSWER in the report.",
+    "- Do NOT treat Seller Notes as evidence unless corroborated by WEBSITE TEXT or PDFs.",
+    "- In the section “## Bottom line for you”, include a bold line exactly like:",
+    "  **Response to seller’s question:** <a one-to-two sentence answer, grounded in the provided evidence; if not evidenced, say “No public evidence found.”>",
   ].join("\n");
 
   const financeCandidates = makeFinancialsDigest(pdfs);
@@ -770,11 +794,21 @@ function buildQualificationJsonPrompt(args) {
     "",
     citationLists,
     "",
+    sellerNotesRules,
+    "",
+    websiteUseRules,
+    "",
+    tradeShowScanBlock,
+    "",
     (financeCandidates ? "FINANCIALS EXTRACTION CANDIDATES:\n" + financeCandidates + "\n" : ""),
     "iXBRL summary (most recent first):",
     ixBrief,
     "",
+    sellerNotesRules,
+    "",
+    "",
     notesBlock,
+    "",
     websiteBlock,
     "",
     pdfBundle
@@ -904,6 +938,29 @@ function normalizeQualification(q) {
   out.meta = Object.assign({ generatedAt: new Date().toISOString() }, out.meta || {});
   return out;
 }
+async function loadTradeShows() {
+  // Try env path first (plaintext or JSON), else fall back to default list
+  const defaultList = [
+    "Connected Britain",
+    "Channel Live",
+    "Managed Services Summit Manchester",
+    "Managed Services Summit London",
+    "Infosecurity Europe"
+  ];
+  const p = process.env.QUAL_TRADE_SHOWS_FILE;
+  if (!p) return defaultList;
+  try {
+    const raw = await fs.readFile(p, 'utf8');
+    try {
+      const asJson = JSON.parse(raw);
+      if (Array.isArray(asJson) && asJson.every(s => typeof s === 'string')) return asJson;
+    } catch { /* not JSON */ }
+    // plaintext: one per line
+    return raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  } catch {
+    return defaultList;
+  }
+}
 
 // ------------------------------
 // Main handler
@@ -1004,6 +1061,7 @@ module.exports = async function (context, req) {
     // --------------------------
     const schema = await loadSchema(req);
     const validator = getValidator(schema);
+    const tradeShowsList = await loadTradeShows();
 
     // --------------------------
     // Prompt build (archive)
@@ -1030,7 +1088,9 @@ module.exports = async function (context, req) {
         otherContext: String(notes || variables.context || '')
       },
       detailMode: isSummary ? 'summary' : 'full',
-      targetWords
+      targetWords,
+      tradeShows: tradeShowsList,
+      sellerNotes: String(notes || variables.context || variables.other_context || '')
     });
 
     const system = 'You are a precise assistant that outputs valid JSON only for evidence-based B2B partner qualification.';
@@ -1077,6 +1137,12 @@ module.exports = async function (context, req) {
     let valid = !!validator(normalized);
 
     const callType = String(variables.call_type || '').toLowerCase().startsWith('p') ? 'Partner' : 'Direct';
+    const hasSellerNotes = !!String(notes || variables.context || '').trim();
+    function answeredSellerNotes(md) {
+      if (!hasSellerNotes) return true; // nothing to enforce
+      // Look for the required callout anywhere in the md
+      return /\*\*Response to seller[’']?s question:\*\s*/i.test(md || '');
+    }
 
     // structure & length rules
     const struct1 = validateReportStructure(normalized.report?.md || '', { isSummary, callType });
@@ -1119,6 +1185,12 @@ module.exports = async function (context, req) {
     const structureFailed = !struct1.ok;
     const evidenceExists = (!isSummary) && ((pages && pages.length) || (pdfs && pdfs.length));
     const citationsMissing = evidenceExists && !hasInlineCitations(normalized.report?.md || '');
+    const notesUnanswered = !answeredSellerNotes(normalized.report?.md || '');
+    function countMatches(md, rx) { return (String(md).match(rx) || []).length; }
+    function hasInlineCitations(md) {
+      if (typeof md !== 'string') return false;
+      return /\[S\d+\]/.test(md) || /\[P\d+\]/.test(md);
+    };
     const financialsSectionMissing = evidenceExists && !hasFinancialsSection(normalized.report?.md || '');
     const financialLinesMissing = evidenceExists && !hasFinancialLines(normalized.report?.md || '');
 
@@ -1129,8 +1201,12 @@ module.exports = async function (context, req) {
       || structureFailed
       || financialsSectionMissing
       || financialLinesMissing
-      || citationsMissing) {
-
+      || citationsMissing
+      || notesUnanswered
+      || websiteCitationsTooFew) {
+      const sTags = countMatches(normalized.report?.md || '', /\[S\d+\]/g);
+      const minSiteTags = (pages && pages.length >= 2) ? 2 : ((pages && pages.length >= 1) ? 1 : 0);
+      const websiteCitationsTooFew = minSiteTags > 0 && sTags < minSiteTags;
       const requiredHeadingsList = requiredHeadingsFor(callType).map(h => '- ' + h).join('\n');
       const addendum = [
         "=== STRICT REWRITE INSTRUCTIONS ===",
@@ -1145,6 +1221,8 @@ module.exports = async function (context, req) {
         "  • Cash at bank and in hand   • Current assets   • Current liabilities   • Net assets/(liabilities)   • Average employees",
         "- If ARR, multi-year contracts/TCV, or undrawn facilities are stated in the PDFs, include them too.",
         "- Add inline [P#] tags next to each financial figure you cite.",
+        "- If website pages were provided, include at least " + minSiteTags + " website tags ([S#]) tied to concrete facts.",
+        "- **MANDATORY:** In “## Bottom line for you”, add the exact line: **Response to seller’s question:** <a one–two sentence answer grounded in the provided evidence; if not evidenced, write “No public evidence found.”>.",
         "- Add inline [S#] or [P#] tags for every other claim that depends on evidence.",
         "- If a data point cannot be found in the provided sources, write exactly: “No public evidence found.”",
         "- Keep the schema and JSON shape exactly as instructed (no markdown fences)."
@@ -1162,8 +1240,9 @@ module.exports = async function (context, req) {
       const struct2 = validateReportStructure(normalized2.report?.md || '', { isSummary, callType });
       const longEnough = isSummary || (normalized2.report?.md || '').length >= 900;
       const citesOk = (!evidenceExists) || hasInlineCitations(normalized2.report?.md || '');
+      const notesAnswered2 = answeredSellerNotes(normalized2.report?.md || '');
 
-      if (valid2 && struct2.ok && longEnough && citesOk && !looksGeneric(normalized2.report?.md) && hasEvidenceMarks(normalized2.report?.md)) {
+      if (valid2 && struct2.ok && longEnough && citesOk && !looksGeneric(normalized2.report?.md) && hasEvidenceMarks(normalized2.report?.md)&& notesAnswered2) {
         normalized = normalized2;
         valid = true;
         redoApplied = true;
