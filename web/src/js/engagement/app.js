@@ -898,9 +898,7 @@ function wire() {
   // Copy / Download / Popout
   if (els.btnCopy && els.output) {
     els.btnCopy.addEventListener("click", async () => {
-      try {
-        await copyToClipboard(els.output.textContent || "");
-      } catch { }
+      await copyToClipboard(els.output.textContent || "");
     });
   }
   if (els.btnDownload && els.output) {
@@ -922,19 +920,8 @@ function wire() {
       w.document.close();
     });
   }
-}
-// Call notes: reuse the shared clipboard helper
-const btnNotesCopy = document.getElementById("save-notes");
-if (btnNotesCopy) {
-  btnNotesCopy.addEventListener("click", async function () {
-    const ta = document.getElementById("notes");
-    if (!ta) return;
-    await copyToClipboard(ta.value);
-    const old = this.textContent;
-    this.textContent = "Copied!";
-    setTimeout(() => { this.textContent = old; }, 1200);
-  });
-  // Call notes: reuse the shared clipboard helper
+
+  // Call notes: Copy to clipboard
   const btnNotesCopy = document.getElementById("save-notes");
   if (btnNotesCopy) {
     btnNotesCopy.addEventListener("click", async function () {
@@ -946,7 +933,8 @@ if (btnNotesCopy) {
       setTimeout(() => { this.textContent = old; }, 1200);
     });
   }
-  // Follow-up email modal: reuse the same helper
+
+  // Follow-up email modal: Copy to clipboard
   const btnEmailCopy = document.getElementById("email-copy");
   if (btnEmailCopy) {
     btnEmailCopy.addEventListener("click", async function () {
