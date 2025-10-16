@@ -523,6 +523,14 @@ async function loadBuyerIntelFromTemplate({ mode, productId, buyerId }) {
     });
     intelBody.hidden = false;
   }
+  intelBody.hidden = false;
+  const btnIntel =
+    document.getElementById("toggle-intel") ||
+    document.querySelector('[data-toggle="intel"]');
+  if (btnIntel) {
+    btnIntel.textContent = "Hide";
+    btnIntel.setAttribute("aria-expanded", "true");
+  }
 }
 
 // ---------- Validation & button enabling ----------
@@ -630,7 +638,7 @@ async function onGenerate() {
     };
 
     // 3) POST to the endpoint (1)
-    setStatus("Generating…");
+    setStatus("Creating your guide…");
     let data;
     try {
       DIAG.set({ kind: "request", variables, mode, productId, buyerId }); // keeps PII-light; omit templateMd if you prefer
@@ -946,6 +954,68 @@ function wire() {
       setTimeout(() => { this.textContent = old; }, 1200);
     });
   }
+  // Help modal (top bar)
+  const helpBtn = document.getElementById("help");
+  const helpDlg = document.getElementById("help-modal");
+  const helpClose = document.getElementById("help-close");
+
+  if (helpBtn && helpDlg) {
+    helpBtn.addEventListener("click", () => {
+      if (typeof helpDlg.showModal === "function") helpDlg.showModal();
+      else helpDlg.setAttribute("open", ""); // very old browsers (non-modal fallback)
+    });
+  }
+  if (helpClose && helpDlg) {
+    helpClose.addEventListener("click", () => {
+      if (typeof helpDlg.close === "function") helpDlg.close();
+      else helpDlg.removeAttribute("open");
+    });
+  }
+  // Click backdrop to close
+  if (helpDlg) {
+    helpDlg.addEventListener("click", (e) => {
+      if (e.target === helpDlg) {
+        if (typeof helpDlg.close === "function") helpDlg.close();
+        else helpDlg.removeAttribute("open");
+      }
+    });
+  }
+  const themeBtn = document.getElementById("themeToggle");
+
+  function applyTheme(t) {
+    const theme = (t === "dark") ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", theme);
+    try { localStorage.setItem("it-theme", theme); } catch { }
+    syncThemeBtn();
+  }
+
+  function syncThemeBtn() {
+    if (!themeBtn) return;
+    const current = document.documentElement.getAttribute("data-theme") || "light";
+    const isDark = current === "dark";
+    themeBtn.textContent = isDark ? "Light mode" : "Night mode";
+    themeBtn.setAttribute("aria-pressed", String(isDark));
+  }
+
+  if (themeBtn) {
+    themeBtn.addEventListener("click", () => {
+      const cur = document.documentElement.getAttribute("data-theme") || "light";
+      applyTheme(cur === "dark" ? "light" : "dark");
+    });
+    // Initial label/state on page load
+    syncThemeBtn();
+  }
+
+  // Keep label in sync if theme changes elsewhere (another tab/page)
+  window.addEventListener("storage", (e) => {
+    if (e.key === "it-theme" || e.key === "theme") {
+      const v = (e.newValue || "").toLowerCase();
+      if (v === "dark" || v === "light") {
+        document.documentElement.setAttribute("data-theme", v);
+        syncThemeBtn();
+      }
+    }
+  });
 }
 
 // ---------- Bootstrap ----------

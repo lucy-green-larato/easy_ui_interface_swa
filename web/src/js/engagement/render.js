@@ -381,6 +381,7 @@ export function enhanceRenderedGuide(container, { getContext }) {
           out.textContent = "Saved to notes.";
         }
       }
+      container.dispatchEvent(new CustomEvent("eng-lookup-sources", { detail: { sources: Array.isArray(data.sources) ? data.sources : [] } }));
     } catch (e) {
       if (out) out.textContent = String(e?.message || e);
     }
