@@ -257,11 +257,6 @@ async function parseMultipart(req) {
 // ------------------------------
 // PDF extraction (optional)
 // ------------------------------
-function hasFinancialSignals(text) {
-  if (!text) return false;
-  const rx = /(turnover|revenue|gross\s+profit|operating\s+profit|operating\s+loss|profit\s+before\s+tax|loss\s+before\s+tax|statement\s+of\s+comprehensive\s+income|balance\s+sheet|cash\s*(?:at\s*bank|and\s*in\s*hand)|current\s+assets|current\s+liabilities|net\s+assets|\bARR\b|average\s+(?:number\s+of\s+)?employees|\bRCF\b|revolving\s+credit)/i;
-  return rx.test(text);
-}
 
 function normalizeFinancialText(s) {
   if (!s) return '';
@@ -593,6 +588,48 @@ function validateReportStructure(md, { isSummary, callType } = {}) {
   };
 }
 
+// --- Section helpers to check Financials formatting/content ---
+const FINANCIALS_HX = /^###\s*Financials\s*\(evidenced\)\s*$/mi;
+
+function sectionSlice(md, headingRx) {
+  if (typeof md !== 'string') return '';
+  const m = md.match(headingRx);
+  if (!m) return '';
+  const start = m.index + m[0].length;
+  const rest = md.slice(start);
+  const next = rest.search(/^\s*##\s+/m);
+  return (next === -1 ? rest : rest.slice(0, next)).trim();
+}
+
+function financialsIsParagraph(md) {
+  const body = sectionSlice(md, FINANCIALS_HX);
+  if (!body) return false;
+  const hasBullets = /^\s*[-*•]/m.test(body);             // no list markers
+  const sentences = (body.match(/[.!?]\s/g) || []).length; // at least a couple of sentences
+  return !hasBullets && sentences >= 2 && body.length >= 140;
+}
+
+function financialsHasLabeledFigures(md) {
+  const body = sectionSlice(md, FINANCIALS_HX);
+  if (!body) return false;
+  // require at least 3 different labeled metrics with FY and a number/currency
+  const tests = [
+    /(revenue|turnover)[^\n]*\bFY\d{2}\b[^\n]*?(?:£|GBP)?\s*\d/i,
+    /gross\s+profit[^\n]*\bFY\d{2}\b[^\n]*?(?:£|GBP)?\s*\d/i,
+    /operating\s+(?:profit|loss)[^\n]*\bFY\d{2}\b[^\n]*?(?:£|GBP)?\s*\d/i,
+    /(profit|loss)\s+before\s+tax[^\n]*\bFY\d{2}\b[^\n]*?(?:£|GBP)?\s*\d/i,
+    /cash[^\n]*(?:bank|in\s*hand|equivalents)[^\n]*\bFY\d{2}\b[^\n]*?(?:£|GBP)?\s*\d/i,
+    /current\s+assets[^\n]*\bFY\d{2}\b[^\n]*?(?:£|GBP)?\s*\d/i,
+    /current\s+liabilities[^\n]*\bFY\d{2}\b[^\n]*?(?:£|GBP)?\s*\d/i,
+    /net\s+(?:assets|liabilities)[^\n]*\bFY\d{2}\b[^\n]*?(?:£|GBP)?\s*\d/i,
+    /average\s+(?:monthly\s+)?(?:number\s+of\s+)?employees[^\n]*\bFY\d{2}\b[^\n]*?\d/i
+  ];
+  let hits = 0;
+  for (const rx of tests) if (rx.test(body)) hits++;
+  return hits >= 3;
+}
+
+
 function makeFinancialsDigest(pdfs) {
   const labels = [
     { key: 'Revenue/Turnover', rx: /(turnover|revenue)/i },
@@ -726,6 +763,7 @@ function buildQualificationJsonPrompt(args) {
     "- Quote figures with currency symbols and YEAR LABELS (e.g., “FY24: £20.76m”).",
     "- If the income statement is not filed (small companies regime), state that explicitly and use balance-sheet items you DO have.",
     "- If no numbers are in the sources, you MUST say so in “What we could not evidence”.",
+    "- Present the subsection “### Financials (evidenced)” in paragraph form (no bullets).",
     "",
     "DECISION MAKERS & PARTNERS (if in website text):",
     "- Extract named roles/titles (CEO, CFO, Directors, etc.) and partner/vendor logos/lists where visible.",
@@ -1201,15 +1239,25 @@ module.exports = async function (context, req) {
     const tooShortFull = !isSummary && ((normalized.report?.md || '').length < 900);
     const structureFailed = !struct1.ok;
     const evidenceExists = (!isSummary) && ((pages && pages.length) || (pdfs && pdfs.length));
-    const citationsMissing = evidenceExists && !hasInlineCitations(normalized.report?.md || '');
-    const notesUnanswered = !answeredSellerNotes(normalized.report?.md || '');
+
     function countMatches(md, rx) { return (String(md).match(rx) || []).length; }
     function hasInlineCitations(md) {
       if (typeof md !== 'string') return false;
       return /\[S\d+\]/.test(md) || /\[P\d+\]/.test(md);
-    };
+    }
+
+    const citationsMissing = evidenceExists && !hasInlineCitations(normalized.report?.md || '');
+    const notesUnanswered = !answeredSellerNotes(normalized.report?.md || '');
+
+    // Website tag minimum (compute BEFORE using)
+    const sTags = countMatches(normalized.report?.md || '', /\[S\d+\]/g);
+    const minSiteTags = (pages && pages.length >= 2) ? 2 : ((pages && pages.length >= 1) ? 1 : 0);
+    const websiteCitationsTooFew = minSiteTags > 0 && sTags < minSiteTags;
+
+    // Financials checks
     const financialsSectionMissing = evidenceExists && !hasFinancialsSection(normalized.report?.md || '');
-    const financialLinesMissing = evidenceExists && !hasFinancialLines(normalized.report?.md || '');
+    const financialsParagraphBad = evidenceExists && !financialsIsParagraph(normalized.report?.md || '');
+    const financialsFiguresMissing = evidenceExists && !financialsHasLabeledFigures(normalized.report?.md || '');
 
     if (!valid
       || looksGeneric(normalized.report?.md)
@@ -1217,7 +1265,8 @@ module.exports = async function (context, req) {
       || tooShortFull
       || structureFailed
       || financialsSectionMissing
-      || financialLinesMissing
+      || financialsFiguresMissing
+      || financialsParagraphBad
       || citationsMissing
       || notesUnanswered
       || websiteCitationsTooFew) {
@@ -1233,16 +1282,17 @@ module.exports = async function (context, req) {
         requiredHeadingsList,
         "- INSIDE “## Company profile (what can be evidenced)”, add the subsection exactly named:",
         "  ### Financials (evidenced)",
-        "- Under that subsection, include bullet lines for at least the following with YEAR labels and numbers:",
-        "  • Revenue/Turnover   • Gross profit   • Operating profit/loss   • Profit/Loss before tax",
-        "  • Cash at bank and in hand   • Current assets   • Current liabilities   • Net assets/(liabilities)   • Average employees",
-        "- If ARR, multi-year contracts/TCV, or undrawn facilities are stated in the PDFs, include them too.",
-        "- Add inline [P#] tags next to each financial figure you cite.",
+        "- Write “Financials (evidenced)” as ONE compact paragraph (no list/bullets).",
+        "- In that paragraph, include AT LEAST THREE labelled metrics with YEAR tags and numbers, chosen from:",
+        "  Revenue/Turnover; Gross profit; Operating profit/loss; Profit/Loss before tax; Cash (bank and in hand); Current assets; Current liabilities; Net assets/(liabilities); Average employees.",
+        "- Add [P#] next to EACH figure cited (use the correct numbers from the PDF sources list).",
         "- If website pages were provided, include at least " + minSiteTags + " website tags ([S#]) tied to concrete facts.",
         "- **MANDATORY:** In “## Bottom line for you”, add the exact line: **Response to seller’s question:** <a one–two sentence answer grounded in the provided evidence; if not evidenced, write “No public evidence found.”>.",
-        "- Add inline [S#] or [P#] tags for every other claim that depends on evidence.",
+        "- Add [S#]/[P#] tags for any other claim that depends on evidence.",
         "- If a data point cannot be found in the provided sources, write exactly: “No public evidence found.”",
-        "- Keep the schema and JSON shape exactly as instructed (no markdown fences)."
+        "- Keep the schema and JSON shape exactly as instructed (no markdown fences).",
+        "",
+        (financeCandidates ? "FINANCIALS EXTRACTION CANDIDATES:\n" + financeCandidates : "")
       ].join("\n");
 
       const messages2 = [
