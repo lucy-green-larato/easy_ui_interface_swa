@@ -1031,12 +1031,15 @@ module.exports = async function (context, req) {
     // --------------------------
     const principal = parsePrincipal(req);
 
-if (String(process.env.QUAL_DISABLE_AUTH) !== '1') {
-  if (!hasAccess(principal, allowedRoles)) {
-    try { context.log('[auth] denied; roles=%j allowed=%j', (principal && principal.userRoles) || [], allowedRoles); } catch {}
-    return err(context, 'Unauthorized', 401, { reason: 'Insufficient role', allowedRoles });
-  }
-}
+    // BYPASS: set QUAL_DISABLE_AUTH=1 to skip all app-level auth
+    if (String(process.env.QUAL_DISABLE_AUTH) !== '1') {
+      if (!hasAccess(principal)) {
+        try { context.log('[auth] denied; roles=%j', (principal && principal.userRoles) || []); } catch { }
+        return err(context, 'Unauthorized', 401, { reason: 'app-auth' });
+      }
+    } else {
+      try { context.log('[auth] bypass active'); } catch { }
+    }
 
     // --------------------------
     // GET = diagnostics
