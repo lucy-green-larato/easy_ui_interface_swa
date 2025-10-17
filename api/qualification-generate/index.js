@@ -66,6 +66,7 @@ function err(context, message, status = 400, details = undefined) {
   context.res = { status, headers: cors(context), body: { error: message, ...(details ? { details } : {}) } };
 }
 
+// ---- Auth helpers (shared-secret + Easy Auth) ----
 function parsePrincipal(req) {
   const raw = req.headers['x-ms-client-principal'];
   if (!raw) return null;
@@ -77,24 +78,56 @@ function parsePrincipal(req) {
   }
 }
 
-function hasAccess(principal, req) {
-  if (isLocal()) return true;             // relaxed locally
-  if (hasSharedSecret(req)) return true;  // shared-secret override
+// case-insensitive header getter
+function getHeader(req, name) {
+  if (!req || !req.headers) return '';
+  const h = req.headers;
+  return h[name] ?? h[name.toLowerCase()] ?? h[name.toUpperCase()] ?? '';
+}
 
+// extract Bearer token, case-insensitive
+function getBearerToken(req) {
+  const auth = String(getHeader(req, 'authorization') || '');
+  const m = /^Bearer\s+(.+)$/i.exec(auth);
+  return m ? m[1].trim() : '';
+}
+
+// constant-time equality when lengths match
+function secretsEqual(a, b) {
+  try {
+    const crypto = require('crypto');
+    const A = Buffer.from(String(a || ''), 'utf8');
+    const B = Buffer.from(String(b || ''), 'utf8');
+    if (A.length !== B.length || A.length === 0) return false;
+    return crypto.timingSafeEqual(A, B);
+  } catch {
+    // fallback
+    return a === b && a.length > 0;
+  }
+}
+
+// shared-secret check (QUAL_API_KEY via Bearer token)
+function hasSharedSecret(req) {
+  const expected = String(process.env.QUAL_API_KEY || '').trim();
+  if (!expected) return false;
+  const token = getBearerToken(req);
+  return secretsEqual(token, expected);
+}
+
+function hasAccess(principal, req) {
+  // 1) local dev or explicit override
+  const allowAnon = String(process.env.ALLOW_ANON || '').trim();
+  if (isLocal() || allowAnon === '1' || /^true$/i.test(allowAnon)) return true;
+
+  // 2) shared-secret via Authorization: Bearer <QUAL_API_KEY>
+  if (hasSharedSecret(req)) return true;
+
+  // 3) Easy Auth roles (if present)
   if (!principal) return false;
   const roles = new Set((principal.userRoles || []).map(r => String(r).toLowerCase()));
   return roles.has('authenticated') || roles.has('contributor') || roles.has('admin');
 }
 
-
-function hasSharedSecret(req) {
-  const key = (process.env.QUAL_API_KEY || '').trim();
-  if (!key) return false; // not configured
-  const raw = String(req.headers['authorization'] || '');
-  const m = /^Bearer\s+(.+)$/i.exec(raw);
-  if (!m) return false;
-  return m[1].trim() === key;
-}
 
 // ------------------------------
 // Fetch helpers
@@ -857,9 +890,6 @@ function buildQualificationJsonPrompt(args) {
     "iXBRL summary (most recent first):",
     ixBrief,
     "",
-    sellerNotesRules,
-    "",
-    "",
     notesBlock,
     "",
     websiteBlock,
@@ -901,7 +931,7 @@ async function callAzureChatJSON({ messages, max_tokens = 1200 }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'api-key': process.env.AZURE_OPENAI_API_KEY,
+        'api-key': process.env.AZURE_OPENAI_API_KEY
       },
       body: JSON.stringify(body),
       signal: ac.signal,
@@ -917,7 +947,14 @@ async function callAzureChatJSON({ messages, max_tokens = 1200 }) {
 
 async function callOpenAIChatJSON({ messages, max_tokens = 1200 }) {
   const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-  const url = 'https://api.openai.com/v1/chat/completions';
+  const apiKey = process.env.OPENAI_API_KEY;
+  const baseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com').replace(/\/+$/, '');
+  const url = `${baseUrl}/v1/chat/completions`;
+
+  if (!apiKey) {
+    throw new Error('OpenAI API key missing (set OPENAI_API_KEY).');
+  }
+
   const body = {
     model,
     messages,
@@ -925,22 +962,45 @@ async function callOpenAIChatJSON({ messages, max_tokens = 1200 }) {
     response_format: { type: 'json_object' },
     max_tokens,
   };
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`,
+  };
+  if (process.env.OPENAI_ORGANIZATION) {
+    headers['OpenAI-Organization'] = process.env.OPENAI_ORGANIZATION;
+  }
+  if (process.env.OPENAI_PROJECT) {
+    headers['OpenAI-Project'] = process.env.OPENAI_PROJECT;
+  }
+
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort('timeout'), MODEL_TIMEOUT_MS);
+
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
+      headers,
       body: JSON.stringify(body),
       signal: ac.signal,
     });
-    if (!res.ok) throw new Error(`OpenAI error ${res.status}`);
+
+    if (!res.ok) {
+      // Try to surface the API’s error JSON if available
+      let detail = '';
+      try {
+        const errJson = await res.json();
+        detail = errJson?.error?.message || JSON.stringify(errJson);
+      } catch {
+        try { detail = await res.text(); } catch { /* ignore */ }
+      }
+      throw new Error(`OpenAI error ${res.status}${detail ? `: ${detail}` : ''}`);
+    }
+
     const json = await res.json();
     const content = json?.choices?.[0]?.message?.content || '';
-    return { content, provider: 'openai' };
+    const usage = json?.usage || null;
+    return { content, provider: 'openai', usage };
   } finally {
     clearTimeout(t);
   }
@@ -1033,7 +1093,7 @@ module.exports = async function (context, req) {
 
     // BYPASS: set QUAL_DISABLE_AUTH=1 to skip all app-level auth
     if (String(process.env.QUAL_DISABLE_AUTH) !== '1') {
-      if (!hasAccess(principal)) {
+      if (!hasAccess(principal, req)) {
         try { context.log('[auth] denied; roles=%j', (principal && principal.userRoles) || []); } catch { }
         return err(context, 'Unauthorized', 401, { reason: 'app-auth' });
       }
@@ -1137,7 +1197,6 @@ module.exports = async function (context, req) {
       pdfs,
       websiteText,
       sitePages: pages,
-      sellerNotes: notes,
       seller: {
         name: String(variables.seller_name || variables.your_name || ''),
         company: String(variables.seller_company || variables.your_company || ''),
@@ -1246,10 +1305,6 @@ module.exports = async function (context, req) {
     const evidenceExists = (!isSummary) && ((pages && pages.length) || (pdfs && pdfs.length));
 
     function countMatches(md, rx) { return (String(md).match(rx) || []).length; }
-    function hasInlineCitations(md) {
-      if (typeof md !== 'string') return false;
-      return /\[S\d+\]/.test(md) || /\[P\d+\]/.test(md);
-    }
 
     const citationsMissing = evidenceExists && !hasInlineCitations(normalized.report?.md || '');
     const notesUnanswered = !answeredSellerNotes(normalized.report?.md || '');
@@ -1270,14 +1325,11 @@ module.exports = async function (context, req) {
       || tooShortFull
       || structureFailed
       || financialsSectionMissing
-      || financialsFiguresMissing
-      || financialsParagraphBad
+      || financialLinesMissing
       || citationsMissing
       || notesUnanswered
       || websiteCitationsTooFew) {
-      const sTags = countMatches(normalized.report?.md || '', /\[S\d+\]/g);
-      const minSiteTags = (pages && pages.length >= 2) ? 2 : ((pages && pages.length >= 1) ? 1 : 0);
-      const websiteCitationsTooFew = minSiteTags > 0 && sTags < minSiteTags;
+
       const requiredHeadingsList = requiredHeadingsFor(callType).map(h => '- ' + h).join('\n');
       const addendum = [
         "=== STRICT REWRITE INSTRUCTIONS ===",
@@ -1287,17 +1339,15 @@ module.exports = async function (context, req) {
         requiredHeadingsList,
         "- INSIDE “## Company profile (what can be evidenced)”, add the subsection exactly named:",
         "  ### Financials (evidenced)",
-        "- Write “Financials (evidenced)” as ONE compact paragraph (no list/bullets).",
-        "- In that paragraph, include AT LEAST THREE labelled metrics with YEAR tags and numbers, chosen from:",
-        "  Revenue/Turnover; Gross profit; Operating profit/loss; Profit/Loss before tax; Cash (bank and in hand); Current assets; Current liabilities; Net assets/(liabilities); Average employees.",
-        "- Add [P#] next to EACH figure cited (use the correct numbers from the PDF sources list).",
+        "- Under that subsection, include YEAR-labelled figures for at least:",
+        "  • Revenue/Turnover   • Gross profit   • Operating profit/loss   • Profit/Loss before tax",
+        "  • Cash at bank and in hand   • Current assets   • Current liabilities   • Net assets/(liabilities)   • Average employees",
+        "- Add inline [P#] tags next to each financial figure you cite.",
         "- If website pages were provided, include at least " + minSiteTags + " website tags ([S#]) tied to concrete facts.",
         "- **MANDATORY:** In “## Bottom line for you”, add the exact line: **Response to seller’s question:** <a one–two sentence answer grounded in the provided evidence; if not evidenced, write “No public evidence found.”>.",
-        "- Add [S#]/[P#] tags for any other claim that depends on evidence.",
+        "- Add inline [S#] or [P#] tags for every other claim that depends on evidence.",
         "- If a data point cannot be found in the provided sources, write exactly: “No public evidence found.”",
-        "- Keep the schema and JSON shape exactly as instructed (no markdown fences).",
-        "",
-        (financeCandidates ? "FINANCIALS EXTRACTION CANDIDATES:\n" + financeCandidates : "")
+        "- Keep the schema and JSON shape exactly as instructed (no markdown fences)."
       ].join("\n");
 
       const messages2 = [
@@ -1320,6 +1370,7 @@ module.exports = async function (context, req) {
         redoApplied = true;
       }
     }
+
 
     // --------------------------
     // Merge server citations
