@@ -390,38 +390,38 @@
           <p id="tips-empty" class="muted">Tips will appear after you generate a report.</p>
         </div>
       </aside>
-
       <aside class="card" id="swot-panel" style="margin-top:var(--s-4)">
         <div class="row-between" style="align-items:center">
-          <h3 style="margin:0">SWOT (from your analysis)</h3>
+          <h3 style="margin:0">SWOT</h3>
           <button id="toggle-swot" class="btn small" type="button" aria-expanded="true"
             aria-controls="swot-body">Hide</button>
         </div>
-
         <div id="swot-body" style="margin-top:var(--s-3)">
-          <p class="muted" style="margin-top:0;margin-bottom:.5rem">Click any card to add its text to your qualification
-            notes.</p>
+          <p class="muted" style="margin-top:0;margin-bottom:.5rem">
+            <strong>SWOT based on your qualification analysis.</strong> Click any card to add its text to your
+            qualification notes.
+          </p>
 
           <div class="swot-grid" style="display:grid;gap:var(--s-3)">
             <div class="card swot-card" data-kind="S" tabindex="0" role="button" aria-label="Add Strengths to notes">
               <h4 style="margin:.25rem 0">Strengths</h4>
-              <ul id="swot-s" class="muted" style="margin:0;padding-left:1.1rem"></ul>
+              <ol id="swot-s" class="swot-list"></ol>
             </div>
 
             <div class="card swot-card" data-kind="W" tabindex="0" role="button" aria-label="Add Weaknesses to notes">
               <h4 style="margin:.25rem 0">Weaknesses</h4>
-              <ul id="swot-w" class="muted" style="margin:0;padding-left:1.1rem"></ul>
+              <ol id="swot-w" class="swot-list"></ol>
             </div>
 
             <div class="card swot-card" data-kind="O" tabindex="0" role="button"
               aria-label="Add Opportunities to notes">
               <h4 style="margin:.25rem 0">Opportunities</h4>
-              <ul id="swot-o" class="muted" style="margin:0;padding-left:1.1rem"></ul>
+              <ol id="swot-o" class="swot-list"></ol>
             </div>
 
             <div class="card swot-card" data-kind="T" tabindex="0" role="button" aria-label="Add Threats to notes">
               <h4 style="margin:.25rem 0">Threats</h4>
-              <ul id="swot-t" class="muted" style="margin:0;padding-left:1.1rem"></ul>
+              <ol id="swot-t" class="swot-list"></ol>
             </div>
           </div>
         </div>

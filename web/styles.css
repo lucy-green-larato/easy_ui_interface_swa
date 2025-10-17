@@ -2457,3 +2457,37 @@ html[data-page="qualification"] #delta-log,
 html[data-page="qualification"] #activity-log {
   display: none !important;
 }
+/* === Qualification: SWOT cards styled like Helpful tips =================== */
+html[data-page="qualification"] .swot-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .05s ease;
+  cursor: pointer;
+}
+
+/* Hover/active shading aligned to design tokens */
+@media (hover:hover) {
+  html[data-page="qualification"] .swot-card:hover {
+    background: var(--hover-tint-accent-6);
+    border-color: var(--accent);
+    box-shadow: var(--ring-shadow);
+  }
+}
+html[data-page="qualification"] .swot-card:active {
+  transform: translateY(0) scale(.985);
+}
+
+/* Numbered list inside each card */
+html[data-page="qualification"] .swot-list {
+  list-style: decimal;
+  margin: 6px 0 0;
+  padding-inline-start: 1.15rem;
+}
+html[data-page="qualification"] .swot-list li {
+  font-size: .92rem;
+  line-height: 1.35;
+  margin: 4px 0;
+  color: var(--text-2);
+}

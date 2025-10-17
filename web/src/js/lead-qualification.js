@@ -18,6 +18,57 @@ const CALL_PREF_KEY = STORAGE_PREFIX + ".call_pref";
 const esc = s => String(s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 const strongify = s => String(s || "").replace(/\*\*([^\*\n][\s\S]*?)\*\*/g, "<strong>$1</strong>");
 
+// --- Theme toggle (qualification app) ---
+(function () {
+  const root = document.documentElement;
+  const btn = document.getElementById("themeToggle");
+  if (!btn) return;
+
+  // Present the toggle beside the user badge (not inside the calltype group)
+  try {
+    const userBadge = document.getElementById("user-badge");
+    const headerRight = document.querySelector(".app-header .header-right");
+    if (userBadge && headerRight && btn.parentElement !== headerRight) {
+      headerRight.insertBefore(btn, userBadge);
+    }
+  } catch { }
+
+  const readTheme = () =>
+    (localStorage.getItem("it-theme") || localStorage.getItem("theme") || "").toLowerCase();
+
+  const writeTheme = (v) => {
+    localStorage.setItem("it-theme", v);
+    // keep legacy key in sync
+    localStorage.setItem("theme", v);
+  };
+
+  const apply = (theme) => {
+    const t = (theme === "dark" ? "dark" : "light");
+    root.setAttribute("data-theme", t);
+    btn.setAttribute("aria-pressed", String(t === "dark"));
+    btn.textContent = t === "dark" ? "Light mode" : "Night mode";
+  };
+
+  // initial
+  const initial = readTheme() || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  apply(initial);
+
+  // click → toggle
+  btn.addEventListener("click", () => {
+    const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    writeTheme(next);
+    apply(next);
+  });
+
+  // keep in sync if another tab flips it
+  window.addEventListener("storage", (e) => {
+    if (e.key === "it-theme" || e.key === "theme") {
+      const v = (e.newValue || "").toLowerCase();
+      if (v === "dark" || v === "light") apply(v);
+    }
+  });
+})();
+
 // === Highlighter helpers (wrap selected text in <mark>) ===
 let QUAL_highlightOn = false;
 
@@ -482,13 +533,13 @@ function QUAL_renderSwot(swot) {
   const oEl = document.getElementById("swot-o");
   const tEl = document.getElementById("swot-t");
 
-  function fill(ul, arr) {
-    if (!ul) return;
-    ul.innerHTML = "";
+  function fill(listEl, arr) {
+    if (!listEl) return;
+    listEl.innerHTML = "";
     (arr || []).forEach(x => {
       const li = document.createElement("li");
       li.textContent = x;
-      ul.appendChild(li);
+      listEl.appendChild(li);
     });
   }
 
@@ -513,7 +564,7 @@ function QUAL_wireSwotClicks() {
         : kind === "O" ? "Opportunities"
           : kind === "T" ? "Threats" : "Notes";
 
-    const list = card.querySelectorAll("ul > li");
+    const list = card.querySelectorAll("ol > li");
     const lines = Array.from(list).map(li => "- " + (li.textContent || "").trim()).filter(Boolean);
 
     if (!lines.length) return;
@@ -928,7 +979,7 @@ form?.addEventListener("submit", (e) => {
   const policy = { evidenceOnly: true, dropUnsupportedClaims: true };
 
   setBusy(true);
-  setStatus("Generating qualification…");
+  setStatus("Working hard to qualify your opportunity. Back in a couple of minutes…");
   if (diag) diag.open = false;
   if (diagJson) diagJson.textContent = "";
 
