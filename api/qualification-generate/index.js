@@ -78,27 +78,22 @@ function parsePrincipal(req) {
 }
 
 function hasAccess(principal, req) {
-  // 1) Local dev: always allow
-  if (isLocal()) return true;
+  if (isLocal()) return true;             // relaxed locally
+  if (hasSharedSecret(req)) return true;  // shared-secret override
 
-  // 2) Explicit server override for testing
-  if (process.env.ALLOW_ANON === '1') return true;
-
-  // 3) Allow a shared-secret API key (e.g., for server-to-server calls)
-  const auth = String(req?.headers?.authorization || '').trim();
-  if (process.env.QUAL_API_KEY && auth === `Bearer ${process.env.QUAL_API_KEY}`) {
-    return true;
-  }
-
-  // 4) Static Web Apps / App Service roles
   if (!principal) return false;
   const roles = new Set((principal.userRoles || []).map(r => String(r).toLowerCase()));
-  if (roles.has('admin') || roles.has('contributor') || roles.has('authenticated')) return true;
+  return roles.has('authenticated') || roles.has('contributor') || roles.has('admin');
+}
 
-  // Optionally allow SWA 'anonymous' role when explicitly enabled
-  if (process.env.ALLOW_SWA_ANON === '1' && roles.has('anonymous')) return true;
 
-  return false;
+function hasSharedSecret(req) {
+  const key = (process.env.QUAL_API_KEY || '').trim();
+  if (!key) return false; // not configured
+  const raw = String(req.headers['authorization'] || '');
+  const m = /^Bearer\s+(.+)$/i.exec(raw);
+  if (!m) return false;
+  return m[1].trim() === key;
 }
 
 // ------------------------------
@@ -1035,9 +1030,13 @@ module.exports = async function (context, req) {
     // Auth
     // --------------------------
     const principal = parsePrincipal(req);
-    if (!hasAccess(principal, req)) {
-      return err(context, 'Unauthorized', 401);
-    }
+
+if (String(process.env.QUAL_DISABLE_AUTH) !== '1') {
+  if (!hasAccess(principal, allowedRoles)) {
+    try { context.log('[auth] denied; roles=%j allowed=%j', (principal && principal.userRoles) || [], allowedRoles); } catch {}
+    return err(context, 'Unauthorized', 401, { reason: 'Insufficient role', allowedRoles });
+  }
+}
 
     // --------------------------
     // GET = diagnostics

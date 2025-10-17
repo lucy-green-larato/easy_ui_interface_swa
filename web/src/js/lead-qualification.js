@@ -515,6 +515,7 @@ docxBtn?.addEventListener("click", () => {
       html: outputEl?.innerHTML || "",
       citations: safeJson(outputEl?.getAttribute("data-citations")) || []
     };
+    
     fetch("/api/qualification-generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
