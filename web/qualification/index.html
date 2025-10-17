@@ -58,11 +58,11 @@
       <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
         <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
         <select id="call_type" name="call_type" form="qual-form" required aria-describedby="call_type_error">
-          <button id="themeToggle" class="btn inline chip" type="button" aria-pressed="false">Night mode</button>
           <option value="">Select…</option>
           <option>Direct</option>
           <option>Partner</option>
         </select>
+        <button id="themeToggle" class="btn inline chip" type="button" aria-pressed="false">Night mode</button>
         <label class="remember">
           <input type="checkbox" id="remember_call_type" form="qual-form" /> Remember
         </label>
@@ -360,10 +360,10 @@
         </div>
         <textarea id="notes" rows="6"
           placeholder="Type notes during desk research or calls. Saved locally on this device."></textarea>
-          <div class="row-between" style="gap:8px">
-            <button id="save-notes" class="btn inline" type="button">Save notes</button>
-            <button id="download-notes" class="btn inline" type="button">Download .txt</button>
-          </div>
+        <div class="row-between" style="gap:8px">
+          <button id="save-notes" class="btn inline" type="button">Copy to clipboard</button>
+          <button id="download-notes" class="btn inline" type="button">Download .txt</button>
+        </div>
         <p class="muted" style="margin-top:.5rem">Notes are downloaded to your device.</p>
       </div>
 
@@ -391,9 +391,40 @@
         </div>
       </aside>
 
-      <aside class="card" style="margin-top:var(--s-4)">
-        <h3>Financial flags</h3>
-        <ul id="flags-list" class="muted"></ul>
+      <aside class="card" id="swot-panel" style="margin-top:var(--s-4)">
+        <div class="row-between" style="align-items:center">
+          <h3 style="margin:0">SWOT (from your analysis)</h3>
+          <button id="toggle-swot" class="btn small" type="button" aria-expanded="true"
+            aria-controls="swot-body">Hide</button>
+        </div>
+
+        <div id="swot-body" style="margin-top:var(--s-3)">
+          <p class="muted" style="margin-top:0;margin-bottom:.5rem">Click any card to add its text to your qualification
+            notes.</p>
+
+          <div class="swot-grid" style="display:grid;gap:var(--s-3)">
+            <div class="card swot-card" data-kind="S" tabindex="0" role="button" aria-label="Add Strengths to notes">
+              <h4 style="margin:.25rem 0">Strengths</h4>
+              <ul id="swot-s" class="muted" style="margin:0;padding-left:1.1rem"></ul>
+            </div>
+
+            <div class="card swot-card" data-kind="W" tabindex="0" role="button" aria-label="Add Weaknesses to notes">
+              <h4 style="margin:.25rem 0">Weaknesses</h4>
+              <ul id="swot-w" class="muted" style="margin:0;padding-left:1.1rem"></ul>
+            </div>
+
+            <div class="card swot-card" data-kind="O" tabindex="0" role="button"
+              aria-label="Add Opportunities to notes">
+              <h4 style="margin:.25rem 0">Opportunities</h4>
+              <ul id="swot-o" class="muted" style="margin:0;padding-left:1.1rem"></ul>
+            </div>
+
+            <div class="card swot-card" data-kind="T" tabindex="0" role="button" aria-label="Add Threats to notes">
+              <h4 style="margin:.25rem 0">Threats</h4>
+              <ul id="swot-t" class="muted" style="margin:0;padding-left:1.1rem"></ul>
+            </div>
+          </div>
+        </div>
       </aside>
     </section>
   </main>

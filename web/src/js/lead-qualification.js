@@ -390,9 +390,11 @@ function renderIxbrlChips(summaryLike) {
   if (d.cashRatio != null && d.cashRatio < 0.25) flags.push("Cash ratio very low.");
   if (d.netDebtToEquity != null && d.netDebtToEquity > 1) flags.push("High leverage (net debt / equity > 1).");
 
-  flagsList.innerHTML = "";
-  flags.forEach(f => { const li = document.createElement("li"); li.textContent = f; flagsList.appendChild(li); });
-  applyAutoTips(flags); // will merge with model/bank tips
+  if (flagsList) {
+    flagsList.innerHTML = "";
+    flags.forEach(f => { const li = document.createElement("li"); li.textContent = f; flagsList.appendChild(li); });
+  }
+  applyAutoTips(flags);;
 }
 
 // -------- Tips system (unified) --------
@@ -438,6 +440,108 @@ function renderTips() {
   merged.forEach(t => { const li = document.createElement("li"); li.textContent = t; list.appendChild(li); });
   tipsEmpty.style.display = merged.length ? "none" : "";
 }
+
+// -------- SWOT (derived from generated report) --------
+
+// Small helper to grab text of a markdown section: "## <heading>" (until next "##")
+function QUAL_mdSection(md, heading) {
+  const h = String(heading || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rx = new RegExp("^\\s*##\\s*" + h + "\\s*$([\\s\\S]*?)(?=^\\s*##\\s+|\\Z)", "mi");
+  const m = String(md || "").match(rx);
+  return m ? m[1].trim() : "";
+}
+
+function QUAL_takeTopThree(text) {
+  const t = String(text || "").replace(/\r/g, "").trim();
+  if (!t) return [];
+  // Prefer existing bullets; else split into sentences.
+  const bullets = t.split(/\n+/).map(s => s.replace(/^\s*[-*•]\s*/, "").trim()).filter(Boolean);
+  const lines = bullets.length >= 3 ? bullets : t.split(/(?<=[.!?])\s+(?=[A-Z(])/).map(s => s.trim()).filter(Boolean);
+  return lines.slice(0, 3);
+}
+
+/**
+ * Map report sections → SWOT buckets:
+ *  S: Relationship value
+ *  W: What we could not evidence (and why)
+ *  O: Pain points
+ *  T: Competition & differentiation
+ */
+function QUAL_buildSwotFromMd(md) {
+  return {
+    S: QUAL_takeTopThree(QUAL_mdSection(md, "Relationship value")),
+    W: QUAL_takeTopThree(QUAL_mdSection(md, "What we could not evidence (and why)")),
+    O: QUAL_takeTopThree(QUAL_mdSection(md, "Pain points")),
+    T: QUAL_takeTopThree(QUAL_mdSection(md, "Competition & differentiation")),
+  };
+}
+
+function QUAL_renderSwot(swot) {
+  const sEl = document.getElementById("swot-s");
+  const wEl = document.getElementById("swot-w");
+  const oEl = document.getElementById("swot-o");
+  const tEl = document.getElementById("swot-t");
+
+  function fill(ul, arr) {
+    if (!ul) return;
+    ul.innerHTML = "";
+    (arr || []).forEach(x => {
+      const li = document.createElement("li");
+      li.textContent = x;
+      ul.appendChild(li);
+    });
+  }
+
+  fill(sEl, swot.S || []);
+  fill(wEl, swot.W || []);
+  fill(oEl, swot.O || []);
+  fill(tEl, swot.T || []);
+}
+
+// Click a SWOT card → append its text to the Qualification notes, with a header.
+function QUAL_wireSwotClicks() {
+  const notes = document.getElementById("notes");
+  const panel = document.getElementById("swot-panel");
+  if (!panel || !notes) return;
+
+  panel.addEventListener("click", (e) => {
+    const card = e.target.closest && e.target.closest(".swot-card");
+    if (!card) return;
+    const kind = card.getAttribute("data-kind") || "";
+    const title = kind === "S" ? "Strengths"
+      : kind === "W" ? "Weaknesses"
+        : kind === "O" ? "Opportunities"
+          : kind === "T" ? "Threats" : "Notes";
+
+    const list = card.querySelectorAll("ul > li");
+    const lines = Array.from(list).map(li => "- " + (li.textContent || "").trim()).filter(Boolean);
+
+    if (!lines.length) return;
+    const block = `\n${title}:\n${lines.join("\n")}\n`;
+    const before = notes.value || "";
+    notes.value = before ? (before.replace(/\s+$/, "") + block) : block.trimStart();
+    notes.dispatchEvent(new Event("input", { bubbles: true }));
+    setStatus(`${title} added to notes.`);
+  });
+
+  // keyboard activation on cards
+  panel.addEventListener("keydown", (e) => {
+    if ((e.key === "Enter" || e.key === " ") && e.target?.classList?.contains("swot-card")) {
+      e.preventDefault();
+      e.target.click();
+    }
+  });
+}
+
+// Show/Hide like Helpful tips
+document.getElementById("toggle-swot")?.addEventListener("click", () => {
+  const btn = document.getElementById("toggle-swot");
+  const body = document.getElementById("swot-body");
+  const expanded = btn.getAttribute("aria-expanded") === "true";
+  btn.setAttribute("aria-expanded", String(!expanded));
+  body.hidden = expanded;
+  btn.textContent = expanded ? "Show" : "Hide";
+});
 
 // Source rendering
 function renderSources(citations) {
@@ -871,7 +975,12 @@ form?.addEventListener("submit", (e) => {
     const now = new Date();
     const time = two(now.getHours()) + ":" + two(now.getMinutes());
     addActivity({ time, product: values.product_service || "—", buyer: values.buyer_type || "—" });
-
+    // --- Build and render SWOT from the generated report markdown ---
+    try {
+      const swot = QUAL_buildSwotFromMd(md);
+      QUAL_renderSwot(swot);
+      QUAL_wireSwotClicks();
+    } catch { /* non-fatal */ }
     setStatus("Done. (Generated from API)");
     document.getElementById("output-title")?.focus();
   }
@@ -943,6 +1052,10 @@ form?.addEventListener("reset", () => {
     emailBtn && (emailBtn.disabled = true);
     docxBtn && (docxBtn.disabled = true);
     prioBtn && (prioBtn.disabled = true);
+    document.getElementById("swot-s")?.replaceChildren();
+    document.getElementById("swot-w")?.replaceChildren();
+    document.getElementById("swot-o")?.replaceChildren();
+    document.getElementById("swot-t")?.replaceChildren();
     try { prioModal?.close(); } catch { }
     LAST_PRIO_PAYLOAD = null;
     document.querySelector(".panel.left")?.scrollTo({ top: 0, behavior: "auto" });
