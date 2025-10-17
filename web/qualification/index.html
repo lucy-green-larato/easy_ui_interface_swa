@@ -1,11 +1,44 @@
 <!-- web/qualification/index.html CSS driven presentation 10-10-2025 v1 -->
 <!doctype html>
-<html lang="en" data-app="inside-track-tools">
+<html lang="en" data-app="inside-track-tools" data-theme="light" data-page="qualification">
 
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inside Track Sales Accelerator · Lead qualification</title>
+  <meta name="color-scheme" content="light dark" />
+  <script>
+    (function () {
+      try {
+        // Persisted theme (use either key if present)
+        var theme = (localStorage.getItem('it-theme') || localStorage.getItem('theme') || '').toLowerCase();
+
+        // Cookie fallback
+        if (!theme) {
+          var m = (document.cookie || '').match(/(?:^|;\s*)(?:it-theme|theme)=(dark|light)/i);
+          theme = m ? m[1].toLowerCase() : '';
+        }
+
+        // OS preference fallback
+        if (!theme && window.matchMedia) {
+          theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+
+        if (theme !== 'dark' && theme !== 'light') theme = 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) { /* no-op */ }
+    })();
+
+    // Keep in sync if another tab flips the theme
+    window.addEventListener('storage', function (e) {
+      if (e.key === 'it-theme' || e.key === 'theme') {
+        var v = (e.newValue || '').toLowerCase();
+        if (v === 'dark' || v === 'light') {
+          document.documentElement.setAttribute('data-theme', v);
+        }
+      }
+    });
+  </script>
   <link rel="stylesheet" href="/styles.css?v=2025-10-09-fc2">
 </head>
 
@@ -25,6 +58,7 @@
       <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
         <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
         <select id="call_type" name="call_type" form="qual-form" required aria-describedby="call_type_error">
+          <button id="themeToggle" class="btn inline chip" type="button" aria-pressed="false">Night mode</button>
           <option value="">Select…</option>
           <option>Direct</option>
           <option>Partner</option>
@@ -102,7 +136,7 @@
                 <option value="full" selected>Full (detailed)</option>
                 <option value="summary">Summary / Exec</option>
               </select>
-              <p class="fineprint">Controls report length & depth.</p>
+              <!--<p class="fineprint">Controls report length & depth.</p> -->
             </div>
 
             <div class="field">
@@ -305,31 +339,32 @@
 
       <!-- Output actions -->
       <div class="output-actions">
-        <button id="copy-report" class="btn inline" type="button" disabled>Copy</button>
+        <button id="toggle-highlighter" type="button" class="btn" aria-pressed="false">Highlighter</button>
+        <button id="clear-highlights" type="button" class="btn">Clear highlights</button>
+        <button id="copy-report" class="btn inline" type="button" disabled>Copy to clipboard</button>
         <button id="download-report" class="btn inline" type="button" disabled>Download .txt</button>
         <button id="export-docx" class="btn inline" type="button" disabled>Export .docx</button>
-        <button id="send-prioritise" class="btn inline" type="button" disabled>Send for prioritisation</button>
+        <!-- <button id="send-prioritise" class="btn inline" type="button" disabled>Send for prioritisation</button> -->
         <!-- Wrap the Email button to place a label under it -->
         <span class="stack">
           <button id="email-report" class="btn inline" type="button" disabled
             aria-describedby="email-hint">Email</button>
-          <span id="email-hint" class="fineprint">Internal email</span>
+          <span id="email-hint" class="fineprint">Writes email for sales management</span>
         </span>
       </div>
-
 
       <!-- Notes -->
       <div class="notes-card card" style="margin-top:var(--s-4)">
         <div class="row-between">
           <h3>Qualification notes</h3>
+        </div>
+        <textarea id="notes" rows="6"
+          placeholder="Type notes during desk research or calls. Saved locally on this device."></textarea>
           <div class="row-between" style="gap:8px">
             <button id="save-notes" class="btn inline" type="button">Save notes</button>
             <button id="download-notes" class="btn inline" type="button">Download .txt</button>
           </div>
-        </div>
-        <textarea id="notes" rows="6"
-          placeholder="Type notes during desk research or calls. Saved locally on this device."></textarea>
-        <p class="muted" style="margin-top:.5rem">Notes are stored locally (this browser only).</p>
+        <p class="muted" style="margin-top:.5rem">Notes are downloaded to your device.</p>
       </div>
 
       <div class="change-log" style="margin-top:var(--s-4)">

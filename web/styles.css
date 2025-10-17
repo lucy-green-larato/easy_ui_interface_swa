@@ -2409,3 +2409,51 @@ html[data-page="engagement"] #intel-objections .objections-text .a:focus-visible
   background: color-mix(in srgb, var(--accent) 6%, var(--surface-1));
   outline: none;
 }
+/* === Qualification app only — mobile header layout & tweaks ============== */
+@media (max-width: 640px) {
+  html[data-page="qualification"] .app-header {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 8px;
+    padding: 8px 12px; /* reduce side padding on small screens */
+  }
+
+  html[data-page="qualification"] .app-header .header-right {
+    display: flex;
+    flex-wrap: wrap;   /* allow chips/controls to wrap neatly */
+    row-gap: 8px;
+    column-gap: 8px;
+    overflow: visible;
+  }
+
+  html[data-page="qualification"] .app-header .model-note {
+    display: none;     /* hide "Sales model in use" note on mobile */
+  }
+
+  html[data-page="qualification"] .app-header .header-left .app-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis; /* truncate long titles */
+  }
+}
+
+@media (max-width: 420px) {
+  html[data-page="qualification"] .app-header .kicker {
+    display: none;     /* hide secondary kicker line on very small screens */
+  }
+}
+/* Qualification app only */
+html[data-page="qualification"] .is-hidden { display: none !important; }
+
+/* Hide Fetch iXBRL (belt-and-braces, even if HTML not changed) */
+html[data-page="qualification"] #fetch-ixbrl { display: none !important; }
+
+/* Move notes buttons below the textarea if a grid/flex was forcing them above */
+html[data-page="qualification"] .notes-actions { margin-top: 8px; display: flex; gap: 8px; }
+
+/* Temporarily hide What changed and Recent activity (reversible) */
+html[data-page="qualification"] #delta-log,
+html[data-page="qualification"] #activity-log {
+  display: none !important;
+}

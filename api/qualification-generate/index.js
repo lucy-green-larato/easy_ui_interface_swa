@@ -1,4 +1,4 @@
-// api/qualification-generate/index.js 15-10-2025 v8
+// api/qualification-generate/index.js 17-10-2025 v11
 // Azure Function: qualification-generate
 // Goal: unify the recent (incomplete) generator with the archive's full feature set
 // Notes:
@@ -1418,6 +1418,97 @@ module.exports = async function (context, req) {
         sample: take(final?.report?.md, 400),
         tips: final?.tips
       });
+    }
+    // --- Internal summary email for sales leadership (plain text) ---
+    try {
+      const tone = String(variables.tone || variables.email_tone || "Professional").trim() || "Professional";
+      const seller = {
+        name: String(variables.seller_name || variables.your_name || ""),
+        company: String(variables.seller_company || variables.your_company || ""),
+      };
+      const prospect = {
+        name: String(variables.prospect_name || ""),
+        role: String(variables.prospect_role || ""),
+        company: String(variables.prospect_company || variables.company_name || ""),
+      };
+
+      // Inputs for the email: use the generated report.md plus any seller notes the user provided
+      const scriptMdText = String(final?.report?.md || "").trim();
+      const callNotes = String(notes || variables.context || variables.other_context || "").trim();
+
+      // Build a compact prompt for a JSON-wrapped plain-text email
+      const emailSystem = [
+        "You are an expert sales manager assistant.",
+        "Write a concise internal email to a sales leader summarising an opportunity.",
+        "Audience: sales leadership (internal).",
+        "Requirements:",
+        "- Be factual, crisp, and action-oriented.",
+        "- Start with a one-line opportunity summary (who/what/why-now).",
+        "- Then 3–6 bullets: buyer pains, current state, value hypothesis, proof/cred, risk/gaps.",
+        "- Close with 1 clear next step + owner + timeframe.",
+        "- No salutations or signatures. Plain text only.",
+        `Tone: ${tone}.`
+      ].join("\n");
+
+      const emailUser = [
+        "== SELLER ==",
+        `Name: ${seller.name}`,
+        `Company: ${seller.company}`,
+        "",
+        "== PROSPECT ==",
+        `Name: ${prospect.name}`,
+        `Role: ${prospect.role}`,
+        `Company: ${prospect.company}`,
+        "",
+        "== QUALIFICATION REPORT (Markdown) ==",
+        scriptMdText || "(none)",
+        "",
+        "== SELLER NOTES (verbatim) ==",
+        callNotes || "(none)"
+      ].join("\n");
+
+      // Ask for JSON: { "text": "<plain text email>" }
+      const emailSchema = {
+        type: "object",
+        properties: { text: { type: "string", description: "The internal email in plain text, no greeting/signoff" } },
+        required: ["text"],
+        additionalProperties: false
+      };
+
+      const emailMsgs = [
+        { role: "system", content: emailSystem },
+        {
+          role: "user", content: [
+            "Return valid JSON only. Shape:",
+            JSON.stringify(emailSchema),
+            "",
+            emailUser
+          ].join("\n")
+        }
+      ];
+
+      // Reuse the same provider and JSON-calling helpers defined above
+      const emailMaxTok = 700;
+      const emailResp = await (provider === 'azure'
+        ? callAzureChatJSON({ messages: emailMsgs, max_tokens: emailMaxTok })
+        : callOpenAIChatJSON({ messages: emailMsgs, max_tokens: emailMaxTok })
+      );
+
+      const emailParsed = (() => {
+        try { return JSON.parse(salvageJson(emailResp?.content || "")); } catch { return null; }
+      })();
+
+      const emailText = (emailParsed && typeof emailParsed.text === 'string')
+        ? emailParsed.text.trim()
+        : "";
+
+      // Attach to response (even if empty string — client can decide)
+      final.email = { text: emailText };
+
+    } catch (e) {
+      // Non-fatal: don’t block the main report; surface a hint for diagnostics
+      final.email = { text: "" };
+      try { context.log('[qual] email generation failed: %s', String(e && e.message || e)); } catch { }
     }
 
     return ok(context, final);

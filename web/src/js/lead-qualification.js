@@ -18,6 +18,39 @@ const CALL_PREF_KEY = STORAGE_PREFIX + ".call_pref";
 const esc = s => String(s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 const strongify = s => String(s || "").replace(/\*\*([^\*\n][\s\S]*?)\*\*/g, "<strong>$1</strong>");
 
+// === Highlighter helpers (wrap selected text in <mark>) ===
+let QUAL_highlightOn = false;
+
+function QUAL_wrapSelectionInMark(root) {
+  const sel = window.getSelection && window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  if (!root || !root.contains(range.commonAncestorContainer)) return;
+  if (range.collapsed) return;
+
+  const mark = document.createElement("mark");
+  try { range.surroundContents(mark); }
+  catch {
+    // Fallback: clone contents to avoid splitting nodes
+    const frag = range.cloneContents();
+    mark.appendChild(frag);
+    range.deleteContents();
+    range.insertNode(mark);
+  }
+  sel.removeAllRanges();
+}
+
+function QUAL_clearHighlights(root) {
+  if (!root) return;
+  const marks = root.querySelectorAll("mark");
+  marks.forEach(m => {
+    const parent = m.parentNode;
+    while (m.firstChild) parent.insertBefore(m.firstChild, m);
+    parent.removeChild(m);
+    parent.normalize();
+  });
+}
+
 // Minimal markdown → HTML (H2/H3, lists, paragraphs)
 function mdToHtml(md) {
   var s = String(md || "").replace(/\r/g, "");
@@ -741,7 +774,17 @@ callTypeSelXs?.addEventListener("change", () => {
 });
 
 // Notes
-saveNotesBtn?.addEventListener("click", saveNotes);
+saveNotesBtn?.addEventListener("click", async () => {
+  const txt = notesArea?.value || "";
+  if (!txt.trim()) return;
+  try {
+    await navigator.clipboard.writeText(txt);
+    setStatus("Notes copied.");
+  } catch {
+    setStatus("Could not copy notes.", "error");
+  }
+});
+
 downloadNotesBtn?.addEventListener("click", () => {
   const who = (form?.elements?.prospect_company?.value || "notes").trim().replace(/\s+/g, "-");
   const txt = notesArea?.value || "";
@@ -950,6 +993,22 @@ form?.addEventListener("reset", () => {
     }
   });
 
+  // 4) Highlighter buttons (analysis panel)
+  const hiBtn = document.getElementById("toggle-highlighter");
+  const clrBtn = document.getElementById("clear-highlights");
+  if (hiBtn && outputEl) {
+    hiBtn.addEventListener("click", () => {
+      QUAL_highlightOn = !QUAL_highlightOn;
+      hiBtn.setAttribute("aria-pressed", String(QUAL_highlightOn));
+    });
+    outputEl.addEventListener("mouseup", () => {
+      if (QUAL_highlightOn) QUAL_wrapSelectionInMark(outputEl);
+    });
+  }
+  if (clrBtn && outputEl) {
+    clrBtn.addEventListener("click", () => QUAL_clearHighlights(outputEl));
+  }
+
   // 5) One source of truth for enabling submit
   function syncSubmitEnabled() {
     submitBtn.disabled = !form.checkValidity();
@@ -984,4 +1043,37 @@ form?.addEventListener("reset", () => {
   try { enableSubmitIfValid && enableSubmitIfValid(); } catch { }
   try { renderActivity && renderActivity(); } catch { }
   try { renderTips && renderTips(); } catch { }
+  // Theme toggle (top bar) — uses data-theme + localStorage("it-theme")
+  const themeBtn = document.getElementById("themeToggle");
+  function applyTheme(t) {
+    const theme = (t === "dark") ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", theme);
+    try { localStorage.setItem("it-theme", theme); } catch { }
+    syncThemeBtn();
+  }
+  function syncThemeBtn() {
+    if (!themeBtn) return;
+    const current = document.documentElement.getAttribute("data-theme") || "light";
+    const isDark = current === "dark";
+    themeBtn.textContent = isDark ? "Light mode" : "Night mode";
+    themeBtn.setAttribute("aria-pressed", String(isDark));
+  }
+  if (themeBtn) {
+    themeBtn.addEventListener("click", () => {
+      const cur = document.documentElement.getAttribute("data-theme") || "light";
+      applyTheme(cur === "dark" ? "light" : "dark");
+    });
+    // Initial label/state
+    syncThemeBtn();
+  }
+  // Keep label in sync if theme changes elsewhere
+  window.addEventListener("storage", (e) => {
+    if (e.key === "it-theme" || e.key === "theme") {
+      const v = (e.newValue || "").toLowerCase();
+      if (v === "dark" || v === "light") {
+        document.documentElement.setAttribute("data-theme", v);
+        syncThemeBtn();
+      }
+    }
+  });
 })();
