@@ -26,6 +26,26 @@ function friendlyName(raw) {
   return raw;
 }
 
+async function setQualApiKey() {
+  // Don’t refetch if we already have it this tab
+  if (window.__QUAL_API_KEY || sessionStorage.getItem('QUAL_API_KEY')) {
+    window.__QUAL_API_KEY = window.__QUAL_API_KEY || sessionStorage.getItem('QUAL_API_KEY');
+    return;
+  }
+
+  // This endpoint must be implemented server-side to return the shared secret
+  // ONLY for authenticated users (and ideally role-checked).
+  const res = await fetch('/api/qual-key', { credentials: 'include', cache: 'no-store' });
+  if (!res.ok) throw new Error('Could not obtain QUAL API key');
+
+  const { key } = await res.json();
+  if (!key) throw new Error('QUAL API key missing in response');
+
+  // Make available to all pages on the same origin
+  window.__QUAL_API_KEY = key;
+  sessionStorage.setItem('QUAL_API_KEY', key);
+}
+
 // ===== Prevent navigation from disabled tiles =====
 document.addEventListener("click", (e) => {
   if (e.target.closest(".tool.disabled, [aria-disabled='true']")) e.preventDefault();
@@ -400,6 +420,15 @@ window.renderReport = renderReport;
       return data?.clientPrincipal ?? null;
     } catch {
       return null;
+    }
+  }
+
+  // Inject QUAL API key for the qualification app
+  {
+    const m = document.querySelector('meta[name="qual-api-key"]');
+    if (m && m.content) {
+      window.__QUAL_API_KEY = m.content.trim();
+      console.debug('[menu] QUAL API key injected for downstream app');
     }
   }
 

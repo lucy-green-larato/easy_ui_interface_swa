@@ -45,6 +45,16 @@ function mdToHtml(md) {
   return out.join("");
 }
 
+// --- API auth helper (shared-secret via <meta name="qual-api-key"> or window var) ---
+function authHeaders() {
+  const meta = document.querySelector('meta[name="qual-api-key"]');
+  const key =
+    (window.__QUAL_API_KEY && String(window.__QUAL_API_KEY).trim()) ||
+    (meta && String(meta.content || "").trim());
+  return key ? { Authorization: "Bearer " + key } : {};
+}
+
+
 // Buyer behaviour → slug
 function buyerSlug(label) {
   const l = String(label || "").toLowerCase();
@@ -515,10 +525,10 @@ docxBtn?.addEventListener("click", () => {
       html: outputEl?.innerHTML || "",
       citations: safeJson(outputEl?.getAttribute("data-citations")) || []
     };
-    
+
     fetch("/api/qualification-generate", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload)
     })
       .then(r => r.ok ? r.blob() : r.json().then(d => { throw new Error(d?.error || ("HTTP " + r.status)); }))
@@ -567,7 +577,7 @@ emailBtn?.addEventListener("click", () => {
     setStatus("Building email…");
     fetch("/api/qualification-generate", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload)
     })
       .then(r => r.json().then(data => { if (!r.ok) throw new Error(data?.error || "Could not build email."); return data; }))
@@ -824,8 +834,13 @@ form?.addEventListener("submit", (e) => {
   }
 
   function handleError(err) {
-    setStatus("Could not generate the report. See Diagnostics for details.", "error");
-    if (diag && diagJson) { diag.open = true; diagJson.textContent = String(err?.message || err); }
+    const msg = String(err?.message || err);
+    if (/401/.test(msg)) {
+      setStatus("Unauthorized (401). Your client didn’t send the QUAL_API_KEY Bearer token.", "error");
+    } else {
+      setStatus("Could not generate the report. See Diagnostics for details.", "error");
+    }
+    if (diag && diagJson) { diag.open = true; diagJson.textContent = msg; }
   }
 
   if (files.length) {
@@ -852,8 +867,8 @@ form?.addEventListener("submit", (e) => {
     };
     fetch("/api/qualification-generate", {
       method: "POST",
-      credentials: 'include', 
-      headers: { "Content-Type": "application/json" },
+      credentials: 'include',
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body)
     })
       .then(resp => resp.json().catch(() => ({})).then(data => { if (!resp.ok) throw new Error(data?.error || ("API " + resp.status)); return data; }))
@@ -931,7 +946,7 @@ form?.addEventListener("reset", () => {
     try {
     } finally {
       setBusy(false);
-      inFlight = false; 
+      inFlight = false;
     }
   });
 
