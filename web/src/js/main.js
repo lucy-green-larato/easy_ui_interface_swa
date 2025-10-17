@@ -540,13 +540,11 @@ window.renderReport = renderReport;
   try {
     const princ = await getClientPrincipal();
     if (princ) {
-      setLikelyAuthed(true);                    // <<< added
+      setLikelyAuthed(true);
       showSignedIn(princ.userDetails);
-      if (typeof window.renderReport === 'function') {
-        try { await window.renderReport(); } catch { }
-      }
+      try { window.renderReport?.(); } catch { /* non-blocking */ }
     } else {
-      setLikelyAuthed(false);                   // <<< added
+      setLikelyAuthed(false);
       showSignIn();
     }
   } catch {
