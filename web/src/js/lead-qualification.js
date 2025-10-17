@@ -851,6 +851,7 @@ form?.addEventListener("submit", (e) => {
     };
     fetch("/api/qualification-generate", {
       method: "POST",
+      credentials: 'include', 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     })

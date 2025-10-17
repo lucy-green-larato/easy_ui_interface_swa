@@ -48,9 +48,12 @@ const isLocal = () => process.env.WEBSITE_INSTANCE_ID == null;
 
 function cors(context) {
   const h = context.res?.headers ?? {};
+  const origin = context.req?.headers?.origin || '*';  // <- echo caller
   return {
     ...h,
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': origin,
+    'Vary': 'Origin',
+    'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Methods': 'OPTIONS, GET, POST',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
   };
