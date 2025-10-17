@@ -2491,3 +2491,20 @@ html[data-page="qualification"] .swot-list li {
   margin: 4px 0;
   color: var(--text-2);
 }
+/* Align SWOT header like Helpful tips (single row) */
+html[data-page="qualification"] #swot-panel #swot-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: nowrap;                 /* keep button on same line */
+}
+
+html[data-page="qualification"] #swot-panel #swot-header h3 {
+  margin: 0;                         /* avoid pushing the chip down */
+  white-space: nowrap;               /* match tips header behaviour */
+}
+
+html[data-page="qualification"] #swot-panel #toggle-swot {
+  margin-left: auto;                 /* keep chip flush-right */
+}
