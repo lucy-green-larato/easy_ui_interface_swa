@@ -1,4 +1,4 @@
-// Extracts text from uploaded PDFs (assumes user OCR’d when needed).
+// api/lib/evidence/ pdf.js Extracts text from uploaded PDFs (assumes user OCR’d when needed). 17-10-2025
 const pdfParse = require("pdf-parse");
 
 const MAX_TEXT_PER_FILE = 14000;

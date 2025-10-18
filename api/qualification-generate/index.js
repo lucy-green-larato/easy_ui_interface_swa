@@ -1,4 +1,4 @@
-// api/qualification-generate/index.js 17-10-2025 v11
+// api/qualification-generate/index.js 18-10-2025 v12
 // Azure Function: qualification-generate
 // Goal: unify the recent (incomplete) generator with the archive's full feature set
 // Notes:
@@ -45,6 +45,7 @@ try { pdfParse = require('pdf-parse'); } catch (_) { /* optional */ }
 const fs = require('fs/promises');
 
 const isLocal = () => process.env.WEBSITE_INSTANCE_ID == null;
+const { fetchLatestAccountsTexts, normalizeCompanyNumber } = require('../lib/chdi');
 
 function cors(context) {
   const h = context.res?.headers ?? {};
@@ -1105,6 +1106,29 @@ module.exports = async function (context, req) {
     // GET = diagnostics
     // --------------------------
     if (req.method === 'GET') {
+      // If a company number/id is provided, act like the old CHDI endpoint and return OCR'd PDFs
+      const raw = String((req.query?.company || req.query?.company_number || req.query?.id || '')).trim();
+      if (raw) {
+        try {
+          const companyNumber = normalizeCompanyNumber(raw);
+          if (!companyNumber) {
+            return err(context, 'company_number_required', 400);
+          }
+
+          // Get up to TWO accounts filings as OCR'd text
+          const pdfs = await fetchLatestAccountsTexts(companyNumber, 2);
+
+          if (!Array.isArray(pdfs) || pdfs.length === 0) {
+            return ok(context, null, 204);
+          }
+
+          return ok(context, { pdfs }, 200); // array of { filename, text }
+        } catch (e) {
+          return err(context, 'chdi_fetch_error', 500, { message: String((e && e.message) || e) });
+        }
+      }
+
+      // No company id -> default diagnostics
       return ok(context, {
         status: 'ok',
         version: 'qualification-generate/merged-1',
@@ -1129,6 +1153,7 @@ module.exports = async function (context, req) {
     let website = '';
     let extraPaths = [];
     let pdfFiles = [];
+    let injectedPdfTexts = [];
 
     const ct = (req.headers['content-type'] || '').toLowerCase();
     context.log('[qual] POST start; content-type=%s', ct);
@@ -1159,8 +1184,20 @@ module.exports = async function (context, req) {
         .map(s => String(s).trim())
         .filter(Boolean)
         .map(s => s.startsWith('/') || s.startsWith('http') ? s : '/' + s);
-    }
 
+      // NEW: capture OCR texts from CHDI (client may send array or JSON string)
+      if (Array.isArray(body.pdfTexts)) {
+        injectedPdfTexts = body.pdfTexts;
+      } else if (typeof body.pdfTexts === "string") {
+        try {
+          injectedPdfTexts = JSON.parse(body.pdfTexts);
+        } catch {
+          injectedPdfTexts = [];
+        }
+      } else {
+        injectedPdfTexts = [];
+      }
+    }
     // --------------------------
     // Evidence collection
     // --------------------------
@@ -1171,7 +1208,13 @@ module.exports = async function (context, req) {
 
     const pages = Array.isArray(siteBundle?.pages) ? siteBundle.pages : [];
     const websiteText = typeof siteBundle?.text === 'string' ? siteBundle.text : '';
-    const pdfs = Array.isArray(pdfExtracts) ? pdfExtracts : [];
+    const injected = Array.isArray(injectedPdfTexts)
+      ? injectedPdfTexts.map((p, i) => ({
+        filename: String(p?.filename || `ch-accounts-${i + 1}.pdf`),
+        text: String(p?.text || '').slice(0, PDF_CHAR_CAP)
+      })).filter(p => p.text && p.text.trim())
+      : [];
+    const pdfs = [...(Array.isArray(pdfExtracts) ? pdfExtracts : []), ...injected].slice(0, QUAL_MAX_PDFS);
 
     context.log('[qual] website pages=%d, websiteTextChars=%d, pdfs=%d',
       (pages || []).length, (websiteText || '').length, (pdfs || []).length);

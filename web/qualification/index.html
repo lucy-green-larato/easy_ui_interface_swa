@@ -1,4 +1,5 @@
-<!-- web/qualification/index.html CSS driven presentation 10-10-2025 v1 -->
+<!-- web/qualification/index.html CSS driven presentation 17-10-2025 v4
+  -->
 <!doctype html>
 <html lang="en" data-app="inside-track-tools" data-theme="light" data-page="qualification">
 
@@ -182,11 +183,8 @@
             </button>
           </label>
 
-          <input id="company_number" name="company_number" placeholder="Optional (e.g., 01234567)" />
-
-          <p id="company_number_hint" class="fineprint">
-            Important information for financial analysis. Click the button to read.
-          </p>
+          <input id="company_number" name="company_number" type="text" inputmode="numeric" autocomplete="off"
+            placeholder="e.g. 8 digits, NI+6 digits, SC+6 digits etc." aria-describedby="company_number_hint" />
         </div>
 
         <div class="field">
@@ -199,11 +197,11 @@
         <div class="grid-2">
           <div class="field">
             <label for="competitors">Competition</label>
-            <input id="competitors" name="competitors" placeholder="e.g., BT Wholesale, CityFibre, Gamma" />
+            <input id="competitors" name="competitors" placeholder="Relevant competitors" />
           </div>
           <div class="field">
             <label for="existing_provider">Existing provider(s)</label>
-            <input id="existing_provider" name="existing_provider" placeholder="e.g., Openreach, Microsoft, Vodafone" />
+            <input id="existing_provider" name="existing_provider" placeholder="e.g. Microsoft, Vodafone..." />
           </div>
         </div>
 
@@ -227,14 +225,16 @@
 
         <div class="field">
           <label for="events">Trade show(s) this year</label>
-          <input id="events" name="events" placeholder="e.g., Channel Live; Connected North" />
+          <input id="events" name="events" placeholder="e.g., Connected Britain, Infosec..." />
         </div>
 
         <fieldset class="card callout-gold" aria-labelledby="legend-evidence">
           <legend id="legend-evidence">Evidence</legend>
+          <p>Provide evidence by automatically getting information direct from Companies House, uploading your own
+            files, or entering data manually.</p>
 
-          <!-- iXBRL fetch -->
-          <div class="row-between" style="align-items:flex-end; gap:12px;">
+          <!-- iXBRL fetch (temporarily hidden; leave markup in place for future re-enable) -->
+          <div class="row-between" style="align-items:flex-end; gap:12px;" hidden>
             <div>
               <p class="muted" style="margin:.25rem 0 .5rem 0">Fetch latest iXBRL by company number (multi-year
                 supported).</p>
@@ -244,9 +244,19 @@
             <div id="ixbrl-chips" class="chips"></div>
           </div>
 
+          <!-- CHDI fetch -->
+          <div class="row-between" style="align-items:flex-end; gap:12px; margin-top:.5rem">
+            <div>
+              <p class="muted" style="margin:.25rem 0 .5rem 0"><strong>Automatic: </strong>analyses the two most recent
+                accounts filings from Companies House.</p>
+              <button id="fetch-chdi" class="btn primary btn-cta" type="button">Get from Companies House</button>
+              <span id="chdi-status" class="muted" aria-live="polite" style="margin-left:.5rem"></span>
+            </div>
+          </div>
+
           <!-- Manual metrics (fallback if 204 or user preference) -->
           <details id="manual-metrics" class="card" style="margin-top:var(--s-3)">
-            <summary>Open this panel to enter metrics manually</summary>
+            <summary><strong>Manual: </strong>click the arrow to enter metrics manually</summary>
             <div class="grid-3" style="margin-top:var(--s-3)">
               <div class="field"><label for="m_end_y1">Year 1 end date</label><input id="m_end_y1"
                   placeholder="YYYY-MM-DD"></div>
@@ -278,13 +288,19 @@
           </details>
 
           <!-- OCR PDF upload -->
-          <div class="field">
-            <label for="report_files">Upload annual report(s) (PDF)</label>
-            <input id="report_files" name="report_files" type="file" accept="application/pdf" multiple />
-            <p id="file_hint" class="muted">
-              Multi-year financial analysis is available. Add the last two years’ filings (max 2).
+          <div class="field" id="upload-block">
+            <p class="upload-hint">
+              <strong>Upload:</strong> choose up to 2 accounts filings (any year). PDFs must be OCR’d before load.
             </p>
-            <ul id="file_list" class="muted" style="margin:.5rem 0 0 0;padding-left:1.1rem"></ul>
+            <button id="upload-reports" class="btn primary btn-cta" type="button">
+              Upload from your device
+            </button>
+
+            <!-- Hidden file input (triggered by the button) -->
+            <input id="report_files" name="report_files" type="file" accept="application/pdf" multiple hidden />
+
+            <!-- Shown only when populated by JS -->
+            <ul id="file_list" class="muted"></ul>
           </div>
 
         </fieldset>
@@ -323,10 +339,22 @@
 
     <!-- MIDDLE -->
     <section class="panel middle">
-      <div class="row-between output-head">
+      <div class="row-between output-head" style="align-items:center">
         <h2 id="output-title">Opportunity qualification analysis</h2>
-        <div class="row-between" style="gap:8px">
-          <div class="meta" id="output-meta" aria-live="polite" style="color:var(--text-2);font-size:.9rem"></div>
+        <div class="row-between" style="gap:8px; align-items:center">
+          <div class="meta" id="output-meta" aria-live="polite" style="color:var(--text-2); font-size:.9rem"></div>
+
+          <!-- Quick checklist chip lives here -->
+          <button id="quickcheck-top" class="btn tip-chip" type="button" aria-haspopup="dialog"
+            aria-controls="quickcheck-modal" title="Quick checklist: size up a company in 90 seconds">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" stroke="currentColor"
+              fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"></circle>
+              <line x1="12" y1="10" x2="12" y2="16"></line>
+              <circle cx="12" cy="7" r="1.25" fill="currentColor"></circle>
+            </svg>
+            <span>Tips to analyse account filings</span>
+          </button>
         </div>
       </div>
 
@@ -387,18 +415,18 @@
         </div>
         <div id="intel-body">
           <ul id="tips-list"></ul>
-          <p id="tips-empty" class="muted">Tips will appear after you generate a report.</p>
+          <p id="tips-empty" class="muted">Tips will appear after lead is qualified.</p>
         </div>
       </aside>
       <aside class="card" id="swot-panel" style="margin-top:var(--s-4)">
         <div class="row-between" id="swot-header" style="align-items:center">
-          <h3 style="margin:0">SWOT</h3>
+          <h2 style="margin:0">SWOT</h2>
           <button id="toggle-swot" class="chip" type="button" aria-controls="swot-body"
             aria-pressed="false">Hide</button>
         </div>
         <div id="swot-body" style="margin-top:var(--s-3)">
           <p class="muted" style="margin-top:0;margin-bottom:.5rem">
-            <strong>SWOT based on your qualification analysis.</strong> Click any card to add its text to your
+            SWOT will appear after lead is qualified. Click any card to add its text to your
             qualification notes.
           </p>
 
@@ -524,6 +552,20 @@
         <button id="prio-copy" class="btn inline" type="button" title="Copy JSON payload for the next tool">Copy
           JSON</button>
         <span class="fineprint">This JSON contains: strategicImpact, operationalImpact, partialFit.</span>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="quickcheck-modal" class="modal">
+    <div class="card" style="max-width:720px">
+      <div class="row-between" style="align-items:center">
+        <h3 style="margin:0">Quick checklist: size up a company in 90 seconds</h3>
+        <button id="quickcheck-close" class="btn inline" type="button">Close ×</button>
+      </div>
+
+      <!-- Content loaded from web/content/quick-checklist-90s.md -->
+      <div id="quickcheck-body" class="modal-body" style="margin-top:var(--s-3)">
+        <p class="muted">Loading…</p>
       </div>
     </div>
   </dialog>

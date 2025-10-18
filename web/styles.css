@@ -838,6 +838,14 @@
     gap: var(--s-2);
   }
 
+  /* Middle panel header should also be a single row */
+  .panel.middle .output-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-2);
+  }
+
   .output-card .meta {
     color: var(--text-2);
     font-size: .9rem;
@@ -872,7 +880,7 @@
   }
 
   /* Hide per-design: no header buttons in the output head on tool pages */
-  .panel.middle .output-head :where(button, .btn) {
+  .panel.middle .output-head :where(button, .btn):not(#quickcheck-top) {
     display: none !important;
   }
 
@@ -2267,18 +2275,23 @@ html[data-theme="dark"] .group-marketing .tool {
   opacity: 0.6;
   pointer-events: none;
 }
+
 /* --- Warmer header background (overrides) --- */
 
 /* Tokens so you can tweak later from one place */
 :root {
-  --header-bg: #F7EBDD;      /* warm sand */
-  --header-border: #E7D8C6;  /* soft tan */
+  --header-bg: #F7EBDD;
+  /* warm sand */
+  --header-border: #E7D8C6;
+  /* soft tan */
 }
 
 /* If your app toggles dark mode with [data-theme="dark"] */
 :root[data-theme="dark"] {
-  --header-bg: #2B2330;      /* warm plum */
-  --header-border: #3A303B;  /* deeper border */
+  --header-bg: #2B2330;
+  /* warm plum */
+  --header-border: #3A303B;
+  /* deeper border */
 }
 
 /* Apply just to the top bar with the logo */
@@ -2294,17 +2307,21 @@ html[data-theme="dark"] .group-marketing .tool {
     border-bottom-color: #3A303B;
   }
 }
+
 /* === Mobile header layout fix (stack + wrap) ============================= */
 /* Place at the very end of styles.css */
 
 @media (max-width: 640px) {
+
   /* Make the header a two-row stack */
   .app-header {
     display: grid;
     grid-template-columns: 1fr;
     align-items: start;
-    gap: 8px;                /* tidy spacing between rows */
-    padding: 8px 12px;       /* reduce side padding on small screens */
+    gap: 8px;
+    /* tidy spacing between rows */
+    padding: 8px 12px;
+    /* reduce side padding on small screens */
   }
 
   /* Brand stays on its own row; truncate long titles safely */
@@ -2317,10 +2334,12 @@ html[data-theme="dark"] .group-marketing .tool {
   /* Controls row: allow wrapping with good spacing */
   .app-header .header-right {
     display: flex;
-    flex-wrap: wrap;         /* allow chips to wrap to a new line */
+    flex-wrap: wrap;
+    /* allow chips to wrap to a new line */
     row-gap: 8px;
     column-gap: 8px;
-    overflow: visible;       /* remove the tiny horizontal scroller */
+    overflow: visible;
+    /* remove the tiny horizontal scroller */
   }
 
   /* Hide the redundant “Sales model in use: …” note on mobile */
@@ -2336,26 +2355,35 @@ html[data-theme="dark"] .group-marketing .tool {
 
 /* Extra-narrow handsets: drop the subtitle for space */
 @media (max-width: 420px) {
-  .app-header .kicker { display: none; }
+  .app-header .kicker {
+    display: none;
+  }
 }
+
 /* Temporarily hide Sales model inside Call details (keep markup intact) */
-.field-calltype-xs { display: none !important; }
+.field-calltype-xs {
+  display: none !important;
+}
+
 /* Hide change log and activity (temporary) */
 .change-log,
 .activity {
   display: none !important;
 }
+
 /* === Engage page only: right-rail intel chips (hover highlight + hand icon) */
 html[data-page="engagement"] .intel-chip {
   position: relative;
   cursor: pointer;
   transition: background-color .15s ease, border-color .15s ease,
-              box-shadow .15s ease, transform .05s ease;
-  padding-left: 28px; /* space for the icon */
+    box-shadow .15s ease, transform .05s ease;
+  padding-left: 28px;
+  /* space for the icon */
 }
 
 html[data-page="engagement"] .intel-chip::before {
-  content: "👆"; /* click hint */
+  content: "👆";
+  /* click hint */
   position: absolute;
   left: 8px;
   top: 50%;
@@ -2363,7 +2391,8 @@ html[data-page="engagement"] .intel-chip::before {
   line-height: 1;
   opacity: .75;
   font-size: .95em;
-  pointer-events: none; /* don’t block clicks */
+  pointer-events: none;
+  /* don’t block clicks */
 }
 
 html[data-page="engagement"] .intel-chip:hover,
@@ -2379,6 +2408,7 @@ html[data-page="engagement"] .intel-chip:active {
   transform: translateY(0) scale(.98);
   background: color-mix(in srgb, var(--accent) 10%, var(--surface-1));
 }
+
 /* === Engage app only — readable Objections (Q→A) ======================== */
 html[data-page="engagement"] #intel-objections .objections-text .qa {
   padding: 10px 12px;
@@ -2409,6 +2439,7 @@ html[data-page="engagement"] #intel-objections .objections-text .a:focus-visible
   background: color-mix(in srgb, var(--accent) 6%, var(--surface-1));
   outline: none;
 }
+
 /* === Qualification app only — mobile header layout & tweaks ============== */
 @media (max-width: 640px) {
   html[data-page="qualification"] .app-header {
@@ -2416,47 +2447,62 @@ html[data-page="engagement"] #intel-objections .objections-text .a:focus-visible
     grid-template-columns: 1fr;
     align-items: start;
     gap: 8px;
-    padding: 8px 12px; /* reduce side padding on small screens */
+    padding: 8px 12px;
+    /* reduce side padding on small screens */
   }
 
   html[data-page="qualification"] .app-header .header-right {
     display: flex;
-    flex-wrap: wrap;   /* allow chips/controls to wrap neatly */
+    flex-wrap: wrap;
+    /* allow chips/controls to wrap neatly */
     row-gap: 8px;
     column-gap: 8px;
     overflow: visible;
   }
 
   html[data-page="qualification"] .app-header .model-note {
-    display: none;     /* hide "Sales model in use" note on mobile */
+    display: none;
+    /* hide "Sales model in use" note on mobile */
   }
 
   html[data-page="qualification"] .app-header .header-left .app-title {
     white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis; /* truncate long titles */
+    text-overflow: ellipsis;
+    /* truncate long titles */
   }
 }
 
 @media (max-width: 420px) {
   html[data-page="qualification"] .app-header .kicker {
-    display: none;     /* hide secondary kicker line on very small screens */
+    display: none;
+    /* hide secondary kicker line on very small screens */
   }
 }
+
 /* Qualification app only */
-html[data-page="qualification"] .is-hidden { display: none !important; }
+html[data-page="qualification"] .is-hidden {
+  display: none !important;
+}
 
 /* Hide Fetch iXBRL (belt-and-braces, even if HTML not changed) */
-html[data-page="qualification"] #fetch-ixbrl { display: none !important; }
+html[data-page="qualification"] #fetch-ixbrl {
+  display: none !important;
+}
 
 /* Move notes buttons below the textarea if a grid/flex was forcing them above */
-html[data-page="qualification"] .notes-actions { margin-top: 8px; display: flex; gap: 8px; }
+html[data-page="qualification"] .notes-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
 
 /* Temporarily hide What changed and Recent activity (reversible) */
 html[data-page="qualification"] #delta-log,
 html[data-page="qualification"] #activity-log {
   display: none !important;
 }
+
 /* === Qualification: SWOT cards styled like Helpful tips =================== */
 html[data-page="qualification"] .swot-card {
   padding: 10px 12px;
@@ -2475,6 +2521,7 @@ html[data-page="qualification"] .swot-card {
     box-shadow: var(--ring-shadow);
   }
 }
+
 html[data-page="qualification"] .swot-card:active {
   transform: translateY(0) scale(.985);
 }
@@ -2485,26 +2532,262 @@ html[data-page="qualification"] .swot-list {
   margin: 6px 0 0;
   padding-inline-start: 1.15rem;
 }
+
 html[data-page="qualification"] .swot-list li {
   font-size: .92rem;
   line-height: 1.35;
   margin: 4px 0;
   color: var(--text-2);
 }
+
 /* Align SWOT header like Helpful tips (single row) */
 html[data-page="qualification"] #swot-panel #swot-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  flex-wrap: nowrap;                 /* keep button on same line */
+  flex-wrap: nowrap;
+  /* keep button on same line */
 }
 
 html[data-page="qualification"] #swot-panel #swot-header h3 {
-  margin: 0;                         /* avoid pushing the chip down */
-  white-space: nowrap;               /* match tips header behaviour */
+  margin: 0;
+  /* avoid pushing the chip down */
+  white-space: nowrap;
+  /* match tips header behaviour */
 }
 
 html[data-page="qualification"] #swot-panel #toggle-swot {
-  margin-left: auto;                 /* keep chip flush-right */
+  margin-left: auto;
+  padding: 12px 18px;
+  font-weight: 600;
+}
+
+/* === Qualification UX tidy — Option 1 overrides ====================== */
+html[data-page="qualification"] .panel.left {
+  max-height: none;
+  /* remove independent scrolling */
+  overflow: visible;
+  scroll-snap-type: none;
+}
+
+/* Evidence block spacing */
+html[data-page="qualification"] fieldset.card.callout-gold {
+  padding: var(--s-4);
+  margin-top: var(--s-4);
+}
+
+html[data-page="qualification"] #manual-metrics {
+  margin-top: var(--s-4) !important;
+}
+
+html[data-page="qualification"] #fetch-chdi {
+  margin-top: var(--s-2);
+}
+
+/* Only show the file list when there are items */
+html[data-page="qualification"] #file_list:empty {
+  display: none;
+}
+
+/* Consistent secondary button look for uploads */
+.btn.secondary {
+  background: var(--chip-bg);
+  color: var(--text-1);
+  border-color: var(--chip-bd);
+}
+
+/* Hint spacing above the upload control */
+html[data-page="qualification"] #file_hint {
+  margin-bottom: var(--s-2);
+}
+
+/* === Qualification: Quick checklist card ================================= */
+html[data-page="qualification"] #quickcheck-card {
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .05s ease;
+  padding: 10px 12px;
+}
+
+html[data-page="qualification"] #quickcheck-card:hover,
+html[data-page="qualification"] #quickcheck-card:focus-visible {
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-1));
+  border-color: var(--accent);
+  box-shadow: var(--ring-shadow);
+  outline: none;
+}
+
+html[data-page="qualification"] #quickcheck-card:active {
+  transform: translateY(0) scale(.985);
+}
+
+/* Make the info button a touch smaller than the default 44px */
+html[data-page="qualification"] #quickcheck-card .btn.info {
+  --icon-size: 36px;
+}
+
+/* Modal content spacing (optional tidy) */
+#quickcheck-modal .modal-body :where(h2, h3) {
+  margin-top: 1rem;
+  margin-bottom: .5rem;
+}
+
+#quickcheck-modal .modal-body p {
+  margin: .4rem 0;
+  line-height: 1.5;
+}
+
+#quickcheck-modal .modal-body ul {
+  padding-inline-start: 1.15rem;
+}
+
+/* ===== Quick checklist modal typography & spacing ===================== */
+#quickcheck-modal .modal-body {
+  line-height: 1.6;
+  font-size: 0.98rem;
+  /* subtle readability bump */
+}
+
+#quickcheck-modal .modal-body h2 {
+  font-size: 1.15rem;
+  line-height: 1.35;
+  margin: 1rem 0 .5rem 0;
+  font-weight: 700;
+}
+
+#quickcheck-modal .modal-body h3 {
+  font-size: 1.05rem;
+  line-height: 1.35;
+  margin: .85rem 0 .35rem 0;
+  font-weight: 600;
+}
+
+#quickcheck-modal .modal-body p {
+  margin: .45rem 0;
+}
+
+#quickcheck-modal .modal-body ul {
+  margin: .35rem 0 .65rem 0;
+  padding-left: 1.15rem;
+}
+
+#quickcheck-modal .modal-body li+li {
+  margin-top: .25rem;
+}
+
+/* Space above the upload controls (before the sr-only label) */
+html[data-page="qualification"] #file_hint {
+  margin-bottom: var(--s-3) !important;
+  /* adjust to taste: var(--s-2|s-4) */
+}
+
+/* ===== Qualification · Evidence spacing tidy =========================== */
+/* 1) Add breathing room under the CH fetch row */
+html[data-page="qualification"] fieldset[aria-labelledby="legend-evidence"] .row-between:has(#fetch-chdi) {
+  margin-bottom: var(--s-4);
+  /* was .5rem inline; this is clearer */
+}
+
+/* 2) Make the Manual metrics accordion sit lower and read better */
+html[data-page="qualification"] #manual-metrics {
+  margin-top: var(--s-4) !important;
+  /* override inline var(--s-3) */
+  padding-top: var(--s-2);
+}
+
+html[data-page="qualification"] #manual-metrics>summary {
+  margin-bottom: var(--s-2);
+}
+
+/* 3) Push the Upload block down (it’s the <div class="field"> that contains #report_files) */
+html[data-page="qualification"] .field:has(#report_files) {
+  margin-top: var(--s-4);
+}
+
+/* 4) Tidy hint spacing above the upload control */
+html[data-page="qualification"] #file_hint {
+  margin: 0 0 var(--s-2) 0;
+}
+
+/* Optional: ensure the big pill upload button (if styled) has space above itself */
+html[data-page="qualification"] .field:has(#report_files) .btn,
+html[data-page="qualification"] .field:has(#upload-reports) .btn {
+  margin-top: var(--s-1);
+}
+
+/* === Make #upload-reports EXACTLY match the CH CTA ===================== */
+/* 1) Kill any container rules that force full-width or odd margins */
+html[data-page="qualification"] .field:has(#upload-reports) {
+  margin-left: 0 !important;
+  /* neutralise any left indent */
+}
+
+/* 2) Force the same inline pill sizing/typography as the CH button */
+html[data-page="qualification"] .field:has(#upload-reports)>#upload-reports.btn.primary.btn-cta {
+  display: inline-flex;
+  /* stop block/full-width stretch */
+  width: auto;
+  max-width: max-content;
+  align-items: center;
+  justify-content: center;
+
+  /* mirror button text metrics */
+  font-size: .95rem;
+  /* same readable size as CH CTA */
+  line-height: 1.1;
+  font-weight: 600;
+
+  /* mirror padding & shape */
+  padding: .5rem 1rem;
+  border-radius: 9999px;
+  /* pill look */
+}
+
+/* 3) Keep the hint normal size and give a clear gap above the button */
+html[data-page="qualification"] #upload-block .upload-hint {
+  color: var(--text-1);
+  font-size: 1rem;
+  line-height: 1.5;
+  margin: 0 0 var(--s-2) 0;
+}
+
+/* 4) Hide the file list until populated */
+html[data-page="qualification"] #file_list:empty {
+  display: none;
+}
+
+/* Header quick-checklist chip */
+html[data-page="qualification"] #quickcheck-top.btn.tip-chip {
+  display: inline-flex !important;
+  align-items: center;
+  gap: .5rem;
+  padding: .55rem .95rem;
+  /* bigger tap target */
+  font-size: .95rem;
+  /* slightly larger text */
+  line-height: 1.1;
+  white-space: nowrap;
+  /* don’t wrap; keep chip compact */
+  border-radius: 9999px;
+  /* rest unchanged */
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-1));
+  color: var(--text-1);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s, box-shadow .15s;
+}
+
+html[data-page="qualification"] #quickcheck-top.btn.tip-chip:hover,
+html[data-page="qualification"] #quickcheck-top.btn.tip-chip:focus-visible {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface-1));
+  border-color: var(--accent);
+  box-shadow: var(--ring-shadow);
+  outline: none;
+}
+
+html[data-page="qualification"] #quickcheck-top.btn.tip-chip svg {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
 }

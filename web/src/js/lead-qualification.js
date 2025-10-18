@@ -1,3 +1,4 @@
+5
 /* ---------- Shared helpers ---------- */
 const basePrefix = (() => {
   const path = location.pathname || "/";
@@ -100,6 +101,15 @@ function QUAL_clearHighlights(root) {
     parent.removeChild(m);
     parent.normalize();
   });
+}
+
+// checklist helpers //
+// --- Upload button -> hidden <input type="file"> trigger ------------------
+function initUploadReports() {
+  const btn = document.getElementById('upload-reports');
+  const input = document.getElementById('report_files');
+  if (!btn || !input) return;            // safe no-op if markup not present
+  btn.addEventListener('click', () => input.click());
 }
 
 // Minimal markdown → HTML (H2/H3, lists, paragraphs)
@@ -261,6 +271,8 @@ const activityLog = document.getElementById("activity-log");
 const ixbrlBtn = document.getElementById("fetch-ixbrl");
 const ixbrlStatus = document.getElementById("ixbrl-status");
 const ixbrlChips = document.getElementById("ixbrl-chips");
+const chdiBtn = document.getElementById("fetch-chdi");
+const chdiStatus = document.getElementById("chdi-status");
 const flagsList = document.getElementById("flags-list");
 const tipsList = document.getElementById("tips-list");
 const tipsEmpty = document.getElementById("tips-empty");
@@ -413,6 +425,42 @@ async function fetchIxbrl(companyNumber) {
   ixbrlStatus.textContent = "Could not fetch iXBRL.";
   return { ok: false, status: 500, data: null };
 }
+
+// CHDI fetch (latest two Accounts PDFs → OCR text) via qualification-generate GET
+async function fetchChdi(companyNumber) {
+  if (!companyNumber) return { ok: false, status: 400, data: null };
+  if (chdiStatus) chdiStatus.textContent = "Fetching…";
+
+  // Call the unified endpoint (GET) which now serves the CHDI response shape: { pdfs }
+  const endpoints = [
+    "/api/qualification-generate?company=" + encodeURIComponent(companyNumber),
+    "/api/qualification-generate?company_number=" + encodeURIComponent(companyNumber),
+    "/api/qualification-generate?id=" + encodeURIComponent(companyNumber)
+  ];
+
+  for (let i = 0; i < endpoints.length; i++) {
+    const url = endpoints[i];
+    try {
+      const r = await fetch(url, { headers: { "Accept": "application/json" }, cache: "no-store" });
+      if (r.status === 204) {
+        if (chdiStatus) chdiStatus.textContent = "No filings found.";
+        return { ok: false, status: 204, data: null };
+      }
+      let data = {};
+      try { data = await r.json(); } catch { data = {}; }
+      if (!r.ok) throw new Error((data && data.error) || ("HTTP " + r.status));
+
+      // Expect unified shape: { pdfs: [{ filename, text }, ...] }
+      if (chdiStatus) chdiStatus.textContent = "Loaded.";
+      return { ok: true, status: 200, data };
+    } catch (e) {
+      // try the next endpoint
+    }
+  }
+  if (chdiStatus) chdiStatus.textContent = "Could not fetch filings.";
+  return { ok: false, status: 500, data: null };
+}
+
 
 function pct(n) { return (n == null || isNaN(n)) ? "—" : (Math.round(n * 10) / 10) + "%"; }
 function ratio(n) { return (n == null || isNaN(n)) ? "—" : String(Math.round(n * 100) / 100); }
@@ -845,6 +893,67 @@ ixbrlBtn?.addEventListener("click", async () => {
   }
 });
 
+// Fetch filings (OCR) click
+chdiBtn?.addEventListener("click", async (ev) => {
+  ev.preventDefault();
+
+  // 1) Normalise input and guard
+  const numRaw = (form?.elements?.company_number?.value || "").trim();
+  const num = numRaw.replace(/\s+/g, ""); // remove spaces in CH numbers
+  if (!num) {
+    setStatus("Enter a Companies House number or upload PDFs.", "error");
+    return;
+  }
+
+  // 2) Reset previous state
+  form.dataset.pdfTexts = "[]";
+  const list = document.getElementById("file_list");
+  if (list) list.innerHTML = "";
+  if (chdiStatus) chdiStatus.textContent = "Fetching latest filings…";
+
+  // 3) Debounce/disable while busy
+  chdiBtn.disabled = true;
+  try {
+    if (typeof setBusy === "function") setBusy(true);
+
+    const res = await fetchChdi(num); // expects { ok, status, data }
+
+    if (res.ok) {
+      const pdfs = Array.isArray(res.data?.pdfs) ? res.data.pdfs.slice(0, 2) : [];
+      form.dataset.pdfTexts = JSON.stringify(pdfs);
+
+      // Render filenames into the file list (so user sees what's attached)
+      if (list) {
+        for (const p of pdfs) {
+          const li = document.createElement("li");
+          li.textContent = p?.filename || "accounts.pdf";
+          list.appendChild(li);
+        }
+      }
+
+      if (chdiStatus) chdiStatus.textContent = pdfs.length
+        ? `Loaded ${pdfs.length} filing(s).`
+        : "No usable text.";
+      if (!pdfs.length) setStatus("No usable text in latest filings. You can still upload PDFs.", "info");
+
+    } else if (res.status === 204) {
+      // No recent accounts found
+      if (chdiStatus) chdiStatus.textContent = "No filings found.";
+      setStatus("No recent Accounts filings via Companies House; you can still upload PDFs.", "info");
+
+    } else {
+      if (chdiStatus) chdiStatus.textContent = "Could not fetch filings.";
+      setStatus("Could not fetch filings from Companies House.", "error");
+    }
+  } catch (e) {
+    if (chdiStatus) chdiStatus.textContent = "Could not fetch filings.";
+    setStatus("Could not fetch filings from Companies House.", "error");
+  } finally {
+    chdiBtn.disabled = false;
+    if (typeof setBusy === "function") setBusy(false);
+  }
+});
+
 function safeJson(raw) { if (!raw) return null; try { return JSON.parse(raw); } catch { return null; } }
 function num(x) { const n = Number(String(x || "").replace(/[,£\s]/g, "")); return Number.isFinite(n) ? n : null; }
 function normUrl(u) {
@@ -958,12 +1067,84 @@ function enableSubmitIfValid() {
   if (submitBtn) submitBtn.disabled = !allRequiredFilled();
 }
 
-// Form input persistence & validation
-document.addEventListener("input", (e) => {
-  if (e.target.closest && e.target.closest("#" + FORM_ID)) {
-    validateField(e.target.id);
-    saveForm();
-    enableSubmitIfValid();
+// === Delegated CLICK handling (keeps behaviour in one place) =============
+
+// Minimal “MD → safe HTML” for headings, bullets, and paragraphs.
+function renderSimpleMarkdown(md) {
+  return md
+    .replace(/^### (.*)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.*)$/gm, '<h2>$1</h2>')
+    .replace(/^---$/gm, '<hr>')
+    .split(/\n{2,}/).map(blk => {
+      if (/^<h[23]>/.test(blk) || /^<hr>/.test(blk)) return blk;
+      if (/^\* /.test(blk)) {
+        return '<ul>' + blk.split('\n')
+          .map(li => '<li>' + li.replace(/^\* /, '') + '</li>').join('') + '</ul>';
+      }
+      return '<p>' + blk + '</p>';
+    }).join('\n');
+}
+
+let quickChecklistHTML = '';  // cache after first load
+
+async function openQuickChecklistModal() {
+  const modal = document.getElementById('quickcheck-modal');
+  const body = document.getElementById('quickcheck-body');
+  const headerBtn = document.getElementById('quickcheck-top'); // header chip (may exist)
+  if (!modal || !body) return;
+
+  if (!quickChecklistHTML) {
+    body.innerHTML = '<p class="muted">Loading…</p>';
+    try {
+      const res = await fetch('/content/call-library/quick-checklist-90s.md', { cache: 'no-store' });
+      const md = await (res.ok ? res.text() : Promise.reject(res.status));
+      quickChecklistHTML = renderSimpleMarkdown(md);   // make sure this helper exists
+    } catch {
+      quickChecklistHTML = '<p class="muted">Sorry — the checklist couldn’t be loaded right now.</p>';
+    }
+  }
+  body.innerHTML = quickChecklistHTML;
+
+  if (!modal.dataset.bound) {
+    modal.addEventListener('cancel', (e) => { e.preventDefault(); closeQuickChecklistModal(); });
+    modal.dataset.bound = '1';
+  }
+
+  modal.showModal();
+  if (headerBtn) headerBtn.setAttribute('aria-expanded', 'true');
+}
+
+function closeQuickChecklistModal() {
+  const modal = document.getElementById('quickcheck-modal');
+  const headerBtn = document.getElementById('quickcheck-top');
+  if (!modal) return;
+  modal.close();
+  if (headerBtn) {
+    headerBtn.setAttribute('aria-expanded', 'false');
+    headerBtn.focus({ preventScroll: true });
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const t = e.target;
+
+  // Upload reports (PDF) -> trigger hidden input
+  if (t.closest && t.closest('#upload-reports')) {
+    const input = document.getElementById('report_files');
+    if (input) input.click();
+    return;
+  }
+
+  // Header Quick checklist button -> open modal
+  if (t.closest && t.closest('#quickcheck-top')) {
+    openQuickChecklistModal();
+    return;
+  }
+
+  // Modal close button
+  if (t.closest && t.closest('#quickcheck-close')) {
+    closeQuickChecklistModal();
+    return;
   }
 });
 
@@ -1068,6 +1249,9 @@ form?.addEventListener("submit", (e) => {
       ixbrlSummary: ixbrlSummary || {},
       policy
     };
+    const injected = safeJson(form.dataset.pdfTexts || "[]") || [];
+    body.pdfTexts = injected;
+
     fetch("/api/qualification-generate", {
       method: "POST",
       credentials: 'include',
@@ -1090,6 +1274,7 @@ form?.addEventListener("reset", () => {
       localStorage.removeItem(OUTPUT_KEY);
       localStorage.removeItem(notesKey());
     } catch { }
+    delete form.dataset.pdfTexts;
     outputEl && (outputEl.innerHTML = "");
     sourceList && (sourceList.innerHTML = "");
     sourcesCard && (sourcesCard.style.display = "none");

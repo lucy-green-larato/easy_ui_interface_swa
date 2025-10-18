@@ -1,4 +1,4 @@
-/** api/lib/chdi.js — CH + Document Intelligence utilities 01-10-2025 
+/** api/lib/chdi.js — CH + Document Intelligence utilities 17-10-2025 
  *  - Normalizes Companies House numbers
  *  - Finds latest Accounts PDF via CH APIs (auth using CH_API_KEY)
  *  - OCRs PDF with Azure Document Intelligence (buffer-first for CH)
@@ -7,8 +7,8 @@
  */
 "use strict";
 // --- tracing (no-op by default) ---
-let __trace = () => {};
-function setTrace(fn) { __trace = typeof fn === "function" ? fn : () => {}; }
+let __trace = () => { };
+function setTrace(fn) { __trace = typeof fn === "function" ? fn : () => { }; }
 function trace(event) {
   try { __trace({ at: new Date().toISOString(), ...event }); } catch { /* ignore */ }
 }
@@ -18,9 +18,9 @@ function trace(event) {
 // Endpoint may be given with or without /formrecognizer; normalize once
 const DI_ENDPOINT_RAW =
   (process.env.DI_ENDPOINT ||
-   process.env.AZ_DI_ENDPOINT ||
-   process.env.DOCUMENTINTELLIGENCE_ENDPOINT ||
-   "").trim();
+    process.env.AZ_DI_ENDPOINT ||
+    process.env.DOCUMENTINTELLIGENCE_ENDPOINT ||
+    "").trim();
 
 const DI_ENDPOINT = DI_ENDPOINT_RAW.replace(/\/+$/, "").replace(/\/formrecognizer$/i, "");
 const NEEDS_FR_SEGMENT = !/\/formrecognizer(\/|$)/i.test(DI_ENDPOINT);
@@ -43,14 +43,13 @@ const CH_API_BASE = (process.env.CH_API_BASE || "https://api.company-information
 const CH_DOC_API_BASE = (process.env.CH_DOC_API_BASE || "https://document-api.company-information.service.gov.uk").replace(/\/+$/, "");
 const CH_API_KEY = process.env.CH_API_KEY || "";
 const READER_BASE = (process.env.CH_STRATEGIC_TEXT_URL || process.env.CH_READER_ENDPOINT || "").replace(/\/+$/, "");
-
 const USER_AGENT = `chdi/1.0 (+larato; node${process.version})`;
 
 /* ------------------------- UTILS ------------------------- */
 
 function debugLog(stage, data) {
   if (process.env.CH_DEBUG !== "1") return;
-  try { console.log(`CH_PROBE ${JSON.stringify({ stage, ...(data || {}) })}`); } catch {}
+  try { console.log(`CH_PROBE ${JSON.stringify({ stage, ...(data || {}) })}`); } catch { }
 }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -61,10 +60,10 @@ async function fetchWithTimeout(url, opts = {}, timeoutMs = 15000) {
     const headers = { "User-Agent": USER_AGENT, ...(opts?.headers || {}) };
     return await fetch(url, { ...(opts || {}), headers, signal: ctrl.signal });
   } catch (e) {
-    try { debugLog("fetch.error", { url, timeoutMs, error: String(e?.message || e) }); } catch {}
+    try { debugLog("fetch.error", { url, timeoutMs, error: String(e?.message || e) }); } catch { }
     return {
       ok: false, status: 0, headers: new Map(),
-      async json(){ return {}; }, async text(){ return ""; }, async arrayBuffer(){ return new ArrayBuffer(0); }
+      async json() { return {}; }, async text() { return ""; }, async arrayBuffer() { return new ArrayBuffer(0); }
     };
   } finally { clearTimeout(timer); }
 }
@@ -129,6 +128,63 @@ async function chDownloadPdfBuffer(pdfUrl) {
   if (!res.ok) return null;
   const ab = await res.arrayBuffer();
   return Buffer.from(ab);
+}
+
+// Add after chFindAccountsPdfUrl(...) in chdi.js
+
+async function chFindLatestAccountsPdfUrls(companyNumber, limit = 2) {
+  const num = encodeURIComponent(normalizeCompanyNumber(companyNumber));
+  // Use the same auth + JSON helpers you already have
+  const fh = await chFetchJson(`${CH_API_BASE}/company/${num}/filing-history?items_per_page=200`);
+  if (!fh || !Array.isArray(fh.items)) return [];
+
+  // Filter for "accounts" category, sort by date desc
+  const items = fh.items
+    .filter(it => it && (it.category === "accounts" || /accounts/i.test(it.category || "")) && it.links?.document_metadata)
+    .sort((a, b) => {
+      // Prefer 'date' fields when present; fall back to action_date/processed_at
+      const da = Date.parse(a.date || a.action_date || a.processed_at || 0) || 0;
+      const db = Date.parse(b.date || b.action_date || b.processed_at || 0) || 0;
+      return db - da; // newest first
+    })
+    .slice(0, Math.max(1, limit));
+
+  const hdr = chAuthHeader(); if (!hdr) return [];
+  const urls = [];
+  for (const it of items) {
+    const docMeta = String(it.links.document_metadata || "");
+    const metaUrl = /^https?:\/\//i.test(docMeta) ? docMeta : `${CH_DOC_API_BASE}${docMeta}`;
+    const meta = await fetchJsonWithTimeout(metaUrl, { ...(hdr || {}) }, 15000);
+    if (!meta) continue;
+
+    const resPdf = meta?.resources && (meta.resources["application/pdf"] || meta.resources["application/pdf; charset=utf-8"]);
+    const href = (resPdf && (resPdf.url || resPdf.href)) || meta?.links?.document || meta?.links?.self;
+    const contentUrl = ensureChContentUrl(href);
+    if (contentUrl) urls.push(contentUrl);
+  }
+  return urls;
+}
+
+async function fetchLatestAccountsTexts(companyNumber, limit = 2) {
+  const urls = await chFindLatestAccountsPdfUrls(companyNumber, limit);
+  const out = [];
+  for (const u of urls) {
+    // Buffer-first (matches your existing strategy for CH PDFs)
+    const buf = await chDownloadPdfBuffer(u);
+    let text = "";
+    if (buf?.length) {
+      text = await diReadTextFromBuffer(buf);
+    }
+    if (!text) {
+      // Fallback to url if public (keeps parity with existing helpers)
+      text = await diReadTextFromUrl(u);
+    }
+    if (text) {
+      const filename = (u.split("/").pop() || "accounts.pdf").replace(/\?.*$/, "");
+      out.push({ filename, text });
+    }
+  }
+  return out.slice(0, Math.max(1, limit));
 }
 
 /* ------------------------- DI READ HELPERS ------------------------- */
@@ -256,7 +312,7 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
   const redactUrl = (u) => {
     try {
       const url = new URL(u);
-      ["key","code","sig","token","signature"].forEach(k => {
+      ["key", "code", "sig", "token", "signature"].forEach(k => {
         if (url.searchParams.has(k)) url.searchParams.set(k, "REDACTED");
       });
       return url.toString();
@@ -304,7 +360,7 @@ async function tryGetReportText(companyNumber, { timeoutMs = 8000, maxLen = 2000
           if (!res.ok) {
             // Only sample body on errors, small slice, no secrets
             let sample = "";
-            try { sample = (await res.text()).slice(0, 500); } catch {}
+            try { sample = (await res.text()).slice(0, 500); } catch { }
             trace({ stage: "reader:respBodySample", url: redactUrl(url), status: res.status, sample });
             if (res.status >= 500) break; // try next path only if not server error
             continue;
@@ -421,4 +477,6 @@ module.exports = {
   chDownloadPdfBuffer,
   diReadTextFromUrl,
   diReadTextFromBuffer,
+  chFindLatestAccountsPdfUrls,
+  fetchLatestAccountsTexts,
 };
