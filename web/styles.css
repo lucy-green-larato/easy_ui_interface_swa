@@ -387,18 +387,52 @@
     flex-shrink: 0
   }
 
+  .app-header.topbar.compact {
+    background: var(--header-bg);
+    border-bottom-color: var(--header-border);
+  }
+
+  /* Generic chip */
   .chip {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    height: var(--chip-h);
-    padding: 0 12px;
+    gap: 8px;
+    padding: var(--s-0) var(--s-2);
     border-radius: 999px;
-    background: var(--chip-bg);
-    color: var(--chip-fg);
-    border: 1px solid var(--chip-bd);
-    font-size: .9rem;
-    line-height: 1;
+    border: 1px solid transparent;
+    font: inherit;
+    line-height: 1.1;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--dur-2) var(--ease-standard),
+      box-shadow var(--dur-2) var(--ease-standard);
+  }
+
+  .chip svg {
+    display: block;
+  }
+
+  .chip-amethyst {
+    background: var(--brand-amethyst);
+    color: #fff;
+  }
+
+  @media (hover:hover) {
+    .chip-amethyst:hover {
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
+    }
+  }
+
+  .chip-amethyst:active {
+    transform: translateY(0);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* Dark mode tweak for contrast */
+  :root[data-theme="dark"] .chip-amethyst {
+    background: color-mix(in srgb, var(--brand-amethyst) 90%, black);
+    color: #fff;
   }
 
   /* Badges */
@@ -513,6 +547,60 @@
   .panel.right {
     grid-column: 3;
     max-width: 300px
+  }
+
+  /* File buttons */
+  .file-btn {
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: none;
+  }
+
+  .file-btn::file-selector-button {
+    font: inherit;
+    border: 1px solid transparent;
+    background: var(--brand-gold);
+    color: #111;
+    /* readable on gold */
+    border-radius: var(--radius, 10px);
+    padding: var(--s-1) var(--s-2);
+    cursor: pointer;
+    box-shadow:
+      0 1px 1px rgba(0, 0, 0, .04),
+      var(--gold-glow, 0 8px 18px rgba(255, 194, 67, .28));
+    transition:
+      transform var(--dur-2) var(--ease-standard),
+      box-shadow var(--dur-2) var(--ease-standard),
+      background-color var(--dur-2) var(--ease-standard);
+  }
+
+  @media (hover:hover) {
+    .file-btn:hover::file-selector-button {
+      background: var(--brand-gold-pressed);
+      transform: translateY(-1px);
+      box-shadow:
+        0 1px 1px rgba(0, 0, 0, .04),
+        var(--gold-glow, 0 10px 20px rgba(255, 194, 67, .34));
+    }
+  }
+
+  .file-btn:active::file-selector-button {
+    transform: translateY(0);
+    box-shadow:
+      0 1px 1px rgba(0, 0, 0, .04),
+      var(--gold-glow, 0 8px 18px rgba(255, 194, 67, .28));
+  }
+
+  .file-btn:focus-visible::file-selector-button {
+    outline: var(--ring-outline);
+    outline-offset: 2px;
+    box-shadow: var(--ring-shadow);
+  }
+
+  :root[data-theme="dark"] .file-btn::file-selector-button {
+    background: color-mix(in srgb, var(--brand-gold) 88%, black);
+    color: #111;
   }
 
   /* Left column specifics */
@@ -879,8 +967,58 @@
     margin-top: 8px;
   }
 
+  /* --- Signal bar (Results insight) --- */
+  @layer components {
+    .signal {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 var(--s-2);
+    }
+
+    .signal-track {
+      flex: 1;
+      height: 10px;
+      border-radius: var(--pill);
+      background: color-mix(in srgb, var(--brand-teal) 10%, var(--surface-1));
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+    }
+
+    .signal-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--brand-teal);
+      /* subtle sheen in light, parity in dark via tokens */
+      background-image: linear-gradient(90deg,
+          color-mix(in srgb, #fff 12%, var(--brand-teal)) 0%,
+          var(--brand-teal) 60%);
+      border-radius: var(--pill);
+      transition: width var(--dur-3) var(--ease-standard);
+    }
+
+    .signal-label {
+      min-width: 6ch;
+      text-align: right;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Dark: keep contrast clean, no glare */
+    :root[data-theme="dark"] .signal-track {
+      background: color-mix(in srgb, var(--brand-teal) 16%, transparent);
+      border-color: var(--border);
+    }
+
+    :root[data-theme="dark"] .signal-fill {
+      background: var(--brand-teal);
+      background-image: none;
+    }
+  }
+
   /* Hide per-design: no header buttons in the output head on tool pages */
-  .panel.middle .output-head :where(button, .btn):not(#quickcheck-top) {
+  .panel.middle .output-head :where(button, .btn):not(#quickcheck-top):not(#insight-help) {
     display: none !important;
   }
 
@@ -2790,4 +2928,12 @@ html[data-page="qualification"] #quickcheck-top.btn.tip-chip svg {
   width: 16px;
   height: 16px;
   color: var(--accent);
+}
+
+/* Scope: Results header helper chip — match tip style */
+.panel.middle .output-head #insight-help.btn.tip-chip {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface-1));
+  border-color: var(--accent);
+  box-shadow: var(--ring-shadow);
+  outline: none;
 }

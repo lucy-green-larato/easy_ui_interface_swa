@@ -336,7 +336,7 @@ function validateField(id) {
 }
 function allRequiredFilled() {
   const missing = requiredIds.filter(id => !String(document.getElementById(id)?.value || "").trim());
-  if (missing.length) setStatus("Please complete: " + missing.map(id => id.replace("_", " ")).join(", ") + ".", "error");
+  if (missing.length) setStatus("Please complete: " + missing.map(id => id === "call_type" ? "sales model" : id.replace(/_/g, " ")).join(", ") + ".", "error");
   else setStatus("");
   return missing.length === 0;
 }
@@ -584,6 +584,13 @@ function QUAL_renderSwot(swot) {
   function fill(listEl, arr) {
     if (!listEl) return;
     listEl.innerHTML = "";
+    if (!arr || !arr.length) {
+      const li = document.createElement("li");
+      li.className = "muted";
+      li.textContent = "No public evidence found.";
+      listEl.appendChild(li);
+      return;
+    }
     (arr || []).forEach(x => {
       const li = document.createElement("li");
       li.textContent = x;
@@ -642,16 +649,22 @@ document.getElementById("toggle-swot")?.addEventListener("click", () => {
   btn.textContent = expanded ? "Show" : "Hide";
 });
 
+const BAD = /^(content|source|sources|n\/a|none)$/i;
+citations = (citations || []).filter(c => !BAD.test(c?.label || ''));
 // Source rendering
 function renderSources(citations) {
   sourceList.innerHTML = "";
   const items = Array.isArray(citations) ? citations : [];
+  const uploadedNames = Array.from((reportInput?.files || [])).map(f => f?.name || "");
   if (!items.length) { sourcesCard.style.display = "none"; return; }
   for (let i = 0; i < items.length; i++) {
     const c = items[i] || {};
     const li = document.createElement("li");
-    const label = (c.label || c.title || c.url || "Source");
+    let label = (c.label || c.title || c.url || "Source");
     const url = (c.url || "");
+    if (!url && /^content$/i.test(label) && uploadedNames[i]) {
+      label = uploadedNames[i];
+    }
     if (url) {
       const a = document.createElement("a");
       a.href = url;
@@ -1321,6 +1334,33 @@ form?.addEventListener("reset", () => {
   const submitBtn = document.getElementById("submit");
   const callTypeSel = document.getElementById("call_type");       // desktop selector
   const callTypeSelXs = document.getElementById("call_type_xs");   // mobile mirror
+  // ---- Force usable website URL when provided ----
+  (function wireWebsiteNormaliser() {
+    const urlInput = document.getElementById("prospect_website");
+    if (!urlInput) return;
+
+    function normUrl(v) {
+      v = String(v || "").trim();
+      if (!v) return v;
+      // Add protocol if missing
+      if (!/^https?:\/\//i.test(v)) v = "https://" + v.replace(/^\/+/, "");
+      // Strip trailing punctuation/spaces
+      v = v.replace(/[)\],.]+$/g, "").trim();
+      return v;
+    }
+
+    // Normalise on blur & before submit
+    urlInput.addEventListener("blur", () => {
+      const n = normUrl(urlInput.value);
+      if (n !== urlInput.value) urlInput.value = n;
+    });
+
+    // Also normalise just-in-time when submitting
+    form.addEventListener("submit", () => {
+      const n = normUrl(urlInput.value);
+      if (n !== urlInput.value) urlInput.value = n;
+    }, { capture: true });
+  })();
 
   // Guard: if the form or button isn’t present, stop cleanly
   if (!form || !submitBtn) return;
@@ -1404,8 +1444,8 @@ form?.addEventListener("reset", () => {
     if (!themeBtn) return;
     const current = document.documentElement.getAttribute("data-theme") || "light";
     const isDark = current === "dark";
-    themeBtn.textContent = isDark ? "Light mode" : "Night mode";
-    themeBtn.setAttribute("aria-pressed", String(isDark));
+    themeBtn.textContent = isDark ? '☀️' : '🌙';
+    themeBtn.setAttribute('aria-label', isDark ? 'Switch to night mode' : 'Switch to light mode');
   }
   if (themeBtn) {
     themeBtn.addEventListener("click", () => {

@@ -31,6 +31,9 @@
     "health",
     "ixbrl-financials",
     "pbi_token",
-    "qualification-generate"
+    "qualification-generate",
+    "ch-strategic-start",
+    "ch-strategic",
+    "ch-strategic-worker"
   ]
 }

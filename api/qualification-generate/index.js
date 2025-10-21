@@ -32,7 +32,7 @@ const QUAL_TOTAL_PDF_BYTES = toInt(
   QUAL_MAX_PDF_PER_FILE_BYTES * QUAL_MAX_PDFS // default combined cap
 );
 const DEDUP_NGRAM = toInt(process.env.QUAL_DEDUP_NGRAM, 12);
-const MIN_PAGE_UNIQUE_PCT = Math.max(0, Math.min(1, Number(process.env.QUAL_MIN_PAGE_UNIQUE_PCT || '0.25')));
+const MIN_PAGE_UNIQUE_PCT = Math.max(0, Math.min(1, Number(process.env.QUAL_MIN_PAGE_UNIQUE_PCT || '0.15')));
 
 
 // Best-effort optional deps
@@ -437,7 +437,7 @@ async function bundleWebsite(website, extraPaths = []) {
 
   const pages = [];
   let text = '';
-  const MAX_PAGES = 18;
+  const MAX_PAGES = toInt(process.env.QUAL_MAX_SITE_PAGES, 24);
 
   // Global shingle set to suppress repeats across pages
   const seen = new Set();
@@ -1041,10 +1041,12 @@ function normalizeQualification(q) {
 
   // Ensure citations nested under report.citations as [{label,url?}]
   const rc = Array.isArray(out.report?.citations) ? out.report.citations : [];
+  const BAD = /^(content|source|sources|n\/a|none)$/i;
   out.report.citations = rc
     .map(c => (typeof c === 'string' ? { label: c } : c))
     .filter(c => c && typeof c.label === 'string' && c.label.trim())
-    .map(c => ({ label: c.label.trim(), ...(c.url ? { url: String(c.url) } : {}) }));
+    .map(c => ({ label: c.label.trim(), ...(c.url ? { url: String(c.url) } : {}) }))
+    .filter(c => !BAD.test(c.label));   // <-- drop meaningless labels
 
   // Remove any stray top-level citations
   if (Array.isArray(out.citations)) delete out.citations;
@@ -1209,10 +1211,15 @@ module.exports = async function (context, req) {
     const pages = Array.isArray(siteBundle?.pages) ? siteBundle.pages : [];
     const websiteText = typeof siteBundle?.text === 'string' ? siteBundle.text : '';
     const injected = Array.isArray(injectedPdfTexts)
-      ? injectedPdfTexts.map((p, i) => ({
-        filename: String(p?.filename || `ch-accounts-${i + 1}.pdf`),
-        text: String(p?.text || '').slice(0, PDF_CHAR_CAP)
-      })).filter(p => p.text && p.text.trim())
+      ? injectedPdfTexts.map((p, i) => {
+        const raw = String(p?.filename || '').trim().toLowerCase();
+        const safeName =
+          !raw || raw === 'content' ? `ch-accounts-${i + 1}.pdf` : String(p.filename);
+        return {
+          filename: safeName,
+          text: String(p?.text || '').slice(0, PDF_CHAR_CAP)
+        };
+      }).filter(p => p.text && p.text.trim())
       : [];
     const pdfs = [...(Array.isArray(pdfExtracts) ? pdfExtracts : []), ...injected].slice(0, QUAL_MAX_PDFS);
 
@@ -1265,7 +1272,7 @@ module.exports = async function (context, req) {
     // Token budget
     const max_tokens = isSummary
       ? 2000
-      : Math.min(6000, Math.ceil((targetWords || 1750) * 1.8) + 600);
+      : Math.min(8000, Math.ceil((targetWords || 2400) * 2.1) + 600);
 
     // --------------------------
     // Model call
@@ -1361,6 +1368,7 @@ module.exports = async function (context, req) {
     const financialsSectionMissing = evidenceExists && !hasFinancialsSection(normalized.report?.md || '');
     const financialsParagraphBad = evidenceExists && !financialsIsParagraph(normalized.report?.md || '');
     const financialsFiguresMissing = evidenceExists && !financialsHasLabeledFigures(normalized.report?.md || '');
+    const financialLinesMissing = evidenceExists && !hasFinancialLines(normalized.report?.md || '');
 
     if (!valid
       || looksGeneric(normalized.report?.md)

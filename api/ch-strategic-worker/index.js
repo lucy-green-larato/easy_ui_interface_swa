@@ -1,4 +1,4 @@
-//  ch-strategic worker (queue-trigger) 10/10/2025 v7
+//  ch-strategic worker (queue-trigger) 21/10/2025 v9
 // Consumes jobs from CH_STRATEGIC_JOBS_QUEUE, updates status, and writes results/log/CSV.
 
 "use strict";
@@ -15,19 +15,20 @@ const {
   CH_STRATEGIC_JOBS_QUEUE,
   CH_SR_PAGES_FIRST,
   CH_SR_PAGES_FALLBACK,
-  DEBUG_SAVE_TEXT,     // <-- from config ONLY
-  DEBUG_FORCE_TEXT,    // <-- from config ONLY
+  MAX_TEXT_CHARS,
+  DEBUG_ENABLED,
+  DEBUG_SAVE_TEXT,
+  DEBUG_FORCE_TEXT,
+  RECORD_SOFT_TIMEOUT_MS,
+  RECORD_MAX_ATTEMPTS,
 } = require("../ch-strategic/config");
-
 const {
   tryGetReportText,
   extractStrategicReport,
   normalizeCompanyNumber,
 } = require("../lib/chdi");
-
-const MAX_TEXT_CHARS = 200_000;
-const HEARTBEAT_EVERY_ROWS = 50;
-const HEARTBEAT_EVERY_MS = 30_000;
+const HEARTBEAT_EVERY_ROWS = 3;
+const HEARTBEAT_EVERY_MS = 3000;
 
 /* -------------------- helpers -------------------- */
 function nowIso() { return new Date().toISOString(); }
@@ -43,6 +44,7 @@ async function withRowTimeout(promise, ms, onTimeoutMsg = "row_timeout") {
     clearTimeout(t);
   }
 }
+
 async function writeParentProgress(statusC, parentRunId, patch) {
   if (!parentRunId) return;
   await writeStatus(statusC, parentRunId, {
@@ -318,6 +320,11 @@ module.exports = async function (context, queueItem) {
   const logName = isChild ? `results.${runId}.log.json` : `${runId}.log.json`;
   const csvName = isChild ? `results.${runId}.csv` : `${runId}.csv`;
 
+  // Parent artifact names (router/UI contract)
+  const parentResultsName = isChild ? `${parentRunId}.json` : resultsName;
+  const parentLogName = isChild ? `${parentRunId}.log.json` : logName;
+  const parentCsvName = isChild ? `${parentRunId}.csv` : csvName;
+
   // Containers
   const statusC = blobSvc.getContainerClient(CHS_STATUS_CONTAINER);
   const outC = blobSvc.getContainerClient(CHS_OUT_CONTAINER);
@@ -404,22 +411,22 @@ module.exports = async function (context, queueItem) {
   }
 
   // Mark Processing
-  await writeParentProgress(statusC, parentRunId, {
+  await writeParentProgress(statusC, runId, {
     lastChild: runId,
     child: { runId, processedRows, matched, skipped }
   }); writeStatus(statusC, runId, {
     state: "Processing",
     message: "Generating outputs…",
-    processedRows,                    // chunk progress so far
+    processedRows,
     matched,
     skipped,
+    totalRows,                         // ← keep total for UI counters
     evidenceTag: evidenceTag || null,
     preview,
     limits: { maxRows: CH_STRATEGIC_MAX_ROWS, chunkSize: CH_STRATEGIC_CHUNK_SIZE },
-    parentRunId: parentRunId || null, // optional but useful
-    slice: { offset: rowOffset, limit: rowLimit || null }, // optional but recommended
+    parentRunId: parentRunId || null,
+    slice: { offset: rowOffset, limit: rowLimit || null },
   });
-
   try {
     // 1) Load cached CSV (prefer cacheKey) — STREAMED
     let csvStream = null;
@@ -540,13 +547,26 @@ module.exports = async function (context, queueItem) {
         if (needRowBeat || needTimeBeat) {
           try {
             // Child (this chunk) heartbeat
+            const recentMatches = (items || [])
+              .filter(it => it && it.matched === true)
+              .slice(-4)
+              .map(it => ({
+                companyName: it.companyName || it["Company Name"] || "",
+                companyNumber: it.companyNumber || it["Company Number"] || "",
+                matched: true,
+                evidence: it.evidence || it.keyword || evidenceTag || "",
+                snippet: it.snippet || it.details || ""
+              }));
+
             await writeStatus(statusC, runId, {
               state: "Processing",
               message: `Processing… ${processedRows}/${totalPlanned}`,
               processedRows,
               matched,
               skipped,
+              totalRows,
               evidenceTag: evidenceTag || null,
+              preview: recentMatches, // ← stream a small preview during processing
               slice: { offset: rowOffset, limit: rowLimit || null },
             });
 
@@ -561,6 +581,7 @@ module.exports = async function (context, queueItem) {
                   processedRows,
                   matched,
                   skipped,
+                  totalRows,
                   slice: { offset: rowOffset, limit: rowLimit || null },
                 },
               });
@@ -738,7 +759,7 @@ module.exports = async function (context, queueItem) {
               errorsByReason[reason] = (errorsByReason[reason] || 0) + 1;
             }
           })(),
-          60_000,
+          RECORD_SOFT_TIMEOUT_MS,
           "row_timeout"
         );
       } catch (e) {
@@ -748,32 +769,44 @@ module.exports = async function (context, queueItem) {
         const key = reason === "row_timeout" ? "row_timeout" : "row_error";
         errorsByReason[key] = (errorsByReason[key] || 0) + 1;
       }
-
       // heartbeat at the end of each row (lightweight)
       const needRowBeat = processedRows % HEARTBEAT_EVERY_ROWS === 0;
       const needTimeBeat = Date.now() - lastBeatAt >= HEARTBEAT_EVERY_MS;
       if (needRowBeat || needTimeBeat) {
+        // Build a small rolling preview from most recent matches (up to 5)
+        const recentMatches = (items || [])
+          .filter(it => it && it.matched === true)
+          .slice(-5)
+          .map(it => ({
+            companyName: it.companyName || it["Company Name"] || "",
+            companyNumber: it.companyNumber || it["Company Number"] || "",
+            matched: true,
+            evidence: it.evidence || it.keyword || evidenceTag || "",
+            snippet: it.snippet || it.details || ""
+          }));
+
         await writeStatus(statusC, runId, {
           state: "Processing",
           message: `Processing… ${processedRows}/${totalPlanned}`,
           processedRows,
           matched,
           skipped,
+          totalRows,                       // ← keep denominator stable for UI
           evidenceTag: evidenceTag || null,
+          preview: recentMatches           // ← stream rolling preview
         });
         lastBeatAt = Date.now();
       }
     }
 
     // Mid-status with preview (once)
-    const preview = (items || []).slice(0, 10).map(({ companyName, companyNumber, matched, evidence, snippet }) => ({
+    preview = (items || []).slice(0, 10).map(({ companyName, companyNumber, matched, evidence, snippet }) => ({
       companyName,
       companyNumber,
       matched,
       evidence,
       snippet,
     }));
-
     try {
       // Child (this chunk) mid-status
       await writeStatus(statusC, runId, {
@@ -782,6 +815,7 @@ module.exports = async function (context, queueItem) {
         processedRows,                // rows processed in THIS chunk so far
         matched,
         skipped,
+        totalRows,
         evidenceTag: evidenceTag || null,
         preview,
         limits: { maxRows: CH_STRATEGIC_MAX_ROWS, chunkSize: CH_STRATEGIC_CHUNK_SIZE },
@@ -800,6 +834,7 @@ module.exports = async function (context, queueItem) {
             processedRows,
             matched,
             skipped,
+            totalRows,
             slice: { offset: rowOffset, limit: rowLimit || null }
           }
         });
@@ -863,6 +898,68 @@ module.exports = async function (context, queueItem) {
     });
     await putJson(outC, resultsName, resultsPayload);
 
+    // --- Also update parent artifacts when running as a child chunk ---
+    if (isChild && parentRunId) {
+      // Merge child results into parent JSON
+      const parentExisting = await getJsonIfExists(outC, parentResultsName);
+      const seen = new Set(Array.isArray(parentExisting._seenChildren) ? parentExisting._seenChildren : []);
+      const existingItems = Array.isArray(parentExisting.items) ? parentExisting.items : [];
+
+      // Summary merge (idempotent-friendly additive; single source of truth is parent JSON)
+      const summary = Object.assign({ processed: 0, matched: 0, skipped: 0 }, parentExisting.summary);
+      summary.processed = Number(summary.processed || 0) + Number(processedRows || 0);
+      summary.matched = Number(summary.matched || 0) + Number(matched || 0);
+      summary.skipped = Number(summary.skipped || 0) + Number(skipped || 0);
+
+      // Append current items (keeps child-named artifacts intact for diagnostics)
+      if (Array.isArray(resultsPayload.items)) {
+        for (const it of resultsPayload.items) existingItems.push(it);
+      }
+
+      const mergedParent = {
+        runId: parentRunId,
+        summary,
+        items: existingItems,
+        _seenChildren: Array.from(seen.add(runId)),
+      };
+
+      // Write parent JSON
+      await putJson(outC, parentResultsName, mergedParent);
+
+      // Rebuild parent CSV from merged JSON for correctness
+      const parentCsv = buildResultsCsv(existingItems);
+      await putText(CHS_OUT_CONTAINER, parentCsvName, parentCsv, "text/csv; charset=utf-8");
+
+      // Append to parent log
+      const parentLogExisting = await getJsonIfExists(outC, parentLogName);
+      const parentEvents = Array.isArray(parentLogExisting.events) ? parentLogExisting.events : [];
+      parentEvents.push({
+        type: "child_completed",
+        childRunId: runId,
+        processedRows,
+        matched,
+        skipped,
+        at: nowIso(),
+      });
+
+      await putJson(outC, parentLogName, {
+        runId: parentRunId,
+        correlationId: correlationId || null,
+        events: parentEvents,
+      });
+
+      // Update parent status as Processing (fan-in completes elsewhere)
+      await writeStatus(statusC, parentRunId, {
+        state: "Processing",
+        message: "Processing chunks…",
+        completedChild: runId,
+        processedRows,
+        matched,
+        skipped,
+      });
+    }
+    // --- end parent artifact update ---
+
     // Final status
     await writeStatus(statusC, runId, {
       state: "Completed",
@@ -870,6 +967,7 @@ module.exports = async function (context, queueItem) {
       processedRows,
       matched,
       skipped,
+      totalRows,                     // ← add this so UI counters stay correct
       evidenceTag: evidenceTag || null,
       preview,
       resultUrl: `blob://${CHS_OUT_CONTAINER}/${resultsName}`,

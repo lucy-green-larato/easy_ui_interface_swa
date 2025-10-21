@@ -11,6 +11,84 @@
   const hide = (el) => el && el.setAttribute("hidden", "hidden");
   const setAriaExpanded = (btn, expanded) => btn?.setAttribute("aria-expanded", String(expanded));
 
+  // --- Minimal markdown → safe HTML (H2/H3, bullets, paragraphs) ---
+  function IM_mdToHtml(md) {
+    const esc = s => String(s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const strong = s => s.replace(/\*\*([^\*\n][\s\S]*?)\*\*/g, "<strong>$1</strong>");
+    const lines = String(md || "").replace(/\r/g, "").split("\n");
+    const out = [];
+    let inList = false;
+    const flush = () => { if (inList) { out.push("</ul>"); inList = false; } };
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i].trim();
+      if (!t) { flush(); continue; }
+      if (/^#{2,}\s+/.test(t)) { flush(); out.push("<h3>" + esc(t.replace(/^#{2,}\s+/, "")) + "</h3>"); continue; }
+      if (/^- /.test(t)) { if (!inList) { out.push("<ul>"); inList = true; } out.push("<li>" + strong(esc(t.slice(2))) + "</li>"); continue; }
+      flush(); out.push("<p>" + strong(esc(t)) + "</p>");
+    }
+    flush();
+    return out.join("");
+  }
+
+  function showDownloadLinks(runId, status) {
+    const wrap = document.querySelector('[data-dl="wrap"], .downloads');
+    wrap?.classList.remove('is-hidden');
+
+    const urlFor = (file) =>
+      `/api/ch-strategic/download?runId=${encodeURIComponent(runId)}&file=${file}`;
+
+    const set = (qs, file) => {
+      const el = document.querySelector(qs);
+      if (!el) return;
+      el.setAttribute('href', urlFor(file));
+      el.removeAttribute('disabled');
+      el.classList.remove('is-disabled');
+    };
+
+    // tolerate either ids or data-attributes (works with your variants)
+    set('#dl-results', 'results'); set('[data-dl="results"]', 'results');
+    set('#dl-log', 'log'); set('[data-dl="log"]', 'log');
+    set('#dl-csv', 'csv'); set('[data-dl="csv"]', 'csv');
+  }
+
+  function setProgressBar(processed, total) {
+    const bar = document.getElementById('progress');
+    const fill = document.getElementById('progressFill');
+    if (!bar || !fill) return;
+
+    const p = Number(processed || 0);
+    const t = Number(total || 0);
+
+    if (t > 0) {
+      const pct = Math.max(0, Math.min(100, Math.round((p / t) * 100)));
+      fill.style.width = pct + '%';
+      bar.hidden = false;
+      bar.setAttribute('aria-hidden', 'false');
+    } else {
+      fill.style.width = '0%';
+    }
+  }
+
+  function enableDownloadButtons(runId) {
+    const mk = (file) =>
+      `/api/ch-strategic/download?runId=${encodeURIComponent(runId)}&file=${file}`;
+
+    const cont = document.getElementById('downloadContainer');
+    const res = document.getElementById('chs-download-results');
+    const log = document.getElementById('chs-download-log');
+
+    if (cont) cont.classList.remove('is-hidden');
+
+    if (res) {
+      res.disabled = false;
+      res.onclick = () => { window.location.href = mk('results'); };
+    }
+    if (log) {
+      log.disabled = false;
+      log.onclick = () => { window.location.href = mk('log'); };
+    }
+  }
+
   // CSV helpers (client-side preview/counters only; server is source of truth)
   const stripBom = (s) => (s && s.charCodeAt(0) === 0xfeff ? s.slice(1) : s);
   const parseCsvRows = (textContent) => {
@@ -142,6 +220,18 @@
     const t = document.querySelector('[data-chs="total"]');
     const m = document.querySelector('[data-chs="matched"]');
     const s = document.querySelector('[data-chs="skipped"]');
+    // --- visual signal bar update ---
+    try {
+      const bar = document.querySelector('[data-chs="signal-bar"]');
+      const label = document.querySelector('[data-chs="signal-label"]');
+      if (bar && label) {
+        const pct = total > 0 ? Math.round((matched / total) * 100) : 0;
+        bar.style.width = `${pct}%`;
+        bar.setAttribute('aria-valuenow', String(pct));
+        label.textContent = `${pct}%`;
+      }
+    } catch { }
+    // --- end visual signal bar update ---
     if (t) t.textContent = String(total ?? 0);
     if (m) m.textContent = String(matched ?? 0);
     if (s) s.textContent = String(skipped ?? 0);
@@ -160,29 +250,57 @@
     host.innerHTML = rows.length ? `<ul>${rows.join("")}</ul>` : "";
   }
 
+  let _uiLastCounters = { total: 0, processed: 0, matched: 0, skipped: 0 };
+
   function countersFromStatus(status) {
-    // Prefer live worker fields
+    // Prefer fields already shaped by apiPollStatus
+    if (Number.isFinite(status?.total)
+      && Number.isFinite(status?.matched)
+      && Number.isFinite(status?.skipped)) {
+      return { total: status.total, matched: status.matched, skipped: status.skipped };
+    }
+
+    // Fallback to live worker fields (older shape)
     if (Number.isFinite(status?.processedRows)
       && Number.isFinite(status?.matched)
       && Number.isFinite(status?.skipped)) {
-      return {
-        total: status.processedRows,
-        matched: status.matched,
-        skipped: status.skipped
-      };
+      return { total: status.processedRows, matched: status.matched, skipped: status.skipped };
     }
-    // Fallback to summary (from results or status)
+
+    // 2) Worker-live fields (some servers expose processedRows)
+    if (Number.isFinite(status?.processedRows)
+      && Number.isFinite(status?.matched)
+      && Number.isFinite(status?.skipped)) {
+      return { total: status.processedRows, matched: status.matched, skipped: status.skipped };
+    }
+
+    // 3) Summary variants from status/results: prefer 'processed', then 'rows'
     const s = status?.summary || {};
+    if (Number.isFinite(s.processed) && Number.isFinite(s.matched) && Number.isFinite(s.skipped)) {
+      const total = Number(status?.totalRows ?? s.processed ?? 0);
+      return { total, matched: s.matched, skipped: s.skipped };
+    }
     if (Number.isFinite(s.rows) && Number.isFinite(s.matched) && Number.isFinite(s.skipped)) {
       return { total: s.rows, matched: s.matched, skipped: s.skipped };
     }
-    // Last resort: preview/items count
+
+    // 4) If totalRows is available alone, use it with any known matched/skipped
+    if (Number.isFinite(status?.totalRows)) {
+      return {
+        total: status.totalRows,
+        matched: Number(status.matched || s.matched || 0),
+        skipped: Number(status.skipped || s.skipped || 0)
+      };
+    }
+
+    // 5) Last resort: infer from preview/items
     const items = Array.isArray(status?.preview) ? status.preview
       : Array.isArray(status?.items) ? status.items : [];
     if (items.length) {
       const m = items.filter(x => x && x.matched === true).length;
       return { total: items.length, matched: m, skipped: Math.max(0, items.length - m) };
     }
+
     return { total: 0, matched: 0, skipped: 0 };
   }
 
@@ -335,13 +453,21 @@
     text(el.countSkipped, `Skipped: ${skipped}`); el.countSkipped && (el.countSkipped.dataset.count = String(skipped));
   }
 
-  function setProgressPercent(percent) {
-    if (!el.progress || !el.progressFill) return;
-    if (percent == null) {
-      hide(el.progress); el.progress.setAttribute("aria-hidden", "true"); el.progressFill.style.width = "0%"; return;
+  function setProgressPercent(pct) {
+    const bar = document.querySelector('[data-chs="signal-bar"]');
+    const label = document.querySelector('[data-chs="signal-label"]');
+    if (!bar || !label) return;
+
+    if (pct == null || !Number.isFinite(pct) || pct < 0) {
+      bar.style.width = '0%';
+      bar.setAttribute('aria-valuenow', '0');
+      label.textContent = '0%';
+      return;
     }
-    show(el.progress); el.progress.removeAttribute("aria-hidden");
-    el.progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+    const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+    bar.style.width = `${clamped}%`;
+    bar.setAttribute('aria-valuenow', String(clamped));
+    label.textContent = `${clamped}%`;
   }
 
   function clearResults() {
@@ -349,11 +475,15 @@
     if (el.resultsSkipped) el.resultsSkipped.innerHTML = "";
     if (el.resultsMatchesTitle) el.resultsMatchesTitle.setAttribute("hidden", "hidden");
     if (el.resultsSkippedTitle) el.resultsSkippedTitle.setAttribute("hidden", "hidden");
-    if (el.downloadContainer) el.downloadContainer.innerHTML = "";
+
+    // DO NOT remove children; just disable if present
     if (el.btnDlResults) el.btnDlResults.setAttribute("disabled", "disabled");
     if (el.btnDlLog) el.btnDlLog.setAttribute("disabled", "disabled");
+
     setCounters({ total: 0, processed: 0, matched: 0, skipped: 0 });
     setProgressPercent(null);
+    // keep the classic bar visually reset too
+    setProgressBar(0, 0);
   }
 
   function appendResultItem({ type, companyNumber, companyName, message }) {
@@ -406,32 +536,52 @@
   }
 
   function wireDownloadButtons(runId) {
-    const enable = () => {
-      if (el.btnDlResults) {
-        el.btnDlResults.removeAttribute("disabled");
-        el.btnDlResults.onclick = () => {
-          window.location.href = `/api/ch-strategic/download?runId=${encodeURIComponent(runId)}&file=results`;
-        };
-      }
-      if (el.btnDlLog) {
-        el.btnDlLog.removeAttribute("disabled");
-        el.btnDlLog.onclick = () => {
-          window.location.href = `/api/ch-strategic/download?runId=${encodeURIComponent(runId)}&file=log`;
+    const mk = (file) =>
+      `/api/ch-strategic/download?runId=${encodeURIComponent(runId)}&file=${file}`;
+
+    // Re-query fresh nodes (avoid stale cached refs)
+    const cont = document.getElementById("downloadContainer");
+    const btnResults = document.getElementById("chs-download-results");
+    const btnLog = document.getElementById("chs-download-log");
+
+    // Make container visible if present
+    if (cont) {
+      cont.hidden = false;
+      cont.classList?.remove("is-hidden");
+    }
+
+    // Enable & wire either <button> or <a>
+    const enableEl = (node, file) => {
+      if (!node) return;
+      const url = mk(file);
+
+      node.removeAttribute("disabled");
+      node.classList?.remove("is-disabled");
+      node.setAttribute?.("aria-disabled", "false");
+
+      if (node.tagName === "A") {
+        node.setAttribute("href", url);
+        node.onclick = null; // let link navigate normally
+      } else {
+        node.onclick = (e) => {
+          e.preventDefault();
+          window.location.href = url;
         };
       }
     };
 
-    // If you don't have the two fixed buttons, render a fallback button
-    if (!el.btnDlResults && !el.btnDlLog && el.downloadContainer) {
-      el.downloadContainer.innerHTML = "";
-      const btn = document.createElement("button");
-      btn.type = "button"; btn.className = "btn"; btn.textContent = "Download Results";
-      btn.addEventListener("click", () => window.location.href = `/api/ch-strategic/download?runId=${encodeURIComponent(runId)}&file=results`);
-      el.downloadContainer.appendChild(btn);
-      return;
-    }
+    enableEl(btnResults, "results");
+    enableEl(btnLog, "log");
 
-    enable();
+    // Fallback: if neither fixed control exists, render a simple results button
+    if (!btnResults && !btnLog && cont) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn";
+      btn.textContent = "Download Results";
+      btn.addEventListener("click", () => { window.location.href = mk("results"); });
+      cont.appendChild(btn);
+    }
   }
 
   function showFeedbackCard(showDetails = false) {
@@ -519,19 +669,54 @@
 
   async function apiPollStatus(runId, { signal } = {}) {
     const s = await getJSON(`/api/ch-strategic/status?runId=${encodeURIComponent(runId)}`, { signal });
-    const total = Number(s.totalRows || 0);
-    const processed = Number(s.processedRows || 0);
+
+    // Be generous about where totals can arrive from
+    const total =
+      Number(
+        s.totalRows ??
+        s.total ??
+        s.total_planned ??
+        s.clippedRows ??
+        (s.summary && s.summary.rows) ??
+        0
+      );
+
+    const processed =
+      Number(
+        s.processedRows ??
+        s.processed ??
+        (s.summary && s.summary.processed) ??
+        0
+      );
+
+    const matched = Number(
+      s.matched ??
+      (s.summary && s.summary.matched) ??
+      0
+    );
+
+    const skipped = Number(
+      s.skipped ??
+      (s.summary && s.summary.skipped) ??
+      0
+    );
+
     const completed = s.state === "Completed" || s.state === "Failed";
+    const preview = Array.isArray(s.preview) ? s.preview : null;
+
     return {
       total,
       processed,
-      matched: Number(s.matched || 0), // optional, default 0
-      skipped: Number(s.skipped || 0), // optional, default 0
+      matched,
+      skipped,
       messages: s.messages || null,
+      preview,
       completed,
-      state: s.state
+      state: s.state,
+      raw: s // keep for debugging if needed
     };
   }
+
   // Flows 
   async function startAndPollWorkerFlow({ file, evidence }) {
     // Start
@@ -543,9 +728,9 @@
 
     const { runId } = await apiStartRun({ file, evidenceTag: evidence });
     if (!runId) throw new Error("No runId returned.");
-
     resetRunUI();
-
+    // Make the classic bar visible immediately (0 of 1) so users see movement on first tick.
+    setProgressBar(0, 1);
     state.run = { runId, polling: true, pollAbort: new AbortController(), downloadEnabled: false };
     wireDownloadButtons(runId);
 
@@ -560,23 +745,57 @@
         }
 
         // overwrite counters and preview on every tick
-        const { total, matched, skipped } = countersFromStatus(status);
-        renderSummary({ total, matched, skipped });
+        const live = countersFromStatus(status);
+        const total = Number(status.total ?? status.totalRows ?? 0);
+        const processed = Number(status.processed ?? status.processedRows ?? 0);
+        setProgressBar(processed, total);
+        const processedNow = Number(status.processed ?? status.processedRows);
+        if (Number.isFinite(live.total) && live.total > 0) _uiLastCounters.total = live.total;
+        if (Number.isFinite(processedNow) && processedNow >= 0) _uiLastCounters.processed = processedNow;
+        if (Number.isFinite(live.matched) && live.matched >= 0) _uiLastCounters.matched = live.matched;
+        if (Number.isFinite(live.skipped) && live.skipped >= 0) _uiLastCounters.skipped = live.skipped;
+
+        // Drive counters & progress from sticky values
+        if (typeof setCounters === "function") setCounters(_uiLastCounters);
+        const denom = _uiLastCounters.total || 0;
+        setProgressPercent(denom > 0 ? Math.round((_uiLastCounters.processed / denom) * 100) : 0);
+
+        // Summary and (rolling) preview if present
+        renderSummary({
+          total: _uiLastCounters.total,
+          matched: _uiLastCounters.matched,
+          skipped: _uiLastCounters.skipped
+        });
         if (Array.isArray(status.preview)) renderPreview(status.preview);
+
         if (status?.state === "Processing") {
-          renderStatus(status?.message || "Processing…");
+          renderStatus(status?.message || "Your file is being processed. There's a lot going on to find the insights you need…");
+        }
+        if (status?.state === "Processing" || status?.state === "Queued" || status?.state === "Received") {
+          renderStatus(
+            status?.message ||
+            (status?.state === "Queued"
+              ? "Queued… waiting for a worker."
+              : "Your file is being processed. There's a lot going on to find the insights you need…")
+          );
         }
 
         if (status?.state === "Completed") {
           renderStatus("Completed");
           state.run.downloadEnabled = true;
+          await renderResultsPanel(runId);
+          showDownloadLinks(runId, status);
+          setProgressBar((Number(status.total ?? status.totalRows ?? 0) || 0),
+            (Number(status.total ?? status.totalRows ?? 0) || 0));
+          enableDownloadButtons(runId);
           break;
         }
+
         if (status?.state === "Failed") {
           renderStatus(status?.error?.message || "Failed");
           break;
         }
-        await sleep(1000);
+        await sleep(status?.state === "Processing" ? 1200 : 2000);
       }
     } finally {
       setBusy(false);
@@ -695,9 +914,16 @@
     // Start (Analyze == Large run now)
     const startHandler = async (evt) => {
       evt.preventDefault();
+
+      // ⭐ Capture the latest UI values at click time
+      state.evidence = (el.evidence?.value || "").trim();
+      state.csvFile = el.csv?.files?.[0] || state.csvFile || null;
+
       clearResults();
+
       const { ok } = validateClientInputs(state.csvFile, state.evidence);
       if (!ok) return;
+
       try {
         await startAndPollWorkerFlow({ file: state.csvFile, evidence: state.evidence });
       } catch (err) {
@@ -759,4 +985,43 @@
   } else {
     runOnce();
   }
+  // --- Insight Miner help modal wiring ---
+  (function wireInsightHelp() {
+    const btn = document.getElementById("insight-help");
+    const modal = document.getElementById("insight-help-modal");
+    const closeBtn = document.getElementById("insight-help-close");
+    const body = document.getElementById("insight-help-body");
+    if (!btn || !modal || !body) return;
+
+    let cachedHTML = "";
+
+    async function openModal() {
+      if (!cachedHTML) {
+        body.innerHTML = '<p class="muted">Loading…</p>';
+        try {
+          const res = await fetch("/content/call-library/insight-miner-help.md", { cache: "no-store" });
+          const md = await (res.ok ? res.text() : Promise.reject(res.status));
+          cachedHTML = IM_mdToHtml(md);
+        } catch {
+          cachedHTML = "<p class='muted'>Sorry — help content couldn’t be loaded right now.</p>";
+        }
+      }
+      body.innerHTML = cachedHTML;
+      if (!modal.dataset.bound) {
+        modal.addEventListener("cancel", (e) => { e.preventDefault(); closeModal(); });
+        modal.dataset.bound = "1";
+      }
+      modal.showModal();
+      btn.setAttribute("aria-expanded", "true");
+    }
+
+    function closeModal() {
+      try { modal.close(); } catch { }
+      btn.setAttribute("aria-expanded", "false");
+      btn.focus({ preventScroll: true });
+    }
+
+    btn.addEventListener("click", openModal);
+    closeBtn?.addEventListener("click", closeModal);
+  })();
 })();

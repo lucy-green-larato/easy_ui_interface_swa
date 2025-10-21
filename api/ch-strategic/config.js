@@ -1,4 +1,4 @@
-// api/ch-strategic/config.js 01-10-2025 v8 (master debug flag + page-window sanitize)
+// api/ch-strategic/config.js 19-10-2025 v9 (master debug flag + page-window sanitize)
 
 "use strict";
 
@@ -87,11 +87,35 @@ const CH_STRATEGIC_FEEDBACK_TTL_DAYS = toInt(
   30
 );
 
+// Standard Track caps (single-run, no fan-out)
+const STANDARD_MAX_ITEMS = toInt(
+  getEnv("CH_STRATEGIC_STANDARD_MAX_ITEMS", ["CHS_STANDARD_MAX_ITEMS"], 200),
+  200
+);
+
+// Per-record safety (soft timeout + retries) used by Standard Track
+const RECORD_SOFT_TIMEOUT_MS = toInt(
+  getEnv("CH_STRATEGIC_RECORD_SOFT_TIMEOUT_MS", ["CHS_RECORD_SOFT_TIMEOUT_MS"], 15000),
+  15000
+);
+
+const RECORD_MAX_ATTEMPTS = toInt(
+  getEnv("CH_STRATEGIC_RECORD_MAX_ATTEMPTS", ["CHS_RECORD_MAX_ATTEMPTS"], 1),
+  3
+);
+
 // Page-window for SR scanning (sanitize)
 const RAW_PAGE_FIRST = toInt(getEnv("CH_SR_PAGES_FIRST", ["CH_SR_PAGES_PRIMARY"], 6), 6);
 const RAW_PAGE_FALLBACK = toInt(getEnv("CH_SR_PAGES_FALLBACK", ["CH_SR_PAGES_SECONDARY"], 12), 12);
 const _PAGE_FIRST = Math.max(1, RAW_PAGE_FIRST | 0);
 const _PAGE_FALLBACK = Math.max(_PAGE_FIRST, RAW_PAGE_FALLBACK | 0);
+// Public, sanitized page-window values for importers
+const CH_SR_PAGES_FIRST = _PAGE_FIRST;
+const CH_SR_PAGES_FALLBACK = _PAGE_FALLBACK;
+const MAX_TEXT_CHARS = toInt(
+  getEnv("CH_SR_MAX_TEXT_CHARS", ["CHS_MAX_TEXT_CHARS", "MAX_TEXT_CHARS"], 200000),
+  200000
+);
 
 /* -------------------- debug (master switch + per-flag) -------------------- */
 
@@ -195,29 +219,32 @@ async function ensureInfrastructure() {
 }
 
 module.exports = {
-  // auth
-  ALLOWED_ROLES,
-
-  // upload
+  // env + limits
   MAX_UPLOAD_BYTES,
   DEFAULT_ALLOWED_UPLOAD_MIME,
 
-  // business
+  // business tuning
   CH_STRATEGIC_MAX_ROWS,
   CH_STRATEGIC_CHUNK_SIZE,
   CH_STRATEGIC_FEEDBACK_RPM,
   CH_STRATEGIC_FEEDBACK_TTL_DAYS,
 
-  // page windows (sanitized)
-  CH_SR_PAGES_FIRST: _PAGE_FIRST,
-  CH_SR_PAGES_FALLBACK: _PAGE_FALLBACK,
+  // Standard Track knobs
+  STANDARD_MAX_ITEMS,
+  RECORD_SOFT_TIMEOUT_MS,
+  RECORD_MAX_ATTEMPTS,
 
-  // debug (master + per-flag)
+  // SR scanning window + text guard
+  CH_SR_PAGES_FIRST,
+  CH_SR_PAGES_FALLBACK,
+  MAX_TEXT_CHARS,
+
+  // debug flags
   DEBUG_ENABLED,
   DEBUG_SAVE_TEXT,
   DEBUG_FORCE_TEXT,
 
-  // storage
+  // storage (containers)
   AZURE_STORAGE,
   CHS_OUT_CONTAINER,
   CHS_STATUS_CONTAINER,
@@ -233,3 +260,4 @@ module.exports = {
   getQueueClient,
   ensureInfrastructure,
 };
+

@@ -1,11 +1,11 @@
-<!-- Index HTML for ch-strategic page 26-09-2025 v1-->
+<!-- Index HTML for ch-strategic page 20-10-2025 v3 -->
 <!doctype html>
 <html lang="en" data-app="inside-track-tools">
 
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Inside Track Tools · Buyer Beacon</title>
+  <title>Inside Track Tools · Insight Miner</title>
   <link rel="stylesheet" href="/styles.css?v=2025-10-09-fc2">
 </head>
 
@@ -17,7 +17,7 @@
         <img class="logo" src="/assets/larato-logo-bullet.svg" alt="" aria-hidden="true" />
         <div class="brand-text">
           <h1 class="app-title">Inside Track Sales Accelerator</h1>
-          <p class="kicker">Buyer Beacon</p>
+          <p class="kicker">Insight Miner</p>
         </div>
       </a>
     </div>
@@ -66,7 +66,7 @@
               <label for="evidence_tag">Keyword or phrase <span aria-hidden="true" class="req">*</span></label>
               <input id="evidence_tag" name="evidence_tag" maxlength="80" placeholder="e.g., international" required
                 autocomplete="off" spellcheck="false" aria-describedby="evidence_help evidence_error" />
-              <p id="evidence_help" class="muted" style ="font-size: smaller;">
+              <p id="evidence_help" class="muted" style="font-size: smaller;">
                 Enter the keywords you want to search for (up to 10, comma separated).
               </p>
               <span id="evidence_error" class="error-inline" role="alert" aria-live="polite"></span>
@@ -81,8 +81,8 @@
             <div class="field">
               <label for="csv_file">Upload CSV <span aria-hidden="true" class="req">*</span></label>
               <input id="csv_file" name="csv_file" type="file" accept=".csv" required
-                aria-describedby="csv_help csv_error" />
-              <p id="csv_help" class="muted" style ="font-size: smaller;">
+                aria-describedby="csv_help csv_error" class="file-btn" />
+              <p id="csv_help" class="muted" style="font-size: smaller;">
                 You provide Company Name and Company Number. We do the heavy lifting.
               </p>
               <span id="csv_error" class="error-inline" role="alert" aria-live="polite"></span>
@@ -92,7 +92,7 @@
               <label for="importPbiBtn">Market Intelligence import</label>
               <button id="importPbiBtn" class="btn inline" type="button" aria-haspopup="dialog"
                 aria-controls="pbi-dialog">Import</button>
-              <p class="muted" style ="font-size: smaller;">
+              <p class="muted" style="font-size: smaller;">
                 Click to analyse your profiled prospects.
               </p>
             </div>
@@ -107,7 +107,9 @@
               <span class="btn-label">Start small run</span>
               <span class="spinner" aria-hidden="true"></span>
             </button>
-            <button id="startLargeBtn" class="btn" type="button" hidden>Start large run</button>
+            <button disabled aria-disabled="true" title="Large run is temporarily unavailable" class="btn">
+              Start large run
+            </button>
             <button id="resetBtn" type="reset" class="btn small">Reset</button>
           </div>
           <p class="muted">
@@ -131,9 +133,22 @@
     </section>
 
     <!-- MIDDLE PANEL :: Results -->
-    <section class="panel middle">
-      <div class="row-between output-head">
-        <h2 id="output-title">Results</h2>
+    <section class="panel middle" aria-labelledby="results-title">
+      <div class="card results">
+        <div class="output-head"
+          style="display:flex; align-items:center; justify-content:space-between; gap:var(--s-2); margin:0 0 var(--s-2) 0;">
+          <h2 id="results-title" style="margin:0">Results</h2>
+          <button id="insight-help" class="btn tip-chip" type="button" aria-haspopup="dialog"
+            aria-controls="insight-help-modal" title="Quick checklist to win more with Insight Miner">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" stroke="currentColor"
+              fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"></circle>
+              <line x1="12" y1="10" x2="12" y2="16"></line>
+              <circle cx="12" cy="7" r="1.25" fill="currentColor"></circle>
+            </svg>
+            <span>Tips to help you win more with Insight Miner</span>
+          </button>
+        </div>
 
         <!-- Download controls (buttons rendered immediately but disabled until Completed) -->
         <div id="downloadContainer" aria-live="polite">
@@ -152,16 +167,31 @@
         <span id="count-total" data-count="0">Total: 0</span> ·
         <span id="count-processed" data-count="0">Processed: 0</span> ·
         <span id="count-matched" data-count="0">Matches: 0</span> ·
-        <span id="count-skipped" data-count="0">Skipped: 0</span>
+        <span id="count-skipped" data-count="0">No matches found: 0</span>
       </div>
 
-      <!-- Lightweight inline preview (first 10 rows shown when Completed) -->
-      <div class="output-preview" style="margin-top:var(--s-3)">
-        <strong class="muted">Output preview:</strong>
-        <pre id="chs-output"
-          style="max-height:320px; overflow:auto; background:#f7f7f7; padding:8px; border-radius:6px;"
-          aria-live="polite"></pre>
+      <!-- Insight strip (populated by renderSummary/renderPreview in ch-strategic.js) -->
+      <div id="insight" class="card" style="margin-top:var(--s-3)" aria-live="polite">
+        <p class="muted" style="margin:0 0 var(--s-2) 0;">
+          <strong>Summary:</strong>
+          <span data-chs="matched">0</span> match(es) from
+          <span data-chs="total">0</span> companies ·
+          <span data-chs="skipped">0</span> No matches found.
+        </p>
+
+        <!-- Visual signal bar (token-styled) -->
+        <div class="signal">
+          <div class="signal-track" aria-hidden="true">
+            <div class="signal-fill" data-chs="signal-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+              aria-valuenow="0" style="width:0%">
+            </div>
+          </div>
+          <div data-chs="signal-label" class="signal-label">0%</div>
+        </div>
+
+        <div data-chs="output-preview" aria-label="Top matches (preview)"></div>
       </div>
+
 
       <!-- Results containers (single column, stable layout) -->
       <section style="margin-top:var(--s-4)">
@@ -264,7 +294,20 @@
       <p id="pbi-status" class="status" role="status" aria-live="polite"></p>
     </form>
   </dialog>
+  <!-- Insight Miner HELP MODAL -->
+  <dialog id="insight-help-modal" class="modal">
+    <div class="card" style="max-width:720px">
+      <div class="row-between" style="align-items:center">
+        <h3 style="margin:0">Win more with Insight Miner</h3>
+        <button id="insight-help-close" class="btn inline" type="button">Close ×</button>
+      </div>
 
+      <!-- Markdown is loaded into this container -->
+      <div id="insight-help-body" class="modal-body" style="margin-top:var(--s-3)">
+        <p class="muted">Loading…</p>
+      </div>
+    </div>
+  </dialog>
   <!-- JS module (handles validation, API calls, progress, download, PBI import) -->
   <script type="module" src="/src/js/ch-strategic.js?v=2025-08-24-1"></script>
 </body>

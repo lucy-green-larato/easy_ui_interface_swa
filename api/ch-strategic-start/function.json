@@ -5,7 +5,7 @@
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "methods": ["post","options"],
+      "methods": ["post"],
       "route": "ch-strategic/start"
     },
     { "type": "http", "direction": "out", "name": "res" },

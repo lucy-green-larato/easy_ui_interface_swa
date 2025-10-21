@@ -1,4 +1,4 @@
-/** api/ch-strategic/index.js 30-09-2025 v7
+/** api/ch-strategic/index.js 20-10-2025 v9
  * ch-strategic — multi-route HTTP trigger (Node 20)
  * Endpoints:
  *   POST /api/ch-strategic/start           (multipart/form-data)
@@ -34,6 +34,9 @@ const {
   CHS_STATUS_CONTAINER,
   CHS_CACHE_CONTAINER,
   CHS_FEEDBACK_CONTAINER,
+  STANDARD_MAX_ITEMS,
+  RECORD_SOFT_TIMEOUT_MS,
+  RECORD_MAX_ATTEMPTS,
   blobSvc,
 } = require("./config");
 
@@ -386,7 +389,10 @@ async function handleHealth() {
       limits: {
         maxUploadBytes: MAX_UPLOAD_BYTES,
         maxRows: CH_STRATEGIC_MAX_ROWS,
-        chunkSize: CH_STRATEGIC_CHUNK_SIZE
+        chunkSize: CH_STRATEGIC_CHUNK_SIZE,
+        standardMaxItems: STANDARD_MAX_ITEMS,
+        recordSoftTimeoutMs: RECORD_SOFT_TIMEOUT_MS,
+        recordMaxAttempts: RECORD_MAX_ATTEMPTS
       }
     })
   };
@@ -420,16 +426,18 @@ module.exports = async function (context, req) {
     // Health is intentionally open
     if (method === "GET" && path === "/health") { context.res = await handleHealth(); return; }
 
-    // 3) AUTH (strict: throws an envelope on failure)
-    try {
-      requireAuth(context, req, ALLOWED_ROLES);
-    } catch (resp) {
-      context.res = {
-        status: resp.status || 401,
-        headers: { ...CORS, "x-correlation-id": cid, "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify(resp.body || { error: "unauthenticated", message: "Auth required" })
-      };
-      return;
+    // 3) AUTH (only for /feedback; /health, /status, /download are open)
+    if (method === "POST" && path === "/feedback") {
+      try {
+        requireAuth(context, req, ALLOWED_ROLES);
+      } catch (resp) {
+        context.res = {
+          status: resp.status || 401,
+          headers: { ...CORS, "x-correlation-id": cid, "Content-Type": "application/json; charset=utf-8" },
+          body: JSON.stringify(resp.body || { error: "unauthenticated", message: "Auth required" })
+        };
+        return;
+      }
     }
 
     // 4) Storage check

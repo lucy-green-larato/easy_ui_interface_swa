@@ -1,12 +1,20 @@
-//--- api/ch-strategic/start/index.js 10-10-2025 v6 (size guard + preflight + output binding)
+//--- api/ch-strategic/start/index.js 20-10-2025 v7 (add more variables, size guard + preflight + output binding)
 "use strict";
 const Busboy = require("busboy");
 const crypto = require("crypto");
 const {
-  ensureInfrastructure, blobSvc,
-  CHS_CACHE_CONTAINER, CHS_STATUS_CONTAINER,
-  CH_STRATEGIC_MAX_ROWS, CH_STRATEGIC_CHUNK_SIZE,
-  MAX_UPLOAD_BYTES
+  blobSvc,
+  CHS_STATUS_CONTAINER,
+  CHS_OUT_CONTAINER,
+  CHS_CACHE_CONTAINER,
+  CH_STRATEGIC_JOBS_QUEUE,
+  STANDARD_MAX_ITEMS,
+  RECORD_SOFT_TIMEOUT_MS,
+  RECORD_MAX_ATTEMPTS,
+  MAX_UPLOAD_BYTES,
+  CH_STRATEGIC_MAX_ROWS,
+  CH_STRATEGIC_CHUNK_SIZE,
+  ensureInfrastructure,
 } = require("../ch-strategic/config");
 
 function bad(status, code, message, extra) {
@@ -131,50 +139,53 @@ module.exports = async function (context, req) {
       limits: { maxRows: CH_STRATEGIC_MAX_ROWS, chunkSize: CH_STRATEGIC_CHUNK_SIZE }
     });
 
-    // --- Chunk planning (rows) ---
-    const chunkSize = Math.max(1, Math.min(
-      Number(CH_STRATEGIC_CHUNK_SIZE) || 5000,   // desired chunk rows (configurable)
-      CH_STRATEGIC_MAX_ROWS                      // never exceed max rows per run
-    ));
-    const totalChunks = Math.max(1, Math.ceil(clippedRows / chunkSize));
+    // --- Standard Track guardrail + single-run enqueue (no children) ---
 
-    // Child runIds: parentRunId + suffix, e.g. "8fa…-c1of5"
-    const parentRunId = runId;
-    const childRunIds = [];
-    const messages = [];
-
-    for (let i = 0; i < totalChunks; i++) {
-      const rowOffset = i * chunkSize;
-      const rowLimit = Math.min(chunkSize, clippedRows - rowOffset);
-      const childRunId = `${parentRunId}-c${i + 1}of${totalChunks}`;
-      childRunIds.push(childRunId);
-
-      messages.push(JSON.stringify({
-        runId: childRunId,             // <-- child runId (unique result files per chunk)
-        parentRunId,                   // <-- to correlate chunks
-        cacheKey: parentRunId,         // <-- ALL children read the same uploaded CSV
-        evidenceTag,
-        totalRows: clippedRows,        // global total (for display)
-        rowOffset,                     // <-- start row (0-based, excluding header)
-        rowLimit,                      // <-- max rows for this chunk
-        submittedAt: nowIso(),
-        correlationId: context.invocationId
-      }));
+    // Enforce Standard Track cap AFTER we know how many rows were uploaded
+    if (Number.isFinite(STANDARD_MAX_ITEMS) && clippedRows > STANDARD_MAX_ITEMS) {
+      context.res = bad(
+        400,
+        "TooManyItems",
+        `This run has ${clippedRows} items which exceeds the Standard Track limit (${STANDARD_MAX_ITEMS}). Please split your file and try again.`,
+        { standardMaxItems: STANDARD_MAX_ITEMS }
+      );
+      return;
     }
 
-    // IMPORTANT: output binding can take an array of queue messages
-    context.bindings.outJobs = messages;
+    // One job = the entire input set, processed by the worker as the parent run.
+    const parentRunId = runId;
+    const message = JSON.stringify({
+      runId: parentRunId,          // parent runId (canonical artifact names)
+      parentRunId: null,           // single-run path
+      cacheKey: parentRunId,       // worker reads the cached upload by this key
+      evidenceTag,
+      totalRows: clippedRows,
+      rowOffset: 0,
+      rowLimit: null,              // worker processes all rows
+      submittedAt: nowIso(),
+      correlationId: context.invocationId
+    });
 
-    // Update initial status to reflect chunked plan
+    // Use the existing output binding (array) with a single message
+    context.bindings.outJobs = [message];
+
+    // Initialize/refresh status for the parent run (no chunkPlan on Standard Track)
     await writeStatus(parentRunId, {
       state: "Queued",
       submittedAt: nowIso(),
-      message: `Queued ${clippedRows} rows in ${totalChunks} chunk(s) of ${chunkSize}`,
+      message: `Queued ${clippedRows} rows for single-run processing`,
       totalRows: clippedRows,
-      chunkPlan: { chunkSize, totalChunks, childRunIds },
       evidenceTag,
-      limits: { maxRows: CH_STRATEGIC_MAX_ROWS, chunkSize: CH_STRATEGIC_CHUNK_SIZE }
+      partial: false,
+      limits: {
+        maxRows: CH_STRATEGIC_MAX_ROWS,
+        chunkSize: CH_STRATEGIC_CHUNK_SIZE,
+        standardMaxItems: STANDARD_MAX_ITEMS,
+        recordSoftTimeoutMs: RECORD_SOFT_TIMEOUT_MS,
+        recordMaxAttempts: RECORD_MAX_ATTEMPTS
+      }
     });
+    // --- end Standard Track single-run enqueue ---
 
     context.res = {
       status: 202,
