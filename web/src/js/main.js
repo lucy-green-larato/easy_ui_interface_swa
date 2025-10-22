@@ -141,7 +141,9 @@ function waitForPowerBi(ms = 10000) {
   const start = Date.now();
   return new Promise((resolve, reject) => {
     (function check() {
-      if (window.powerbi) return resolve(window.powerbi);
+      if (window.powerbi || (window["powerbi-client"] && window["powerbi-client"].models)) {
+        return resolve(window.powerbi || window["powerbi-client"]);
+      }
       if (Date.now() - start > ms) return reject(new Error("Power BI client not loaded"));
       requestAnimationFrame(check);
     })();
@@ -175,7 +177,15 @@ async function renderReport() {
     }
 
     const pbiGlobal = await waitForPowerBi(10000);
-    const models = pbiGlobal && pbiGlobal.models ? pbiGlobal.models : (window.powerbi && window.powerbi.models);
+    const models =
+      (window["powerbi-client"] && window["powerbi-client"].models) ||
+      (pbiGlobal && pbiGlobal.models) ||
+      (window.powerbi && window.powerbi.models);
+
+    if (!models) {
+      showPbiDisabled("Power BI models not available.");
+      return;
+    }
     if (!models) {
       showPbiDisabled("Power BI models not available.");
       return;
