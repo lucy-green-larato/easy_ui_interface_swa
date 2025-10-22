@@ -650,11 +650,10 @@ document.getElementById("toggle-swot")?.addEventListener("click", () => {
 });
 
 const BAD = /^(content|source|sources|n\/a|none)$/i;
-citations = (citations || []).filter(c => !BAD.test(c?.label || ''));
 // Source rendering
 function renderSources(citations) {
   sourceList.innerHTML = "";
-  const items = Array.isArray(citations) ? citations : [];
+  const items = (Array.isArray(citations) ? citations : []).filter(c => !BAD.test((c?.label) || ''));
   const uploadedNames = Array.from((reportInput?.files || [])).map(f => f?.name || "");
   if (!items.length) { sourcesCard.style.display = "none"; return; }
   for (let i = 0; i < items.length; i++) {
