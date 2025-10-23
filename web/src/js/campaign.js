@@ -128,18 +128,67 @@
 
   // ---------- API ----------
   async function generate(payload) {
-    const res = await fetch("/api/generate", {
+    // Map your existing payload onto /api/campaign/start
+    const startBody = {
+      page: payload.page || "campaign",
+      rowCount: payload.rowCount,
+      // Put the original fields under filters so the worker can pick them up
+      // NOTE: csv_text can be large; your backend will trim if needed
+      filters: {
+        kind: payload.kind,
+        source: payload.source,
+        csv_sha256: payload.csv_sha256,
+        company: payload.company,
+        persona: payload.persona,
+        evidenceWindowMonths: payload.evidenceWindowMonths,
+        complianceFooter: payload.complianceFooter,
+        csv_text: payload.csv_text
+      },
+      // Optional legacy fields if you start using them:
+      salesModel: payload.salesModel || null,
+      call_type: payload.call_type || null,
+      notes: null
+    };
+
+    // 1) Start
+    const startRes = await fetch("/api/campaign/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(startBody)
     });
-    const text = await res.text();
-    let data = {};
-    try {
-      data = JSON.parse(text);
-    } catch { }
-    if (!res.ok) throw new Error(`generate ${res.status}: ${text.slice(0, 400)}`);
-    return data;
+    const startText = await startRes.text();
+    const startJson = (() => { try { return JSON.parse(startText); } catch { return {}; } })();
+    if (!startRes.ok || !startJson.runId) {
+      throw new Error(`start ${startRes.status}: ${startText.slice(0, 400)}`);
+    }
+    const runId = startJson.runId;
+
+    // 2) Poll status until Completed (or Failed / timeout)
+    const t0 = Date.now();
+    const TIMEOUT_MS = 120000;
+    const POLL_MS = 1500;
+    let state = "Queued";
+    while (Date.now() - t0 < TIMEOUT_MS) {
+      const sRes = await fetch(`/api/campaign/status?runId=${encodeURIComponent(runId)}`, { cache: "no-store" });
+      const sText = await sRes.text();
+      const sJson = (() => { try { return JSON.parse(sText); } catch { return {}; } })();
+      state = sJson.state || "Unknown";
+      if (state === "Completed") break;
+      if (state === "Failed") {
+        const msg = sJson?.error?.message || "Worker failed";
+        throw new Error(`campaign failed: ${msg}`);
+      }
+      await new Promise(r => setTimeout(r, POLL_MS));
+    }
+    if (state !== "Completed") throw new Error("timeout waiting for campaign");
+
+    // 3) Fetch the final campaign JSON
+    const fRes = await fetch(`/api/campaign/fetch?runId=${encodeURIComponent(runId)}&file=campaign`, { cache: "no-store" });
+    const fText = await fRes.text();
+    if (!fRes.ok) throw new Error(`fetch campaign ${fRes.status}: ${fText.slice(0, 400)}`);
+    const contract = (() => { try { return JSON.parse(fText); } catch { return fText; } })();
+
+    return { runId, contract_v1: contract }; // keep a simple, stable envelope
   }
 
   // ---------- Actions ----------
@@ -185,24 +234,22 @@
       const ms = Date.now() - t0;
       log(`Received response in ${ms}ms`);
 
-      // NEW: normalise envelope and use contract if available
-      const body = (result && result.body) ? result.body : result;
-      if (body && (body._debug_prompt || result._debug_prompt)) {
-        log("---- PROMPT SENT TO LLM ----\n" + (body._debug_prompt || result._debug_prompt));
-      }
-
+      // result = { runId, contract_v1 }
+      setRunId(result.runId);
       updateStage("DraftCampaign");
       updateStage("QualityGate");
       updateStage("Completed");
 
-      // Contract-only renderer
-      const hasSetter = window.CampaignUI && typeof window.CampaignUI.setContract === "function";
-      window.lastResult = body;             // optional: handy for debugging
-      window.lastContract = body && body.contract_v1 ? body.contract_v1 : null;
-      if (hasSetter) window.CampaignUI.setContract(window.lastContract);
-      setStatus("Completed (contract)", "ok");
+      const body = { contract_v1: result.contract_v1 };
+      window.lastResult = body;
+      window.lastContract = result.contract_v1 || null;
 
+      const hasSetter = window.CampaignUI && typeof window.CampaignUI.setContract === "function";
+      if (hasSetter) window.CampaignUI.setContract(window.lastContract);
+
+      setStatus("Completed (contract)", "ok");
       setActiveTab("tab-overview");
+
     } catch (e) {
       log(`Error: ${e && e.message ? e.message : e}`);
       setStatus("Error", "err");

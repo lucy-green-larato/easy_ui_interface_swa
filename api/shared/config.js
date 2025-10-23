@@ -1,4 +1,4 @@
-// /api/shared/config.js
+// /api/shared/config.js 21-10-2025 v1
 const must = (name, val) => {
   if (!val) throw new Error(`Missing env var: ${name}`);
   return val;

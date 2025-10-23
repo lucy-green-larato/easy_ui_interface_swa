@@ -1,4 +1,4 @@
-// /api/shared/packs.js
+// /api/shared/packs.js 21-10-2025 v1 (Errors in lines 23 and 25?)
 export const packs = {
   uk_b2b_sales_core: {
     default: {

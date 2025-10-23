@@ -1,100 +1,250 @@
-// 26/09/2025 v1 /api/campaign-start/index.js
-// POST /api/campaign/start -> enqueue queue work item and return { runId }.
-// Enforces roles, echoes x-correlation-id, and logs structured events.
+// /api/campaign-start/index.js 23-10-2025 v5
+// Classic Azure Functions (function.json + scriptFile), CommonJS.
+// POST /api/campaign/start → enqueues job to campaign-jobs, writes initial status.json ("Queued"), returns 202 { runId }.
 
-const { QueueClient } = require("@azure/storage-queue");
 const { BlobServiceClient } = require("@azure/storage-blob");
-const { requireAuth, jsonError, cryptoRandomId } = require("../lib/auth");
+const { QueueClient } = require("@azure/storage-queue");
+const crypto = require("crypto");
 
-const ALLOWED_ROLES_CAMPAIGN = ["campaign", "campaign-admin"];
-const DEFAULT_QUEUE = process.env.CAMPAIGN_JOBS_QUEUE || "campaign-jobs";
+// ---- Config ----
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
+const QUEUE_NAME = process.env.CAMPAIGN_JOBS_QUEUE || "campaign-jobs";
 
-function correlationIdFrom(req) {
-  return (req.headers?.["x-correlation-id"] || "").toString() || cryptoRandomId();
+// ---- Small utils ----
+function readHeader(req, name) {
+  return req?.headers?.[name] || req?.headers?.[name.toLowerCase()] || null;
 }
 
-function utcParts(date = new Date()) {
-  const yyyy = date.getUTCFullYear();
-  const MM = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(date.getUTCDate()).padStart(2, "0");
-  return { yyyy, MM, dd };
+function getCorrelationId(req) {
+  return (
+    readHeader(req, "x-correlation-id") ||
+    `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`
+  );
 }
 
-function computePrefix({ page = "default", runId, now }) {
-  const { yyyy, MM, dd } = utcParts(now);
-  return `results/campaign/${page}/${yyyy}/${MM}/${dd}/${runId}/`; // per required pattern
+function sanitizePage(page) {
+  const s = String(page || "default").trim().toLowerCase();
+  const cleaned = s.replace(/[^a-z0-9._-]/g, "-").replace(/-+/g, "-");
+  return cleaned || "default";
+}
+
+// IMPORTANT: container-relative prefix (NO container name here)
+function computePrefix(page, runId, now = new Date()) {
+  const yyyy = now.getUTCFullYear();
+  const MM = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(now.getUTCDate()).padStart(2, "0");
+  const p = sanitizePage(page);
+  return `campaign/${p}/${yyyy}/${MM}/${dd}/${runId}/`;
+}
+
+async function writeInitialStatus(containerClient, relPrefix, status) {
+  // relPrefix is container-relative (e.g., "campaign/.../<runId>/")
+  const client = containerClient.getBlockBlobClient(`${relPrefix}status.json`);
+  const payload = JSON.stringify(status);
+  await client.upload(payload, Buffer.byteLength(payload), {
+    blobHTTPHeaders: { blobContentType: "application/json" },
+  });
 }
 
 module.exports = async function (context, req) {
-  if (req.method !== "POST") {
-    context.res = jsonError(400, "bad_request", "Invalid input", correlationIdFrom(req));
+  const method = (req?.method || "GET").toUpperCase();
+  const correlationId = getCorrelationId(req);
+
+  if (method !== "POST") {
+    context.res = {
+      status: 405,
+      headers: {
+        "content-type": "application/json",
+        "x-correlation-id": correlationId,
+        allow: "POST",
+      },
+      body: { error: "method_not_allowed", message: "Only POST is supported" },
+    };
     return;
   }
 
-  const auth = await requireAuth(context, req, ALLOWED_ROLES_CAMPAIGN);
-  if (!auth.ok) return;
-  const correlationId = auth.correlationId;
-
   try {
-    const body = typeof req.body === "object" && req.body ? req.body : {};
-    const { page, rowCount, filters, notes } = body;
-    const runId = cryptoRandomId();
-    const enqueuedAt = new Date().toISOString();
-    const prefix = computePrefix({ page: page || "default", runId, now: new Date() });
+    const STORAGE_CONN = process.env.AzureWebJobsStorage;
+    if (!STORAGE_CONN) {
+      context.res = {
+        status: 500,
+        headers: {
+          "content-type": "application/json",
+          "x-correlation-id": correlationId,
+        },
+        body: { error: "config", message: "AzureWebJobsStorage app setting is missing" },
+      };
+      return;
+    }
 
-    // Build message (plain JSON string, no base64)
-    const message = {
-      runId,
-      page: page || "default",
-      rowCount: typeof rowCount === "number" ? rowCount : undefined,
-      filters: filters ?? undefined,
-      notes: notes ?? undefined,
-      enqueuedAt,
-      prefix,
-      correlationId,
-    };
-    const payload = JSON.stringify(message);
+    // Parse/normalise input
+    const body = (typeof req.body === "object" && req.body) || {};
+    const pageRaw = body.page || "campaign";
+    const effectivePage = sanitizePage(pageRaw);
 
-    // Enqueue
-    const queueClient = new QueueClient(process.env.AzureWebJobsStorage, DEFAULT_QUEUE);
-    await queueClient.createIfNotExists();
-    await queueClient.sendMessage(payload);
+    let salesModel =
+      body.salesModel ??
+      body.sales_model ??
+      body.filters?.salesModel ??
+      body.filters?.sales_model ??
+      null;
 
-    // (Optional but helpful) Write initial "Queued" status so status endpoint can find without delay
-    const blobService = BlobServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
+    let callType = body.call_type ?? body.callType ?? body.filters?.call_type ?? body.filters?.callType ?? null;
+
+    if (salesModel != null) {
+      const sm = String(salesModel).trim().toLowerCase();
+      if (sm !== "direct" && sm !== "partner") {
+        context.res = {
+          status: 400,
+          headers: {
+            "content-type": "application/json",
+            "x-correlation-id": correlationId,
+          },
+          body: { error: "bad_request", message: "salesModel must be 'direct' or 'partner' if provided" },
+        };
+        return;
+      }
+      salesModel = sm;
+    }
+
+    // numeric rowCount (optional)
+    let rc = body.rowCount;
+    if (rc != null) {
+      const n = Number(rc);
+      if (!Number.isFinite(n) || n < 0) {
+        context.res = {
+          status: 400,
+          headers: {
+            "content-type": "application/json",
+            "x-correlation-id": correlationId,
+          },
+          body: { error: "bad_request", message: "rowCount must be a non-negative number" },
+        };
+        return;
+      }
+      rc = Math.floor(n);
+    }
+
+    // Idempotency support
+    const clientRunKey = body.clientRunKey || readHeader(req, "x-idempotency-key") || null;
+    const runId = clientRunKey
+      ? crypto.createHash("sha1").update(String(clientRunKey)).digest("hex")
+      : (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`);
+
+    const now = new Date();
+    const relPrefix = computePrefix(effectivePage, runId, now); // container-relative (no 'results/' here)
+
+    // Blob container client
+    const blobService = BlobServiceClient.fromConnectionString(STORAGE_CONN);
     const containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
     await containerClient.createIfNotExists();
-    const statusClient = containerClient.getBlockBlobClient(`${prefix}status.json`);
+
+    // Initial status (Queued)
+    const enqueuedAt = now.toISOString();
     const initialStatus = {
       runId,
       state: "Queued",
-      input: { page: page || "default", rowCount, filters, notes },
+      input: {
+        page: effectivePage,
+        rowCount: rc ?? null,
+        filters: body.filters ?? null,
+        notes: body.notes ?? null,
+        sales_model: salesModel ?? null,
+        call_type: callType ?? null,
+      },
       enqueuedAt,
-    };
-    const initialJson = JSON.stringify(initialStatus);
-    await statusClient.upload(initialJson, Buffer.byteLength(initialJson), {
-      blobHTTPHeaders: { blobContentType: "application/json" },
-    });
-
-    context.log({
-      event: "campaign_start_enqueued",
-      runId,
       correlationId,
-      queue: DEFAULT_QUEUE,
-      outcome: "OK",
-    });
+    };
+
+    await writeInitialStatus(containerClient, relPrefix, initialStatus);
+
+    // Build queue message (container-relative prefix)
+    const msg = {
+      runId,
+      page: effectivePage,
+      rowCount: rc ?? null,
+      filters: body.filters ?? null,
+      notes: body.notes ?? null,
+      salesModel: salesModel ?? null,
+      call_type: callType ?? null,
+      enqueuedAt,
+      prefix: relPrefix, // <= container-relative; worker supports both but we standardise on this
+      correlationId,
+      clientRunKey: clientRunKey ?? null,
+    };
+
+    // Trim oversized payload (Azure Queue limit ~64KB post-base64)
+    function safeStringify(obj) {
+      try { return JSON.stringify(obj); } catch { return "{}"; }
+    }
+    let payload = safeStringify(msg);
+    const MAX_BYTES = 60 * 1024;
+
+    if (Buffer.byteLength(payload) > MAX_BYTES) {
+      const slim = { ...msg, notes: null };
+      let s = safeStringify(slim);
+      if (Buffer.byteLength(s) > MAX_BYTES) {
+        slim.filters = null;
+        s = safeStringify(slim);
+        if (Buffer.byteLength(s) > MAX_BYTES) {
+          slim.rowCount = null;
+          s = safeStringify(slim);
+        }
+      }
+      payload = s;
+    }
+
+    // Enqueue
+    const q = new QueueClient(STORAGE_CONN, QUEUE_NAME);
+    await q.createIfNotExists();
+    try {
+      await q.sendMessage(Buffer.from(payload).toString("base64"));
+    } catch (e) {
+      // Mark run as Failed if we couldn't enqueue
+      await writeInitialStatus(containerClient, relPrefix, {
+        ...initialStatus,
+        state: "Failed",
+        error: { code: "enqueue_error", message: String(e?.message || e) },
+      });
+      context.res = {
+        status: 500,
+        headers: {
+          "content-type": "application/json",
+          "x-correlation-id": correlationId,
+        },
+        body: { error: "enqueue_error", message: String(e?.message || e) },
+      };
+      return;
+    }
+
+    // OK
+    context.log(
+      JSON.stringify({
+        event: "campaign_start_enqueued_ok",
+        runId,
+        queue: QUEUE_NAME,
+        prefix: relPrefix,
+        correlationId,
+      })
+    );
 
     context.res = {
       status: 202,
       headers: {
-        "Content-Type": "application/json",
+        "content-type": "application/json",
         "x-correlation-id": correlationId,
       },
       body: { runId },
     };
-  } catch (err) {
-    context.log.error("campaign_start_error", err);
-    context.res = jsonError(500, "internal", "Unexpected error", correlationId);
+  } catch (e) {
+    context.log.error("campaign_start_failed", e);
+    context.res = {
+      status: 500,
+      headers: {
+        "content-type": "application/json",
+        "x-correlation-id": getCorrelationId(req),
+      },
+      body: { error: "server_error", message: String(e?.message || e) },
+    };
   }
 };

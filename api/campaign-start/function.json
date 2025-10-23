@@ -1,11 +1,19 @@
 {
+  "disabled": false,
+  "logging": {
+    "logLevel": {
+      "Function": "Information"
+    }
+  },
   "bindings": [
     {
       "authLevel": "anonymous",
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "methods": ["post"],
+      "methods": [
+        "post"
+      ],
       "route": "campaign/start"
     },
     {

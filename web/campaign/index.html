@@ -541,8 +541,8 @@
       $("#goBtn").addEventListener("click", async () => {
         if (!selectedFile) { toast("Choose a CSV first"); return; }
         $("#goBtn").disabled = true;
-        setStatus("Generating…");
-        log("Submitting to /api/generate (kind=campaign)");
+        setStatus("Building your campaign…");
+        log("Submitting to /api/campaign/start (kind=campaign)");
         window.CampaignPage.updateStage("ValidatingInput");
 
         const csv_text = await selectedFile.text();
@@ -565,23 +565,95 @@
         };
 
         try {
-          const res = await fetch("/api/generate", {
+          // 1) START the campaign run
+          const startBody = {
+            page: payload.page || "campaign",
+            rowCount: payload.rowCount,
+            // pass original inputs under filters so worker can use them
+            filters: {
+              kind: payload.kind,
+              source: payload.source,
+              csv_sha256: payload.csv_sha256,
+              company: payload.company,
+              tone: payload.tone,
+              evidenceWindowMonths: payload.evidenceWindowMonths,
+              complianceFooter: payload.complianceFooter,
+              csv_text: payload.csv_text
+            },
+            salesModel: payload.salesModel || null,
+            call_type: payload.call_type || null,
+            notes: null
+          };
+
+          const startRes = await fetch("/api/campaign/start", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(startBody)
           });
-          const data = await res.json().catch(() => ({}));
-          log("---- PROMPT SENT TO LLM ----\n" + data._debug_prompt);
-          if (!res.ok) {
-            log(`generate failed ${res.status}: ${JSON.stringify(data)}`);
+          const startText = await startRes.text();
+          let startJson = {};
+          try { startJson = JSON.parse(startText); } catch { }
+          if (!startRes.ok || !startJson.runId) {
+            log(`start failed ${startRes.status}: ${startText.slice(0, 400)}`);
             setStatus("Failed", "err");
             $("#goBtn").disabled = false;
             return;
           }
+          const runId = startJson.runId;
+          if (window.CampaignPage && typeof window.CampaignPage.setRunId === "function") {
+            window.CampaignPage.setRunId(runId);
+          }
+
+          // 2) POLL STATUS until Completed (or Failed/timeout)
+          const T0 = Date.now();
+          const TIMEOUT_MS = 120000;
+          const POLL_MS = 1500;
+          let state = "Queued";
+          while (Date.now() - T0 < TIMEOUT_MS) {
+            const sRes = await fetch(`/api/campaign/status?runId=${encodeURIComponent(runId)}`, { cache: "no-store" });
+            const sText = await sRes.text();
+            let sJson = {};
+            try { sJson = JSON.parse(sText); } catch { }
+            state = sJson.state || "Unknown";
+            if (window.CampaignPage && typeof window.CampaignPage.updateStage === "function") {
+              window.CampaignPage.updateStage(state);
+            }
+            if (state === "Completed") break;
+            if (state === "Failed") {
+              const msg = (sJson && sJson.error && sJson.error.message) ? sJson.error.message : "Worker failed";
+              log(`status failed: ${msg}`);
+              setStatus("Failed", "err");
+              $("#goBtn").disabled = false;
+              return;
+            }
+            await new Promise(r => setTimeout(r, POLL_MS));
+          }
+          if (state !== "Completed") {
+            log("status timeout");
+            setStatus("Error", "err");
+            $("#goBtn").disabled = false;
+            return;
+          }
+
+          // 3) FETCH the final campaign JSON
+          const fRes = await fetch(`/api/campaign/fetch?runId=${encodeURIComponent(runId)}&file=campaign`, { cache: "no-store" });
+          const fText = await fRes.text();
+          if (!fRes.ok) {
+            log(`fetch failed ${fRes.status}: ${fText.slice(0, 400)}`);
+            setStatus("Failed", "err");
+            $("#goBtn").disabled = false;
+            return;
+          }
+          let contract = null;
+          try { contract = JSON.parse(fText); } catch { contract = fText; }
+
+          // Stage & render
           window.CampaignPage.updateStage("DraftCampaign");
           window.CampaignPage.updateStage("QualityGate");
           window.CampaignPage.updateStage("Completed");
-          window.CampaignUI.setContract(data && data.contract_v1 ? data.contract_v1 : null);
+          if (window.CampaignUI && typeof window.CampaignUI.setContract === "function") {
+            window.CampaignUI.setContract(contract);
+          }
           setStatus("Completed", "ok");
           $("#goBtn").disabled = false;
         } catch (e) {
@@ -1098,4 +1170,5 @@
     })();
   </script>
 </body>
+
 </html>
