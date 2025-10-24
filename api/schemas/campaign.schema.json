@@ -35,7 +35,7 @@
           "publisher": { "type": "string", "minLength": 1 },
           "title": { "type": "string", "minLength": 1 },
           "date": { "type": "string", "format": "date" },
-          "url": { "type": "string", "format": "uri" },
+          "url": { "type": "string", "format": "url", "pattern": "^https?://" },
           "relevance": { "type": "string", "minLength": 1 },
           "excerpt": { "type": "string", "minLength": 1 }
         }
@@ -55,7 +55,7 @@
           "problem": { "type": "string" },
           "solution": { "type": "string" },
           "outcomes": { "type": "string" },
-          "link": { "type": "string", "format": "uri" },
+          "link": { "type": "string", "format": "url", "pattern": "^https?://" },
           "source": { "type": "string" }
         }
       }
@@ -89,7 +89,7 @@
             "properties": {
               "vendor": { "type": "string" },
               "reason_in_set": { "type": "string" },
-              "url": { "type": "string", "format": "uri" }
+              "url": { "type": "string", "format": "url", "pattern": "^https?://" }
             }
           }
         }
