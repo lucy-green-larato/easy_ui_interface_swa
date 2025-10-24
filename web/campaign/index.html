@@ -542,7 +542,7 @@
         if (!selectedFile) { toast("Choose a CSV first"); return; }
         $("#goBtn").disabled = true;
         setStatus("Building your campaign…");
-        log("Submitting to /api/campaign/start (kind=campaign)");
+        log("Submitting to /api/campaign-start (kind=campaign)");
         window.CampaignPage.updateStage("ValidatingInput");
 
         const csv_text = await selectedFile.text();
@@ -585,7 +585,7 @@
             notes: null
           };
 
-          const startRes = await fetch("/api/campaign/start", {
+          const startRes = await fetch("/api/campaign-start", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(startBody)
@@ -610,7 +610,7 @@
           const POLL_MS = 1500;
           let state = "Queued";
           while (Date.now() - T0 < TIMEOUT_MS) {
-            const sRes = await fetch(`/api/campaign/status?runId=${encodeURIComponent(runId)}`, { cache: "no-store" });
+            const sRes = await fetch(`/api/campaign-status?runId=${encodeURIComponent(runId)}`, { cache: "no-store" });
             const sText = await sRes.text();
             let sJson = {};
             try { sJson = JSON.parse(sText); } catch { }
@@ -636,7 +636,7 @@
           }
 
           // 3) FETCH the final campaign JSON
-          const fRes = await fetch(`/api/campaign/fetch?runId=${encodeURIComponent(runId)}&file=campaign`, { cache: "no-store" });
+          const fRes = await fetch(`/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign`, { cache: "no-store" });
           const fText = await fRes.text();
           if (!fRes.ok) {
             log(`fetch failed ${fRes.status}: ${fText.slice(0, 400)}`);
@@ -666,7 +666,7 @@
       async function pollStatus(runId) {
         for (let i = 0; i < 90; i++) {
           try {
-            const url = `/api/campaign/status?runId=${encodeURIComponent(runId)}`;
+            const url = `/api/campaign-status?runId=${encodeURIComponent(runId)}`;
             const res = await fetch(url, { method: "GET" });
             if (!res.ok) { log(`status ${res.status}`); await new Promise(r => setTimeout(r, 1500)); continue; }
             const js = await res.json().catch(() => ({}));
@@ -696,8 +696,8 @@
 
       async function fetchResults(runId) {
         const urls = [
-          `/api/campaign/fetch?file=campaign&runId=${encodeURIComponent(runId)}`,
-          `/api/campaign/fetch?file=campaign`
+          `/api/campaign-fetch?file=campaign&runId=${encodeURIComponent(runId)}`,
+          `/api/campaign-fetch?file=campaign`
         ];
         for (const u of urls) {
           try {

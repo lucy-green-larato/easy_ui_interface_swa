@@ -128,7 +128,7 @@
 
   // ---------- API ----------
   async function generate(payload) {
-    // Map your existing payload onto /api/campaign/start
+    // Map your existing payload onto /api/campaign-start
     const startBody = {
       page: payload.page || "campaign",
       rowCount: payload.rowCount,
@@ -151,7 +151,7 @@
     };
 
     // 1) Start
-    const startRes = await fetch("/api/campaign/start", {
+    const startRes = await fetch("/api/campaign-start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(startBody)
@@ -169,7 +169,7 @@
     const POLL_MS = 1500;
     let state = "Queued";
     while (Date.now() - t0 < TIMEOUT_MS) {
-      const sRes = await fetch(`/api/campaign/status?runId=${encodeURIComponent(runId)}`, { cache: "no-store" });
+      const sRes = await fetch(`/api/campaign-status?runId=${encodeURIComponent(runId)}`, { cache: "no-store" });
       const sText = await sRes.text();
       const sJson = (() => { try { return JSON.parse(sText); } catch { return {}; } })();
       state = sJson.state || "Unknown";
@@ -183,7 +183,7 @@
     if (state !== "Completed") throw new Error("timeout waiting for campaign");
 
     // 3) Fetch the final campaign JSON
-    const fRes = await fetch(`/api/campaign/fetch?runId=${encodeURIComponent(runId)}&file=campaign`, { cache: "no-store" });
+    const fRes = await fetch(`/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign`, { cache: "no-store" });
     const fText = await fRes.text();
     if (!fRes.ok) throw new Error(`fetch campaign ${fRes.status}: ${fText.slice(0, 400)}`);
     const contract = (() => { try { return JSON.parse(fText); } catch { return fText; } })();
