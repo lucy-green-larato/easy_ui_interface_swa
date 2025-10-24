@@ -198,20 +198,11 @@ async function generate({ schemaPath, packs, input, options = {} }) {
       }
     };
 
-    // Decide API path
-    const apiChoice = (azure.api || "chat").toString().toLowerCase().trim();
+    // Decide API path (force Chat Completions; do not use Responses)
     const base = azure.endpoint.replace(/\/+$/, "");
     const dep = encodeURIComponent(azure.deployment);
     const ver = encodeURIComponent(azure.apiVersion);
-
-    let url;
-    if (apiChoice === "chat") {
-      url = `${base}/openai/deployments/${dep}/chat/completions?api-version=${ver}`;
-    } else if (apiChoice === "responses") {
-      url = `${base}/openai/deployments/${dep}/responses?api-version=${ver}`;
-    } else {
-      throw new Error(`Unsupported azure.api value: ${azure.api}`);
-    }
+    const url = `${base}/openai/deployments/${dep}/chat/completions?api-version=${ver}`;
 
     // Attempt loop
     let lastErr;

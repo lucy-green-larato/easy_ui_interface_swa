@@ -4,317 +4,60 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Inside Track Tools · Campaign Builder</title>
+  <meta name="color-scheme" content="light dark" />
+  <title>Inside Track Sales Accelerator · Campaign</title>
   <link rel="icon" href="/assets/larato-logo.svg" />
-  <style>
-    :root {
-      --bg: #f6f7fb;
-      --card: #fff;
-      --ink: #1c1e21;
-      --muted: #6b7280;
-      --border: #e5e7eb;
-      --brand: #111827;
-      --accent: #2563eb;
-      --ok: #047857;
-      --warn: #b45309;
-      --err: #b91c1c;
-    }
-
-    * {
-      box-sizing: border-box
-    }
-
-    body {
-      margin: 0;
-      font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      color: var(--ink);
-      background: var(--bg)
-    }
-
-    header {
-      position: sticky;
-      top: 0;
-      z-index: 30;
-      background: var(--card);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 16px
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-weight: 600
-    }
-
-    .chip {
-      background: #eef2ff;
-      color: #3730a3;
-      font-size: 12px;
-      padding: 4px 8px;
-      border-radius: 999px
-    }
-
-    main {
-      max-width: 1400px;
-      margin: 16px auto;
-      padding: 0 16px;
-      display: grid;
-      grid-template-columns: 300px 1fr 290px;
-      gap: 16px
-    }
-
-    @media (max-width:1100px) {
-      main {
-        grid-template-columns: 1fr
+  <script>
+    (function () {
+      try {
+        var theme = (localStorage.getItem('it-theme') || localStorage.getItem('theme') || '').toLowerCase();
+        if (!theme) {
+          var m = (document.cookie || '').match(/(?:^|;\s*)(?:it-theme|theme)=(dark|light)/i);
+          theme = m ? m[1].toLowerCase() : '';
+        }
+        if (!theme && window.matchMedia) {
+          theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        if (theme !== 'dark' && theme !== 'light') theme = 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) { /* no-op */ }
+    })();
+    window.addEventListener('storage', function (e) {
+      if (e.key === 'it-theme' || e.key === 'theme') {
+        var v = (e.newValue || '').toLowerCase();
+        if (v === 'dark' || v === 'light') {
+          document.documentElement.setAttribute('data-theme', v);
+        }
       }
-
-      .assist {
-        display: none
-      }
-    }
-
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      box-shadow: 0 1px 0 rgba(0, 0, 0, .02)
-    }
-
-    .rail {
-      position: sticky;
-      top: 64px;
-      align-self: start;
-      max-height: calc(100vh - 80px);
-      overflow: auto;
-      padding: 12px
-    }
-
-    .rail h3 {
-      margin: 8px 8px 4px;
-      font-size: 13px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: .04em
-    }
-
-    .group {
-      padding: 8px;
-      border-bottom: 1px dashed var(--border)
-    }
-
-    .group:last-child {
-      border-bottom: 0
-    }
-
-    label {
-      display: block;
-      font-size: 12px;
-      color: var(--muted);
-      margin-bottom: 6px
-    }
-
-    input[type="text"],
-    input[type="url"],
-    select,
-    .textarea {
-      width: 100%;
-      padding: 10px 12px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: #fff
-    }
-
-    input[type="file"] {
-      width: 100%
-    }
-
-    .muted {
-      color: var(--muted)
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: #111827;
-      color: #fff;
-      cursor: pointer
-    }
-
-    .btn.secondary {
-      background: #fff;
-      color: #111827
-    }
-
-    .btn:disabled {
-      opacity: .6;
-      cursor: not-allowed
-    }
-
-    .workspace {
-      padding: 12px
-    }
-
-    .stage {
-      display: flex;
-      gap: 10px;
-      margin: 4px 0 12px
-    }
-
-    .stage .step {
-      flex: 1;
-      padding: 8px;
-      background: #f3f4f6;
-      border-radius: 10px;
-      text-align: center;
-      font-size: 12px;
-      color: #6b7280;
-      border: 1px solid #e5e7eb
-    }
-
-    .stage .step.active {
-      background: #eef2ff;
-      color: #3730a3;
-      border-color: #c7d2fe
-    }
-
-    .stage .step.done {
-      background: #ecfdf5;
-      color: #047857;
-      border-color: #a7f3d0
-    }
-
-    .tabs {
-      display: flex;
-      gap: 8px;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 8px;
-      align-items: center;
-      justify-content: space-between
-    }
-
-    .tabs-left {
-      display: flex;
-      gap: 8px
-    }
-
-    .tab {
-      padding: 10px 12px;
-      border: 1px solid var(--border);
-      border-bottom: none;
-      border-radius: 10px 10px 0 0;
-      background: #f9fafb;
-      cursor: pointer
-    }
-
-    .tab.active {
-      background: #fff;
-      font-weight: 600
-    }
-
-    .panel {
-      padding: 8px 4px 16px
-    }
-
-    .assist {
-      padding: 12px
-    }
-
-    .assist .section {
-      padding: 10px;
-      border-bottom: 1px dashed var(--border)
-    }
-
-    .assist .section:last-child {
-      border-bottom: 0
-    }
-
-    .list {
-      margin: 6px 0 0;
-      padding-left: 16px
-    }
-
-    .pre {
-      white-space: pre-wrap;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: .95rem
-    }
-
-    .table {
-      width: 100%;
-      border-collapse: collapse
-    }
-
-    .table th,
-    .table td {
-      text-align: left;
-      border-bottom: 1px solid #eee;
-      padding: .5rem;
-      vertical-align: top
-    }
-
-    .toast {
-      position: fixed;
-      bottom: 16px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #111;
-      color: #fff;
-      padding: 8px 12px;
-      border-radius: 6px;
-      opacity: 0;
-      transition: opacity .2s;
-      pointer-events: none
-    }
-
-    .toast.show {
-      opacity: .9
-    }
-
-    .status-dot {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--warn);
-      margin-right: 8px
-    }
-
-    .status-dot.ok {
-      background: var(--ok)
-    }
-
-    .status-dot.err {
-      background: var(--err)
-    }
-  </style>
+    });
+  </script>
+  <link rel="stylesheet" href="/styles.css?v=2025-10-09-fc2">
 </head>
 
 <body>
-  <header>
-    <div class="brand">
-      <img src="/assets/larato-logo.svg" alt="Inside Track" class="logo" style="height:24px" />
-      <span>Inside Track Tools · <strong>Campaign Builder</strong></span>
-      <span class="chip" id="envChip">Dev</span>
+  <!-- HEADER (suite shell) -->
+  <header class="app-header topbar compact" role="banner">
+    <div class="header-left">
+      <a class="brand-link" href="/" aria-label="Back to Inside Track main menu" title="Back to main menu">
+        <img class="logo" src="/assets/larato-logo-bullet.svg" alt="" aria-hidden="true" />
+        <div class="brand-text">
+          <h1 class="app-title">Inside Track Sales Accelerator</h1>
+          <p class="kicker">Campaign builder</p>
+        </div>
+      </a>
     </div>
-    <div style="display:flex; gap:8px; align-items:center">
-      <button class="btn secondary" id="newRunBtn">New run</button>
-      <button class="btn secondary" id="loadRecentBtn">Load recent</button>
+    <div class="header-right" style="display:flex;gap:8px;align-items:center">
+      <span class="chip chip-amethyst" id="envChip">Dev</span>
+      <button class="btn secondary small" id="newRunBtn">New run</button>
+      <button class="btn secondary small" id="loadRecentBtn">Load recent</button>
       <div id="download-docx-mount"></div>
-      <a href="#" class="muted">Help</a>
+      <a href="#" class="btn btn-tertiary small" id="helpLink">Help</a>
     </div>
   </header>
 
-  <main>
+  <main class="workboard">
     <!-- Left rail: inputs -->
-    <aside class="card rail" id="inputs">
+    <aside class="panel left card rail" id="inputs">
       <div class="group">
         <h3>Data source</h3>
         <label for="runSelect">Pick a recent Power BI run</label>
@@ -325,7 +68,7 @@
         <label for="csvUpload" style="margin-top:6px">Upload CSV (testing only)</label>
         <input id="csvUpload" type="file" accept=".csv" />
         <div style="display:flex; gap:8px; align-items:center; margin-top:8px">
-          <button id="goBtn" class="btn" disabled>Go</button>
+          <button id="goBtn" class="btn primary btn-cta" disabled>Go</button>
           <div class="muted"><span id="csvBadge">(no file)</span></div>
         </div>
       </div>
@@ -372,17 +115,7 @@
     </aside>
 
     <!-- Center: workspace -->
-    <section class="card workspace">
-      <!-- Stage / status -->
-      <div class="stage" id="stageBar">
-        <div class="step" id="step-ValidatingInput">Validate</div>
-        <div class="step" id="step-EvidenceBuilder">Evidence</div>
-        <div class="step" id="step-DraftCampaign">Draft</div>
-        <div class="step" id="step-QualityGate">Quality</div>
-        <div class="step" id="step-Completed">Done</div>
-      </div>
-
-      <!-- Tabs -->
+    <section class="panel middle card workspace">
       <div class="tabs">
         <div class="tabs-left" id="sectionTabs"></div>
       </div>
@@ -390,7 +123,6 @@
       <div class="panel" id="centerPanel"></div>
 
       <div id="runBadge" class="muted">Run: <span id="runBadgeId">–</span></div>
-      </div>
 
       <!-- Panels -->
       <div id="campaign-content" class="panel">
@@ -413,7 +145,7 @@
     </section>
 
     <!-- Right rail: assist / tips -->
-    <aside class="card assist">
+    <aside class="panel right card assist">
       <div class="section">
         <strong>Tips</strong>
         <ul class="list">
