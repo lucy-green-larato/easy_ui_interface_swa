@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 23-10-2025 v6
+// /api/campaign-worker/index.js 2025-10-24 v8
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // Writes under results/campaign/{page}/{yyyy}/{MM}/{dd}/{runId}/(status.json|evidence_log.json|campaign.json)
 
@@ -22,19 +22,30 @@ try {
   buildEvidence = null; // tolerate absence
 }
 
-// Guard packloader require at module scope to avoid top-level crash -> poison
-let loadPacks = async () => ({ packs: {} });
-try {
-  // eslint-disable-next-line import/no-dynamic-require, global-require
-  ({ loadPacks } = require("../shared/packloader"));
-  if (typeof loadPacks !== "function") {
-    loadPacks = async () => ({ packs: {} });
+// ---- Robust loader that supports CJS or ESM packloader without top-level throw
+async function loadPackModule() {
+  // Try CommonJS first (fast path)
+  try {
+    // eslint-disable-next-line import/no-dynamic-require, global-require
+    const cjs = require("../shared/packloader");
+    const fn = cjs?.loadPacks ?? cjs?.default ?? cjs;
+    if (typeof fn === "function") return fn;
+  } catch (e) {
+    // fall through to ESM try
   }
-} catch {
-  loadPacks = async () => ({ packs: {} });
+  // Try ESM dynamically
+  try {
+    const modUrl = new URL("../shared/packloader.js", `file://${__dirname}/`);
+    const esm = await import(modUrl.href);
+    const fn = esm?.loadPacks ?? esm?.default ?? esm;
+    if (typeof fn === "function") return fn;
+  } catch (e) {
+    // ignore
+  }
+  // Last resort: no-op pack loader
+  return async () => ({ packs: {} });
 }
 
-// ----- Config -----
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || "45000");
 
@@ -118,7 +129,6 @@ module.exports = async function (context, queueItem) {
     call_type: call_type ?? filters?.call_type ?? null
   };
 
-  // Non-throwing status writer (uses containerClient/prefix once set)
   async function updateStatus(state, extra = {}) {
     try {
       if (!containerClient || !prefix) return; // cannot write before setup
@@ -151,11 +161,10 @@ module.exports = async function (context, queueItem) {
     const conn = process.env.AzureWebJobsStorage;
     if (!conn) {
       context.log.error("AzureWebJobsStorage not configured");
-      // Can't write status.json without storage; bail quietly (no poison)
-      return;
+      return; // Can't write status.json without storage; bail quietly (no poison)
     }
 
-    // Storage client + container (inside try to avoid pre-try throws -> poison)
+    // Storage client + container
     const blobService = BlobServiceClient.fromConnectionString(conn);
     containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
     await containerClient.createIfNotExists();
@@ -170,9 +179,10 @@ module.exports = async function (context, queueItem) {
       prefix = computePrefix({ page, runId, enqueuedAt });
     }
 
-    // Load packs (awaited; guarded func)
+    // Load packs (works with CJS or ESM)
     let packsConfig = {};
     try {
+      const loadPacks = await loadPackModule();
       const loaded = await loadPacks();
       packsConfig = loaded?.packs || {};
     } catch (e) {
@@ -205,13 +215,44 @@ module.exports = async function (context, queueItem) {
     // Phase 3 – Drafting
     await updateStatus("DraftingCampaign");
 
+    // Effective Azure OpenAI config (explicit, to avoid env drift)
+    const AZO_ENDPOINT   = process.env.AZURE_OPENAI_ENDPOINT;
+    const AZO_API_KEY    = process.env.AZURE_OPENAI_API_KEY;
+    const AZO_API_VER    = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
+    const AZO_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT;
+
+    // One line debug (safe—no key)
+    context.log("[campaign-worker env]", {
+      endpoint: AZO_ENDPOINT,
+      deployment: AZO_DEPLOYMENT,
+      apiVersion: AZO_API_VER
+    });
+
+    if (!AZO_ENDPOINT || !AZO_API_KEY || !AZO_DEPLOYMENT) {
+      await updateStatus("Failed", {
+        error: { code: "config_missing", message: "Missing Azure OpenAI configuration (endpoint/apiKey/deployment)" }
+      });
+      logEvent("campaign_worker_completed", "Failed", { error: "Missing Azure OpenAI config" });
+      return;
+    }
+
     let draft;
     try {
       draft = await promptHarness.generate({
         schemaPath,
         packs: packsConfig,
         input: { runId, page: sanitizePage(page), rowCount, filters, notes, evidence },
-        options: { timeoutMs: LLM_TIMEOUT_MS }
+        options: {
+          timeoutMs: LLM_TIMEOUT_MS,
+          azure: {
+            endpoint:   AZO_ENDPOINT,
+            apiKey:     AZO_API_KEY,
+            apiVersion: AZO_API_VER,
+            deployment: AZO_DEPLOYMENT,
+            api: "responses" // or "chat" if you standardise on Chat Completions
+          },
+          retry: { attempts: 2, backoffMs: 500 }
+        }
       });
 
       if (typeof draft === "string") {

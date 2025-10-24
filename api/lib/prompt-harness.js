@@ -1,25 +1,28 @@
-// /api/lib/prompt-harness.js 22-10-2025, includes JSON-generation helper.
+// /api/lib/prompt-harness.js 2025-10-24 v 4
 // Exports:
 //   - buildDefaultMessages({ inputs, evidencePack })
 //   - buildCustomMessages({ customPromptText, evidencePack })
 //   - schemaJson  (from loaded/default schema)
 //   - generate({ schemaPath?, packs?, input?, options? }) -> ALWAYS returns a JSON object
 //
-// Notes:
+// Behaviours:
 // - If schemaPath is provided, that schema is used instead.
-// - Uses Azure OpenAI Chat Completions 2024-08-01-preview with JSON Schema mode.
-// - Node 20 global fetch; no extra deps.
+// - Defaults to Azure OpenAI **Responses API** (2024-08-01-preview) with JSON Schema mode.
+// - Can be forced to Chat Completions by options.azure.api = "chat".
+// - Env can be overridden by options.azure { endpoint, apiKey, apiVersion, deployment }.
+// - Node 18/20 global fetch; no extra deps.
 
 const fs = require("fs");
 const path = require("path");
 
-// ---- Env ----
-const AZURE_OPENAI_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT; // e.g., https://sales-tools.openai.azure.com
-const AZURE_OPENAI_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT; // e.g., sales-tools
-const AZURE_OPENAI_API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
+// ---- Env defaults (override with options.azure below) ----
+const ENV_ENDPOINT   = process.env.AZURE_OPENAI_ENDPOINT;   // e.g., https://sales-tools.openai.azure.com
+const ENV_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT; // e.g., sales-tools
+const ENV_API_VER    = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
+const ENV_API_KEY    = process.env.AZURE_OPENAI_API_KEY;
 const LLM_TIMEOUT_MS_DEFAULT = Number(process.env.LLM_TIMEOUT_MS || "45000");
 
-// ---- Default 21/10 schema (fallback) ----
+// ---- Default schema path ----
 const DEFAULT_SCHEMA_PATH = path.join(__dirname, "..", "schemas", "qualification.v2.json");
 
 function loadJsonFile(absOrRelPath) {
@@ -35,7 +38,7 @@ function tryLoadDefaultSchema() {
   catch { return null; }
 }
 
-// ---- Helpers to keep message size sane (21/10 parity) ----
+// ---- Helpers to keep message size sane ----
 const MAX_STR = 120_000;
 function clipString(s, max = MAX_STR) {
   const str = typeof s === "string" ? s : JSON.stringify(s ?? "");
@@ -43,7 +46,7 @@ function clipString(s, max = MAX_STR) {
 }
 function safe(obj) { try { return clipString(obj); } catch { return "null"; } }
 
-// ---- Base 21/10 content ----
+// ---- Personas & rules ----
 const BASE_RULES = `
 Return STRICTLY valid JSON that conforms to the provided schema. Do NOT include any prose before or after the JSON.
 
@@ -58,7 +61,6 @@ STYLE & FORMATTING
 - Keep tables/lists compact and scannable.
 `.trim();
 
-// --- Personas ---
 const PARTNER_PERSONA = `
 You are a top-performing UK B2B channel strategist (tech markets) and CMO. 
 You understand partner recruitment, enablement, and common channel constraints (M&A, higher interest rates, lead-gen pressure).
@@ -71,9 +73,7 @@ You understand the challenges that your customers face (need better productivity
 Your job is to produce an evidence-only campaign that adds value to direct customers by making them more efficient and productive, improving customer service they provide, and differentiating them in the market. (Key technologies: cybersecurity, artificial intelligence, IoT, mobile data connectivity)
 `.trim();
 
-// Backward compatible default (used only if we can't infer the model)
 const DEFAULT_PERSONA = PARTNER_PERSONA;
-// Map input → persona. Accepts: sales_model, salesModel, call_type (case-insensitive).
 function selectPersona(input = {}) {
   const raw =
     (input.sales_model ?? input.salesModel ?? input.call_type ?? "").toString().toLowerCase().trim();
@@ -82,7 +82,7 @@ function selectPersona(input = {}) {
   return DEFAULT_PERSONA;
 }
 
-// ---- 21/10 builders (unchanged behavior) ----
+// ---- Builders ----
 function buildDefaultMessages({ inputs = {}, evidencePack = {} }) {
   const system = `${selectPersona(inputs)}\n\n${BASE_RULES}`;
 
@@ -126,54 +126,65 @@ ${JSON.stringify(schemaJson)}
   return { messages: [{ role: "system", content: system }, { role: "user", content: user }], schemaJson };
 }
 
-// ---- Schema holder (defaults to 21/10 schema) ----
+// ---- Schema holder ----
 let schemaJson = tryLoadDefaultSchema() || { title: "campaign", type: "object" };
 
-// ---- JSON-generation helper (keeps 21/10 content, adds model call) ----
+// ---- Core generate() ----
 async function generate({ schemaPath, packs, input, options = {} }) {
-  // Load schema: prefer provided path, else keep the default 21/10 one.
+  // Load/override schema
   if (schemaPath) {
     const loaded = loadJsonFile(schemaPath);
     if (!loaded || typeof loaded !== "object") throw new Error("Invalid schema");
     schemaJson = loaded;
   }
 
-  if (!AZURE_OPENAI_ENDPOINT || !AZURE_OPENAI_DEPLOYMENT) {
-    throw new Error("OpenAI endpoint/deployment env not configured");
+  // Effective config: env defaults overridden by options.azure
+  const azure = {
+    endpoint:   options.azure?.endpoint   || ENV_ENDPOINT,
+    apiKey:     options.azure?.apiKey     || ENV_API_KEY,
+    apiVersion: options.azure?.apiVersion || ENV_API_VER,
+    deployment: options.azure?.deployment || ENV_DEPLOYMENT,
+    api:        (options.azure?.api || "responses").toLowerCase() // "responses" | "chat"
+  };
+
+  if (!azure.endpoint || !azure.deployment) {
+    throw new Error("OpenAI endpoint/deployment not configured");
   }
-  const apiKey = process.env.AZURE_OPENAI_API_KEY;
-  if (!apiKey) {
+  if (!azure.apiKey) {
     throw new Error("AZURE_OPENAI_API_KEY not configured");
   }
 
-  // Build concise system prompt with optional pack list
+  // Messages payload (compact)
   const packsLine =
     packs?.enabled && Array.isArray(packs.enabled) && packs.enabled.length
       ? `\nEnabled packs: ${packs.enabled.join(", ")}`
       : "";
   const system = `${selectPersona(input)}\n\n${BASE_RULES}${packsLine}`;
-  
   const userPayload = {
     task: "Generate JSON that STRICTLY conforms to the provided schema.",
     input: input || {},
     packs: packs || {},
     schema_hint: schemaJson?.title || "campaign",
   };
-
   const messages = [
     { role: "system", content: system },
     { role: "user", content: JSON.stringify(userPayload) }
   ];
 
+  // Timeouts
   const timeoutMsRaw = options.timeoutMs ?? LLM_TIMEOUT_MS_DEFAULT;
   const timeoutMs = Number.isFinite(Number(timeoutMsRaw)) && Number(timeoutMsRaw) > 0
     ? Number(timeoutMsRaw)
     : LLM_TIMEOUT_MS_DEFAULT;
-
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("llm_timeout"), timeoutMs);
 
+  // Retry helper
+  const attempts = Math.max(1, Number(options.retry?.attempts || 1));
+  const backoffMs = Math.max(0, Number(options.retry?.backoffMs || 0));
+
   try {
+    // Build request body
     const reqBody = {
       messages,
       temperature: 0,
@@ -187,37 +198,59 @@ async function generate({ schemaPath, packs, input, options = {} }) {
       }
     };
 
-    const url = `${AZURE_OPENAI_ENDPOINT.replace(/\/+$/,"")}/openai/deployments/${encodeURIComponent(AZURE_OPENAI_DEPLOYMENT)}/responses?api-version=${encodeURIComponent(AZURE_OPENAI_API_VERSION)}`;
-    const res = await fetch(url, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        "api-key": apiKey
-      },
-      body: JSON.stringify(reqBody)
-    });
+    // Decide API path
+    const base = azure.endpoint.replace(/\/+$/, "");
+    const url =
+      azure.api === "chat"
+        ? `${base}/openai/deployments/${encodeURIComponent(azure.deployment)}/chat/completions?api-version=${encodeURIComponent(azure.apiVersion)}`
+        : `${base}/openai/deployments/${encodeURIComponent(azure.deployment)}/responses?api-version=${encodeURIComponent(azure.apiVersion)}`;
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`OpenAI error ${res.status}: ${text || res.statusText}`);
-    }
+    // Attempt loop
+    let lastErr;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            "Content-Type": "application/json",
+            "api-key": azure.apiKey
+          },
+          body: JSON.stringify(reqBody)
+        });
 
-    const json = await res.json();
-    const content = json?.choices?.[0]?.message?.content;
-    if (!content) throw new Error("Empty model response");
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(`OpenAI error ${res.status}: ${text || res.statusText}`);
+        }
 
-    // Enforce JSON object return (throw if not parseable)
-    let obj;
-    try {
-      obj = JSON.parse(content);
-    } catch {
-      throw new Error("Model returned non-JSON content");
+        const json = await res.json();
+        // Responses vs Chat shape
+        const content =
+          azure.api === "chat"
+            ? json?.choices?.[0]?.message?.content
+            : json?.choices?.[0]?.message?.content;
+
+        if (!content) throw new Error("Empty model response");
+
+        let obj;
+        try {
+          obj = JSON.parse(content);
+        } catch {
+          throw new Error("Model returned non-JSON content");
+        }
+        if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+          throw new Error("Model returned non-object JSON");
+        }
+        return obj;
+      } catch (e) {
+        lastErr = e;
+        if (i < attempts - 1 && backoffMs) {
+          await new Promise(r => setTimeout(r, backoffMs));
+        }
+      }
     }
-    if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
-      throw new Error("Model returned non-object JSON");
-    }
-    return obj;
+    throw lastErr || new Error("Unknown LLM error");
   } finally {
     clearTimeout(timeout);
   }
