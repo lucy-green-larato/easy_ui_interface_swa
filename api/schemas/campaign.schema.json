@@ -17,24 +17,25 @@
     "compliance_and_governance",
     "risks_and_contingencies",
     "one_pager_summary",
-    "meta"
+    "meta",
+    "input_proof"
   ],
   "properties": {
     "executive_summary": { "type": "string", "minLength": 1 },
 
-"evidence_log": {
-  "type": "array",
-  "items": {
-    "type": "object",
-    "properties": {
-      "url":     { "type": "string", "pattern": "^https?://\\S+$" },
-      "title":   { "type": "string" },
-      "snippet": { "type": "string" },
-      "claim":   { "type": "string" }
-    },
-    "required": ["url", "title", "snippet", "claim"],
-    "additionalProperties": false
-  }
+    "evidence_log": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "pattern": "^https?://\\S+$" },
+          "title": { "type": "string" },
+          "snippet": { "type": "string" },
+          "claim": { "type": "string" }
+        },
+        "required": ["url", "title", "snippet", "claim"],
+        "additionalProperties": false
+      }
     },
 
     "case_studies": {
@@ -152,7 +153,7 @@
     "channel_plan": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["emails", "linkedin"],
+      "required": ["emails", "linkedin", "paid", "event"],
       "properties": {
         "emails": {
           "type": "array",
@@ -195,6 +196,7 @@
         "event": {
           "type": "object",
           "additionalProperties": false,
+          "required": ["concept", "agenda", "speakers", "cta"],
           "properties": {
             "concept": { "type": "string" },
             "agenda": { "type": "string" },
@@ -268,6 +270,6 @@
       }
     },
 
-    "input_proof": { "type": "object" }
+    "input_proof": { "type": "object", "additionalProperties": false, "properties": {} }
   }
 }

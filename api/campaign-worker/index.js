@@ -6,21 +6,10 @@ const { BlobServiceClient } = require("@azure/storage-blob");
 const path = require("path");
 
 // ----- Repo helpers (guarded imports; never throw at module load) -----
-const promptHarness = require("../lib/prompt-harness"); // expected present
+// ----- Repo helpers (guarded imports; never throw at module load) -----
+const promptHarness = require("../lib/prompt-harness");
 const schemaPath = path.join(__dirname, "../schemas/campaign.schema.json");
-
-let buildEvidence = null;
-try {
-  // Prefer ../lib/evidence with common shapes: { buildEvidence } or default export
-  // eslint-disable-next-line import/no-dynamic-require, global-require
-  const evidenceModule = require("../lib/evidence");
-  buildEvidence =
-    evidenceModule?.buildEvidence ||
-    evidenceModule?.default ||
-    evidenceModule;
-} catch {
-  buildEvidence = null; // tolerate absence
-}
+const { buildEvidence } = require("../lib/evidence");
 
 // ---- Robust loader that supports CJS or ESM packloader without top-level throw
 async function loadPackModule() {
@@ -200,15 +189,14 @@ module.exports = async function (context, queueItem) {
     // Phase 2 – Evidence builder
     await updateStatus("BuildingEvidence");
     let evidence = [];
-    if (typeof buildEvidence === "function") {
-      try {
-        evidence = (await buildEvidence({ input, packs: packsConfig, runId, correlationId })) || [];
-      } catch (e) {
-        await updateStatus("BuildingEvidence", {
-          warning: { code: "evidence_error", message: String(e?.message || e) }
-        });
-        evidence = [];
-      }
+    try {
+      const ev = await buildEvidence({ input, packs: packsConfig, runId, correlationId });
+      evidence = Array.isArray(ev) ? ev : [];
+    } catch (e) {
+      await updateStatus("BuildingEvidence", {
+        warning: { code: "evidence_error", message: String(e?.message || e) }
+      });
+      evidence = [];
     }
     await putJson(containerClient, `${prefix}evidence_log.json`, evidence);
 
@@ -216,9 +204,9 @@ module.exports = async function (context, queueItem) {
     await updateStatus("DraftingCampaign");
 
     // Effective Azure OpenAI config (explicit, to avoid env drift)
-    const AZO_ENDPOINT   = process.env.AZURE_OPENAI_ENDPOINT;
-    const AZO_API_KEY    = process.env.AZURE_OPENAI_API_KEY;
-    const AZO_API_VER    = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
+    const AZO_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;
+    const AZO_API_KEY = process.env.AZURE_OPENAI_API_KEY;
+    const AZO_API_VER = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
     const AZO_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT;
 
     // One line debug (safe—no key)
@@ -245,8 +233,8 @@ module.exports = async function (context, queueItem) {
         options: {
           timeoutMs: LLM_TIMEOUT_MS,
           azure: {
-            endpoint:   AZO_ENDPOINT,
-            apiKey:     AZO_API_KEY,
+            endpoint: AZO_ENDPOINT,
+            apiKey: AZO_API_KEY,
             apiVersion: AZO_API_VER,
             deployment: AZO_DEPLOYMENT,
             api: "chat"
