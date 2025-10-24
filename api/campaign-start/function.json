@@ -14,7 +14,7 @@
       "methods": [
         "post"
       ],
-      "route": "campaign/start"
+      "route": "campaign-start"
     },
     {
       "type": "http",

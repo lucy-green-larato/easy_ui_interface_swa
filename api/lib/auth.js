@@ -135,31 +135,69 @@ function devBypass(req, defaultRoles = []) {
   };
 }
 
-// ---------- Authorization (non-throwing) ----------
-
 function authorize(req, allowedRoles = []) {
-  // Dev bypass first
-  const bypass = devBypass(req, allowedRoles);
-  const principal = bypass || decodePrincipal(req);
+  // Normalize allowedRoles
+  const roles = Array.isArray(allowedRoles) ? allowedRoles : [];
+
+  // 1) Dev bypass (existing behavior)
+  const bypass = devBypass(req, roles);
+  const decoded = decodePrincipal(req);
+  const principal = bypass || decoded;
+
+  // 2) Anonymous/testing allowance
+  // Allow when any of the following is true:
+  // - No roles required (roles.length === 0)
+  // - 'anonymous' is explicitly allowed
+  // - ALLOW_ANON env flag is set to "true"
+  // - Not running in production (NODE_ENV !== "production")
+  const allowAnonymous =
+    roles.length === 0 ||
+    roles.map(r => String(r).toLowerCase()).includes("anonymous") ||
+    String(process.env.ALLOW_ANON || "").toLowerCase() === "true" ||
+    String(process.env.NODE_ENV || "").toLowerCase() !== "production";
 
   if (!principal) {
+    if (allowAnonymous) {
+      return {
+        ok: true,
+        principal: {
+          userId: "anon",
+          name: "Anonymous",
+          userRoles: ["anonymous"],
+          claims: [{ typ: "roles", val: ["anonymous"] }]
+        }
+      };
+    }
     return {
       ok: false,
       code: 401,
       error: "unauthenticated",
       message:
-        "Missing or invalid identity. Ensure SWA auth is enabled and x-ms-client-principal is forwarded.",
+        "Missing or invalid identity. Ensure SWA auth is enabled and x-ms-client-principal is forwarded."
     };
   }
-  if (!hasAnyRole(principal.userRoles, allowedRoles)) {
+
+  // 3) Role check
+  if (!hasAnyRole(principal.userRoles, roles)) {
+    // If anonymous is allowed, accept even if decoded principal has no roles
+    if (allowAnonymous) {
+      return {
+        ok: true,
+        principal: {
+          ...principal,
+          userRoles: Array.from(new Set([...(principal.userRoles || []), "anonymous"]))
+        }
+      };
+    }
     return {
       ok: false,
       code: 403,
       error: "forbidden",
       message: "You do not have permission to perform this action.",
-      principal,
+      principal
     };
   }
+
   return { ok: true, principal };
 }
 
@@ -257,5 +295,5 @@ module.exports = {
   // NEW exports
   authResponse,
   respondIfNotAuthorized,
-  requireRole: requireRoleAdapter 
+  requireRole: requireRoleAdapter
 };
