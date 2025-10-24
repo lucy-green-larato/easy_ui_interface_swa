@@ -420,12 +420,11 @@ module.exports = async function (context, req) {
 
     // 2) Routing target (compute before auth to allow /health unauthenticated)
     const rawPath = (context.bindingData && context.bindingData.path) ? `/${context.bindingData.path}` : "/";
-    let path = rawPath.toLowerCase();
-    if (path.length > 1 && path.endsWith("/")) path = path.replace(/\/+$/, "");
+    const path = rawPath.toLowerCase();
     const method = (req.method || "GET").toUpperCase();
 
     // Health is intentionally open
-    if ((method === "GET" || method === "HEAD") && path === "/health") { context.res = await handleHealth(); return; }
+    if (method === "GET" && path === "/health") { context.res = await handleHealth(); return; }
 
     // 3) AUTH (only for /feedback; /health, /status, /download are open)
     if (method === "POST" && path === "/feedback") {

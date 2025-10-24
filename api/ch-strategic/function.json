@@ -5,7 +5,7 @@
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "methods": [ "get", "options", "head" ],
+      "methods": [ "get", "options" ],
       "route": "ch-strategic/{*path}"
     },
     {
