@@ -8,26 +8,26 @@
       "type": "object",
       "required": ["product_id", "sales_mode", "version", "updated_at"],
       "properties": {
-        "product_id": {"type": "string"},
-        "sales_mode": {"enum": ["direct", "partner"]},
-        "version": {"type": "string"},
-        "updated_at": {"type": "string", "format": "date"}
+        "product_id": { "type": "string" },
+        "sales_mode": { "enum": ["direct", "partner"] },
+        "version": { "type": "string" },
+        "updated_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
       }
     },
     "shared": {
       "type": "object",
       "required": ["tone", "proof_points", "ctas"],
       "properties": {
-        "tone": {"type": "string"},
+        "tone": { "type": "string" },
         "proof_points": {
           "type": "array",
           "items": {
             "type": "object",
             "required": ["id", "text"],
             "properties": {
-              "id": {"type": "string"},
-              "text": {"type": "string"},
-              "source_id": {"type": "string"}
+              "id": { "type": "string" },
+              "text": { "type": "string" },
+              "source_id": { "type": "string" }
             }
           }
         },
@@ -37,8 +37,8 @@
             "type": "object",
             "required": ["id", "text"],
             "properties": {
-              "id": {"type": "string"},
-              "text": {"type": "string"}
+              "id": { "type": "string" },
+              "text": { "type": "string" }
             }
           }
         }
@@ -50,7 +50,7 @@
         "type": "object",
         "required": ["guidance", "stages"],
         "properties": {
-          "guidance": {"type": "string"},
+          "guidance": { "type": "string" },
           "stages": {
             "type": "object",
             "required": [
@@ -62,12 +62,12 @@
               "call_to_action"
             ],
             "properties": {
-              "opening": {"$ref": "#/$defs/stage"},
-              "buyer_pain": {"$ref": "#/$defs/stage"},
-              "buyer_desire": {"$ref": "#/$defs/stage"},
-              "example": {"$ref": "#/$defs/stageWithProof"},
-              "objections": {"$ref": "#/$defs/objectionsStage"},
-              "call_to_action": {"$ref": "#/$defs/ctaStage"}
+              "opening": { "$ref": "#/$defs/stage" },
+              "buyer_pain": { "$ref": "#/$defs/stage" },
+              "buyer_desire": { "$ref": "#/$defs/stage" },
+              "example": { "$ref": "#/$defs/stageWithProof" },
+              "objections": { "$ref": "#/$defs/objectionsStage" },
+              "call_to_action": { "$ref": "#/$defs/ctaStage" }
             }
           }
         }
@@ -79,38 +79,38 @@
       "type": "object",
       "required": ["script", "buyer_needs_summary"],
       "properties": {
-        "script": {"type": "string"},
-        "buyer_needs_summary": {"type": "array", "items": {"type": "string"}}
+        "script": { "type": "string" },
+        "buyer_needs_summary": { "type": "array", "items": { "type": "string" } }
       }
     },
     "stageWithProof": {
       "allOf": [
-        {"$ref": "#/$defs/stage"},
+        { "$ref": "#/$defs/stage" },
         {
           "type": "object",
           "properties": {
-            "proof_points": {"type": "array", "items": {"type": "string"}}
+            "proof_points": { "type": "array", "items": { "type": "string" } }
           }
         }
       ]
     },
     "objectionsStage": {
       "allOf": [
-        {"$ref": "#/$defs/stage"},
+        { "$ref": "#/$defs/stage" },
         {
           "type": "object",
           "properties": {
-            "anticipated": {"type": "array", "items": {"type": "string"}}
+            "anticipated": { "type": "array", "items": { "type": "string" } }
           }
         }
       ]
     },
     "ctaStage": {
       "allOf": [
-        {"$ref": "#/$defs/stage"},
+        { "$ref": "#/$defs/stage" },
         {
           "type": "object",
-          "properties": {"ctas": {"type": "array", "items": {"type": "string"}}}
+          "properties": { "ctas": { "type": "array", "items": { "type": "string" } } }
         }
       ]
     }
