@@ -35,7 +35,7 @@
           "publisher": { "type": "string", "minLength": 1 },
           "title": { "type": "string", "minLength": 1 },
           "date": { "type": "string", "format": "date" },
-          "url": { "type": "string", "format": "url", "pattern": "^https?://" },
+          "url": { "type": "string", "pattern": "^https?://\\S+$" },
           "relevance": { "type": "string", "minLength": 1 },
           "excerpt": { "type": "string", "minLength": 1 }
         }
@@ -89,7 +89,7 @@
             "properties": {
               "vendor": { "type": "string" },
               "reason_in_set": { "type": "string" },
-              "url": { "type": "string", "format": "url", "pattern": "^https?://" }
+              "url": { "type": "string", "pattern": "^https?://\\S+$" }
             }
           }
         }
