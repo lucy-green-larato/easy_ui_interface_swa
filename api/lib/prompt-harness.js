@@ -1,4 +1,4 @@
-// /api/lib/prompt-harness.js 2025-10-24 v 4
+// /api/lib/prompt-harness.js 2025-10-24 v 5
 // Exports:
 //   - buildDefaultMessages({ inputs, evidencePack })
 //   - buildCustomMessages({ customPromptText, evidencePack })
@@ -7,8 +7,8 @@
 //
 // Behaviours:
 // - If schemaPath is provided, that schema is used instead.
-// - Defaults to Azure OpenAI **Responses API** (2024-08-01-preview) with JSON Schema mode.
-// - Can be forced to Chat Completions by options.azure.api = "chat".
+// - Defaults to Azure OpenAI **Chat Completions** (2024-08-01-preview) with JSON Schema mode.
+// - Can be switched to Responses by options.azure.api = "responses".
 // - Env can be overridden by options.azure { endpoint, apiKey, apiVersion, deployment }.
 // - Node 18/20 global fetch; no extra deps.
 
@@ -16,10 +16,10 @@ const fs = require("fs");
 const path = require("path");
 
 // ---- Env defaults (override with options.azure below) ----
-const ENV_ENDPOINT   = process.env.AZURE_OPENAI_ENDPOINT;   // e.g., https://sales-tools.openai.azure.com
+const ENV_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;   // e.g., https://sales-tools.openai.azure.com
 const ENV_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT; // e.g., sales-tools
-const ENV_API_VER    = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
-const ENV_API_KEY    = process.env.AZURE_OPENAI_API_KEY;
+const ENV_API_VER = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
+const ENV_API_KEY = process.env.AZURE_OPENAI_API_KEY;
 const LLM_TIMEOUT_MS_DEFAULT = Number(process.env.LLM_TIMEOUT_MS || "45000");
 
 // ---- Default schema path ----
@@ -140,11 +140,11 @@ async function generate({ schemaPath, packs, input, options = {} }) {
 
   // Effective config: env defaults overridden by options.azure
   const azure = {
-    endpoint:   options.azure?.endpoint   || ENV_ENDPOINT,
-    apiKey:     options.azure?.apiKey     || ENV_API_KEY,
+    endpoint: options.azure?.endpoint || ENV_ENDPOINT,
+    apiKey: options.azure?.apiKey || ENV_API_KEY,
     apiVersion: options.azure?.apiVersion || ENV_API_VER,
     deployment: options.azure?.deployment || ENV_DEPLOYMENT,
-    api:        (options.azure?.api || "responses").toLowerCase() // "responses" | "chat"
+    api: (options.azure?.api || "chat").toLowerCase() // "chat" | "responses"
   };
 
   if (!azure.endpoint || !azure.deployment) {
@@ -199,11 +199,19 @@ async function generate({ schemaPath, packs, input, options = {} }) {
     };
 
     // Decide API path
+    const apiChoice = (azure.api || "chat").toString().toLowerCase().trim();
     const base = azure.endpoint.replace(/\/+$/, "");
-    const url =
-      azure.api === "chat"
-        ? `${base}/openai/deployments/${encodeURIComponent(azure.deployment)}/chat/completions?api-version=${encodeURIComponent(azure.apiVersion)}`
-        : `${base}/openai/deployments/${encodeURIComponent(azure.deployment)}/responses?api-version=${encodeURIComponent(azure.apiVersion)}`;
+    const dep = encodeURIComponent(azure.deployment);
+    const ver = encodeURIComponent(azure.apiVersion);
+
+    let url;
+    if (apiChoice === "chat") {
+      url = `${base}/openai/deployments/${dep}/chat/completions?api-version=${ver}`;
+    } else if (apiChoice === "responses") {
+      url = `${base}/openai/deployments/${dep}/responses?api-version=${ver}`;
+    } else {
+      throw new Error(`Unsupported azure.api value: ${azure.api}`);
+    }
 
     // Attempt loop
     let lastErr;
@@ -225,9 +233,8 @@ async function generate({ schemaPath, packs, input, options = {} }) {
         }
 
         const json = await res.json();
-        // Responses vs Chat shape
         const content =
-          azure.api === "chat"
+          apiChoice === "chat"
             ? json?.choices?.[0]?.message?.content
             : json?.choices?.[0]?.message?.content;
 
@@ -255,10 +262,12 @@ async function generate({ schemaPath, packs, input, options = {} }) {
     clearTimeout(timeout);
   }
 }
+Object.defineProperty(module.exports, "schemaJson", {
+  enumerable: true,
+  get() { return schemaJson; }
+});
 
-module.exports = {
-  buildDefaultMessages,
-  buildCustomMessages,
-  schemaJson,
-  generate
-};
+module.exports.buildDefaultMessages = buildDefaultMessages;
+module.exports.buildCustomMessages = buildCustomMessages;
+// schemaJson is exposed via the getter above
+module.exports.generate = generate;

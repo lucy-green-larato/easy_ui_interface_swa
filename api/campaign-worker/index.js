@@ -249,7 +249,7 @@ module.exports = async function (context, queueItem) {
             apiKey:     AZO_API_KEY,
             apiVersion: AZO_API_VER,
             deployment: AZO_DEPLOYMENT,
-            api: "responses" // or "chat" if you standardise on Chat Completions
+            api: "chat"
           },
           retry: { attempts: 2, backoffMs: 500 }
         }
