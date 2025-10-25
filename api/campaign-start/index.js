@@ -1,10 +1,11 @@
-// /api/campaign-start/index.js 23-10-2025 v5
+// /api/campaign-start/index.js 25-10-2025 v7
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign/start → enqueues job to campaign-jobs, writes initial status.json ("Queued"), returns 202 { runId }.
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { QueueClient } = require("@azure/storage-queue");
 const crypto = require("crypto");
+const { QueueServiceClient } = require("@azure/storage-queue");
 
 // ---- Config ----
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
@@ -194,13 +195,13 @@ module.exports = async function (context, req) {
       payload = s;
     }
 
-    // Enqueue
-    // Enqueue (let SDK handle base64 encoding)
-    const q = QueueClient.fromConnectionString(STORAGE_CONN, QUEUE_NAME);
+    // Enqueue (SDK handles base64 encoding; send plain JSON string)
+    const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
+    const q = qs.getQueueClient(QUEUE_NAME);
     await q.createIfNotExists();
 
     try {
-      const resp = await q.sendMessage(payload); // payload is plain JSON string
+      const resp = await q.sendMessage(payload); // payload is a JSON string
       context.log({
         event: "campaign_start_enqueued_ok",
         runId,
@@ -218,25 +219,11 @@ module.exports = async function (context, req) {
       });
       context.res = {
         status: 500,
-        headers: {
-          "content-type": "application/json",
-          "x-correlation-id": correlationId,
-        },
+        headers: { "content-type": "application/json", "x-correlation-id": correlationId },
         body: { error: "enqueue_error", message: String(e?.message || e) },
       };
       return;
     }
-
-    // OK
-    context.log(
-      JSON.stringify({
-        event: "campaign_start_enqueued_ok",
-        runId,
-        queue: QUEUE_NAME,
-        prefix: relPrefix,
-        correlationId,
-      })
-    );
 
     context.res = {
       status: 202,

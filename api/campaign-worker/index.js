@@ -1,11 +1,9 @@
-// /api/campaign-worker/index.js 2025-10-24 v8
+// /api/campaign-worker/index.js 2025-10-25 v8
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // Writes under results/campaign/{page}/{yyyy}/{MM}/{dd}/{runId}/(status.json|evidence_log.json|campaign.json)
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const path = require("path");
-
-// ----- Repo helpers (guarded imports; never throw at module load) -----
 // ----- Repo helpers (guarded imports; never throw at module load) -----
 const promptHarness = require("../lib/prompt-harness");
 const schemaPath = path.join(__dirname, "../schemas/campaign.schema.json");
