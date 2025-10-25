@@ -195,10 +195,20 @@ module.exports = async function (context, req) {
     }
 
     // Enqueue
-    const q = new QueueClient(STORAGE_CONN, QUEUE_NAME);
+    // Enqueue (let SDK handle base64 encoding)
+    const q = QueueClient.fromConnectionString(STORAGE_CONN, QUEUE_NAME);
     await q.createIfNotExists();
+
     try {
-      await q.sendMessage(Buffer.from(payload).toString("base64"));
+      const resp = await q.sendMessage(payload); // payload is plain JSON string
+      context.log({
+        event: "campaign_start_enqueued_ok",
+        runId,
+        queue: QUEUE_NAME,
+        messageId: resp.messageId,
+        insertedOn: resp.insertedOn,
+        correlationId,
+      });
     } catch (e) {
       // Mark run as Failed if we couldn't enqueue
       await writeInitialStatus(containerClient, relPrefix, {
