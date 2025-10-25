@@ -1,13 +1,53 @@
-// /api/campaign-worker/index.js 2025-10-25 v8
+// /api/campaign-worker/index.js 2025-10-25 v9
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // Writes under results/campaign/{page}/{yyyy}/{MM}/{dd}/{runId}/(status.json|evidence_log.json|campaign.json)
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const path = require("path");
-// ----- Repo helpers (guarded imports; never throw at module load) -----
-const promptHarness = require("../lib/prompt-harness");
 const schemaPath = path.join(__dirname, "../schemas/campaign.schema.json");
-const { buildEvidence } = require("../lib/evidence");
+// Guarded, lazy loaders so startup never throws
+let _promptHarness;
+async function loadPromptHarness() {
+  if (_promptHarness) return _promptHarness;
+  try {
+    // CJS fast path
+    // eslint-disable-next-line import/no-dynamic-require, global-require
+    _promptHarness = require("../lib/prompt-harness");
+    return _promptHarness;
+  } catch (e1) {
+    try {
+      // ESM fallback
+      const modUrl = new URL("../lib/prompt-harness.js", `file://${__dirname}/`);
+      const esm = await import(modUrl.href);
+      _promptHarness = esm?.default ?? esm;
+      return _promptHarness;
+    } catch (e2) {
+      throw new Error(`prompt-harness load failed: ${e1?.message || e1} | ${e2?.message || e2}`);
+    }
+  }
+}
+
+let _evidence;
+async function loadEvidence() {
+  if (_evidence) return _evidence;
+  try {
+    // CJS fast path
+    // eslint-disable-next-line import/no-dynamic-require, global-require
+    const mod = require("../lib/evidence");
+    _evidence = { buildEvidence: mod.buildEvidence ?? mod.default ?? mod };
+    return _evidence;
+  } catch (e1) {
+    try {
+      // ESM fallback
+      const modUrl = new URL("../lib/evidence.js", `file://${__dirname}/`);
+      const esm = await import(modUrl.href);
+      _evidence = { buildEvidence: esm.buildEvidence ?? esm.default ?? esm };
+      return _evidence;
+    } catch (e2) {
+      throw new Error(`evidence load failed: ${e1?.message || e1} | ${e2?.message || e2}`);
+    }
+  }
+}
 
 // ---- Robust loader that supports CJS or ESM packloader without top-level throw
 async function loadPackModule() {
@@ -79,6 +119,11 @@ async function putJson(containerClient, blobPath, obj) {
 }
 
 module.exports = async function (context, queueItem) {
+   context.log("campaign-worker TRIGGERED");  // <- simple, unmistakable
+  context.log("campaign-worker received", {
+    type: typeof queueItem,
+    sample: typeof queueItem === "string" ? queueItem.slice(0, 200) : queueItem
+  });
   const started = Date.now();
 
   // Normalize queue message (string -> JSON)
@@ -176,6 +221,14 @@ module.exports = async function (context, queueItem) {
       context.log.warn("packs_load_failed", { runId, correlationId, message: String(e?.message || e) });
       packsConfig = {};
     }
+    // Load evidence helper safely
+    let buildEvidenceFn;
+    try {
+      ({ buildEvidence: buildEvidenceFn } = await loadEvidence());
+    } catch (e) {
+      context.log.error("evidence_loader_failed", { runId, correlationId, message: String(e?.message || e) });
+      // We can continue with empty evidence
+    }
 
     // Phase 1 – Validate input
     await updateStatus("ValidatingInput", { startedAt: new Date().toISOString() });
@@ -188,8 +241,12 @@ module.exports = async function (context, queueItem) {
     await updateStatus("BuildingEvidence");
     let evidence = [];
     try {
-      const ev = await buildEvidence({ input, packs: packsConfig, runId, correlationId });
-      evidence = Array.isArray(ev) ? ev : [];
+      if (buildEvidenceFn) {
+        const ev = await buildEvidenceFn({ input, packs: packsConfig, runId, correlationId });
+        evidence = Array.isArray(ev) ? ev : [];
+      } else {
+        evidence = [];
+      }
     } catch (e) {
       await updateStatus("BuildingEvidence", {
         warning: { code: "evidence_error", message: String(e?.message || e) }
@@ -200,6 +257,17 @@ module.exports = async function (context, queueItem) {
 
     // Phase 3 – Drafting
     await updateStatus("DraftingCampaign");
+    let promptHarness;
+    try {
+      promptHarness = await loadPromptHarness();
+    } catch (e) {
+      await updateStatus("Failed", {
+        error: { code: "loader_error", message: String(e?.message || e) },
+        failedAt: new Date().toISOString()
+      });
+      logEvent("campaign_worker_completed", "Failed", { error: "prompt harness load failed" });
+      return;
+    }
 
     // Effective Azure OpenAI config (explicit, to avoid env drift)
     const AZO_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;
