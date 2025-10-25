@@ -107,17 +107,10 @@ async function putJson(containerClient, blobPath, obj) {
   const payload = typeof obj === "string" ? obj : JSON.stringify(obj);
   const bytes = Buffer.byteLength(payload);
   const opts = { blobHTTPHeaders: { blobContentType: "application/json" } };
-
   let attempt = 0, lastErr;
   while (attempt < 3) {
-    try {
-      await client.upload(payload, bytes, opts);
-      return;
-    } catch (e) {
-      lastErr = e;
-      await new Promise(r => setTimeout(r, 200 * (1 << attempt))); // 200ms, 400ms, 800ms
-      attempt++;
-    }
+    try { await client.upload(payload, bytes, opts); return; }
+    catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 200 * (1 << attempt))); attempt++; }
   }
   throw lastErr;
 }
@@ -131,12 +124,17 @@ module.exports = async function (context, queueItem) {
     });
     const started = Date.now();
 
-    // Normalize queue message (string -> JSON)
+    // Force object; try best-effort parse if string
     let message = queueItem;
     if (typeof message === "string") {
-      try { message = JSON.parse(message); } catch { /* keep as string if not JSON */ }
+      try { message = JSON.parse(message); } catch { /* leave as string */ }
+    }
+    if (!message || typeof message !== "object") {
+      // bail out early – don’t write under 'default/undefined/'
+      throw new Error("Invalid queue payload: expected JSON object");
     }
 
+    const src = (message && typeof message === "object") ? message : {};
     const {
       runId,
       page,
@@ -148,7 +146,7 @@ module.exports = async function (context, queueItem) {
       salesModel,
       call_type,
       correlationId: msgCorrelationId
-    } = message || {};
+    } = src;
 
     const correlationId = msgCorrelationId || `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
     const filtersObj = (filters && typeof filters === "object" && !Array.isArray(filters)) ? filters : null;
@@ -194,26 +192,59 @@ module.exports = async function (context, queueItem) {
     };
 
     // Guard configuration before any storage use
+    // Guard configuration before any storage use
     const conn = process.env.AzureWebJobsStorage;
     if (!conn) {
-      context.log.error("AzureWebJobsStorage not configured");
-      return; // Can't write status.json without storage; bail quietly (no poison)
+      const msg = "AzureWebJobsStorage not configured";
+      context.log.error(msg);
+
+      // Best-effort: write a Failed status so the UI doesn’t stay “Queued”
+      try {
+        const parsed = (typeof queueItem === "string")
+          ? (() => { try { return JSON.parse(queueItem); } catch { return undefined; } })()
+          : queueItem;
+        const runId = parsed?.runId;
+        const page = parsed?.page || "default";
+        const enqueuedAt = parsed?.enqueuedAt;
+
+        // If we don’t have a connection, we cannot really write;
+        // but if your Functions host *does* have it via env, try anyway:
+        const conn2 = process.env.AzureWebJobsStorage || "";
+        if (conn2 && runId) {
+          const bs = BlobServiceClient.fromConnectionString(conn2);
+          const cc = bs.getContainerClient(RESULTS_CONTAINER);
+          await cc.createIfNotExists();
+          const pfx = `${computePrefix({ page, runId, enqueuedAt })}`;
+          await putJson(cc, `${pfx}status.json`, {
+            runId,
+            state: "Failed",
+            error: { code: "config", message: msg },
+            failedAt: new Date().toISOString()
+          });
+        }
+      } catch { /* best effort; ignore */ }
+
+      // Important: throw so Azure retries (otherwise the message is “Successfully processed” and disappears)
+      throw new Error(msg);
     }
 
+    // Storage client + container
     // Storage client + container
     const blobService = BlobServiceClient.fromConnectionString(conn);
     containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
     await containerClient.createIfNotExists();
 
-    // Prefix (prefer provided, else compute)
-    if (msgPrefix && typeof msgPrefix === "string") {
-      prefix = msgPrefix.startsWith(`${RESULTS_CONTAINER}/`)
-        ? msgPrefix.slice(`${RESULTS_CONTAINER}/`.length)
-        : msgPrefix;
-      if (!prefix.endsWith("/")) prefix += "/";
-    } else {
-      prefix = computePrefix({ page, runId, enqueuedAt });
+    // --- REQUIRE a container-relative prefix from the starter message ---
+    if (!msgPrefix || typeof msgPrefix !== "string") {
+      throw new Error("Missing prefix in message");
     }
+    if (msgPrefix.startsWith(`${RESULTS_CONTAINER}/`)) {
+      throw new Error("Prefix must be container-relative (do not include the container name)");
+    }
+    prefix = msgPrefix.endsWith("/") ? msgPrefix : (msgPrefix + "/");
+
+    // Optional: log where we will write, for quick diagnostics
+    context.log("campaign-worker resolved path", { runId, prefix });
 
     // Load packs (works with CJS or ESM)
     let packsConfig = {};
@@ -301,7 +332,7 @@ module.exports = async function (context, queueItem) {
       draft = await promptHarness.generate({
         schemaPath,
         packs: packsConfig,
-        input: { runId, page: sanitizePage(page), rowCount, filters, notes, evidence },
+        input: { runId, page: sanitizePage(page), rowCount, filters, notes, evidence,sales_model: input.sales_model, call_type: input.call_type },
         options: {
           timeoutMs: LLM_TIMEOUT_MS,
           azure: {
@@ -336,27 +367,42 @@ module.exports = async function (context, queueItem) {
     // Catch absolutely everything (including early-phase exceptions)
     context.log.error("campaign_worker_failed", error);
     try {
-      // Best-effort write of a failure status if we can
+      // Best-effort: write a clear Failed status where the UI is polling
       const conn = process.env.AzureWebJobsStorage;
-      if (conn) {
-        const blobService = BlobServiceClient.fromConnectionString(conn);
-        const container = blobService.getContainerClient(RESULTS_CONTAINER);
-        await container.createIfNotExists();
-        const parsed = (typeof queueItem === "string")
-          ? (() => { try { return JSON.parse(queueItem); } catch { return undefined; } })() : queueItem;
-        const runId = parsed?.runId;
-        const page = parsed?.page || "default";
-        const enqueuedAt = parsed?.enqueuedAt;
-        if (runId) {
-          const prefix = computePrefix({ page, runId, enqueuedAt });
-          await putJson(container, `${prefix}status.json`, {
-            runId,
-            state: "Failed",
-            error: { code: "worker_error", message: String(error?.message || error) },
-            failedAt: new Date().toISOString()
-          });
-        }
+      if (!conn) {
+        // No storage available; nothing we can do
+        return;
       }
-    } catch { /* best effort */ }
+
+      const blobService = BlobServiceClient.fromConnectionString(conn);
+      const container = blobService.getContainerClient(RESULTS_CONTAINER);
+      await container.createIfNotExists();
+
+      // Recover as much routing info as possible from the original message
+      const raw = typeof queueItem === "string" ? queueItem : JSON.stringify(queueItem || {});
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
+
+      // Prefer values from the parsed message; fall back to in-scope vars if present
+      const runIdSafe = parsed?.runId ?? (typeof runId !== "undefined" ? runId : undefined);
+      const prefixSafe = parsed?.prefix ?? undefined;
+      const pageSafe = parsed?.page ?? (typeof page !== "undefined" ? page : "default");
+      const enqSafe = parsed?.enqueuedAt ?? (typeof enqueuedAt !== "undefined" ? enqueuedAt : undefined);
+
+      // Use provided container-relative prefix when available; otherwise compute
+      const pfx = (typeof prefixSafe === "string" && prefixSafe.length > 0)
+        ? (prefixSafe.endsWith("/") ? prefixSafe : `${prefixSafe}/`)
+        : computePrefix({ page: pageSafe, runId: runIdSafe || "unknown", enqueuedAt: enqSafe });
+
+      await putJson(container, `${pfx}status.json`, {
+        runId: runIdSafe || "unknown",
+        state: "Failed",
+        error: { code: "worker_error", message: String(error?.message || error) },
+        failedAt: new Date().toISOString()
+      });
+    } catch (writeErr) {
+      // Best effort; do not rethrow
+      context.log.warn("campaign_worker_failure_status_write_failed", String(writeErr?.message || writeErr));
+    }
   }
 };

@@ -37,7 +37,6 @@
     "campaign-fetch",
     "campaign-start",
     "campaign-status",
-    "campaign-worker",
-    "queue-probe"
+    "campaign-worker"
   ]
 }

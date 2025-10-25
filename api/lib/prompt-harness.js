@@ -1,4 +1,4 @@
-// /api/lib/prompt-harness.js 2025-10-24 v 5
+// /api/lib/prompt-harness.js 2025-10-25 v 6
 // Exports:
 //   - buildDefaultMessages({ inputs, evidencePack })
 //   - buildCustomMessages({ customPromptText, evidencePack })
@@ -7,8 +7,8 @@
 //
 // Behaviours:
 // - If schemaPath is provided, that schema is used instead.
-// - Defaults to Azure OpenAI **Chat Completions** (2024-08-01-preview) with JSON Schema mode.
-// - Can be switched to Responses by options.azure.api = "responses".
+// - Uses Azure OpenAI **Chat Completions** (2024-08-01-preview) with JSON Schema mode.
+// - (Responses API not enabled in this version; we always call Chat Completions.)
 // - Env can be overridden by options.azure { endpoint, apiKey, apiVersion, deployment }.
 // - Node 18/20 global fetch; no extra deps.
 
@@ -75,8 +75,16 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
 
 const DEFAULT_PERSONA = PARTNER_PERSONA;
 function selectPersona(input = {}) {
-  const raw =
-    (input.sales_model ?? input.salesModel ?? input.call_type ?? "").toString().toLowerCase().trim();
+  const raw = (
+    input.sales_model ??
+    input.salesModel ??
+    input.call_type ??
+    input?.filters?.sales_model ??
+    input?.filters?.salesModel ??
+    input?.filters?.call_type ??
+    ""
+  ).toString().toLowerCase().trim();
+
   if (raw.includes("partner") || raw.includes("channel") || raw.includes("indirect")) return PARTNER_PERSONA;
   if (raw.includes("direct") || raw.includes("field") || raw.includes("inside")) return DIRECT_PERSONA;
   return DEFAULT_PERSONA;
@@ -224,10 +232,7 @@ async function generate({ schemaPath, packs, input, options = {} }) {
         }
 
         const json = await res.json();
-        const content =
-          apiChoice === "chat"
-            ? json?.choices?.[0]?.message?.content
-            : json?.choices?.[0]?.message?.content;
+        const content = json?.choices?.[0]?.message?.content;
 
         if (!content) throw new Error("Empty model response");
 

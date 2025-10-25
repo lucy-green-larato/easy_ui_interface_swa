@@ -1,4 +1,4 @@
-// /api/campaign-status/index.js 22-10-2025
+// /api/campaign-status/index.js 22-10-2025 v1 
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // GET /api/campaign/status?runId=... -> reads status.json under the discovered prefix.
 // Finds the blob by scanning for ".../<runId>/status.json" to avoid date/page ambiguity.
@@ -128,6 +128,7 @@ module.exports = async function (context, req) {
         headers: {
           "ETag": etag,
           ...(lastModified ? { "Last-Modified": lastModified } : {}),
+          "Cache-Control": "no-cache",
           "x-correlation-id": correlationId
         }
       };

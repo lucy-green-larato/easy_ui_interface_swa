@@ -61,7 +61,7 @@
   };
 
   const updateStage = (state) => {
-    const order = ["ValidatingInput", "EvidenceBuilder", "DraftCampaign", "QualityGate", "Completed"];
+    const order = ["ValidatingInput", "BuildingEvidence", "DraftingCampaign", "Completed"];
     order.forEach((s) => {
       const el = document.getElementById("step-" + s);
       if (!el) return;
@@ -100,7 +100,9 @@
   }
 
   // ---------- Tabs ----------
-  els.tabs.forEach((btn) => btn.addEventListener("click", () => setActiveTab(btn.dataset.tabTarget)));
+  if (els.tabs.length) {
+    els.tabs.forEach((btn) => btn.addEventListener("click", () => setActiveTab(btn.dataset.tabTarget)));
+  }
   setActiveTab("tab-overview");
 
   // ---------- CSV selection ----------
@@ -132,21 +134,24 @@
     const startBody = {
       page: payload.page || "campaign",
       rowCount: payload.rowCount,
-      // Put the original fields under filters so the worker can pick them up
-      // NOTE: csv_text can be large; your backend will trim if needed
+      // Put the original fields under filters so the worker/harness can pick them up
+      // NOTE: csv_text can be large; backend will trim if needed
       filters: {
         kind: payload.kind,
         source: payload.source,
         csv_sha256: payload.csv_sha256,
         company: payload.company,
-        persona: payload.persona,
+        tone: payload.tone,
         evidenceWindowMonths: payload.evidenceWindowMonths,
         complianceFooter: payload.complianceFooter,
-        csv_text: payload.csv_text
+        csv_text: payload.csv_text,
+        // persona hint duplicated under filters for harness selectPersona()
+        sales_model: payload.salesModel ?? null,
+        call_type: payload.call_type ?? null
       },
-      // Optional legacy fields if you start using them:
-      salesModel: payload.salesModel || null,
-      call_type: payload.call_type || null,
+      // top-level persona hints too (worker/harness read these)
+      salesModel: payload.salesModel ?? null,
+      call_type: payload.call_type ?? null,
       notes: null
     };
 
@@ -165,7 +170,7 @@
 
     // 2) Poll status until Completed (or Failed / timeout)
     const t0 = Date.now();
-    const TIMEOUT_MS = 120000;
+    const TIMEOUT_MS = 300000; // 5 min to cover LLM retries + I/O
     const POLL_MS = 1500;
     let state = "Queued";
     while (Date.now() - t0 < TIMEOUT_MS) {
@@ -210,11 +215,16 @@
       const csv_text = await selectedFile.text();
 
       // EXACT payload field names
+      const uiPage = (document.getElementById("pageKey")?.value || "campaign").trim();
+      // derive persona hint from the Page field
+      const derivedSalesModel = uiPage.toLowerCase().includes("direct")
+        ? "direct"
+        : (uiPage.toLowerCase().includes("partner") ? "partner" : null);
       const payload = {
         kind: "campaign",
         csv_text,
         source: "upload",
-        page: "campaign",
+        page: uiPage,
         rowCount,
         csv_sha256: csvSha,
         company: {
@@ -226,6 +236,9 @@
         tone: els.tone?.value || undefined,
         evidenceWindowMonths: parseInt(els.evidenceWindow?.value || "6", 10),
         complianceFooter: !!els.includeCompliance?.checked,
+        // persona hints if you ever wire them top-level
+        salesModel: derivedSalesModel,
+        call_type: null
       };
 
       log("Submitting to /api/generate (kind=campaign)");
@@ -237,7 +250,6 @@
       // result = { runId, contract_v1 }
       setRunId(result.runId);
       updateStage("DraftCampaign");
-      updateStage("QualityGate");
       updateStage("Completed");
 
       const body = { contract_v1: result.contract_v1 };

@@ -1,4 +1,4 @@
-// /api/campaign-fetch/index.js
+// /api/campaign-fetch/index.js 28-10-2025 v1
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // Complete drop-in replacement that restores ALL 26/09 behavior and fixes all issues:
 //
@@ -68,34 +68,16 @@ function internalError(cid, msg = "Unexpected error") {
 
 // --- prefix resolution ---
 // Accepts optional ?prefix=...; boolean validator (container-relative or container-qualified).
-function isLikelyValidPrefix(prefix, runId) {
-  // Accepts container-relative ("campaign/...") or container-qualified
-  // ("results/campaign/..." or "<RESULTS_CONTAINER>/campaign/...").
-  if (typeof prefix !== "string") return false;
-
-  let p = prefix.trim();
-  p = p.replace(/\/{2,}/g, "/");
-  if (!p) return false;
-
-  // Basic hardening
-  if (p.includes("..") || p.includes("\\")) return false;
-
-  // Normalize for checks: strip container if present
+if (isLikelyValidPrefix(optionalPrefix, runId)) {
+  // Normalize to container-relative
+  let p = optionalPrefix.trim().replace(/\/{2,}/g, "/");
+  if (p.startsWith("/")) p = p.slice(1);
   if (p.startsWith(`${RESULTS_CONTAINER}/`)) {
-    p = p.slice(RESULTS_CONTAINER.length + 1); // remove "<container>/"
+    p = p.slice(`${RESULTS_CONTAINER}/`.length);
   }
-
-  if (!p.startsWith("campaign/")) return false;
-
-  // Ensure last path segment matches runId
-  p = p.replace(/\/+$/, ""); // drop trailing slashes
-  const segs = p.split("/"); // campaign/<page>/<yyyy>/<MM>/<dd>/<runId>
-  if (segs.length < 6) return false;
-
-  const last = segs[segs.length - 1];
-  if (last !== String(runId)) return false;
-
-  return true;
+  prefix = p.endsWith("/") ? p : `${p}/`;
+} else {
+  prefix = await locateRunPrefix(containerClient, runId);
 }
 
 /** Returns 'campaign/<page>/<yyyy>/<MM>/<dd>/<runId>/' (container-relative). */
@@ -206,10 +188,15 @@ module.exports = async function (context, req) {
 
     context.res = {
       status: 200,
-      headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        "x-correlation-id": correlationId
+      },
       body: bodyStream,
       isRaw: true,
     };
+
   } catch (err) {
     context.log.error(
       JSON.stringify({
