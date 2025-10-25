@@ -28,7 +28,6 @@
    "functions": [
     "auth",
     "engagement-generate",
-    "health",
     "ixbrl-financials",
     "pbi_token",
     "qualification-generate",
@@ -38,6 +37,7 @@
     "campaign-fetch",
     "campaign-start",
     "campaign-status",
-    "campaign-worker"
+    "campaign-worker",
+    "queue-probe"
   ]
 }

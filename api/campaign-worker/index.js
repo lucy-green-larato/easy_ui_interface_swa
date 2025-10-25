@@ -1,25 +1,28 @@
-// /api/campaign-worker/index.js 2025-10-25 v9
+// /api/campaign-worker/index.js 2025-10-25 v10
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // Writes under results/campaign/{page}/{yyyy}/{MM}/{dd}/{runId}/(status.json|evidence_log.json|campaign.json)
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const path = require("path");
+
 const schemaPath = path.join(__dirname, "../schemas/campaign.schema.json");
-// Guarded, lazy loaders so startup never throws
+
+// ---------- Guarded, lazy loaders (no top-level throws) ----------
 let _promptHarness;
 async function loadPromptHarness() {
   if (_promptHarness) return _promptHarness;
   try {
     // CJS fast path
     // eslint-disable-next-line import/no-dynamic-require, global-require
-    _promptHarness = require("../lib/prompt-harness");
+    const mod = require("../lib/prompt-harness");
+    _promptHarness = mod?.generate ? mod : { generate: mod?.default ?? mod };
     return _promptHarness;
   } catch (e1) {
     try {
       // ESM fallback
       const modUrl = new URL("../lib/prompt-harness.js", `file://${__dirname}/`);
       const esm = await import(modUrl.href);
-      _promptHarness = esm?.default ?? esm;
+      _promptHarness = esm?.generate ? esm : { generate: esm?.default ?? esm };
       return _promptHarness;
     } catch (e2) {
       throw new Error(`prompt-harness load failed: ${e1?.message || e1} | ${e2?.message || e2}`);
@@ -98,6 +101,7 @@ function computePrefix({ page = "default", runId, enqueuedAt }) {
   return `campaign/${p}/${yyyy}/${MM}/${dd}/${runId}/`;
 }
 
+// Idempotent write: delete-then-upload to avoid 409 "already exists" across retries
 async function putJson(containerClient, blobPath, obj) {
   const client = containerClient.getBlockBlobClient(blobPath);
   const payload = typeof obj === "string" ? obj : JSON.stringify(obj);
@@ -119,76 +123,76 @@ async function putJson(containerClient, blobPath, obj) {
 }
 
 module.exports = async function (context, queueItem) {
-   context.log("campaign-worker TRIGGERED");  // <- simple, unmistakable
-  context.log("campaign-worker received", {
-    type: typeof queueItem,
-    sample: typeof queueItem === "string" ? queueItem.slice(0, 200) : queueItem
-  });
-  const started = Date.now();
-
-  // Normalize queue message (string -> JSON)
-  let message = queueItem;
-  if (typeof message === "string") {
-    try { message = JSON.parse(message); } catch { /* keep as string if not JSON */ }
-  }
-
-  const {
-    runId,
-    page,
-    rowCount,
-    filters,
-    notes,
-    enqueuedAt,
-    prefix: msgPrefix,
-    salesModel,
-    call_type,
-    correlationId: msgCorrelationId
-  } = message || {};
-
-  const correlationId = msgCorrelationId || `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
-
-  let containerClient;
-  let prefix;
-
-  // Build input envelope up-front (used in status.json and harness)
-  const input = {
-    page,
-    rowCount,
-    filters,
-    notes,
-    // normalised keys for harness
-    sales_model: salesModel ?? filters?.salesModel ?? null,
-    call_type: call_type ?? filters?.call_type ?? null
-  };
-
-  async function updateStatus(state, extra = {}) {
-    try {
-      if (!containerClient || !prefix) return; // cannot write before setup
-      const status = {
-        runId,
-        state,
-        input,
-        ...(extra || {}),
-        correlationId
-      };
-      await putJson(containerClient, `${prefix}status.json`, status);
-    } catch (e) {
-      context.log.warn("status_write_failed", { runId, correlationId, message: String(e?.message || e) });
-    }
-  }
-
-  const logEvent = (event, outcome, extra = {}) => {
-    context.log({
-      event,
-      runId,
-      correlationId,
-      durationMs: Date.now() - started,
-      outcome,
-      ...extra,
-    });
-  };
-
   try {
+    context.log("campaign-worker TRIGGERED");
+    context.log("campaign-worker received", {
+      type: typeof queueItem,
+      sample: typeof queueItem === "string" ? queueItem.slice(0, 200) : queueItem
+    });
+    const started = Date.now();
+
+    // Normalize queue message (string -> JSON)
+    let message = queueItem;
+    if (typeof message === "string") {
+      try { message = JSON.parse(message); } catch { /* keep as string if not JSON */ }
+    }
+
+    const {
+      runId,
+      page,
+      rowCount,
+      filters,
+      notes,
+      enqueuedAt,
+      prefix: msgPrefix,
+      salesModel,
+      call_type,
+      correlationId: msgCorrelationId
+    } = message || {};
+
+    const correlationId = msgCorrelationId || `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
+    const filtersObj = (filters && typeof filters === "object" && !Array.isArray(filters)) ? filters : null;
+    let containerClient;
+    let prefix;
+
+    // Build input envelope up-front (used in status.json and harness)
+    const input = {
+      page,
+      rowCount,
+      filters,
+      notes,
+      // normalised keys for harness
+      sales_model: salesModel ?? filtersObj?.salesModel ?? null,
+      call_type: call_type ?? filtersObj?.call_type ?? null
+    };
+
+    async function updateStatus(state, extra = {}) {
+      try {
+        if (!containerClient || !prefix) return; // cannot write before setup
+        const status = {
+          runId,
+          state,
+          input,
+          ...(extra || {}),
+          correlationId
+        };
+        await putJson(containerClient, `${prefix}status.json`, status);
+      } catch (e) {
+        context.log.warn("status_write_failed", { runId, correlationId, message: String(e?.message || e) });
+      }
+    }
+
+    const logEvent = (event, outcome, extra = {}) => {
+      context.log({
+        event,
+        runId,
+        correlationId,
+        durationMs: Date.now() - started,
+        outcome,
+        ...extra,
+      });
+    };
+
     // Guard configuration before any storage use
     const conn = process.env.AzureWebJobsStorage;
     if (!conn) {
@@ -221,13 +225,14 @@ module.exports = async function (context, queueItem) {
       context.log.warn("packs_load_failed", { runId, correlationId, message: String(e?.message || e) });
       packsConfig = {};
     }
+
     // Load evidence helper safely
     let buildEvidenceFn;
     try {
       ({ buildEvidence: buildEvidenceFn } = await loadEvidence());
     } catch (e) {
       context.log.error("evidence_loader_failed", { runId, correlationId, message: String(e?.message || e) });
-      // We can continue with empty evidence
+      // Continue with empty evidence
     }
 
     // Phase 1 – Validate input
@@ -290,6 +295,7 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
+    // Generate draft
     let draft;
     try {
       draft = await promptHarness.generate({
@@ -327,11 +333,30 @@ module.exports = async function (context, queueItem) {
     await updateStatus("Completed", { completedAt: new Date().toISOString() });
     logEvent("campaign_worker_completed", "OK");
   } catch (error) {
+    // Catch absolutely everything (including early-phase exceptions)
     context.log.error("campaign_worker_failed", error);
-    await updateStatus("Failed", {
-      error: { code: "worker_error", message: String(error?.message || error) },
-      failedAt: new Date().toISOString(),
-    });
-    logEvent("campaign_worker_completed", "Failed", { error: String(error?.message || error) });
+    try {
+      // Best-effort write of a failure status if we can
+      const conn = process.env.AzureWebJobsStorage;
+      if (conn) {
+        const blobService = BlobServiceClient.fromConnectionString(conn);
+        const container = blobService.getContainerClient(RESULTS_CONTAINER);
+        await container.createIfNotExists();
+        const parsed = (typeof queueItem === "string")
+          ? (() => { try { return JSON.parse(queueItem); } catch { return undefined; } })() : queueItem;
+        const runId = parsed?.runId;
+        const page = parsed?.page || "default";
+        const enqueuedAt = parsed?.enqueuedAt;
+        if (runId) {
+          const prefix = computePrefix({ page, runId, enqueuedAt });
+          await putJson(container, `${prefix}status.json`, {
+            runId,
+            state: "Failed",
+            error: { code: "worker_error", message: String(error?.message || error) },
+            failedAt: new Date().toISOString()
+          });
+        }
+      }
+    } catch { /* best effort */ }
   }
 };
