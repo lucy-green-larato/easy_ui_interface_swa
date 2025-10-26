@@ -7,7 +7,7 @@
    - #statusText, #statusDot, #debugLog, #runBadgeId, #currentRunId
    - #goBtn, #csvUpload (optional), #salesModel (optional), #notes (optional)
 */
-
+window.CampaignUI = window.CampaignUI || {};
 (function () {
   // ---------- DOM helpers ----------
   const $ = (sel, root = document) => root.querySelector(sel);
