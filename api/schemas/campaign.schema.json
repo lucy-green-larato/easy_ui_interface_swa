@@ -90,7 +90,8 @@
           "summary",
           "source_type",
           "url",
-          "title"
+          "title",
+          "quote"
         ]
       }
     },
