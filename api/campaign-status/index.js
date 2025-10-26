@@ -102,6 +102,10 @@ module.exports = async function (context, req) {
 
     const blobService = BlobServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
     const containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
+    context.log({
+      event: "campaign_status_storage_target",
+      blobContainerUrl: containerClient.url
+    });
 
     const blobName = await findStatusBlob(containerClient, runId);
     if (!blobName) {

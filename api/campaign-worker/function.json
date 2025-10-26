@@ -4,7 +4,7 @@
       "type": "queueTrigger",
       "direction": "in",
       "name": "queueItem",
-      "queueName": "campaign-jobs",
+      "queueName": "%CAMPAIGN_JOBS_QUEUE%",
       "connection": "AzureWebJobsStorage"
     }
   ],

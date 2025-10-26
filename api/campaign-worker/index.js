@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 2025-10-25 v10
+// /api/campaign-worker/index.js 2025-10-25 v11
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // Writes under results/campaign/{page}/{yyyy}/{MM}/{dd}/{runId}/(status.json|evidence_log.json|campaign.json)
 
@@ -101,7 +101,7 @@ function computePrefix({ page = "default", runId, enqueuedAt }) {
   return `campaign/${p}/${yyyy}/${MM}/${dd}/${runId}/`;
 }
 
-// Idempotent write: delete-then-upload to avoid 409 "already exists" across retries
+// Idempotent write with small retries
 async function putJson(containerClient, blobPath, obj) {
   const client = containerClient.getBlockBlobClient(blobPath);
   const payload = typeof obj === "string" ? obj : JSON.stringify(obj);
@@ -134,19 +134,18 @@ module.exports = async function (context, queueItem) {
       throw new Error("Invalid queue payload: expected JSON object");
     }
 
-    const src = (message && typeof message === "object") ? message : {};
     const {
       runId,
       page,
       rowCount,
       filters,
       notes,
-      enqueuedAt,
       prefix: msgPrefix,
       salesModel,
       call_type,
+      callType,
       correlationId: msgCorrelationId
-    } = src;
+    } = message;
 
     const correlationId = msgCorrelationId || `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
     const filtersObj = (filters && typeof filters === "object" && !Array.isArray(filters)) ? filters : null;
@@ -160,8 +159,8 @@ module.exports = async function (context, queueItem) {
       filters,
       notes,
       // normalised keys for harness
-      sales_model: salesModel ?? filtersObj?.salesModel ?? null,
-      call_type: call_type ?? filtersObj?.call_type ?? null
+      sales_model: (salesModel ?? filtersObj?.salesModel) ?? null,
+      call_type: (call_type ?? callType ?? filtersObj?.call_type ?? filtersObj?.callType) ?? null
     };
 
     async function updateStatus(state, extra = {}) {
@@ -191,8 +190,7 @@ module.exports = async function (context, queueItem) {
       });
     };
 
-    // Guard configuration before any storage use
-    // Guard configuration before any storage use
+    // ---- Guard configuration BEFORE any storage use ----
     const conn = process.env.AzureWebJobsStorage;
     if (!conn) {
       const msg = "AzureWebJobsStorage not configured";
@@ -203,20 +201,18 @@ module.exports = async function (context, queueItem) {
         const parsed = (typeof queueItem === "string")
           ? (() => { try { return JSON.parse(queueItem); } catch { return undefined; } })()
           : queueItem;
-        const runId = parsed?.runId;
-        const page = parsed?.page || "default";
-        const enqueuedAt = parsed?.enqueuedAt;
+        const runId2 = parsed?.runId;
+        const page2 = parsed?.page || "default";
+        const enq2 = parsed?.enqueuedAt;
 
-        // If we don’t have a connection, we cannot really write;
-        // but if your Functions host *does* have it via env, try anyway:
         const conn2 = process.env.AzureWebJobsStorage || "";
-        if (conn2 && runId) {
+        if (conn2 && runId2) {
           const bs = BlobServiceClient.fromConnectionString(conn2);
           const cc = bs.getContainerClient(RESULTS_CONTAINER);
           await cc.createIfNotExists();
-          const pfx = `${computePrefix({ page, runId, enqueuedAt })}`;
+          const pfx = `${computePrefix({ page: page2, runId: runId2, enqueuedAt: enq2 })}`;
           await putJson(cc, `${pfx}status.json`, {
-            runId,
+            runId: runId2,
             state: "Failed",
             error: { code: "config", message: msg },
             failedAt: new Date().toISOString()
@@ -224,12 +220,11 @@ module.exports = async function (context, queueItem) {
         }
       } catch { /* best effort; ignore */ }
 
-      // Important: throw so Azure retries (otherwise the message is “Successfully processed” and disappears)
+      // Throw so the message retries (prevents false "success" + poison)
       throw new Error(msg);
     }
 
-    // Storage client + container
-    // Storage client + container
+    // ---- Storage client + container ----
     const blobService = BlobServiceClient.fromConnectionString(conn);
     containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
     await containerClient.createIfNotExists();
@@ -246,7 +241,14 @@ module.exports = async function (context, queueItem) {
     // Optional: log where we will write, for quick diagnostics
     context.log("campaign-worker resolved path", { runId, prefix });
 
-    // Load packs (works with CJS or ESM)
+    // ---- Phase 1 – Validate input ----
+    await updateStatus("ValidatingInput", { startedAt: new Date().toISOString() });
+    if (!runId) throw new Error("Missing runId");
+    if (rowCount != null && (typeof rowCount !== "number" || rowCount < 0)) {
+      throw new Error("rowCount must be a non-negative number when provided");
+    }
+
+    // ---- Packs (optional) ----
     let packsConfig = {};
     try {
       const loadPacks = await loadPackModule();
@@ -257,42 +259,25 @@ module.exports = async function (context, queueItem) {
       packsConfig = {};
     }
 
-    // Load evidence helper safely
-    let buildEvidenceFn;
-    try {
-      ({ buildEvidence: buildEvidenceFn } = await loadEvidence());
-    } catch (e) {
-      context.log.error("evidence_loader_failed", { runId, correlationId, message: String(e?.message || e) });
-      // Continue with empty evidence
-    }
-
-    // Phase 1 – Validate input
-    await updateStatus("ValidatingInput", { startedAt: new Date().toISOString() });
-    if (!runId) throw new Error("Missing runId");
-    if (rowCount != null && (typeof rowCount !== "number" || rowCount < 0)) {
-      throw new Error("rowCount must be a non-negative number when provided");
-    }
-
-    // Phase 2 – Evidence builder
-    await updateStatus("BuildingEvidence");
+    // ---- Phase 2 – Evidence builder ----
+    await updateStatus("EvidenceBuilder");
     let evidence = [];
     try {
-      if (buildEvidenceFn) {
-        const ev = await buildEvidenceFn({ input, packs: packsConfig, runId, correlationId });
+      const { buildEvidence } = await loadEvidence();
+      if (typeof buildEvidence === "function") {
+        const ev = await buildEvidence({ input, packs: packsConfig, runId, correlationId });
         evidence = Array.isArray(ev) ? ev : [];
-      } else {
-        evidence = [];
       }
     } catch (e) {
-      await updateStatus("BuildingEvidence", {
+      await updateStatus("EvidenceBuilder", {
         warning: { code: "evidence_error", message: String(e?.message || e) }
       });
       evidence = [];
     }
     await putJson(containerClient, `${prefix}evidence_log.json`, evidence);
 
-    // Phase 3 – Drafting
-    await updateStatus("DraftingCampaign");
+    // ---- Phase 3 – Draft campaign (LLM) ----
+    await updateStatus("DraftCampaign");
     let promptHarness;
     try {
       promptHarness = await loadPromptHarness();
@@ -311,12 +296,7 @@ module.exports = async function (context, queueItem) {
     const AZO_API_VER = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
     const AZO_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT;
 
-    // One line debug (safe—no key)
-    context.log("[campaign-worker env]", {
-      endpoint: AZO_ENDPOINT,
-      deployment: AZO_DEPLOYMENT,
-      apiVersion: AZO_API_VER
-    });
+    context.log("[campaign-worker env]", { endpoint: AZO_ENDPOINT, deployment: AZO_DEPLOYMENT, apiVersion: AZO_API_VER });
 
     if (!AZO_ENDPOINT || !AZO_API_KEY || !AZO_DEPLOYMENT) {
       await updateStatus("Failed", {
@@ -326,13 +306,21 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
-    // Generate draft
     let draft;
     try {
       draft = await promptHarness.generate({
         schemaPath,
         packs: packsConfig,
-        input: { runId, page: sanitizePage(page), rowCount, filters, notes, evidence,sales_model: input.sales_model, call_type: input.call_type },
+        input: {
+          runId,
+          page: sanitizePage(page),
+          rowCount,
+          filters,
+          notes,
+          evidence,
+          sales_model: input.sales_model,
+          call_type: input.call_type
+        },
         options: {
           timeoutMs: LLM_TIMEOUT_MS,
           azure: {
@@ -360,7 +348,10 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
-    // Phase 4 – Completed
+    // ---- Phase 4 – Quality Gate (no-op placeholder, but visible to UI) ----
+    await updateStatus("QualityGate");
+
+    // ---- Phase 5 – Completed ----
     await updateStatus("Completed", { completedAt: new Date().toISOString() });
     logEvent("campaign_worker_completed", "OK");
   } catch (error) {
@@ -369,33 +360,24 @@ module.exports = async function (context, queueItem) {
     try {
       // Best-effort: write a clear Failed status where the UI is polling
       const conn = process.env.AzureWebJobsStorage;
-      if (!conn) {
-        // No storage available; nothing we can do
-        return;
-      }
+      if (!conn) return;
 
       const blobService = BlobServiceClient.fromConnectionString(conn);
       const container = blobService.getContainerClient(RESULTS_CONTAINER);
       await container.createIfNotExists();
 
-      // Recover as much routing info as possible from the original message
+      // Recover routing from original message
       const raw = typeof queueItem === "string" ? queueItem : JSON.stringify(queueItem || {});
       let parsed;
       try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
 
-      // Prefer values from the parsed message; fall back to in-scope vars if present
-      const runIdSafe = parsed?.runId ?? (typeof runId !== "undefined" ? runId : undefined);
-      const prefixSafe = parsed?.prefix ?? undefined;
-      const pageSafe = parsed?.page ?? (typeof page !== "undefined" ? page : "default");
-      const enqSafe = parsed?.enqueuedAt ?? (typeof enqueuedAt !== "undefined" ? enqueuedAt : undefined);
+      const runIdSafe = parsed?.runId ?? "unknown";
+      const prefixSafe = typeof parsed?.prefix === "string" && parsed.prefix.length > 0
+        ? (parsed.prefix.endsWith("/") ? parsed.prefix : `${parsed.prefix}/`)
+        : computePrefix({ page: parsed?.page || "default", runId: runIdSafe, enqueuedAt: parsed?.enqueuedAt });
 
-      // Use provided container-relative prefix when available; otherwise compute
-      const pfx = (typeof prefixSafe === "string" && prefixSafe.length > 0)
-        ? (prefixSafe.endsWith("/") ? prefixSafe : `${prefixSafe}/`)
-        : computePrefix({ page: pageSafe, runId: runIdSafe || "unknown", enqueuedAt: enqSafe });
-
-      await putJson(container, `${pfx}status.json`, {
-        runId: runIdSafe || "unknown",
+      await putJson(container, `${prefixSafe}status.json`, {
+        runId: runIdSafe,
         state: "Failed",
         error: { code: "worker_error", message: String(error?.message || error) },
         failedAt: new Date().toISOString()

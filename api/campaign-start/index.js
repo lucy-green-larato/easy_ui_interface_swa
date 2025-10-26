@@ -199,6 +199,12 @@ module.exports = async function (context, req) {
     const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
     const q = qs.getQueueClient(QUEUE_NAME);
     await q.createIfNotExists();
+    context.log({
+      event: "campaign_start_storage_targets",
+      blobContainerUrl: containerClient.url,     // e.g. https://<account>.blob.core.windows.net/results
+      queueUrl: q.url,                           // e.g. https://<account>.queue.core.windows.net/campaign-jobs
+      queueName: QUEUE_NAME
+    });
 
     try {
       const resp = await q.sendMessage(payload); // payload is a JSON string

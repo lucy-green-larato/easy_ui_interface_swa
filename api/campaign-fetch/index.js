@@ -1,4 +1,4 @@
-// /api/campaign-fetch/index.js 28-10-2025 v1
+// /api/campaign-fetch/index.js 25-10-2025 v2
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // Complete drop-in replacement that restores ALL 26/09 behavior and fixes all issues:
 //
@@ -66,18 +66,18 @@ function internalError(cid, msg = "Unexpected error") {
   };
 }
 
-// --- prefix resolution ---
-// Accepts optional ?prefix=...; boolean validator (container-relative or container-qualified).
-if (isLikelyValidPrefix(optionalPrefix, runId)) {
-  // Normalize to container-relative
-  let p = optionalPrefix.trim().replace(/\/{2,}/g, "/");
-  if (p.startsWith("/")) p = p.slice(1);
-  if (p.startsWith(`${RESULTS_CONTAINER}/`)) {
-    p = p.slice(`${RESULTS_CONTAINER}/`.length);
-  }
-  prefix = p.endsWith("/") ? p : `${p}/`;
-} else {
-  prefix = await locateRunPrefix(containerClient, runId);
+// --- prefix helpers ---
+function isLikelyValidPrefix(prefix, runId) {
+  if (typeof prefix !== "string") return false;
+  let p = prefix.trim().replace(/\/{2,}/g, "/");
+  if (!p || p.includes("..") || p.includes("\\")) return false;
+  // Normalize for checks: strip container if present
+  if (p.startsWith(`${RESULTS_CONTAINER}/`)) p = p.slice(RESULTS_CONTAINER.length + 1);
+  if (!p.startsWith("campaign/")) return false;
+  p = p.replace(/\/+$/, "");
+  const segs = p.split("/"); // campaign/<page>/<yyyy>/<MM>/<dd>/<runId>
+  if (segs.length < 6) return false;
+  return segs[segs.length - 1] === String(runId);
 }
 
 /** Returns 'campaign/<page>/<yyyy>/<MM>/<dd>/<runId>/' (container-relative). */
@@ -98,14 +98,14 @@ module.exports = async function (context, req) {
   // Precompute CID so every path returns it
   const fallbackCid = correlationIdFrom(req);
 
-  // Enforce GET only (route is controlled by function.json: "campaign/fetch")
+  // Enforce GET only (route is controlled by function.json: "campaign-fetch")
   if (String(req?.method || "").toUpperCase() !== "GET") {
     context.res = {
       status: 405,
       headers: {
         "Content-Type": "application/json",
         "x-correlation-id": fallbackCid,
-        "allow": "GET"
+        "allow": "GET",
       },
       body: { error: "method_not_allowed", message: "Only GET is supported" },
     };
@@ -132,21 +132,20 @@ module.exports = async function (context, req) {
       context.res = internalError(correlationId, "AzureWebJobsStorage app setting is missing");
       return;
     }
+
     const blobService = BlobServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
     const containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
 
-    // Resolve prefix (fast path: ?prefix=..., else list to discover)
+    // Resolve prefix (fast path: ?prefix=..., else discover by listing)
     let prefix;
     if (isLikelyValidPrefix(optionalPrefix, runId)) {
-      // Normalize to container-relative: strip the actual container name if present
-      if (optionalPrefix.startsWith(`${RESULTS_CONTAINER}/`)) {
-        prefix = optionalPrefix.slice(`${RESULTS_CONTAINER}/`.length);
-      } else {
-        prefix = optionalPrefix;
-      }
-      if (!prefix.endsWith("/")) prefix += "/";
+      // Normalize to container-relative
+      let p = optionalPrefix.trim().replace(/\/{2,}/g, "/");
+      if (p.startsWith("/")) p = p.slice(1);
+      if (p.startsWith(`${RESULTS_CONTAINER}/`)) p = p.slice(`${RESULTS_CONTAINER}/`.length);
+      prefix = p.endsWith("/") ? p : `${p}/`;
     } else {
-      prefix = await locateRunPrefix(containerClient, runId);
+      prefix = await locateRunPrefix(containerClient, runId); // (inside async fn -> safe await)
     }
 
     if (!prefix) {
@@ -191,12 +190,11 @@ module.exports = async function (context, req) {
       headers: {
         "Content-Type": "application/json",
         "Cache-Control": "no-cache",
-        "x-correlation-id": correlationId
+        "x-correlation-id": correlationId,
       },
       body: bodyStream,
       isRaw: true,
     };
-
   } catch (err) {
     context.log.error(
       JSON.stringify({
@@ -208,4 +206,5 @@ module.exports = async function (context, req) {
     context.res = internalError(correlationId);
   }
 };
+
 

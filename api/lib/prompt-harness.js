@@ -1,4 +1,4 @@
-// /api/lib/prompt-harness.js 2025-10-25 v 6
+// /api/lib/prompt-harness.js 2025-10-26 v 7
 // Exports:
 //   - buildDefaultMessages({ inputs, evidencePack })
 //   - buildCustomMessages({ customPromptText, evidencePack })
@@ -61,6 +61,22 @@ STYLE & FORMATTING
 - Keep tables/lists compact and scannable.
 `.trim();
 
+const DOC_SPEC = `
+DOCUMENT STRUCTURE (JSON keys and expectations)
+- executiveSummary: 4–8 concise bullets. Each bullet MUST end with a parenthesised source tag (e.g., (Ofcom), (Company site)).
+- evidenceLog: array of { claimId, summary, sourceUrl, sourceType, quote? }. Reuse claims given in input.claims when possible.
+- caseStudies: 2–4 named examples. Each item has name, headline (cited), and 2–4 bullets (each cited).
+- positioning: valueProposition + >=3 differentiators. Every differentiator MUST end with a source tag.
+- icpMessagingMatrix: rows per ICP persona with valueStatement (cited), proof (cited), and CTA.
+- offerStrategy.lpWire: hero; whyItMatters[] (cited); whatYouGet[] (cited); howItWorks[]; outcomes[] (cited); proof[] (cited); cta.
+- channelPlan.emails: 4 emails. subject<=80 chars. body ~90–120 words and MUST include at least one citation.
+- salesEnablement: >=5 discoveryQs and >=2 objections (each objection text ends with a citation).
+- measurement: kpis[] and tests[] (clear and measurable).
+- compliance and risks: practical, specific lists (no generic advice).
+- onePager: 6–10 bullets summarising ICP, offer, proof points, channels, and near-term targets; each claim cited.
+- notEvidenced: list any ideas you could not back with sources in the evidence pack.
+`.trim();
+
 const PARTNER_PERSONA = `
 You are a top-performing UK B2B channel strategist (tech markets) and CMO. 
 You understand partner recruitment, enablement, and common channel constraints (M&A, higher interest rates, lead-gen pressure).
@@ -117,7 +133,7 @@ ${JSON.stringify(schemaJson)}
 }
 
 function buildCustomMessages({ customPromptText = "", evidencePack = {} }) {
-  const system = `${BASE_RULES}`;
+  const system = `${BASE_RULES}\n\n${DOC_SPEC}`;
   const user = `
 ${customPromptText}
 
@@ -167,7 +183,7 @@ async function generate({ schemaPath, packs, input, options = {} }) {
     packs?.enabled && Array.isArray(packs.enabled) && packs.enabled.length
       ? `\nEnabled packs: ${packs.enabled.join(", ")}`
       : "";
-  const system = `${selectPersona(input)}\n\n${BASE_RULES}${packsLine}`;
+  const system = `${selectPersona(input)}\n\n${BASE_RULES}\n\n${DOC_SPEC}${packsLine}`;
   const userPayload = {
     task: "Generate JSON that STRICTLY conforms to the provided schema.",
     input: input || {},
@@ -178,14 +194,6 @@ async function generate({ schemaPath, packs, input, options = {} }) {
     { role: "system", content: system },
     { role: "user", content: JSON.stringify(userPayload) }
   ];
-
-  // Timeouts
-  const timeoutMsRaw = options.timeoutMs ?? LLM_TIMEOUT_MS_DEFAULT;
-  const timeoutMs = Number.isFinite(Number(timeoutMsRaw)) && Number(timeoutMsRaw) > 0
-    ? Number(timeoutMsRaw)
-    : LLM_TIMEOUT_MS_DEFAULT;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("llm_timeout"), timeoutMs);
 
   // Retry helper
   const attempts = Math.max(1, Number(options.retry?.attempts || 1));
@@ -215,6 +223,14 @@ async function generate({ schemaPath, packs, input, options = {} }) {
     // Attempt loop
     let lastErr;
     for (let i = 0; i < attempts; i++) {
+      // Per-attempt timeout & controller
+      const timeoutMsRaw = options.timeoutMs ?? LLM_TIMEOUT_MS_DEFAULT;
+      const timeoutMs = Number.isFinite(Number(timeoutMsRaw)) && Number(timeoutMsRaw) > 0
+        ? Number(timeoutMsRaw)
+        : LLM_TIMEOUT_MS_DEFAULT;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort("llm_timeout"), timeoutMs);
+
       try {
         const res = await fetch(url, {
           method: "POST",
@@ -251,11 +267,13 @@ async function generate({ schemaPath, packs, input, options = {} }) {
         if (i < attempts - 1 && backoffMs) {
           await new Promise(r => setTimeout(r, backoffMs));
         }
+      } finally {
+        clearTimeout(timer);
       }
     }
     throw lastErr || new Error("Unknown LLM error");
   } finally {
-    clearTimeout(timeout);
+    // no global timer
   }
 }
 Object.defineProperty(module.exports, "schemaJson", {

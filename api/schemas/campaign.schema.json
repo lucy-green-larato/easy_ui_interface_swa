@@ -4,6 +4,26 @@
   "title": "campaign",
   "type": "object",
   "additionalProperties": false,
+  "definitions": {
+    "citedString": {
+      "type": "string",
+      "pattern": ".*\\([^()]{2,}\\)\\.?$"
+    },
+    "emailBody": {
+      "type": "string",
+      "minLength": 90,
+      "maxLength": 800,
+      "pattern": ".*\\([^()]{2,}\\)\\.?$"
+    },
+    "subject80": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "httpsUrl": {
+      "type": "string",
+      "pattern": "^https?://\\S+$"
+    }
+  },
   "required": [
     "executive_summary",
     "evidence_log",
@@ -21,163 +41,360 @@
     "input_proof"
   ],
   "properties": {
-    "executive_summary": { "type": "string", "minLength": 1 },
-
-    "evidence_log": {
+    "executive_summary": {
       "type": "array",
+      "minItems": 4,
+      "maxItems": 8,
       "items": {
-        "type": "object",
-        "properties": {
-          "url": { "type": "string", "pattern": "^https?://\\S+$" },
-          "title": { "type": "string" },
-          "snippet": { "type": "string" },
-          "claim": { "type": "string" }
-        },
-        "required": ["url", "title", "snippet", "claim"],
-        "additionalProperties": false
+        "$ref": "#/definitions/citedString"
       }
     },
-
-    "case_studies": {
+    "evidence_log": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 6,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["customer", "industry", "problem", "solution", "outcomes", "link", "source"],
         "properties": {
-          "customer": { "type": "string" },
-          "industry": { "type": "string" },
-          "problem": { "type": "string" },
-          "solution": { "type": "string" },
-          "outcomes": { "type": "string" },
-          "link": { "type": "string", "pattern": "^https?://\\S+$" },
-          "source": { "type": "string" }
+          "claim_id": {
+            "type": "string",
+            "pattern": "^CLM-[0-9]{3}$"
+          },
+          "summary": {
+            "$ref": "#/definitions/citedString"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "Ofcom",
+              "ONS",
+              "DSIT",
+              "Company site",
+              "Trade press",
+              "PDF extract",
+              "Directory"
+            ]
+          },
+          "url": {
+            "$ref": "#/definitions/httpsUrl"
+          },
+          "title": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "summary",
+          "source_type",
+          "url",
+          "title"
+        ]
+      }
+    },
+    "case_studies": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "customer",
+          "industry",
+          "headline",
+          "bullets",
+          "link",
+          "source"
+        ],
+        "properties": {
+          "customer": {
+            "type": "string"
+          },
+          "industry": {
+            "type": "string"
+          },
+          "headline": {
+            "$ref": "#/definitions/citedString"
+          },
+          "bullets": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 4,
+            "items": {
+              "$ref": "#/definitions/citedString"
+            }
+          },
+          "link": {
+            "$ref": "#/definitions/httpsUrl"
+          },
+          "source": {
+            "type": "string"
+          }
         }
       }
     },
-
     "positioning_and_differentiation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["value_prop", "swot", "differentiators", "competitor_set"],
+      "required": [
+        "value_prop",
+        "swot",
+        "differentiators",
+        "competitor_set"
+      ],
       "properties": {
-        "value_prop": { "type": "string" },
+        "value_prop": {
+          "type": "string"
+        },
         "swot": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["strengths", "weaknesses", "opportunities", "threats"],
+          "required": [
+            "strengths",
+            "weaknesses",
+            "opportunities",
+            "threats"
+          ],
           "properties": {
-            "strengths": { "type": "array", "items": { "type": "string" } },
-            "weaknesses": { "type": "array", "items": { "type": "string" } },
-            "opportunities": { "type": "array", "items": { "type": "string" } },
-            "threats": { "type": "array", "items": { "type": "string" } }
+            "strengths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "weaknesses": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "opportunities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "threats": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           }
         },
-        "differentiators": { "type": "array", "minItems": 3, "items": { "type": "string" } },
+        "differentiators": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "$ref": "#/definitions/citedString"
+          }
+        },
         "competitor_set": {
           "type": "array",
           "minItems": 5,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["vendor", "reason_in_set", "url"],
+            "required": [
+              "vendor",
+              "reason_in_set",
+              "url"
+            ],
             "properties": {
-              "vendor": { "type": "string" },
-              "reason_in_set": { "type": "string" },
-              "url": { "type": "string", "pattern": "^https?://\\S+$" }
+              "vendor": {
+                "type": "string"
+              },
+              "reason_in_set": {
+                "type": "string"
+              },
+              "url": {
+                "$ref": "#/definitions/httpsUrl"
+              }
             }
           }
         }
       }
     },
-
     "messaging_matrix": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["nonnegotiables", "matrix"],
+      "required": [
+        "nonnegotiables",
+        "matrix"
+      ],
       "properties": {
-        "nonnegotiables": { "type": "array", "minItems": 3, "items": { "type": "string" } },
+        "nonnegotiables": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string"
+          }
+        },
         "matrix": {
           "type": "array",
           "minItems": 3,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["persona", "pain", "value_statement", "proof", "cta"],
+            "required": [
+              "persona",
+              "pain",
+              "value_statement",
+              "proof",
+              "cta"
+            ],
             "properties": {
-              "persona": { "type": "string" },
-              "pain": { "type": "string" },
-              "value_statement": { "type": "string" },
-              "proof": { "type": "string" },
-              "cta": { "type": "string" }
+              "persona": {
+                "type": "string"
+              },
+              "pain": {
+                "type": "string"
+              },
+              "value_statement": {
+                "$ref": "#/definitions/citedString"
+              },
+              "proof": {
+                "$ref": "#/definitions/citedString"
+              },
+              "cta": {
+                "type": "string"
+              }
             }
           }
         }
       }
     },
-
     "offer_strategy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["landing_page", "assets_checklist"],
+      "required": [
+        "landing_page",
+        "assets_checklist"
+      ],
       "properties": {
         "landing_page": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["headline", "subheadline", "sections", "cta"],
+          "required": [
+            "hero",
+            "why_it_matters",
+            "what_you_get",
+            "how_it_works",
+            "outcomes",
+            "proof",
+            "cta"
+          ],
           "properties": {
-            "headline": { "type": "string" },
-            "subheadline": { "type": "string" },
-            "sections": {
+            "hero": {
+              "type": "string"
+            },
+            "why_it_matters": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "$ref": "#/definitions/citedString"
+              }
+            },
+            "what_you_get": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "$ref": "#/definitions/citedString"
+              }
+            },
+            "how_it_works": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "type": "string"
+              }
+            },
+            "outcomes": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "$ref": "#/definitions/citedString"
+              }
+            },
+            "proof": {
               "type": "array",
               "minItems": 1,
               "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["title", "content", "bullets"],
-                "properties": {
-                  "title": { "type": "string" },
-                  "content": { "type": "string" },
-                  "bullets": { "type": "array", "items": { "type": "string" } }
-                }
+                "$ref": "#/definitions/citedString"
               }
             },
-            "cta": { "type": "string" }
+            "cta": {
+              "type": "string"
+            }
           }
         },
-        "assets_checklist": { "type": "array", "minItems": 5, "items": { "type": "string" } }
+        "assets_checklist": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
-
     "channel_plan": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["emails", "linkedin", "paid", "event"],
+      "required": [
+        "emails",
+        "linkedin",
+        "paid",
+        "event"
+      ],
       "properties": {
         "emails": {
           "type": "array",
-          "minItems": 3,
+          "minItems": 4,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["subject", "preview", "body"],
+            "required": [
+              "subject",
+              "preview",
+              "body"
+            ],
             "properties": {
-              "subject": { "type": "string" },
-              "preview": { "type": "string" },
-              "body": { "type": "string" }
+              "subject": {
+                "$ref": "#/definitions/subject80"
+              },
+              "preview": {
+                "type": "string"
+              },
+              "body": {
+                "$ref": "#/definitions/emailBody"
+              }
             }
           }
         },
         "linkedin": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["connect_note", "insight_post", "dm", "comment_strategy"],
+          "required": [
+            "connect_note",
+            "insight_post",
+            "dm",
+            "comment_strategy"
+          ],
           "properties": {
-            "connect_note": { "type": "string" },
-            "insight_post": { "type": "string" },
-            "dm": { "type": "string" },
-            "comment_strategy": { "type": "string" }
+            "connect_note": {
+              "type": "string"
+            },
+            "insight_post": {
+              "$ref": "#/definitions/citedString"
+            },
+            "dm": {
+              "$ref": "#/definitions/citedString"
+            },
+            "comment_strategy": {
+              "type": "string"
+            }
           }
         },
         "paid": {
@@ -185,91 +402,195 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["variant", "proof", "cta"],
+            "required": [
+              "variant",
+              "proof",
+              "cta"
+            ],
             "properties": {
-              "variant": { "type": "string" },
-              "proof": { "type": "string" },
-              "cta": { "type": "string" }
+              "variant": {
+                "type": "string"
+              },
+              "proof": {
+                "$ref": "#/definitions/citedString"
+              },
+              "cta": {
+                "type": "string"
+              }
             }
           }
         },
         "event": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["concept", "agenda", "speakers", "cta"],
+          "required": [
+            "concept",
+            "agenda",
+            "speakers",
+            "cta"
+          ],
           "properties": {
-            "concept": { "type": "string" },
-            "agenda": { "type": "string" },
-            "speakers": { "type": "string" },
-            "cta": { "type": "string" }
+            "concept": {
+              "type": "string"
+            },
+            "agenda": {
+              "type": "string"
+            },
+            "speakers": {
+              "type": "string"
+            },
+            "cta": {
+              "type": "string"
+            }
           }
         }
       }
     },
-
     "sales_enablement": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["discovery_questions", "objection_cards", "proof_pack_outline", "handoff_rules"],
+      "required": [
+        "discovery_questions",
+        "objection_cards",
+        "proof_pack_outline",
+        "handoff_rules"
+      ],
       "properties": {
-        "discovery_questions": { "type": "array", "minItems": 5, "items": { "type": "string" } },
+        "discovery_questions": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "string"
+          }
+        },
         "objection_cards": {
           "type": "array",
           "minItems": 3,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["blocker", "reframe_with_claimid", "proof", "risk_reversal"],
+            "required": [
+              "blocker",
+              "reframe_with_claimid",
+              "proof",
+              "risk_reversal"
+            ],
             "properties": {
-              "blocker": { "type": "string" },
-              "reframe_with_claimid": { "type": "string" },
-              "proof": { "type": "string" },
-              "risk_reversal": { "type": "string" }
+              "blocker": {
+                "type": "string"
+              },
+              "reframe_with_claimid": {
+                "$ref": "#/definitions/citedString"
+              },
+              "proof": {
+                "$ref": "#/definitions/citedString"
+              },
+              "risk_reversal": {
+                "type": "string"
+              }
             }
           }
         },
-        "proof_pack_outline": { "type": "array", "items": { "type": "string" } },
-        "handoff_rules": { "type": "string" }
+        "proof_pack_outline": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "handoff_rules": {
+          "type": "string"
+        }
       }
     },
-
     "measurement_and_learning": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kpis", "weekly_test_plan", "utm_and_crm", "evidence_freshness_rule"],
+      "required": [
+        "kpis",
+        "weekly_test_plan",
+        "utm_and_crm",
+        "evidence_freshness_rule"
+      ],
       "properties": {
-        "kpis": { "type": "array", "items": { "type": "string" } },
-        "weekly_test_plan": { "type": "string" },
-        "utm_and_crm": { "type": "string" },
-        "evidence_freshness_rule": { "type": "string" }
+        "kpis": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "weekly_test_plan": {
+          "type": "string"
+        },
+        "utm_and_crm": {
+          "type": "string"
+        },
+        "evidence_freshness_rule": {
+          "type": "string"
+        }
       }
     },
-
     "compliance_and_governance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["substantiation_file", "gdpr_pecr_checklist", "brand_accessibility_checks", "approval_log_note"],
+      "required": [
+        "substantiation_file",
+        "gdpr_pecr_checklist",
+        "brand_accessibility_checks",
+        "approval_log_note"
+      ],
       "properties": {
-        "substantiation_file": { "type": "string" },
-        "gdpr_pecr_checklist": { "type": "string" },
-        "brand_accessibility_checks": { "type": "string" },
-        "approval_log_note": { "type": "string" }
+        "substantiation_file": {
+          "type": "string"
+        },
+        "gdpr_pecr_checklist": {
+          "type": "string"
+        },
+        "brand_accessibility_checks": {
+          "type": "string"
+        },
+        "approval_log_note": {
+          "type": "string"
+        }
       }
     },
-
-    "risks_and_contingencies": { "type": "string" },
-    "one_pager_summary": { "type": "string" },
-
+    "risks_and_contingencies": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "$ref": "#/definitions/citedString"
+      }
+    },
+    "one_pager_summary": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 10,
+      "items": {
+        "$ref": "#/definitions/citedString"
+      }
+    },
     "meta": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["icp_from_csv", "it_spend_buckets"],
+      "required": [
+        "icp_from_csv",
+        "it_spend_buckets"
+      ],
       "properties": {
-        "icp_from_csv": { "type": "string" },
-        "it_spend_buckets": { "type": "array", "items": { "type": "string" } }
+        "icp_from_csv": {
+          "type": "string"
+        },
+        "it_spend_buckets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
-
-    "input_proof": { "type": "object", "additionalProperties": false, "properties": {} }
+    "input_proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    }
   }
 }
