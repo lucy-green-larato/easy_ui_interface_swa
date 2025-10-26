@@ -22,7 +22,17 @@ const ENV_API_VER = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview"
 const ENV_API_KEY = process.env.AZURE_OPENAI_API_KEY;
 const LLM_TIMEOUT_MS_DEFAULT = Number(process.env.LLM_TIMEOUT_MS || "45000");
 const ENV_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS || process.env.AZURE_OPENAI_MAX_TOKENS || "4096");
-
+const ENV_MAX_EVIDENCE_CHARS = (() => {
+  const raw = process.env.PROMPT_MAX_EVIDENCE_CHARS || process.env.MAX_STR;
+  const n = Number(raw);
+  // Guardrails: allow 50k–1.5M chars, default 380k
+  if (!Number.isFinite(n)) return 380_000;
+  return Math.min(Math.max(n, 50_000), 1_500_000);
+})();
+if (process.env.NODE_ENV !== "production" && !global.__LOGGED_PROMPT_MAX__) {
+  try { console.log(`[prompt-harness] PROMPT_MAX_EVIDENCE_CHARS=${MAX_STR}`); } catch { }
+  global.__LOGGED_PROMPT_MAX__ = true;
+}
 // ---- Default schema path ----
 const DEFAULT_SCHEMA_PATH = path.join(__dirname, "..", "schemas", "campaign.schema.json");
 
@@ -39,22 +49,47 @@ function tryLoadDefaultSchema() {
   catch { return null; }
 }
 
-// ---- Helpers to keep message size sane ----
-const MAX_STR = 120_000;
+// Now driven by env (PROMPT_MAX_EVIDENCE_CHARS or MAX_STR).
+const MAX_STR = ENV_MAX_EVIDENCE_CHARS;
+
 function clipString(s, max = MAX_STR) {
   const str = typeof s === "string" ? s : JSON.stringify(s ?? "");
-  return str.length > max ? (str.slice(0, max) + " …TRUNCATED…") : str;
+  if (str.length <= max) return str;
+  // Keep head + tail to preserve useful context; avoids losing titles/attributions
+  const keep = Math.floor(max / 2);
+  return str.slice(0, keep) + " …TRUNCATED… " + str.slice(-keep);
 }
-function safe(obj) { try { return clipString(obj); } catch { return "null"; } }
+
+function safe(obj, max = MAX_STR) {
+  try { return clipString(obj, max); }
+  catch { return "null"; }
+}
+
 
 // ---- Personas & rules ----
 const BASE_RULES = `
 Return STRICTLY valid JSON that conforms to the provided schema. Do NOT include any prose before or after the JSON.
 
 EVIDENCE RULES
-- Every bullet/statement must end with a short source tag in parentheses, e.g., (Company site), (Annual report 2024, p.14), (Trade show directory).
+- Every bullet/statement must end with a short source tag in parentheses, e.g., (Company site), (Annual report 2024, p.14), (Trade press).
 - If something cannot be evidenced from the evidence pack, do not claim it. You may add a brief reason in notEvidenced[].
 - Do NOT invent sources or estimate trade-show budgets unless a show organiser/exhibitor source exists in the evidence pack.
+
+SOURCE MIX (hard requirement; reject internally until met)
+- Minimum mix across the whole JSON:
+  • ≥4 claims from the **company website** or product materials (tag as (Company site) or the exact page title).  
+  • ≥1 signal from **LinkedIn** (company page/post) if provided in evidencePack.  
+  • ≥2 claims from **regulator/government** (e.g., Ofcom/ONS/DSIT); prefer ≤6 months old.  
+- “Trade press” is allowed, but NEVER as the only category. If quotas are not met with given evidence, leave fields blank and add an explanation in notEvidenced[].
+
+CSV FUSION RULES
+- Treat CSV fields as ground truth about ICP focus and messaging emphasis. You MUST reflect:
+  • SimplifiedIndustry → ICP phrasing and examples,
+  • TopPurchases → offer & assets,
+  • TopBlockers → pains & objections,
+  • TopNeedsSupplier → nonnegotiables & differentiators.
+- Do NOT use AdopterProfile or TopConnectivity even if present.
+- If CSV is missing, say why in notEvidenced[].
 
 STYLE & FORMATTING
 - UK currency & numerals: £20.756m, £1,421,646, 8.4%.
@@ -63,21 +98,20 @@ STYLE & FORMATTING
 `.trim();
 
 const DOC_SPEC = `
-DOCUMENT STRUCTURE (must match the JSON schema keys exactly)
-- executive_summary: 4–8 concise bullets. Each bullet MUST end with a parenthesised source tag (e.g., (Ofcom), (Company site)).
-- evidence_log: array of { claim_id, summary, source_type, url, title, quote? }. Prefer reusing claim IDs (CLM-xxx) across the doc.
-- case_studies: 2–4 examples. Each has { customer, industry, headline (cited), bullets[2–4 each cited], link, source }.
-- positioning_and_differentiation: value_prop (paragraph), differentiators[>=3 cited], swot{strengths[], weaknesses[], opportunities[], threats[]}, competitor_set[ { vendor, reason_in_set, url } ].
-- messaging_matrix: nonnegotiables[>=3], matrix[ { persona, pain, value_statement (cited), proof (cited), cta } ].
-- offer_strategy: landing_page{ hero, why_it_matters[] (cited), what_you_get[] (cited), how_it_works[], outcomes[] (cited), proof[] (cited), cta }, assets_checklist[>=5].
-- channel_plan: emails[4 items; subject<=80 chars; body ~90–120 words with at least one citation], linkedin{ connect_note, insight_post (cited), dm (cited), comment_strategy }, paid[ { variant, proof (cited), cta } ], event{ concept, agenda, speakers, cta }.
-- sales_enablement: discovery_questions[>=5], objection_cards[>=3 { blocker, reframe_with_claimid (cited), proof (cited), risk_reversal }], proof_pack_outline[], handoff_rules.
-- measurement_and_learning: kpis[], weekly_test_plan, utm_and_crm, evidence_freshness_rule.
-- compliance_and_governance: substantiation_file, gdpr_pecr_checklist, brand_accessibility_checks, approval_log_note.
-- risks_and_contingencies: 2+ cited bullets.
-- one_pager_summary: 6–10 cited bullets covering ICP, offer, proof points, channels, near-term targets.
-- meta: icp_from_csv (string), it_spend_buckets[].
-- input_proof: echo inputs used (may be empty object).
+DOCUMENT STRUCTURE (your output JSON must fill these keys with cited content)
+- executive_summary: 4–8 bullets. Each ends with a parenthesised source tag; include at least one Company site and one regulator claim.
+- evidence_log: array of { claim_id, summary, source_type, url, title, quote? }. Reuse ClaimIDs in other sections.
+- case_studies: 2–4 named examples (prefer company materials; clearly mark proxies if used).
+- positioning_and_differentiation: value_prop; ≥3 differentiators (each cited). Map CSV TopNeedsSupplier into “nonnegotiables”.
+- messaging_matrix: rows per persona with pain (from CSV TopBlockers), value_statement (cited), proof (cited ClaimIDs/Case), CTA.
+- offer_strategy.landing_page: hero; why_it_matters[] (regulator/company claims); what_you_get[]; how_it_works[]; outcomes[]; proof[]; cta.
+- channel_plan.emails: 4 emails. subject ≤80 chars; body 90–120 words; each body includes at least one citation.
+- sales_enablement: ≥5 discovery_questions; ≥3 objection_cards with reframe_with_claimid + proof.
+- measurement_and_learning, compliance_and_governance, risks_and_contingencies, one_pager_summary: all evidence-anchored.
+- notEvidenced: enumerate anything you could not back with the pack/CSV.
+
+VALIDATION GATE (self-check before emitting JSON)
+- Reject internally until: source quotas met; CSV fields referenced in Executive Summary, Messaging, Offer, and Objections; at least one Company site ClaimID present in evidence_log and reused elsewhere.
 `.trim();
 
 const PARTNER_PERSONA = `
@@ -122,11 +156,13 @@ Company inputs
 - Product/service focus: ${inputs.product_service || ""}
 - Extra context: ${inputs.context || ""}
 
-Evidence pack (may be partial)
-- WEBSITE_SNAPSHOTS: ${safe(evidencePack.website || [])}
+Evidence pack (prioritise Company site → LinkedIn → Regulator/Gov → Other)
+- COMPANY_WEBSITE_HTML_OR_TEXT: ${safe(evidencePack.website || [])}
+- LINKEDIN_COMPANY: ${safe(evidencePack.linkedin || [])}
 - IXBRL_SUMMARY: ${safe(evidencePack.ixbrl || {})}
 - PDF_EXTRACTS: ${safe(evidencePack.pdf || [])}
 - DIRECTORY_MATCHES: ${safe(evidencePack.directories || [])}
+- CSV_SUMMARY: ${safe(evidencePack.csv || inputs?.csvSummary || {})}
 
 Return only JSON for this schema:
 ${JSON.stringify(schemaJson)}
@@ -216,7 +252,7 @@ async function generate({ schemaPath, packs, input, evidencePack = {}, options =
     const reqBody = {
       messages,
       temperature: 0,
-      top_p: 0,
+      top_p: 0.9,
       max_tokens: Number.isFinite(options.maxTokens) ? options.maxTokens : ENV_MAX_TOKENS,
       response_format: {
         type: "json_schema",
