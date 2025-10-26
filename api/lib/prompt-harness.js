@@ -95,23 +95,61 @@ STYLE & FORMATTING
 - UK currency & numerals: £20.756m, £1,421,646, 8.4%.
 - No generic advice; keep everything specific to the evidence.
 - Keep tables/lists compact and scannable.
+
+FAIL-SAFE
+- Never return empty sections. If evidence is sparse, (1) use company website + LinkedIn + USER_USPS, (2) mark any unsubstantiated elements in notEvidenced[], but (3) still produce full JSON objects/arrays to meet the schema.
 `.trim();
 
 const DOC_SPEC = `
-DOCUMENT STRUCTURE (your output JSON must fill these keys with cited content)
-- executive_summary: 4–8 bullets. Each ends with a parenthesised source tag; include at least one Company site and one regulator claim.
-- evidence_log: array of { claim_id, summary, source_type, url, title, quote? }. Reuse ClaimIDs in other sections.
-- case_studies: 2–4 named examples (prefer company materials; clearly mark proxies if used).
-- positioning_and_differentiation: value_prop; ≥3 differentiators (each cited). Map CSV TopNeedsSupplier into “nonnegotiables”.
-- messaging_matrix: rows per persona with pain (from CSV TopBlockers), value_statement (cited), proof (cited ClaimIDs/Case), CTA.
-- offer_strategy.landing_page: hero; why_it_matters[] (regulator/company claims); what_you_get[]; how_it_works[]; outcomes[]; proof[]; cta.
-- channel_plan.emails: 4 emails. subject ≤80 chars; body 90–120 words; each body includes at least one citation.
-- sales_enablement: ≥5 discovery_questions; ≥3 objection_cards with reframe_with_claimid + proof.
-- measurement_and_learning, compliance_and_governance, risks_and_contingencies, one_pager_summary: all evidence-anchored.
-- notEvidenced: enumerate anything you could not back with the pack/CSV.
+DOCUMENT STRUCTURE (JSON keys and expectations)
 
-VALIDATION GATE (self-check before emitting JSON)
-- Reject internally until: source quotas met; CSV fields referenced in Executive Summary, Messaging, Offer, and Objections; at least one Company site ClaimID present in evidence_log and reused elsewhere.
+CAMPAIGN NAMING
+- Create a programme name in the format: "Demand programme for <market> by <company>". 
+- Write this as the FIRST line inside meta.icp_from_csv (prefix with "Campaign: "), then include any other ICP notes below it.
+  Example: meta.icp_from_csv = "Campaign: Demand programme for UK Construction by Comms 365\\nPrimary ICPs: …"
+
+EXECUTIVE SUMMARY (format required)
+- 1 short paragraph (≈100–130 words) that introduces the problem, the buyer context, and the company's USP-backed solution. 
+- Follow with a "Why now:" list of 2–4 **evidenced bullets** (each ends with a citation tag).- Prioritise evidence from Company site & LinkedIn where applicable, then CSV (tag "(CSV)"), then Regulators/Gov (Ofcom, ONS, DSIT), then annual reports/IXBRL, then PDF extracts, then Trade press/Directory.
+
+EVIDENCE LOG (mix of sources is mandatory)
+- At least **2 items** must come from Company site or LinkedIn (source_type = "Company site" or "LinkedIn").
+- At least **3 items** must come from external/regulatory/public sources (Ofcom/ONS/DSIT/Annual report/PDF/Trade press/Directory).
+- Each item: claim_id (CLM-###), summary (cited), source_type, url (if applicable), title, and optional quote.
+
+POSITIONING & USPs
+- value_prop concise and UK-specific. 
+- differentiators (≥3) MUST include at least **2 items sourced from USER_USPS** (verbatim or tight paraphrase) and be cited to Company site/LinkedIn where possible (else include brief note in notEvidenced[]).
+
+OFFER & CHANNELS
+- offer_strategy.landing_page: hero; why_it_matters[] (cited); what_you_get[] (cited; reflect TopPurchases + USER_USPS); how_it_works[]; outcomes[] (cited); proof[] (cited); cta.
+- channel_plan.emails: exactly 4 emails; subject ≤80 chars; body ≈90–120 words; each body includes ≥1 citation (prefer Company site/LinkedIn/CSV).
+- LinkedIn section: connect_note, insight_post, dm each with at least one specific assertion or proof tied to the CSV or site.
+
+SALES ENABLEMENT, MEASUREMENT, COMPLIANCE, RISKS
+- sales_enablement: ≥5 discovery_questions; ≥3 objection_cards mapping TopBlockers → reframe_with_claimid + proof (both cited).
+- measurement_and_learning: concrete KPIs; weekly_test_plan tied to channels; UTM & CRM notes.
+- compliance_and_governance: practical, specific lists; approval_log_note short.
+- risks_and_contingencies: ≥2 cited items.
+
+CSV FUSION RULES (CSV is current market research; treat as ground truth for targeting/messaging)
+- You MUST reflect CSV mappings:
+  • SimplifiedIndustry → ICP phrasing, persona contexts, examples.  
+  • TopPurchases → offer_strategy.what_you_get and assets_checklist.  
+  • TopBlockers → persona pains + objection_cards.  
+  • TopNeedsSupplier → nonnegotiables + differentiators.
+- Do NOT use AdopterProfile or TopConnectivity even if present.
+- Cite CSV-derived statements with (CSV). If a CSV value conflicts with public sources, keep CSV (ground truth for targeting) and note the discrepancy in notEvidenced[].
+
+USP FUSION RULES (must accept and use USER_USPS)
+- Incorporate USER_USPS into: differentiators (≥2), nonnegotiables (≥2), landing_page.hero & what_you_get.
+- If a USP has no public corroboration, still include it (it is supplied input); cite Company site/LinkedIn if present; otherwise list a one-line rationale in notEvidenced[].
+
+FAIL-SAFE OUTPUT
+- Never leave sections empty. If evidence is sparse, prioritise Company site + LinkedIn + USER_USPS + CSV; mark any gaps in notEvidenced[] and still produce full, schema-valid JSON.
+
+ALLOWED CITATION TAGS
+- (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (Annual report 2024, p.xx), (IXBRL), (PDF extract), (Trade press), (Directory).
 `.trim();
 
 const PARTNER_PERSONA = `
@@ -145,30 +183,61 @@ function selectPersona(input = {}) {
 
 // ---- Builders ----
 function buildDefaultMessages({ inputs = {}, evidencePack = {} }) {
-  const system = `${selectPersona(inputs)}\n\n${BASE_RULES}`;
+  // ---- System message: persona + rules + document spec (non-negotiable) ----
+  const system = `${selectPersona(inputs)}\n\n${BASE_RULES}\n\n${DOC_SPEC}`;
 
+  // ---- Normalise common input aliases (defensive) ----
+  const name    = inputs.prospect_company   || inputs.company_name     || "";
+  const website = inputs.prospect_website   || inputs.company_website  || "";
+  const linkedin= inputs.prospect_linkedin  || inputs.company_linkedin || "";
+
+  const salesModel =
+    inputs.sales_model ?? inputs.salesModel ?? inputs.call_type ?? "";
+
+  // USER_USPS: array of strings (your UI should send this as inputs.user_usps)
+  const userUsps = Array.isArray(inputs.user_usps) ? inputs.user_usps : (inputs.user_usps ? [inputs.user_usps] : []);
+
+  // CSV meta + preview rows (short, so we don’t blow the token budget)
+  const csvMeta = inputs.csv_meta || evidencePack.csv_meta || evidencePack.csvSummary || inputs.csvSummary || {};
+  const csvRowsPreview = Array.isArray(inputs.csv_rows) ? inputs.csv_rows.slice(0, 5)
+                        : Array.isArray(evidencePack.csv_rows) ? evidencePack.csv_rows.slice(0, 5)
+                        : [];
+
+  // ---- User message: ALL sources, in the priority order we want the model to follow ----
   const user = `
 Company inputs
-- Name: ${inputs.prospect_company || ""}
-- Website: ${inputs.prospect_website || ""}
+- Name: ${name}
+- Website: ${website}
+- LinkedIn: ${linkedin}
 - Buyer type: ${inputs.buyer_type || ""}
-- Sales model: ${inputs.sales_model || inputs.salesModel || inputs.call_type || ""}
+- Sales model: ${salesModel}
 - Product/service focus: ${inputs.product_service || ""}
+- USER_USPS: ${safe(userUsps)}
+- Persona hints (optional): ${safe(inputs.persona_hints || [])}
 - Extra context: ${inputs.context || ""}
 
-Evidence pack (prioritise Company site → LinkedIn → Regulator/Gov → Other)
+CSV (current market research; treat as ground truth per CSV FUSION RULES)
+- CSV_META: ${safe(csvMeta)}
+- CSV_ROWS (preview): ${safe(csvRowsPreview)}
+
+Evidence pack (use priority: Company site/LinkedIn → CSV → Regulator/Gov → Annual report/IXBRL → PDF → Trade press/Directory)
 - COMPANY_WEBSITE_HTML_OR_TEXT: ${safe(evidencePack.website || [])}
 - LINKEDIN_COMPANY: ${safe(evidencePack.linkedin || [])}
 - IXBRL_SUMMARY: ${safe(evidencePack.ixbrl || {})}
 - PDF_EXTRACTS: ${safe(evidencePack.pdf || [])}
 - DIRECTORY_MATCHES: ${safe(evidencePack.directories || [])}
-- CSV_SUMMARY: ${safe(evidencePack.csv || inputs?.csvSummary || {})}
 
 Return only JSON for this schema:
 ${JSON.stringify(schemaJson)}
 `.trim();
 
-  return { messages: [{ role: "system", content: system }, { role: "user", content: user }], schemaJson };
+  return {
+    messages: [
+      { role: "system", content: system },
+      { role: "user",   content: user    }
+    ],
+    schemaJson
+  };
 }
 
 function buildCustomMessages({ customPromptText = "", evidencePack = {} }) {
