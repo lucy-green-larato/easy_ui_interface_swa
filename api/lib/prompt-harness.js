@@ -21,9 +21,10 @@ const ENV_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT; // e.g., sales-tools
 const ENV_API_VER = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
 const ENV_API_KEY = process.env.AZURE_OPENAI_API_KEY;
 const LLM_TIMEOUT_MS_DEFAULT = Number(process.env.LLM_TIMEOUT_MS || "45000");
+const ENV_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS || process.env.AZURE_OPENAI_MAX_TOKENS || "4096");
 
 // ---- Default schema path ----
-const DEFAULT_SCHEMA_PATH = path.join(__dirname, "..", "schemas", "qualification.v2.json");
+const DEFAULT_SCHEMA_PATH = path.join(__dirname, "..", "schemas", "campaign.schema.json");
 
 function loadJsonFile(absOrRelPath) {
   const abs = path.isAbsolute(absOrRelPath)
@@ -62,19 +63,21 @@ STYLE & FORMATTING
 `.trim();
 
 const DOC_SPEC = `
-DOCUMENT STRUCTURE (JSON keys and expectations)
-- executiveSummary: 4–8 concise bullets. Each bullet MUST end with a parenthesised source tag (e.g., (Ofcom), (Company site)).
-- evidenceLog: array of { claimId, summary, sourceUrl, sourceType, quote? }. Reuse claims given in input.claims when possible.
-- caseStudies: 2–4 named examples. Each item has name, headline (cited), and 2–4 bullets (each cited).
-- positioning: valueProposition + >=3 differentiators. Every differentiator MUST end with a source tag.
-- icpMessagingMatrix: rows per ICP persona with valueStatement (cited), proof (cited), and CTA.
-- offerStrategy.lpWire: hero; whyItMatters[] (cited); whatYouGet[] (cited); howItWorks[]; outcomes[] (cited); proof[] (cited); cta.
-- channelPlan.emails: 4 emails. subject<=80 chars. body ~90–120 words and MUST include at least one citation.
-- salesEnablement: >=5 discoveryQs and >=2 objections (each objection text ends with a citation).
-- measurement: kpis[] and tests[] (clear and measurable).
-- compliance and risks: practical, specific lists (no generic advice).
-- onePager: 6–10 bullets summarising ICP, offer, proof points, channels, and near-term targets; each claim cited.
-- notEvidenced: list any ideas you could not back with sources in the evidence pack.
+DOCUMENT STRUCTURE (must match the JSON schema keys exactly)
+- executive_summary: 4–8 concise bullets. Each bullet MUST end with a parenthesised source tag (e.g., (Ofcom), (Company site)).
+- evidence_log: array of { claim_id, summary, source_type, url, title, quote? }. Prefer reusing claim IDs (CLM-xxx) across the doc.
+- case_studies: 2–4 examples. Each has { customer, industry, headline (cited), bullets[2–4 each cited], link, source }.
+- positioning_and_differentiation: value_prop (paragraph), differentiators[>=3 cited], swot{strengths[], weaknesses[], opportunities[], threats[]}, competitor_set[ { vendor, reason_in_set, url } ].
+- messaging_matrix: nonnegotiables[>=3], matrix[ { persona, pain, value_statement (cited), proof (cited), cta } ].
+- offer_strategy: landing_page{ hero, why_it_matters[] (cited), what_you_get[] (cited), how_it_works[], outcomes[] (cited), proof[] (cited), cta }, assets_checklist[>=5].
+- channel_plan: emails[4 items; subject<=80 chars; body ~90–120 words with at least one citation], linkedin{ connect_note, insight_post (cited), dm (cited), comment_strategy }, paid[ { variant, proof (cited), cta } ], event{ concept, agenda, speakers, cta }.
+- sales_enablement: discovery_questions[>=5], objection_cards[>=3 { blocker, reframe_with_claimid (cited), proof (cited), risk_reversal }], proof_pack_outline[], handoff_rules.
+- measurement_and_learning: kpis[], weekly_test_plan, utm_and_crm, evidence_freshness_rule.
+- compliance_and_governance: substantiation_file, gdpr_pecr_checklist, brand_accessibility_checks, approval_log_note.
+- risks_and_contingencies: 2+ cited bullets.
+- one_pager_summary: 6–10 cited bullets covering ICP, offer, proof points, channels, near-term targets.
+- meta: icp_from_csv (string), it_spend_buckets[].
+- input_proof: echo inputs used (may be empty object).
 `.trim();
 
 const PARTNER_PERSONA = `
@@ -154,7 +157,7 @@ ${JSON.stringify(schemaJson)}
 let schemaJson = tryLoadDefaultSchema() || { title: "campaign", type: "object" };
 
 // ---- Core generate() ----
-async function generate({ schemaPath, packs, input, options = {} }) {
+async function generate({ schemaPath, packs, input, evidencePack = {}, options = {} }) {
   // Load/override schema
   if (schemaPath) {
     const loaded = loadJsonFile(schemaPath);
@@ -178,23 +181,32 @@ async function generate({ schemaPath, packs, input, options = {} }) {
     throw new Error("AZURE_OPENAI_API_KEY not configured");
   }
 
-  // Messages payload (compact)
+  // Messages payload (evidence-rich)
+  const useCustom = !!(packs && typeof packs.promptText === "string" && packs.promptText.trim());
+  const { messages: builtMessages } = useCustom
+    ? buildCustomMessages({ customPromptText: packs.promptText, evidencePack })
+    : buildDefaultMessages({ inputs: input || {}, evidencePack });
+
+  // Optionally augment system message with persona + DOC_SPEC + enabled packs line
   const packsLine =
     packs?.enabled && Array.isArray(packs.enabled) && packs.enabled.length
       ? `\nEnabled packs: ${packs.enabled.join(", ")}`
       : "";
-  const system = `${selectPersona(input)}\n\n${BASE_RULES}\n\n${DOC_SPEC}${packsLine}`;
-  const userPayload = {
-    task: "Generate JSON that STRICTLY conforms to the provided schema.",
-    input: input || {},
-    packs: packs || {},
-    schema_hint: schemaJson?.title || "campaign",
-  };
-  const messages = [
-    { role: "system", content: system },
-    { role: "user", content: JSON.stringify(userPayload) }
-  ];
 
+  // Rebuild system message to include Persona + BASE_RULES + DOC_SPEC + packs line
+  const personaText = selectPersona(input);
+  const systemFull = [
+    personaText,
+    BASE_RULES,
+    DOC_SPEC,
+    packsLine
+  ].filter(Boolean).join("\n\n");
+
+  const messages = [
+    { role: "system", content: systemFull },
+    // keep the evidence-rich user content from the builder (index 1)
+    builtMessages[1] || { role: "user", content: "Return JSON." }
+  ];
   // Retry helper
   const attempts = Math.max(1, Number(options.retry?.attempts || 1));
   const backoffMs = Math.max(0, Number(options.retry?.backoffMs || 0));
@@ -204,6 +216,8 @@ async function generate({ schemaPath, packs, input, options = {} }) {
     const reqBody = {
       messages,
       temperature: 0,
+      top_p: 0,
+      max_tokens: Number.isFinite(options.maxTokens) ? options.maxTokens : ENV_MAX_TOKENS,
       response_format: {
         type: "json_schema",
         json_schema: {
@@ -211,7 +225,8 @@ async function generate({ schemaPath, packs, input, options = {} }) {
           schema: schemaJson,
           strict: true
         }
-      }
+      },
+      ...(options.seed ? { seed: Number(options.seed) } : {})
     };
 
     // Decide API path (force Chat Completions; do not use Responses)

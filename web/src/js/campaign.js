@@ -321,14 +321,22 @@
   }
 
   function renderActive() {
+    if (!state.tabsMounted || !$("#sectionTabs")?.children?.length) {
+      mountTabs(true); // force rebuild if needed
+    }
     const sec = SECTIONS.find(s => s.id === state.active) || SECTIONS[0];
     (sec?.render || renderExecutiveSummary)();
   }
 
-  function mountTabs() {
+  function mountTabs(force = false) {
     const host = $("#sectionTabs");
-    if (!host) return;
-    host.innerHTML = "";
+    if (!host) return false;
+
+    // If already mounted and not forcing, skip
+    if (state.tabsMounted && !force && host.childElementCount) return true;
+
+    // (Re)build
+    host.replaceChildren();
     host.setAttribute("role", "tablist");
     host.setAttribute("aria-label", "Campaign sections");
 
@@ -351,17 +359,24 @@
     });
 
     state.tabsMounted = true;
+    return true;
   }
 
   // ---------- Public API for the poller ----------
-  window.CampaignUI = {
+  window.CampaignUI = Object.assign(window.CampaignUI || {}, {
     setContract(contract_v1) {
       state.contract = contract_v1 || null;
       state.active = "exec";
-      if (!state.tabsMounted) mountTabs();
+      mountTabs(true);
       renderActive();
+    },
+    // optional: small debug surface you can call from DevTools
+    _debug: {
+      mountTabs,
+      renderActive: () => renderActive(),
+      getState: () => ({ active: state.active, hasContract: !!state.contract })
     }
-  };
+  });
 
   // ---------- Start → poll → fetch wiring ----------
   const UI = {
@@ -388,7 +403,7 @@
     },
     setRun(runId) {
       const b = $("#runBadgeId"); if (b) b.textContent = runId || "";
-      const h = $("#currentRunId"); if (h) h.value = runId || "";
+      const h = $("#currentRunId"); if (h) h.textContent = runId || "";
     }
   };
 
@@ -450,7 +465,7 @@
     UI.setStatus("Queued", "run");
 
     const contract = await pollToCompletion(runId);
-    UI.log("Contract fetched; rendering…");
+    UI.log("Contract fetched; keys=" + Object.keys(contract || {}).join(","));
     window.CampaignUI?.setContract?.(contract);
     UI.setStatus("Completed", "ok");
   }
@@ -488,6 +503,19 @@
   document.addEventListener("DOMContentLoaded", () => {
     // 1) Mount tabs immediately so the UI isn’t blank before data arrives
     mountTabs();
+    // Late retry after paint
+    requestAnimationFrame(() => {
+      if (!state.tabsMounted || !$("#sectionTabs")?.children?.length) {
+        mountTabs(true);
+      }
+    });
+
+    // Also when page is shown from bfcache or after slow CSS loads
+    window.addEventListener("pageshow", () => {
+      if (!state.tabsMounted || !$("#sectionTabs")?.children?.length) {
+        mountTabs(true);
+      }
+    });
     renderExecutiveSummary();
 
     // 2) Elements we care about
