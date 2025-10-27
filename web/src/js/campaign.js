@@ -824,8 +824,8 @@ window.CampaignUI = window.CampaignUI || {};
     { id: "chan", label: "Go-to-market", render: renderChannel },
     { id: "se", label: "Sales Battle Card", render: renderSalesEnablement },
     { id: "ml", label: "Measurement", render: renderMeasurement },
-    { id: "comp", label: "Compliance & Governance", render: renderCompliance },
-    { id: "risk", label: "Risks & Contingencies", render: renderRisks },
+    { id: "comp", label: "Governance", render: renderCompliance },
+    { id: "risk", label: "Contingencies", render: renderRisks },
     { id: "one", label: "One Page Summary", render: renderOnePager }
   ];
 })();

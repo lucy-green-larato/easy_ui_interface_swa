@@ -254,7 +254,9 @@ let schemaJson = tryLoadDefaultSchema() || { title: "campaign", type: "object" }
 
 // ---- Core generate() ----
 async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {}, options = {} }) {
-  const ep = args?.evidencePack || {};
+  // Param-name-agnostic: works whether function signature is (args) or ({...})
+  const __firstArg = (arguments && arguments.length) ? arguments[0] : undefined;
+  const ep = (__firstArg && __firstArg.evidencePack) || {};
   console.log("[harness] evidencePack counts", {
     website: Array.isArray(ep.website) ? ep.website.length : 0,
     linkedin: Array.isArray(ep.linkedin) ? ep.linkedin.length : 0,
