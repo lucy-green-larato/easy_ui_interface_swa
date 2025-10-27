@@ -215,8 +215,6 @@ module.exports = async function (context, req) {
       }
       payload = s;
     }
-    
-    enqueue
     // Enqueue (SDK handles base64 encoding; send plain JSON string)
     const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
     const q = qs.getQueueClient(QUEUE_NAME);
