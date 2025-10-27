@@ -254,6 +254,15 @@ let schemaJson = tryLoadDefaultSchema() || { title: "campaign", type: "object" }
 
 // ---- Core generate() ----
 async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {}, options = {} }) {
+  const ep = args?.evidencePack || {};
+  console.log("[harness] evidencePack counts", {
+    website: Array.isArray(ep.website) ? ep.website.length : 0,
+    linkedin: Array.isArray(ep.linkedin) ? ep.linkedin.length : 0,
+    pdf: Array.isArray(ep.pdf) ? ep.pdf.length : 0,
+    directories: Array.isArray(ep.directories) ? ep.directories.length : 0,
+    ixbrlKeys: ep.ixbrl ? Object.keys(ep.ixbrl).length : 0,
+    csvKeys: ep.csv ? Object.keys(ep.csv).length : 0
+  });
   // --- 1) Load schema WITHOUT mutating the module global (thread/concurrency safe)
   let effectiveSchema = schemaJson;
   if (schemaPath) {
@@ -420,7 +429,17 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
       }
       return obj;
     } catch (e) {
-      lastErr = e;
+      // Normalize and tag the error so the caller can distinguish timeout vs generic LLM error
+      const err = (e instanceof Error) ? e : new Error(String(e));
+      const msg = String(err.message || e || "");
+      const aborted = (err.name === "AbortError") || /aborted|abort|timeout/i.test(msg);
+      if (!("code" in err)) {
+        Object.defineProperty(err, "code", { value: aborted ? "llm_timeout" : "llm_error", enumerable: true });
+      } else if (!err.code) {
+        err.code = aborted ? "llm_timeout" : "llm_error";
+      }
+      lastErr = err;
+
       if (i < attempts - 1 && backoffMs) {
         const jitter = Math.floor(Math.random() * 250); // 0–250ms
         const step = backoffMs * (i + 1);
@@ -430,9 +449,9 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
       clearTimeout(timer);
     }
   }
-
   throw lastErr || new Error("Unknown LLM error");
 }
+
 Object.defineProperty(module.exports, "schemaJson", {
   enumerable: true,
   get() { return schemaJson; }

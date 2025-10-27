@@ -209,6 +209,7 @@ module.exports = async function (context, queueItem) {
       sample: typeof queueItem === "string" ? queueItem.slice(0, 200) : queueItem
     });
     const __startedAtMs = Date.now();
+    const HOST_FUNCTION_BUDGET_MS = Number(process.env.HOST_FUNCTION_BUDGET_MS || 0); // 0 = disabled
 
     // -------- Parse and validate the queue message --------
     let __message = queueItem;
@@ -446,6 +447,18 @@ module.exports = async function (context, queueItem) {
       });
       evidence = [];
     }
+    // Build a bucketed pack the harness expects (all env-driven limits remain in the harness)
+    const evidencePack = { website: [], linkedin: [], ixbrl: {}, pdf: [], directories: [], csv: {} };
+    for (const item of (Array.isArray(evidence) ? evidence : [])) {
+      const t = String(item?.type || "").toLowerCase();
+      if (t.includes("linkedin")) evidencePack.linkedin.push(item);
+      else if (t.includes("ixbrl")) Object.assign(evidencePack.ixbrl, item.data || {});
+      else if (t.includes("pdf")) evidencePack.pdf.push(item);
+      else if (t.includes("directory")) evidencePack.directories.push(item);
+      else if (t.includes("csv")) Object.assign(evidencePack.csv, item.data || {});
+      else evidencePack.website.push(item);
+    }
+
     await putJson(containerClient, `${prefix}evidence_log.json`, evidence);
 
     // -------- Phase 3 – Draft campaign (LLM) --------
@@ -482,17 +495,26 @@ module.exports = async function (context, queueItem) {
     // IMPORTANT: pass the normalised inputs into the harness
     let draft;
     try {
+      context.log("worker evidencePack summary", {
+        website: Array.isArray(evidencePack.website) ? evidencePack.website.length : 0,
+        linkedin: Array.isArray(evidencePack.linkedin) ? evidencePack.linkedin.length : 0,
+        pdf: Array.isArray(evidencePack.pdf) ? evidencePack.pdf.length : 0,
+        directories: Array.isArray(evidencePack.directories) ? evidencePack.directories.length : 0,
+        ixbrlKeys: Object.keys(evidencePack.ixbrl || {}).length,
+        csvKeys: Object.keys(evidencePack.csv || {}).length
+      });
       draft = await promptHarness.generate({
-        schemaPath,               // keep your existing schema wiring if present in module scope
+        schemaPath,
         packs: packsConfig,
         input: {
-          ...inputPayload,        // <-- pass everything the model needs
+          ...inputPayload,
           runId,
-          page: sanitizePage(inputPayload.page), // in case sanitizePage is defined in module scope
-          evidence               // keep evidence alongside input for traceability (harmless if unused by harness)
+          page: sanitizePage(inputPayload.page)
         },
+        // pass evidence at the top level (not inside input)
+        evidencePack,
         options: {
-          timeoutMs: LLM_TIMEOUT_MS,
+          timeoutMs: Number(LLM_TIMEOUT_MS), // env-driven
           azure: {
             endpoint: AZO_ENDPOINT,
             apiKey: AZO_API_KEY,
@@ -500,17 +522,18 @@ module.exports = async function (context, queueItem) {
             deployment: AZO_DEPLOYMENT,
             api: "chat"
           },
-          retry: { attempts: 2, backoffMs: 500 },
-          temperature: 0
+          retry: {
+            attempts: Number(process.env.LLM_ATTEMPTS ?? 2),
+            backoffMs: Number(process.env.LLM_BACKOFF_MS ?? 500)
+          },
+          temperature: Number(process.env.LLM_TEMPERATURE ?? 0)
         }
       });
 
       if (typeof draft === "string") {
         try { draft = JSON.parse(draft); } catch { /* leave as string */ }
       }
-
       const prospectSite = inputPayload.prospect_website || inputPayload.company_website || "";
-
       try {
         draft = sanitizeCaseStudyLibrary(draft, evidence, prospectSite, context);
       } catch (sanErr) {
@@ -530,6 +553,15 @@ module.exports = async function (context, queueItem) {
 
     // -------- Phase 4 – Quality Gate (placeholder) --------
     await updateStatus("QualityGate");
+
+    if (HOST_FUNCTION_BUDGET_MS > 0 && (Date.now() - __startedAtMs) > HOST_FUNCTION_BUDGET_MS) {
+      await updateStatus("Failed", {
+        error: { code: "wall_clock_budget", message: "Exceeded worker wall-clock budget" },
+        failedAt: new Date().toISOString()
+      });
+      logEvent("campaign_worker_completed", "Failed", { error: "wall_clock_budget" });
+      return;
+    }
 
     // -------- Phase 5 – Completed --------
     await updateStatus("Completed", { completedAt: new Date().toISOString() });

@@ -5,24 +5,33 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inside Track Sales Accelerator · Campaign builder</title>
   <meta name="color-scheme" content="light dark" />
-  <title>Inside Track Sales Accelerator · Campaign</title>
-  <link rel="icon" href="/assets/larato-logo.svg" />
   <script>
     (function () {
       try {
+        // Persisted theme (use either key if present)
         var theme = (localStorage.getItem('it-theme') || localStorage.getItem('theme') || '').toLowerCase();
+
+        // Cookie fallback
         if (!theme) {
           var m = (document.cookie || '').match(/(?:^|;\s*)(?:it-theme|theme)=(dark|light)/i);
           theme = m ? m[1].toLowerCase() : '';
         }
+
+        // OS preference fallback
         if (!theme && window.matchMedia) {
           theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         }
+
         if (theme !== 'dark' && theme !== 'light') theme = 'light';
         document.documentElement.setAttribute('data-theme', theme);
       } catch (e) { /* no-op */ }
     })();
+
+    // Keep in sync if another tab flips the theme
     window.addEventListener('storage', function (e) {
       if (e.key === 'it-theme' || e.key === 'theme') {
         var v = (e.newValue || '').toLowerCase();
@@ -36,23 +45,51 @@
 </head>
 
 <body class="app-campaign">
-  <!-- HEADER (suite shell) -->
+  <!-- HEADER (reused shell) -->
   <header class="app-header topbar compact" role="banner">
     <div class="header-left">
       <a class="brand-link" href="/" aria-label="Back to Inside Track main menu" title="Back to main menu">
         <img class="logo" src="/assets/larato-logo-bullet.svg" alt="" aria-hidden="true" />
         <div class="brand-text">
           <h1 class="app-title">Inside Track Sales Accelerator</h1>
-          <p class="kicker">Campaign builder</p>
+          <p class="kicker">Lead qualilfication</p>
         </div>
       </a>
     </div>
-    <div class="header-right" style="display:flex;gap:8px;align-items:center">
-      <span class="chip chip-amethyst" id="envChip">Dev</span>
-      <button class="btn secondary small" id="newRunBtn">New run</button>
-      <button class="btn secondary small" id="loadRecentBtn">Load recent</button>
-      <div id="download-docx-mount"></div>
-      <a href="#" class="btn btn-tertiary small" id="helpLink">Help</a>
+    <div class="header-right">
+      <div class="calltype-mini" role="group" aria-labelledby="sales-model-label">
+        <span id="sales-model-label" class="mini-label">Direct or partner sales</span>
+        <select id="call_type" name="call_type" form="qual-form" required aria-describedby="call_type_error">
+          <option value="">Select…</option>
+          <option>Direct</option>
+          <option>Partner</option>
+        </select>
+        <button id="themeToggle" class="chip chip-amethyst" type="button" aria-pressed="false"
+          aria-label="Switch theme">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M21 12.79A9 9 0 1111.21 3a7 7 0 109.79 9.79z"></path>
+          </svg>
+          <span class="sr-only">Theme</span>
+        </button>
+        <label class="remember">
+          <input type="checkbox" id="remember_call_type" form="qual-form" /> Remember
+        </label>
+        <span id="call_type_error" class="error-inline" role="alert" aria-live="polite"></span>
+      </div>
+
+      <span class="model-note">
+        <span class="label">Sales model in use:</span>
+        <strong id="map-label">Direct</strong>
+      </span>
+
+      <button id="help" class="btn inline chip" type="button" title="About this tool">Help</button>
+      <span id="user-badge" class="chip is-hidden" aria-live="polite" aria-atomic="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="7" r="4"></circle>
+          <path d="M4 22c0-4 4-7 8-7s8 3 8 7"></path>
+        </svg>
+        <span id="user-email">Loading…</span>
+      </span>
     </div>
   </header>
 
