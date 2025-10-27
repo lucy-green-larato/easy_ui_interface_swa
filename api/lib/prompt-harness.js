@@ -1,4 +1,4 @@
-// /api/lib/prompt-harness.js 2025-10-26 v 7
+// /api/lib/prompt-harness.js 2025-10-27 v 8
 // Exports:
 //   - buildDefaultMessages({ inputs, evidencePack })
 //   - buildCustomMessages({ customPromptText, evidencePack })
@@ -16,23 +16,31 @@ const fs = require("fs");
 const path = require("path");
 
 // ---- Env defaults (override with options.azure below) ----
-const ENV_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;   // e.g., https://sales-tools.openai.azure.com
-const ENV_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT; // e.g., sales-tools
+const ENV_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;
+const ENV_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT;
 const ENV_API_VER = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
 const ENV_API_KEY = process.env.AZURE_OPENAI_API_KEY;
 const LLM_TIMEOUT_MS_DEFAULT = Number(process.env.LLM_TIMEOUT_MS || "45000");
+
 const ENV_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS || process.env.AZURE_OPENAI_MAX_TOKENS || "4096");
+
+// Evidence clipping limit driven by env
 const ENV_MAX_EVIDENCE_CHARS = (() => {
   const raw = process.env.PROMPT_MAX_EVIDENCE_CHARS || process.env.MAX_STR;
   const n = Number(raw);
-  // Guardrails: allow 50k–1.5M chars, default 380k
   if (!Number.isFinite(n)) return 380_000;
   return Math.min(Math.max(n, 50_000), 1_500_000);
 })();
+
+// Use env-driven limit
+const MAX_STR = ENV_MAX_EVIDENCE_CHARS;
+
+// dev-only visibility
 if (process.env.NODE_ENV !== "production" && !global.__LOGGED_PROMPT_MAX__) {
-  try { console.log(`[prompt-harness] PROMPT_MAX_EVIDENCE_CHARS=${MAX_STR}`); } catch { }
+  try { console.log(`[prompt-harness] PROMPT_MAX_EVIDENCE_CHARS=${ENV_MAX_EVIDENCE_CHARS}`); } catch { }
   global.__LOGGED_PROMPT_MAX__ = true;
 }
+
 // ---- Default schema path ----
 const DEFAULT_SCHEMA_PATH = path.join(__dirname, "..", "schemas", "campaign.schema.json");
 
@@ -48,9 +56,6 @@ function tryLoadDefaultSchema() {
   try { return JSON.parse(fs.readFileSync(DEFAULT_SCHEMA_PATH, "utf8")); }
   catch { return null; }
 }
-
-// Now driven by env (PROMPT_MAX_EVIDENCE_CHARS or MAX_STR).
-const MAX_STR = ENV_MAX_EVIDENCE_CHARS;
 
 function clipString(s, max = MAX_STR) {
   const str = typeof s === "string" ? s : JSON.stringify(s ?? "");
@@ -71,86 +76,79 @@ const BASE_RULES = `
 Return STRICTLY valid JSON that conforms to the provided schema. Do NOT include any prose before or after the JSON.
 
 EVIDENCE RULES
-- Every bullet/statement must end with a short source tag in parentheses, e.g., (Company site), (Annual report 2024, p.14), (Trade press).
-- If something cannot be evidenced from the evidence pack, do not claim it. You may add a brief reason in notEvidenced[].
-- Do NOT invent sources or estimate trade-show budgets unless a show organiser/exhibitor source exists in the evidence pack.
+- Every bullet/statement must end with a short source tag in parentheses, e.g., (Company site), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).
+- If something cannot be evidenced from the evidence pack, prefer using company website, LinkedIn-as-company-site, or CSV. If still unavailable, omit the claim rather than inventing it.
 
-SOURCE MIX (hard requirement; reject internally until met)
-- Minimum mix across the whole JSON:
-  • ≥4 claims from the **company website** or product materials (tag as (Company site) or the exact page title).  
-  • ≥1 signal from **LinkedIn** (company page/post) if provided in evidencePack.  
-  • ≥2 claims from **regulator/government** (e.g., Ofcom/ONS/DSIT); prefer ≤6 months old.  
-- “Trade press” is allowed, but NEVER as the only category. If quotas are not met with given evidence, leave fields blank and add an explanation in notEvidenced[].
+SOURCE MIX (hard requirement; map to schema-safe source_type)
+- Aim to include across the whole JSON:
+  • ≥4 claims from the company website or product materials → set source_type="Company site".
+  • ≥1 signal from LinkedIn (company page/post). Since the schema has no "LinkedIn" enum, set source_type="Company site" and keep the inline tag "(LinkedIn)" in the sentence.
+  • ≥2 claims from regulators/government (Ofcom/ONS/DSIT) → set source_type to those exact enum values if present, else prefer "PDF extract" or "Trade press" only when unavoidable.
+- “Trade press” is allowed, but NEVER as the only category.
 
-CSV FUSION RULES
-- Treat CSV fields as ground truth about ICP focus and messaging emphasis. You MUST reflect:
-  • SimplifiedIndustry → ICP phrasing and examples,
-  • TopPurchases → offer & assets,
-  • TopBlockers → pains & objections,
-  • TopNeedsSupplier → nonnegotiables & differentiators.
-- Do NOT use AdopterProfile or TopConnectivity even if present.
-- If CSV is missing, say why in notEvidenced[].
+CSV & USPs
+- Treat CSV as current market research for targeting/messaging (tag inline as (CSV)). The schema does not capture CSV as source_type; keep "Company site"/regulator/etc. in evidence_log.source_type and reserve "(CSV)" for inline tags.
+- USER_USPS are accepted inputs; use them directly where relevant and tag inline with (Company site) if corroborated, otherwise leave the inline tag off and incorporate them as inputs.
 
 STYLE & FORMATTING
 - UK currency & numerals: £20.756m, £1,421,646, 8.4%.
 - No generic advice; keep everything specific to the evidence.
 - Keep tables/lists compact and scannable.
-
-FAIL-SAFE
-- Never return empty sections. If evidence is sparse, (1) use company website + LinkedIn + USER_USPS, (2) mark any unsubstantiated elements in notEvidenced[], but (3) still produce full JSON objects/arrays to meet the schema.
 `.trim();
 
 const DOC_SPEC = `
 DOCUMENT STRUCTURE (JSON keys and expectations)
 
 CAMPAIGN NAMING
-- Create a programme name in the format: "Demand programme for <market> by <company>". 
-- Write this as the FIRST line inside meta.icp_from_csv (prefix with "Campaign: "), then include any other ICP notes below it.
-  Example: meta.icp_from_csv = "Campaign: Demand programme for UK Construction by Comms 365\\nPrimary ICPs: …"
+- Put a programme name at the TOP of meta.icp_from_csv, first line only, formatted:
+  "Campaign: Demand programme for <market> by <company>"
+  Then append any ICP notes below (newline-separated).
 
-EXECUTIVE SUMMARY (format required)
-- 1 short paragraph (≈100–130 words) that introduces the problem, the buyer context, and the company's USP-backed solution. 
-- Follow with a "Why now:" list of 2–4 **evidenced bullets** (each ends with a citation tag).- Prioritise evidence from Company site & LinkedIn where applicable, then CSV (tag "(CSV)"), then Regulators/Gov (Ofcom, ONS, DSIT), then annual reports/IXBRL, then PDF extracts, then Trade press/Directory.
+EXECUTIVE SUMMARY
+- executive_summary is an array of strings. Set:
+  • Item #1: one short paragraph (~100–130 words) introducing the problem, buyer context, and the company's USP-backed solution.
+  • Items #2–#4: "Why now" bullets (2–4 items). Each bullet ends with a citation tag, prioritising Company site & (LinkedIn), then regulators (Ofcom/ONS/DSIT), then PDF extract, then Trade press/Directory.
 
-EVIDENCE LOG (mix of sources is mandatory)
-- At least **2 items** must come from Company site or LinkedIn (source_type = "Company site" or "LinkedIn").
-- At least **3 items** must come from external/regulatory/public sources (Ofcom/ONS/DSIT/Annual report/PDF/Trade press/Directory).
-- Each item: claim_id (CLM-###), summary (cited), source_type, url (if applicable), title, and optional quote.
+EVIDENCE LOG
+- evidence_log entries MUST satisfy the schema:
+  { claim_id: "CLM-###", summary (cited), source_type (enum-compliant), url, title, quote? }.
+- Ensure at least 2 items are clearly from the company (Company site source_type), and ≥3 items from external sources (Ofcom/ONS/DSIT/PDF extract/Trade press/Directory).
+- When using LinkedIn, set source_type="Company site" but keep the inline "(LinkedIn)" tag inside the summary.
 
-POSITIONING & USPs
-- value_prop concise and UK-specific. 
-- differentiators (≥3) MUST include at least **2 items sourced from USER_USPS** (verbatim or tight paraphrase) and be cited to Company site/LinkedIn where possible (else include brief note in notEvidenced[]).
+POSITIONING & DIFFERENTIATION
+- Provide a concise value_prop for the UK context.
+- differentiators: ≥3 items; incorporate ≥2 USER_USPS if given (cite Company site if possible; otherwise keep without citation).
+- competitor_set: 5 vendors with reason_in_set and URL.
 
-OFFER & CHANNELS
-- offer_strategy.landing_page: hero; why_it_matters[] (cited); what_you_get[] (cited; reflect TopPurchases + USER_USPS); how_it_works[]; outcomes[] (cited); proof[] (cited); cta.
-- channel_plan.emails: exactly 4 emails; subject ≤80 chars; body ≈90–120 words; each body includes ≥1 citation (prefer Company site/LinkedIn/CSV).
-- LinkedIn section: connect_note, insight_post, dm each with at least one specific assertion or proof tied to the CSV or site.
+MESSAGING MATRIX
+- nonnegotiables: ≥3.
+- matrix rows: persona, pain, value_statement (cited), proof (cited), cta.
+- Use CSV fields to drive wording: SimplifiedIndustry → persona context; TopBlockers → pains; TopNeedsSupplier → nonnegotiables; TopPurchases → value/what_you_get.
 
-SALES ENABLEMENT, MEASUREMENT, COMPLIANCE, RISKS
-- sales_enablement: ≥5 discovery_questions; ≥3 objection_cards mapping TopBlockers → reframe_with_claimid + proof (both cited).
-- measurement_and_learning: concrete KPIs; weekly_test_plan tied to channels; UTM & CRM notes.
-- compliance_and_governance: practical, specific lists; approval_log_note short.
-- risks_and_contingencies: ≥2 cited items.
+OFFER STRATEGY
+- landing_page: hero, why_it_matters[] (cited), what_you_get[] (cited; reflect CSV + USER_USPS), how_it_works[], outcomes[] (cited), proof[] (cited), cta.
+- assets_checklist: ≥5 items tied to the above.
 
-CSV FUSION RULES (CSV is current market research; treat as ground truth for targeting/messaging)
-- You MUST reflect CSV mappings:
-  • SimplifiedIndustry → ICP phrasing, persona contexts, examples.  
-  • TopPurchases → offer_strategy.what_you_get and assets_checklist.  
-  • TopBlockers → persona pains + objection_cards.  
-  • TopNeedsSupplier → nonnegotiables + differentiators.
-- Do NOT use AdopterProfile or TopConnectivity even if present.
-- Cite CSV-derived statements with (CSV). If a CSV value conflicts with public sources, keep CSV (ground truth for targeting) and note the discrepancy in notEvidenced[].
+CHANNEL PLAN
+- emails: exactly 4; subject ≤80 chars; body ~90–120 words; each body includes ≥1 citation (prefer Company site/(LinkedIn)/CSV).
+- linkedin.{connect_note, insight_post, dm, comment_strategy} with specific assertions tied to CSV/site.
 
-USP FUSION RULES (must accept and use USER_USPS)
-- Incorporate USER_USPS into: differentiators (≥2), nonnegotiables (≥2), landing_page.hero & what_you_get.
-- If a USP has no public corroboration, still include it (it is supplied input); cite Company site/LinkedIn if present; otherwise list a one-line rationale in notEvidenced[].
+SALES ENABLEMENT / MEASUREMENT / COMPLIANCE / RISKS
+- discovery_questions: ≥5.
+- objection_cards: ≥3 mapping TopBlockers → reframe_with_claimid + proof (both cited inline).
+- measurement_and_learning: concrete KPIs; weekly_test_plan; utm_and_crm; evidence_freshness_rule.
+- compliance_and_governance: substantiation_file; gdpr_pecr_checklist; brand_accessibility_checks; approval_log_note.
+- risks_and_contingencies: ≥2 items (cited if external).
 
-FAIL-SAFE OUTPUT
-- Never leave sections empty. If evidence is sparse, prioritise Company site + LinkedIn + USER_USPS + CSV; mark any gaps in notEvidenced[] and still produce full, schema-valid JSON.
+CSV MAPPING (ground truth for targeting/messaging)
+- SimplifiedIndustry → ICP phrasing/examples.
+- TopPurchases → offer & assets.
+- TopBlockers → pains & objections.
+- TopNeedsSupplier → nonnegotiables & differentiators.
+- Do NOT use AdopterProfile or TopConnectivity.
 
-ALLOWED CITATION TAGS
-- (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (Annual report 2024, p.xx), (IXBRL), (PDF extract), (Trade press), (Directory).
-`.trim();
+ALLOWED INLINE CITATION TAGS (IN TEXT, not source_type): (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).
+`.trim(); F
 
 const PARTNER_PERSONA = `
 You are a top-performing UK B2B channel strategist (tech markets) and CMO. 
@@ -182,62 +180,38 @@ function selectPersona(input = {}) {
 }
 
 // ---- Builders ----
-function buildDefaultMessages({ inputs = {}, evidencePack = {} }) {
-  // ---- System message: persona + rules + document spec (non-negotiable) ----
-  const system = `${selectPersona(inputs)}\n\n${BASE_RULES}\n\n${DOC_SPEC}`;
+function buildDefaultMessages({ inputs = {}, evidencePack = {}, packs = {}, useDocSpec = false }) {
+  const persona = selectPersona(inputs);
+  const packsLine = (packs?.enabled && Array.isArray(packs.enabled) && packs.enabled.length)
+    ? `\nEnabled packs: ${packs.enabled.join(", ")}`
+    : "";
 
-  // ---- Normalise common input aliases (defensive) ----
-  const name    = inputs.prospect_company   || inputs.company_name     || "";
-  const website = inputs.prospect_website   || inputs.company_website  || "";
-  const linkedin= inputs.prospect_linkedin  || inputs.company_linkedin || "";
+  const system = `${persona}\n\n${BASE_RULES}${useDocSpec ? `\n\n${DOC_SPEC}` : ""}${packsLine}`;
 
-  const salesModel =
-    inputs.sales_model ?? inputs.salesModel ?? inputs.call_type ?? "";
-
-  // USER_USPS: array of strings (your UI should send this as inputs.user_usps)
-  const userUsps = Array.isArray(inputs.user_usps) ? inputs.user_usps : (inputs.user_usps ? [inputs.user_usps] : []);
-
-  // CSV meta + preview rows (short, so we don’t blow the token budget)
-  const csvMeta = inputs.csv_meta || evidencePack.csv_meta || evidencePack.csvSummary || inputs.csvSummary || {};
-  const csvRowsPreview = Array.isArray(inputs.csv_rows) ? inputs.csv_rows.slice(0, 5)
-                        : Array.isArray(evidencePack.csv_rows) ? evidencePack.csv_rows.slice(0, 5)
-                        : [];
-
-  // ---- User message: ALL sources, in the priority order we want the model to follow ----
   const user = `
 Company inputs
-- Name: ${name}
-- Website: ${website}
-- LinkedIn: ${linkedin}
+- Name: ${inputs.prospect_company || ""}
+- Website: ${inputs.prospect_website || ""}
 - Buyer type: ${inputs.buyer_type || ""}
-- Sales model: ${salesModel}
+- Sales model: ${inputs.sales_model || inputs.salesModel || inputs.call_type || ""}
 - Product/service focus: ${inputs.product_service || ""}
-- USER_USPS: ${safe(userUsps)}
-- Persona hints (optional): ${safe(inputs.persona_hints || [])}
+- USER_USPS (comma-separated): ${inputs.user_usps || inputs.usps || ""}
+- Personas (comma-separated): ${inputs.personas || ""}
 - Extra context: ${inputs.context || ""}
 
-CSV (current market research; treat as ground truth per CSV FUSION RULES)
-- CSV_META: ${safe(csvMeta)}
-- CSV_ROWS (preview): ${safe(csvRowsPreview)}
-
-Evidence pack (use priority: Company site/LinkedIn → CSV → Regulator/Gov → Annual report/IXBRL → PDF → Trade press/Directory)
+Evidence pack (prioritise Company site → LinkedIn → Regulator/Gov → Other)
 - COMPANY_WEBSITE_HTML_OR_TEXT: ${safe(evidencePack.website || [])}
 - LINKEDIN_COMPANY: ${safe(evidencePack.linkedin || [])}
 - IXBRL_SUMMARY: ${safe(evidencePack.ixbrl || {})}
 - PDF_EXTRACTS: ${safe(evidencePack.pdf || [])}
 - DIRECTORY_MATCHES: ${safe(evidencePack.directories || [])}
+- CSV_SUMMARY: ${safe(evidencePack.csv || inputs?.csvSummary || {})}
 
 Return only JSON for this schema:
 ${JSON.stringify(schemaJson)}
 `.trim();
 
-  return {
-    messages: [
-      { role: "system", content: system },
-      { role: "user",   content: user    }
-    ],
-    schemaJson
-  };
+  return { messages: [{ role: "system", content: system }, { role: "user", content: user }], schemaJson };
 }
 
 function buildCustomMessages({ customPromptText = "", evidencePack = {} }) {
@@ -262,139 +236,184 @@ ${JSON.stringify(schemaJson)}
 let schemaJson = tryLoadDefaultSchema() || { title: "campaign", type: "object" };
 
 // ---- Core generate() ----
-async function generate({ schemaPath, packs, input, evidencePack = {}, options = {} }) {
-  // Load/override schema
+async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {}, options = {} }) {
+  // --- 1) Load schema WITHOUT mutating the module global (thread/concurrency safe)
+  let effectiveSchema = schemaJson;
   if (schemaPath) {
     const loaded = loadJsonFile(schemaPath);
     if (!loaded || typeof loaded !== "object") throw new Error("Invalid schema");
-    schemaJson = loaded;
+    effectiveSchema = loaded;
   }
 
-  // Effective config: env defaults overridden by options.azure
+  // --- 2) Azure config (env with per-call overrides)
   const azure = {
     endpoint: options.azure?.endpoint || ENV_ENDPOINT,
     apiKey: options.azure?.apiKey || ENV_API_KEY,
     apiVersion: options.azure?.apiVersion || ENV_API_VER,
     deployment: options.azure?.deployment || ENV_DEPLOYMENT,
-    api: (options.azure?.api || "chat").toLowerCase() // "chat" | "responses"
+    api: (options.azure?.api || "chat").toLowerCase()
   };
+  if (!azure.endpoint || !azure.deployment) throw new Error("OpenAI endpoint/deployment not configured");
+  if (!azure.apiKey) throw new Error("AZURE_OPENAI_API_KEY not configured");
 
-  if (!azure.endpoint || !azure.deployment) {
-    throw new Error("OpenAI endpoint/deployment not configured");
-  }
-  if (!azure.apiKey) {
-    throw new Error("AZURE_OPENAI_API_KEY not configured");
-  }
-
-  // Messages payload (evidence-rich)
-  const useCustom = !!(packs && typeof packs.promptText === "string" && packs.promptText.trim());
-  const { messages: builtMessages } = useCustom
-    ? buildCustomMessages({ customPromptText: packs.promptText, evidencePack })
-    : buildDefaultMessages({ inputs: input || {}, evidencePack });
-
-  // Optionally augment system message with persona + DOC_SPEC + enabled packs line
-  const packsLine =
-    packs?.enabled && Array.isArray(packs.enabled) && packs.enabled.length
+  // --- 3) Build messages (prefer a builder that includes DOC_SPEC/CSV rules)
+  let messages;
+  if (Array.isArray(options.messages) && options.messages.length) {
+    messages = options.messages;
+  } else if (typeof buildDefaultMessages === "function") {
+    // Pass through packs and ask the builder to include DOC_SPEC if it supports the flag
+    const built = buildDefaultMessages({
+      inputs: input,
+      evidencePack,
+      packs,           // <- don’t drop this
+      useDocSpec: true // <- your builder can append DOC_SPEC/CSV fusion rules if it supports this flag
+    });
+    messages = built.messages;
+  } else {
+    // Fallback inline build (keeps you safe even if builder signature lags)
+    // Fallback inline build (if builders aren't available)
+    const personaText = selectPersona(input);
+    const packsLine = (packs?.enabled && Array.isArray(packs.enabled) && packs.enabled.length)
       ? `\nEnabled packs: ${packs.enabled.join(", ")}`
       : "";
 
-  // Rebuild system message to include Persona + BASE_RULES + DOC_SPEC + packs line
-  const personaText = selectPersona(input);
-  const systemFull = [
-    personaText,
-    BASE_RULES,
-    DOC_SPEC,
-    packsLine
-  ].filter(Boolean).join("\n\n");
+    const system = [
+      personaText,
+      BASE_RULES,
+      DOC_SPEC
+    ].filter(Boolean).join("\n\n") + packsLine;
 
-  const messages = [
-    { role: "system", content: systemFull },
-    // keep the evidence-rich user content from the builder (index 1)
-    builtMessages[1] || { role: "user", content: "Return JSON." }
-  ];
-  // Retry helper
-  const attempts = Math.max(1, Number(options.retry?.attempts || 1));
-  const backoffMs = Math.max(0, Number(options.retry?.backoffMs || 0));
+    const evidenceText = [
+      "Evidence pack (prioritise Company site → LinkedIn → Regulator/Gov → Other)",
+      `- COMPANY_WEBSITE_HTML_OR_TEXT: ${safe(evidencePack.website || [])}`,
+      `- LINKEDIN_COMPANY: ${safe(evidencePack.linkedin || [])}`,
+      `- IXBRL_SUMMARY: ${safe(evidencePack.ixbrl || {})}`,
+      `- PDF_EXTRACTS: ${safe(evidencePack.pdf || [])}`,
+      `- DIRECTORY_MATCHES: ${safe(evidencePack.directories || [])}`,
+      `- CSV_SUMMARY: ${safe(evidencePack.csv || input?.csvSummary || {})}`
+    ].join("\n");
 
-  try {
-    // Build request body
-    const reqBody = {
-      messages,
-      temperature: 0,
-      top_p: 0.9,
-      max_tokens: Number.isFinite(options.maxTokens) ? options.maxTokens : ENV_MAX_TOKENS,
+    const userText = [
+      "Company inputs",
+      `- Name: ${input.prospect_company || ""}`,
+      `- Website: ${input.prospect_website || ""}`,
+      `- Buyer type: ${input.buyer_type || ""}`,
+      `- Sales model: ${input.sales_model || input.salesModel || input.call_type || ""}`,
+      `- Product/service focus: ${input.product_service || ""}`,
+      `- USER_USPS (comma-separated): ${input.user_usps || input.usps || ""}`,
+      `- Personas (comma-separated): ${input.personas || ""}`,
+      `- Extra context: ${input.context || ""}`,
+      "",
+      evidenceText,
+      "",
+      "Return only JSON for this schema:",
+      JSON.stringify(effectiveSchema)
+    ].join("\n");
+
+    messages = [
+      { role: "system", content: system },
+      { role: "user", content: userText }
+    ];
+  }
+  // --- 4) Retry/jitter + behavior knobs
+  const attempts = Math.max(1, Number(options.retry?.attempts ?? 2));
+  const backoffMs = Math.max(0, Number(options.retry?.backoffMs ?? 600));
+
+  const maxTokens = Number.isFinite(Number(options.maxTokens))
+  ? Number(options.maxTokens)
+  : (ENV_MAX_TOKENS || 3072);
+  const temperature = (typeof options.temperature === "number") ? options.temperature : 0;
+  const seedEnv = (process.env.LLM_SEED != null ? Number(process.env.LLM_SEED) : undefined);
+  const seed = (options.seed != null ? Number(options.seed) : seedEnv);
+
+  // --- 5) Endpoint URL
+  const base = azure.endpoint.replace(/\/+$/, "");
+  const dep = encodeURIComponent(azure.deployment);
+  const ver = encodeURIComponent(azure.apiVersion);
+  const url = `${base}/openai/deployments/${dep}/chat/completions?api-version=${ver}`;
+
+  // --- 6) Fresh body per attempt (adds a tiny non-semantic attempt hint in system on retries)
+  const mkReqBody = (attemptIndex) => {
+    const bumped = (attemptIndex > 0)
+      ? messages.map(m => (m.role === "system")
+        ? { ...m, content: `${m.content}\n\n[attempt:${attemptIndex + 1}]` }
+        : m)
+      : messages;
+
+    const body = {
+      messages: bumped,
+      temperature,
+      max_tokens: maxTokens,
       response_format: {
         type: "json_schema",
         json_schema: {
-          name: (schemaJson.title || "campaign_schema").replace(/[^\w\-]/g, "_"),
-          schema: schemaJson,
+          name: (effectiveSchema.title || "campaign_schema").replace(/[^\w\-]/g, "_"),
+          schema: effectiveSchema,
           strict: true
         }
-      },
-      ...(options.seed ? { seed: Number(options.seed) } : {})
-    };
-
-    // Decide API path (force Chat Completions; do not use Responses)
-    const base = azure.endpoint.replace(/\/+$/, "");
-    const dep = encodeURIComponent(azure.deployment);
-    const ver = encodeURIComponent(azure.apiVersion);
-    const url = `${base}/openai/deployments/${dep}/chat/completions?api-version=${ver}`;
-
-    // Attempt loop
-    let lastErr;
-    for (let i = 0; i < attempts; i++) {
-      // Per-attempt timeout & controller
-      const timeoutMsRaw = options.timeoutMs ?? LLM_TIMEOUT_MS_DEFAULT;
-      const timeoutMs = Number.isFinite(Number(timeoutMsRaw)) && Number(timeoutMsRaw) > 0
-        ? Number(timeoutMsRaw)
-        : LLM_TIMEOUT_MS_DEFAULT;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort("llm_timeout"), timeoutMs);
-
-      try {
-        const res = await fetch(url, {
-          method: "POST",
-          signal: controller.signal,
-          headers: {
-            "Content-Type": "application/json",
-            "api-key": azure.apiKey
-          },
-          body: JSON.stringify(reqBody)
-        });
-
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(`OpenAI error ${res.status}: ${text || res.statusText}`);
-        }
-
-        const json = await res.json();
-        const content = json?.choices?.[0]?.message?.content;
-
-        if (!content) throw new Error("Empty model response");
-
-        let obj;
-        try {
-          obj = JSON.parse(content);
-        } catch {
-          throw new Error("Model returned non-JSON content");
-        }
-        if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
-          throw new Error("Model returned non-object JSON");
-        }
-        return obj;
-      } catch (e) {
-        lastErr = e;
-        if (i < attempts - 1 && backoffMs) {
-          await new Promise(r => setTimeout(r, backoffMs));
-        }
-      } finally {
-        clearTimeout(timer);
       }
+    };
+    // Only pass seed if explicitly allowed (some Azure deployments 400 on unknown param)
+    if (options.useSeed === true && seed != null && Number.isFinite(seed)) {
+      body.seed = Number(seed);
     }
-    throw lastErr || new Error("Unknown LLM error");
-  } finally {
-    // no global timer
+    return body;
+  };
+
+  // --- 7) Attempt loop with jittered linear backoff
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    const timeoutMsRaw = options.timeoutMs ?? LLM_TIMEOUT_MS_DEFAULT;
+    const timeoutMs = Number.isFinite(Number(timeoutMsRaw)) && Number(timeoutMsRaw) > 0
+      ? Number(timeoutMsRaw)
+      : LLM_TIMEOUT_MS_DEFAULT;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort("llm_timeout"), timeoutMs);
+
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json", "api-key": azure.apiKey },
+        body: JSON.stringify(mkReqBody(i))
+      });
+
+      const raw = await res.text();
+      if (!res.ok) {
+        const msg = raw && raw.length > 2000 ? raw.slice(0, 2000) + "…(truncated)" : (raw || res.statusText);
+        throw new Error(`OpenAI error ${res.status}: ${msg}`);
+      }
+
+      let wire;
+      try { wire = raw ? JSON.parse(raw) : null; } catch { wire = null; }
+      const content = wire?.choices?.[0]?.message?.content;
+      if (!content) throw new Error("Empty model response");
+
+      // Fence-safe parse
+      let cleaned = String(content).trim();
+      if (/^```/i.test(cleaned)) {
+        cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+      }
+
+      const obj = JSON.parse(cleaned);
+      if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+        throw new Error("Model returned non-object JSON");
+      }
+      return obj;
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1 && backoffMs) {
+        const jitter = Math.floor(Math.random() * 250); // 0–250ms
+        const step = backoffMs * (i + 1);
+        await new Promise(r => setTimeout(r, step + jitter));
+      }
+    } finally {
+      clearTimeout(timer);
+    }
   }
+
+  throw lastErr || new Error("Unknown LLM error");
 }
 Object.defineProperty(module.exports, "schemaJson", {
   enumerable: true,

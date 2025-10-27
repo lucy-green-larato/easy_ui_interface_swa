@@ -450,11 +450,33 @@ window.CampaignUI = window.CampaignUI || {};
     UI.setStatus("Submitting…", "run");
     UI.log("Submitting job to /api/campaign-start");
 
+    // ---- Collect UI inputs (defensive) ----
     const salesModel = ($("#salesModel")?.value || "").trim().toLowerCase() || null; // "partner" | "direct" | null
     const notes = ($("#notes")?.value || "").trim() || null;
 
-    // CSV is optional; rowCount left null (worker computes true count)
-    const payload = { page: "campaign", salesModel, notes, rowCount: null };
+    const prospect_company = ($("#companyName")?.value || "").trim();
+    const prospect_website = ($("#companyWebsite")?.value || "").trim();
+    const prospect_linkedin = ($("#companyLinkedIn")?.value || "").trim();
+
+    // USPs: allow newline / semicolon / comma separated; normalise to array
+    const uspsText = ($("#companyUsps")?.value || "").trim();
+    const user_usps = uspsText
+      ? uspsText.split(/\r?\n|;|,/).map(s => s.trim()).filter(Boolean)
+      : [];
+
+    // CSV is optional; worker computes true count server-side → keep null
+    const payload = {
+      page: "campaign",
+      salesModel,
+      notes,
+      rowCount: null,
+
+      // >>> send user inputs to the job <<<
+      prospect_company,
+      prospect_website,
+      prospect_linkedin,
+      user_usps
+    };
 
     const startResp = await http("POST", API.start, { body: payload, timeoutMs: 25000 });
     const runId = startResp?.runId;

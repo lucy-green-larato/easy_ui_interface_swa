@@ -80,6 +80,13 @@ module.exports = async function (context, req) {
 
     // Parse/normalise input
     const body = (typeof req.body === "object" && req.body) || {};
+    // --- Company inputs from the body (parse only; no validation here) ---
+    const prospect_company = (body.prospect_company || "").toString().trim();
+    const prospect_website = (body.prospect_website || "").toString().trim();
+    const prospect_linkedin = (body.prospect_linkedin || "").toString().trim();
+    const user_usps = Array.isArray(body.user_usps)
+      ? body.user_usps.map(s => (s == null ? "" : String(s)).trim()).filter(Boolean)
+      : [];
     const pageRaw = body.page || "campaign";
     const effectivePage = sanitizePage(pageRaw);
 
@@ -152,6 +159,12 @@ module.exports = async function (context, req) {
         notes: body.notes ?? null,
         sales_model: salesModel ?? null,
         call_type: callType ?? null,
+
+        // keep for traceability
+        prospect_company,
+        prospect_website,
+        prospect_linkedin,
+        user_usps
       },
       enqueuedAt,
       correlationId,
@@ -169,9 +182,13 @@ module.exports = async function (context, req) {
       salesModel: salesModel ?? null,
       call_type: callType ?? null,
       enqueuedAt,
-      prefix: relPrefix, // <= container-relative; worker supports both but we standardise on this
+      prefix: relPrefix,
       correlationId,
       clientRunKey: clientRunKey ?? null,
+      prospect_company,
+      prospect_website,
+      prospect_linkedin,
+      user_usps
     };
 
     // Trim oversized payload (Azure Queue limit ~64KB post-base64)
@@ -194,20 +211,28 @@ module.exports = async function (context, req) {
       }
       payload = s;
     }
-
+    
+    enqueue
     // Enqueue (SDK handles base64 encoding; send plain JSON string)
     const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
     const q = qs.getQueueClient(QUEUE_NAME);
     await q.createIfNotExists();
     context.log({
       event: "campaign_start_storage_targets",
-      blobContainerUrl: containerClient.url,     // e.g. https://<account>.blob.core.windows.net/results
-      queueUrl: q.url,                           // e.g. https://<account>.queue.core.windows.net/campaign-jobs
+      blobContainerUrl: containerClient.url,
+      queueUrl: q.url,
       queueName: QUEUE_NAME
     });
 
     try {
-      const resp = await q.sendMessage(payload); // payload is a JSON string
+      context.log({
+        event: "campaign_start_inputs",
+        prospect_company,
+        has_site: !!prospect_website,
+        has_linkedin: !!prospect_linkedin,
+        user_usps_count: user_usps.length
+      });
+      const resp = await q.sendMessage(payload);
       context.log({
         event: "campaign_start_enqueued_ok",
         runId,

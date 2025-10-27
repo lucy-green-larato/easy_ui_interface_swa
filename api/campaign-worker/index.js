@@ -153,15 +153,49 @@ module.exports = async function (context, queueItem) {
     let prefix;
 
     // Build input envelope up-front (used in status.json and harness)
+    // Source may be local vars OR the queued job object. We defensively read both.
+    const src = (typeof job === "object" && job) || {};
+    const norm = (v) => (v == null ? "" : String(v)).trim();
     const input = {
       page,
       rowCount,
       filters,
       notes,
-      // normalised keys for harness
-      sales_model: (salesModel ?? filtersObj?.salesModel) ?? null,
-      call_type: (call_type ?? callType ?? filtersObj?.call_type ?? filtersObj?.callType) ?? null
+
+      // --- Normalised keys for harness ---
+      sales_model:
+        (salesModel ?? filtersObj?.salesModel ?? src.sales_model ?? src.salesModel) ?? null,
+      call_type:
+        (call_type ?? callType ?? filtersObj?.call_type ?? filtersObj?.callType ?? src.call_type ?? src.callType) ?? null,
+
+      // --- Company inputs (pass-through) ---
+      // Preferred names
+      prospect_company: norm(src.prospect_company ?? src.company_name),
+      prospect_website: norm(src.prospect_website ?? src.company_website),
+      prospect_linkedin: norm(src.prospect_linkedin ?? src.company_linkedin),
+
+      // USPs as array
+      user_usps: Array.isArray(src.user_usps)
+        ? src.user_usps.map(s => String(s).trim()).filter(Boolean)
+        : [],
+
+      // Optional CSV summary if you capture it earlier in the pipeline
+      csvSummary: src.csvSummary ?? src.csv_summary ?? null,
+
+      // --- Backwards-compat aliases (some prompts/schemas use these) ---
+      company_name: norm(src.prospect_company ?? src.company_name),
+      company_website: norm(src.prospect_website ?? src.company_website),
+      company_linkedin: norm(src.prospect_linkedin ?? src.company_linkedin),
     };
+
+    // Optional: lightweight sanity log
+    console.log("worker→harness input snapshot", {
+      page: input.page,
+      sales_model: input.sales_model,
+      has_site: !!input.prospect_website,
+      has_li: !!input.prospect_linkedin,
+      usps: input.user_usps.length
+    });
 
     async function updateStatus(state, extra = {}) {
       try {
