@@ -74,6 +74,50 @@ function safe(obj, max = MAX_STR) {
   catch { return "null"; }
 }
 
+// ---- Robust JSON extraction / repair helpers ----
+function extractJsonCandidate(s) {
+  if (!s) return "";
+  // Prefer fenced ```json … ```
+  const fence = s.match(/```json\s*([\s\S]*?)```/i);
+  if (fence && fence[1]) return fence[1].trim();
+
+  // Otherwise, take the first plausible top-level object
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start !== -1 && end !== -1 && end > start) return s.slice(start, end + 1).trim();
+  return s.trim();
+}
+
+function tryParseJson(s) {
+  try { return JSON.parse(s); } catch { return null; }
+}
+
+function parseModelJsonOrRepair(rawText) {
+  let candidate = extractJsonCandidate(String(rawText || ""));
+
+  // 1) First attempt (fast path)
+  let obj = tryParseJson(candidate);
+  if (obj) return obj;
+
+  // 2) Minimal, safe repairs for common LLM issues
+  let repaired = candidate
+    .replace(/^\uFEFF/, "")                           // strip BOM
+    .replace(/"([^"\\]*(\\.[^"\\]*)*)"/g, m =>       // collapse CR/LF inside quoted strings
+      m.replace(/\r?\n/g, "\\n"))
+    .replace(/,\s*([}\]])/g, "$1");                   // remove trailing commas
+
+  obj = tryParseJson(repaired);
+  if (obj) return obj;
+
+  const err = new Error("draft_json_parse_error: unrecoverable JSON");
+  err.code = "draft_json_parse_error";
+  err.details = {
+    length: candidate.length,
+    head: candidate.slice(0, 1200),
+    tail: candidate.slice(-1200)
+  };
+  throw err;
+}
 
 // ---- Personas & rules ----
 const BASE_RULES = `
@@ -419,13 +463,8 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
       const content = wire?.choices?.[0]?.message?.content;
       if (!content) throw new Error("Empty model response");
 
-      // Fence-safe parse
-      let cleaned = String(content).trim();
-      if (/^```/i.test(cleaned)) {
-        cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-      }
-
-      const obj = JSON.parse(cleaned);
+      // Robust parse with fenced/repair handling
+      const obj = parseModelJsonOrRepair(content);
       if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
         throw new Error("Model returned non-object JSON");
       }
