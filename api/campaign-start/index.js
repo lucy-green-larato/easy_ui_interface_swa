@@ -3,9 +3,7 @@
 // POST /api/campaign/start → enqueues job to campaign-jobs, writes initial status.json ("Queued"), returns 202 { runId }.
 
 const { BlobServiceClient } = require("@azure/storage-blob");
-const { QueueClient } = require("@azure/storage-queue");
 const crypto = require("crypto");
-const { QueueServiceClient } = require("@azure/storage-queue");
 
 // ---- Config ----
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
@@ -27,6 +25,12 @@ function sanitizePage(page) {
   const s = String(page || "default").trim().toLowerCase();
   const cleaned = s.replace(/[^a-z0-9._-]/g, "-").replace(/-+/g, "-");
   return cleaned || "default";
+}
+
+// --- helper: enqueue a message to Azure Storage Queue ---
+async function enqueueMessage(queueClient, jsonString) {
+  // SDK base64-encodes for you; pass a plain string
+  return queueClient.sendMessage(jsonString);
 }
 
 // IMPORTANT: container-relative prefix (NO container name here)
@@ -232,7 +236,7 @@ module.exports = async function (context, req) {
         has_linkedin: !!prospect_linkedin,
         user_usps_count: user_usps.length
       });
-      const resp = await q.sendMessage(payload);
+      const resp = await enqueueMessage(q, payload);
       context.log({
         event: "campaign_start_enqueued_ok",
         runId,
