@@ -22,7 +22,8 @@
     {
       "route": "/qualification/*",
       "rewrite": "/qualification/index.html"
-    }
+    },
+    { "route": "/*", "allowedRoles": ["anonymous"] }
   ],
   "mimeTypes": {
     ".json": "application/json",
