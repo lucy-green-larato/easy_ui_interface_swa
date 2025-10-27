@@ -1,13 +1,20 @@
-// /api/campaign-start/index.js 25-10-2025 v7
+// /api/campaign-start/index.js 26-10-2025 v8
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign/start → enqueues job to campaign-jobs, writes initial status.json ("Queued"), returns 202 { runId }.
 
 const { BlobServiceClient } = require("@azure/storage-blob");
+const { QueueServiceClient } = require("@azure/storage-queue");
 const crypto = require("crypto");
 
 // ---- Config ----
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const QUEUE_NAME = process.env.CAMPAIGN_JOBS_QUEUE || "campaign-jobs";
+const MAX_BYTES_DEFAULT = 48 * 1024; // 49152
+const MAX_BYTES_ENV = Number.parseInt(process.env.CAMPAIGN_MAX_MSG_BYTES, 10);
+const MAX_BYTES =
+  Number.isFinite(MAX_BYTES_ENV) && MAX_BYTES_ENV >= 1024 && MAX_BYTES_ENV <= 62 * 1024
+    ? MAX_BYTES_ENV
+    : MAX_BYTES_DEFAULT;
 
 // ---- Small utils ----
 function readHeader(req, name) {
@@ -81,7 +88,14 @@ module.exports = async function (context, req) {
       };
       return;
     }
-
+    if (!QUEUE_NAME) {
+      context.res = {
+        status: 500,
+        headers: { "content-type": "application/json", "x-correlation-id": correlationId },
+        body: { error: "config", message: "CAMPAIGN_JOBS_QUEUE app setting is missing" }
+      };
+      return;
+    }
     // Parse/normalise input
     const body = (typeof req.body === "object" && req.body) || {};
     // --- Company inputs from the body (parse only; no validation here) ---
@@ -200,7 +214,6 @@ module.exports = async function (context, req) {
       try { return JSON.stringify(obj); } catch { return "{}"; }
     }
     let payload = safeStringify(msg);
-    const MAX_BYTES = 60 * 1024;
 
     if (Buffer.byteLength(payload) > MAX_BYTES) {
       const slim = { ...msg, notes: null };
