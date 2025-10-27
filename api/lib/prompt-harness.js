@@ -81,14 +81,19 @@ Return STRICTLY valid JSON that conforms to the provided schema. Do NOT include 
 
 EVIDENCE RULES
 - Every bullet/statement must end with a short source tag in parentheses, e.g., (Company site), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).
-- If something cannot be evidenced from the evidence pack, prefer using company website, LinkedIn-as-company-site, or CSV. If still unavailable, omit the claim rather than inventing it.
+- Evidence log items must be SPECIFIC:
+  • Include concrete numbers, dates, and named entities (e.g., “Connected Nations 2024”, “Cyber Security Breaches Survey 2025”).
+  • Prefer deep links to the exact page, not homepages.
+  • For company site claims, reference the exact product page (title + URL), and include a short verbatim quote in 'quote' when available.
+  • Avoid generic marketing claims with no figures; omit if not evidenced.
+
+- STRICT NO-FABRICATION FOR CASE STUDIES:
+  • Only include case studies that are evidenced by the evidence pack OR are direct pages on the same host as the provided company website.
+  • If you cannot find any genuine case studies, return an empty array for the case_study_library section (do not invent customers or URLs).
+  • Use deep links (product/case-study pages), not homepages. Include page title and exact URL.
 
 SOURCE MIX (hard requirement; map to schema-safe source_type)
-- Aim to include across the whole JSON:
-  • ≥4 claims from the company website or product materials → set source_type="Company site".
-  • ≥1 signal from LinkedIn (company page/post). Since the schema has no "LinkedIn" enum, set source_type="Company site" and keep the inline tag "(LinkedIn)" in the sentence.
-  • ≥2 claims from regulators/government (Ofcom/ONS/DSIT) → set source_type to those exact enum values if present, else prefer "PDF extract" or "Trade press" only when unavoidable.
-- “Trade press” is allowed, but NEVER as the only category.
+- Ensure ≥2 items from Company site (product pages), and ≥3 items from external regulators/government (Ofcom/ONS/DSIT) where applicable.
 
 CSV & USPs
 - Treat CSV as current market research for targeting/messaging (tag inline as (CSV)). The schema does not capture CSV as source_type; keep "Company site"/regulator/etc. in evidence_log.source_type and reserve "(CSV)" for inline tags.
@@ -109,15 +114,20 @@ CAMPAIGN NAMING
   Then append any ICP notes below (newline-separated).
 
 EXECUTIVE SUMMARY
-- executive_summary is an array of strings. Set:
-  • Item #1: one short paragraph (~100–130 words) introducing the problem, buyer context, and the company's USP-backed solution.
-  • Items #2–#4: "Why now" bullets (2–4 items). Each bullet ends with a citation tag, prioritising Company site & (LinkedIn), then regulators (Ofcom/ONS/DSIT), then PDF extract, then Trade press/Directory.
+- executive_summary is an array of strings.
+  • Item #1 (paragraph, ~110–140 words): name the company and explicitly reference its relevant products/services found on the website (use exact product names, e.g., “Bonded Internet”, “SD-One”, “Continuum”, “Continuum Constellation”) and tie them to outcomes for the specified buyer context (e.g., UK construction).
+  • Items #2–#5: “Why now” bullets (each ends with a citation tag like (Ofcom), (ONS), (DSIT), (Company site)). Prioritise regulator/government sources for market signals; include concrete numbers/percentages/dates.
 
-EVIDENCE LOG
+  EVIDENCE LOG
 - evidence_log entries MUST satisfy the schema:
   { claim_id: "CLM-###", summary (cited), source_type (enum-compliant), url, title, quote? }.
 - Ensure at least 2 items are clearly from the company (Company site source_type), and ≥3 items from external sources (Ofcom/ONS/DSIT/PDF extract/Trade press/Directory).
 - When using LinkedIn, set source_type="Company site" but keep the inline "(LinkedIn)" tag inside the summary.
+
+CASE STUDY LIBRARY
+- case_study_library is an array. Each item must be sourced from the company website (same host as prospect_website) or appear in the evidence pack.
+- Required fields per item: { customer, industry?, headline, bullets[] (2–4), url, source_type="Company site" }.
+- Do NOT invent customers or URLs. If none are found, return [].
 
 POSITIONING & DIFFERENTIATION
 - Provide a concise value_prop for the UK context.
@@ -144,11 +154,14 @@ SALES ENABLEMENT / MEASUREMENT / COMPLIANCE / RISKS
 - compliance_and_governance: substantiation_file; gdpr_pecr_checklist; brand_accessibility_checks; approval_log_note.
 - risks_and_contingencies: ≥2 items (cited if external).
 
-CSV MAPPING (ground truth for targeting/messaging)
-- SimplifiedIndustry → ICP phrasing/examples.
-- TopPurchases → offer & assets.
-- TopBlockers → pains & objections.
-- TopNeedsSupplier → nonnegotiables & differentiators.
+CSV MAPPING (when buyer_industry is provided)
+- ONLY use csvSummary.* derived from the specified buyer_industry.
+- Use IT spend distribution to set commercial tone/priority (e.g., “most spend 7–10%”).
+- Map:
+  • TopBlockers  → pains, objections, and risk language.
+  • TopPurchases → offer & “what you get” (tie directly to supplier’s product names from the website).
+  • TopNeedsSupplier → nonnegotiables & differentiators (tie to supplier capabilities).
+- If buyer_industry is NOT provided, ignore csvSummary entirely (do not average across multiple industries).
 - Do NOT use AdopterProfile or TopConnectivity.
 
 ALLOWED INLINE CITATION TAGS (IN TEXT, not source_type): (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).

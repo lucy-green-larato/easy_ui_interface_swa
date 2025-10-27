@@ -187,28 +187,28 @@ module.exports = async function (context, queueItem) {
     const __src = __message;
 
     // Canonical scalars
-    const __pageVal     = __normNonEmpty(page) || "campaign";
+    const __pageVal = __normNonEmpty(page) || "campaign";
     const __rowCountVal = Number.isFinite(Number(rowCount)) ? Number(rowCount) : undefined;
-    const __notesVal    = __normNonEmpty(notes);
+    const __notesVal = __normNonEmpty(notes);
 
     // Sales model / call type (normalise to 'direct' | 'partner' when possible; otherwise omit)
     const __rawSales = __normNonEmpty(__pickFirstPresent(
       salesModel, __filtersObj?.salesModel, __src.sales_model, __src.salesModel
     ));
-    const __salesModelVal = (__rawSales && ["direct","partner"].includes(__rawSales.toLowerCase()))
+    const __salesModelVal = (__rawSales && ["direct", "partner"].includes(__rawSales.toLowerCase()))
       ? __rawSales.toLowerCase()
       : undefined;
 
     const __rawCall = __normNonEmpty(__pickFirstPresent(
       call_type, callType, __filtersObj?.call_type, __filtersObj?.callType, __src.call_type, __src.callType
     ));
-    const __callTypeVal = (__rawCall && ["direct","partner"].includes(__rawCall.toLowerCase()))
+    const __callTypeVal = (__rawCall && ["direct", "partner"].includes(__rawCall.toLowerCase()))
       ? __rawCall.toLowerCase()
       : undefined;
 
     // Company inputs (prefer canonical; fall back to legacy/alt names)
-    const __companyVal  = __normNonEmpty(__pickFirstPresent(__src.prospect_company,  __src.company_name,  __src.company));
-    const __websiteVal  = __normNonEmpty(__pickFirstPresent(__src.prospect_website,  __src.company_website, __src.website));
+    const __companyVal = __normNonEmpty(__pickFirstPresent(__src.prospect_company, __src.company_name, __src.company));
+    const __websiteVal = __normNonEmpty(__pickFirstPresent(__src.prospect_website, __src.company_website, __src.website));
     const __linkedinVal = __normNonEmpty(__pickFirstPresent(__src.prospect_linkedin, __src.company_linkedin, __src.linkedin));
 
     // USPs: accept array or comma-separated string; omit if none
@@ -225,29 +225,29 @@ module.exports = async function (context, queueItem) {
 
     // Optional CSV summary object
     const __csvSummaryVal = (typeof __src.csvSummary === "object" && __src.csvSummary)
-                         || (typeof __src.csv_summary === "object" && __src.csv_summary)
-                         || undefined;
+      || (typeof __src.csv_summary === "object" && __src.csv_summary)
+      || undefined;
 
     // Assemble payload for the harness: only set keys that have meaningful values
     const inputPayload = {};
     inputPayload.page = __pageVal;
     if (__rowCountVal !== undefined) inputPayload.rowCount = __rowCountVal;
-    if (__filtersObj)                 inputPayload.filters  = __filtersObj;
-    if (__notesVal)                   inputPayload.notes    = __notesVal;
+    if (__filtersObj) inputPayload.filters = __filtersObj;
+    if (__notesVal) inputPayload.notes = __notesVal;
 
-    if (__salesModelVal)              inputPayload.sales_model = __salesModelVal;
-    if (__callTypeVal)                inputPayload.call_type   = __callTypeVal;
+    if (__salesModelVal) inputPayload.sales_model = __salesModelVal;
+    if (__callTypeVal) inputPayload.call_type = __callTypeVal;
 
-    if (__companyVal)                 inputPayload.prospect_company  = __companyVal;
-    if (__websiteVal)                 inputPayload.prospect_website  = __websiteVal;
-    if (__linkedinVal)                inputPayload.prospect_linkedin = __linkedinVal;
+    if (__companyVal) inputPayload.prospect_company = __companyVal;
+    if (__websiteVal) inputPayload.prospect_website = __websiteVal;
+    if (__linkedinVal) inputPayload.prospect_linkedin = __linkedinVal;
 
     if (__uspsArr && __uspsArr.length) inputPayload.user_usps = __uspsArr;
-    if (__csvSummaryVal)               inputPayload.csvSummary = __csvSummaryVal;
+    if (__csvSummaryVal) inputPayload.csvSummary = __csvSummaryVal;
 
     // Legacy aliases only when canonical exists (prevents duplicate empty fields)
-    if (inputPayload.prospect_company)  inputPayload.company_name     = inputPayload.prospect_company;
-    if (inputPayload.prospect_website)  inputPayload.company_website  = inputPayload.prospect_website;
+    if (inputPayload.prospect_company) inputPayload.company_name = inputPayload.prospect_company;
+    if (inputPayload.prospect_website) inputPayload.company_website = inputPayload.prospect_website;
     if (inputPayload.prospect_linkedin) inputPayload.company_linkedin = inputPayload.prospect_linkedin;
 
     // Quick snapshot for diagnostics
@@ -392,9 +392,9 @@ module.exports = async function (context, queueItem) {
     }
 
     // Effective Azure OpenAI config
-    const AZO_ENDPOINT   = process.env.AZURE_OPENAI_ENDPOINT;
-    const AZO_API_KEY    = process.env.AZURE_OPENAI_API_KEY;
-    const AZO_API_VER    = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
+    const AZO_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;
+    const AZO_API_KEY = process.env.AZURE_OPENAI_API_KEY;
+    const AZO_API_VER = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
     const AZO_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT;
 
     context.log("[campaign-worker env]", { endpoint: AZO_ENDPOINT, deployment: AZO_DEPLOYMENT, apiVersion: AZO_API_VER });
@@ -436,6 +436,9 @@ module.exports = async function (context, queueItem) {
       if (typeof draft === "string") {
         try { draft = JSON.parse(draft); } catch { /* leave as string */ }
       }
+
+      const prospectSite = inputPayload.prospect_website || inputPayload.company_website || "";
+      draft = __sanitizeCaseStudyLibrary(draft, evidence, prospectSite, context);
 
       await putJson(containerClient, `${prefix}campaign.json`, draft);
     } catch (e) {

@@ -1,4 +1,4 @@
-<!-- web/campaign/index.html 26-10-2025 v 2 -->
+<!-- web/campaign/index.html 27-10-2025 v 3 -->
 <!doctype html>
 <html lang="en">
 
@@ -35,7 +35,7 @@
   <link rel="stylesheet" href="/styles.css?v=2025-10-09-fc2">
 </head>
 
-<body>
+<body class="app-campaign">
   <!-- HEADER (suite shell) -->
   <header class="app-header topbar compact" role="banner">
     <div class="header-left">
@@ -58,7 +58,7 @@
 
   <main class="workboard">
     <!-- Left rail: inputs -->
-     <label style="margin-top:8px">Sales model</label>
+    <label style="margin-top:8px">Sales model</label>
     <select id="salesModel">
       <option value="">(unspecified)</option>
       <option value="direct">Direct</option>
@@ -88,6 +88,10 @@
         <input id="companyWebsite" type="url" placeholder="https://www.example.com" />
         <label style="margin-top:8px">LinkedIn</label>
         <input id="companyLinkedIn" type="url" placeholder="https://www.linkedin.com/company/..." />
+        <label for="buyerIndustry">Industry (optional)</label>
+        <input id="buyerIndustry" name="buyerIndustry" type="text" placeholder="e.g., Construction"
+          list="industryOptions" />
+        <datalist id="industryOptions"></datalist>
         <label style="margin-top:8px">USPs / differentiators</label>
         <textarea id="companyUsps" class="textarea" rows="3"
           placeholder="Resilient connectivity; Millisecond failover"></textarea>
@@ -153,4 +157,5 @@
   <div id="campaign-toast" class="toast"></div>
   <script src="/src/js/campaign.js" defer></script>
 </body>
+
 </html>

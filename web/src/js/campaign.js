@@ -75,23 +75,176 @@ window.CampaignUI = window.CampaignUI || {};
     return table;
   }
 
-  // ---------- Renderers (match your schema keys) ----------
+  function csvToArray(text) {
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const headers = lines.shift().split(",").map(h => h.trim());
+    return lines.map(line => {
+      const cols = line.split(","); // simple CSV (your sample has no quoted commas)
+      const row = {};
+      headers.forEach((h, i) => row[h] = (cols[i] ?? "").trim());
+      return row;
+    });
+  }
+
+  function freqFromCSV(list) {
+    const map = new Map();
+    list.forEach(s => {
+      const parts = String(s || "")
+        .split(",")
+        .map(x => x.trim())
+        .filter(Boolean);
+      parts.forEach(p => map.set(p, (map.get(p) || 0) + 1));
+    });
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([value, count]) => ({ value, count }));
+  }
+
+  function buildCsvSummary(rows, buyerIndustryInput) {
+    const allIndustries = Array.from(new Set(rows.map(r => r.SimplifiedIndustry).filter(Boolean))).sort();
+    const buyerIndustry = (buyerIndustryInput || "").trim();
+    const rowsScoped = buyerIndustry
+      ? rows.filter(r => String(r.SimplifiedIndustry || "").toLowerCase() === buyerIndustry.toLowerCase())
+      : rows;
+
+    // Fill datalist options for convenience (UI nicety; harmless if duplicates)
+    const dl = document.getElementById("industryOptions");
+    if (dl && !dl.childElementCount) {
+      allIndustries.forEach(ind => {
+        const opt = document.createElement("option");
+        opt.value = ind;
+        dl.appendChild(opt);
+      });
+    }
+
+    // Frequencies
+    const itSpend = freqFromCSV(rowsScoped.map(r => r.ITSpendPct));
+    const blockers = freqFromCSV(rowsScoped.map(r => r.TopBlockers));
+    const purchases = freqFromCSV(rowsScoped.map(r => r.TopPurchases));
+    const needs = freqFromCSV(rowsScoped.map(r => r.TopNeedsSupplier));
+    const sampleCompanies = rowsScoped.slice(0, 10).map(r => r.CompanyName).filter(Boolean);
+
+    return {
+      schema: `csv-summary-v1:${buyerIndustry ? buyerIndustry.toLowerCase() : "all"}`,
+      buyerIndustry: buyerIndustry || null,
+      industriesAvailable: allIndustries,
+      rowCountAll: rows.length,
+      rowCountScoped: rowsScoped.length,
+      itSpend, blockers, purchases, needs,
+      sampleCompanies
+    };
+  }
+
   function renderExecutiveSummary() {
-    const lines = rowsOf(state.contract?.executive_summary);
-    setPanelContent(lines.length ? makeList(lines) : makePre("When a run completes, the executive summary will render here."));
+    // Use the same pattern as the other renderers (read from state)
+    const list = rowsOf(state.contract?.executive_summary);
+
+    if (!list.length) {
+      setPanelContent(makePre("The executive summary will show here when your campaign has been created."));
+      return;
+    }
+
+    const wrap = document.createElement("div");
+
+    // Item #1 → paragraph (product-specific content comes from the harness)
+    const para = document.createElement("p");
+    para.textContent = String(list[0] || "");
+    wrap.appendChild(para);
+
+    // Items #2..N → bullets (Why now)
+    if (list.length > 1) {
+      const ul = document.createElement("ul");
+      ul.className = "list"; // to match your existing CSS list styling
+      for (let i = 1; i < list.length; i++) {
+        const li = document.createElement("li");
+        li.textContent = String(list[i] || "");
+        ul.appendChild(li);
+      }
+      wrap.appendChild(ul);
+    }
+
+    setPanelContent(wrap);
   }
 
   function renderEvidenceLog() {
     const entries = rowsOf(state.contract?.evidence_log);
+
+    // ---- helpers (scoped to this renderer; no globals) ----
+    const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
+    const truncate = (s, n = 240) => (typeof s === "string" && s.length > n) ? (s.slice(0, n - 1) + "…") : (s || "");
+    const hasNumbers = (s) => /\d/.test(String(s || ""));
+    const isSpecific = (e) => {
+      // Must have URL + Title + a substantive summary (numbers OR quote)
+      if (!e || !e.url || !e.title) return false;
+      const summary = String(e.summary || "");
+      const quote = String(e.quote || "");
+      const longEnough = summary.trim().length >= 20 || quote.trim().length >= 20;
+      const hasSubstance = hasNumbers(summary) || hasNumbers(quote) || quote.trim().length >= 20;
+      return longEnough && hasSubstance;
+    };
+    const srcRank = (t) => {
+      const k = String(t || "").toLowerCase();
+      if (k.includes("ofcom")) return 1;
+      if (k.includes("ons")) return 2;
+      if (k.includes("dsit")) return 3;
+      if (k.includes("company")) return 4;         // "Company site"
+      if (k.includes("pdf")) return 5;
+      if (k.includes("trade")) return 6;
+      if (k.includes("directory")) return 7;
+      return 9;
+    };
+
+    // ---- de-dup (prefer first occurrence) ----
+    const seen = new Set();
+    const deduped = entries.filter(e => {
+      const key = e?.claim_id || `${e?.title || ""}|${e?.url || ""}`;
+      if (!key) return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    // ---- filter for specificity ----
+    const strong = deduped.filter(isSpecific);
+    const removedCount = deduped.length - strong.length;
+
+    // ---- sort: regulator/government first, then company site, then others; secondary by host then title ----
+    strong.sort((a, b) => {
+      const r = srcRank(a.source_type) - srcRank(b.source_type);
+      if (r !== 0) return r;
+      const ha = hostOf(a.url), hb = hostOf(b.url);
+      if (ha !== hb) return ha.localeCompare(hb);
+      return String(a.title || "").localeCompare(String(b.title || ""));
+    });
+
+    // ---- build table rows (keep your column order) ----
     const headers = ["ClaimID", "Summary", "Source type", "Title", "URL", "Quote"];
-    const rows = entries.map(e => [
+    const rows = strong.map(e => [
       e.claim_id ? { __link: true, href: `#${e.claim_id}`, text: e.claim_id } : "",
-      e.summary || "",
+      truncate(e.summary, 280),
       e.source_type || "",
       e.title || "",
-      e.url ? { __link: true, href: e.url, text: e.url } : "",
-      e.quote || ""
+      e.url ? { __link: true, href: e.url, text: hostOf(e.url) || e.url } : "",
+      truncate(e.quote, 220)
     ]);
+
+    // ---- assemble UI: note + table or empty state ----
+    const wrap = document.createElement("div");
+
+    const note = document.createElement("div");
+    note.className = "muted";
+    note.style.marginBottom = ".5rem";
+    note.textContent = removedCount > 0
+      ? `Showing ${strong.length} specific items. Filtered ${removedCount} generic entries with missing URL/title or weak evidence.`
+      : `Showing ${strong.length} specific items.`;
+    wrap.appendChild(note);
+
+    if (!strong.length) {
+      wrap.appendChild(makePre("No specific evidence found. Try re-running with a wider evidence window or ensure product/regulator pages are reachable."));
+      setPanelContent(wrap);
+      return;
+    }
+
     const table = makeTable(headers, rows);
 
     // Cross-nav: click CLM-xxx → switch to ICP tab + highlight
@@ -111,21 +264,55 @@ window.CampaignUI = window.CampaignUI || {};
       }, 0);
     });
 
-    setPanelContent(table);
+    wrap.appendChild(table);
+    setPanelContent(wrap);
   }
 
   function renderCaseLibrary() {
-    const cases = rowsOf(state.contract?.case_studies);
-    const headers = ["Customer", "Industry", "Headline", "Bullets", "Link", "Source"];
-    const rows = cases.map(k => [
-      k.customer || "",
-      k.industry || "",
-      k.headline || "",
-      rowsOf(k.bullets),
-      k.link ? { __link: true, href: k.link, text: k.link } : "",
-      k.source || ""
-    ]);
-    setPanelContent(makeTable(headers, rows));
+    // Accept either schema key (old/new)
+    const listRaw =
+      rowsOf(state.contract?.case_study_library).length
+        ? rowsOf(state.contract?.case_study_library)
+        : rowsOf(state.contract?.case_studies);
+
+    // Empty / none verified → clear message
+    if (!listRaw.length) {
+      setPanelContent(makePre("No verified case studies found on the company website."));
+      return;
+    }
+
+    // Detect whether any row is marked verified (from worker sanitizer)
+    const hasVerifiedFlag = listRaw.some(k => k && k.verified === true);
+
+    // Build headers conditionally
+    const headers = hasVerifiedFlag
+      ? ["Customer", "Industry", "Headline", "Bullets", "Link", "Source", "Verified"]
+      : ["Customer", "Industry", "Headline", "Bullets", "Link", "Source"];
+
+    // Normalise rows for display
+    const rows = listRaw.map(k => {
+      const customer = k?.customer || "";
+      const industry = k?.industry || "";
+      const headline = k?.headline || "";
+      const bullets = rowsOf(k?.bullets);
+      const href = k?.link || k?.url || "";
+      const source = k?.source || k?.source_type || "";
+
+      const base = [
+        customer,
+        industry,
+        headline,
+        bullets,
+        href ? { __link: true, href, text: href } : "",
+        source
+      ];
+
+      if (hasVerifiedFlag) base.push(k?.verified ? "✓" : "");
+      return base;
+    });
+
+    const table = makeTable(headers, rows);
+    setPanelContent(table);
   }
 
   function renderPositioning() {
@@ -464,18 +651,28 @@ window.CampaignUI = window.CampaignUI || {};
       ? uspsText.split(/\r?\n|;|,/).map(s => s.trim()).filter(Boolean)
       : [];
 
-    // CSV is optional; worker computes true count server-side → keep null
+    // Optional industry (if you add the field in index.html)
+    const buyer_industry = ($("#buyerIndustry")?.value || "").trim() || null;
+
+    // CSV: build compact summary if a file is present
+    let csvSummary = null;
+    const fileEl = $("#csvUpload");
+    if (fileEl?.files?.[0]) {
+      const text = await fileEl.files[0].text();
+      const rows = csvToArray(text);
+      csvSummary = buildCsvSummary(rows, buyer_industry || "");
+    }
     const payload = {
       page: "campaign",
       salesModel,
       notes,
       rowCount: null,
-
-      // >>> send user inputs to the job <<<
       prospect_company,
       prospect_website,
       prospect_linkedin,
-      user_usps
+      user_usps,
+      buyer_industry,
+      csvSummary
     };
 
     const startResp = await http("POST", API.start, { body: payload, timeoutMs: 25000 });
@@ -619,16 +816,16 @@ window.CampaignUI = window.CampaignUI || {};
   // Section registry lives near tabs so it’s visible here
   const SECTIONS = [
     { id: "exec", label: "Executive Summary", render: renderExecutiveSummary },
-    { id: "elog", label: "Evidence Log (table)", render: renderEvidenceLog },
-    { id: "cases", label: "Case Study Library (table)", render: renderCaseLibrary },
-    { id: "pos", label: "Positioning & Differentiation", render: renderPositioning },
-    { id: "icp", label: "ICP & Messaging Matrix (table)", render: renderICPMatrix },
-    { id: "offer", label: "Offer Strategy & Assets", render: renderOffer },
-    { id: "chan", label: "Channel Plan & Orchestration", render: renderChannel },
-    { id: "se", label: "Sales Enablement Alignment", render: renderSalesEnablement },
-    { id: "ml", label: "Measurement & Learning Plan", render: renderMeasurement },
+    { id: "elog", label: "Evidence Log", render: renderEvidenceLog },
+    { id: "cases", label: "Case Studies", render: renderCaseLibrary },
+    { id: "pos", label: "Positioning", render: renderPositioning },
+    { id: "icp", label: "Messaging", render: renderICPMatrix },
+    { id: "offer", label: "Strategy & Assets", render: renderOffer },
+    { id: "chan", label: "Go-to-market", render: renderChannel },
+    { id: "se", label: "Sales Battle Card", render: renderSalesEnablement },
+    { id: "ml", label: "Measurement", render: renderMeasurement },
     { id: "comp", label: "Compliance & Governance", render: renderCompliance },
     { id: "risk", label: "Risks & Contingencies", render: renderRisks },
-    { id: "one", label: "One Page Campaign Summary", render: renderOnePager }
+    { id: "one", label: "One Page Summary", render: renderOnePager }
   ];
 })();
