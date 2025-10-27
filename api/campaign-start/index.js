@@ -98,6 +98,44 @@ module.exports = async function (context, req) {
     }
     // Parse/normalise input
     const body = (typeof req.body === "object" && req.body) || {};
+    // --- Normalise alternate client field names to the canonical ones ---
+    if (body.company && !body.prospect_company) body.prospect_company = String(body.company).trim();
+    if (body.company_name && !body.prospect_company) body.prospect_company = String(body.company_name).trim();
+
+    if (body.website && !body.prospect_website) body.prospect_website = String(body.website).trim();
+    if (body.company_website && !body.prospect_website) body.prospect_website = String(body.company_website).trim();
+
+    if (body.linkedin && !body.prospect_linkedin) body.prospect_linkedin = String(body.linkedin).trim();
+    if (body.company_linkedin && !body.prospect_linkedin) body.prospect_linkedin = String(body.company_linkedin).trim();
+
+    // USPs: allow comma-separated string or array
+    if (!Array.isArray(body.user_usps)) {
+      if (typeof body.usps === "string") {
+        body.user_usps = body.usps.split(",").map(s => s.trim()).filter(Boolean);
+      } else if (Array.isArray(body.usps)) {
+        body.user_usps = body.usps.map(s => String(s ?? "").trim()).filter(Boolean);
+      }
+    }
+
+    // sales model / call type normalisation
+    if (!body.sales_model && body.salesModel) body.sales_model = String(body.salesModel).trim();
+    if (!body.call_type && body.callType) body.call_type = String(body.callType).trim();
+
+    // --- Minimal validation (fail fast if truly empty) ---
+    const missing = [];
+    if (!body.prospect_company) missing.push("prospect_company");
+    if (!body.prospect_website) missing.push("prospect_website");
+    // LinkedIn optional; add if you want: if (!body.prospect_linkedin) missing.push("prospect_linkedin");
+
+    if (missing.length) {
+      context.res = {
+        status: 400,
+        headers: { "content-type": "application/json", "x-correlation-id": correlationId },
+        body: { error: "bad_request", message: `Missing required field(s): ${missing.join(", ")}` }
+      };
+      return;
+    }
+
     // --- Company inputs from the body (parse only; no validation here) ---
     const prospect_company = (body.prospect_company || "").toString().trim();
     const prospect_website = (body.prospect_website || "").toString().trim();

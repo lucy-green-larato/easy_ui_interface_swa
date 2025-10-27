@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 2025-10-25 v11
+// /api/campaign-worker/index.js 2025-10-27 v12
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // Writes under results/campaign/{page}/{yyyy}/{MM}/{dd}/{runId}/(status.json|evidence_log.json|campaign.json)
 
@@ -15,14 +15,18 @@ async function loadPromptHarness() {
     // CJS fast path
     // eslint-disable-next-line import/no-dynamic-require, global-require
     const mod = require("../lib/prompt-harness");
-    _promptHarness = mod?.generate ? mod : { generate: mod?.default ?? mod };
+    const out = mod?.generate ? mod : { generate: mod?.default ?? mod };
+    if (typeof out.generate !== "function") throw new Error("prompt-harness has no generate()");
+    _promptHarness = out;
     return _promptHarness;
   } catch (e1) {
     try {
       // ESM fallback
       const modUrl = new URL("../lib/prompt-harness.js", `file://${__dirname}/`);
       const esm = await import(modUrl.href);
-      _promptHarness = esm?.generate ? esm : { generate: esm?.default ?? esm };
+      const out = esm?.generate ? esm : { generate: esm?.default ?? esm };
+      if (typeof out.generate !== "function") throw new Error("prompt-harness has no generate()");
+      _promptHarness = out;
       return _promptHarness;
     } catch (e2) {
       throw new Error(`prompt-harness load failed: ${e1?.message || e1} | ${e2?.message || e2}`);
@@ -37,14 +41,18 @@ async function loadEvidence() {
     // CJS fast path
     // eslint-disable-next-line import/no-dynamic-require, global-require
     const mod = require("../lib/evidence");
-    _evidence = { buildEvidence: mod.buildEvidence ?? mod.default ?? mod };
+    const buildEvidence = mod.buildEvidence ?? mod.default ?? mod;
+    if (typeof buildEvidence !== "function") throw new Error("evidence module has no buildEvidence()");
+    _evidence = { buildEvidence };
     return _evidence;
   } catch (e1) {
     try {
       // ESM fallback
       const modUrl = new URL("../lib/evidence.js", `file://${__dirname}/`);
       const esm = await import(modUrl.href);
-      _evidence = { buildEvidence: esm.buildEvidence ?? esm.default ?? esm };
+      const buildEvidence = esm.buildEvidence ?? esm.default ?? esm;
+      if (typeof buildEvidence !== "function") throw new Error("evidence module has no buildEvidence()");
+      _evidence = { buildEvidence };
       return _evidence;
     } catch (e2) {
       throw new Error(`evidence load failed: ${e1?.message || e1} | ${e2?.message || e2}`);
@@ -60,18 +68,14 @@ async function loadPackModule() {
     const cjs = require("../shared/packloader");
     const fn = cjs?.loadPacks ?? cjs?.default ?? cjs;
     if (typeof fn === "function") return fn;
-  } catch (e) {
-    // fall through to ESM try
-  }
+  } catch { /* fall through to ESM */ }
   // Try ESM dynamically
   try {
     const modUrl = new URL("../shared/packloader.js", `file://${__dirname}/`);
     const esm = await import(modUrl.href);
     const fn = esm?.loadPacks ?? esm?.default ?? esm;
     if (typeof fn === "function") return fn;
-  } catch (e) {
-    // ignore
-  }
+  } catch { /* ignore */ }
   // Last resort: no-op pack loader
   return async () => ({ packs: {} });
 }
@@ -101,16 +105,26 @@ function computePrefix({ page = "default", runId, enqueuedAt }) {
   return `campaign/${p}/${yyyy}/${MM}/${dd}/${runId}/`;
 }
 
-// Idempotent write with small retries
+// Idempotent write with small retries (overwrite allowed by default)
 async function putJson(containerClient, blobPath, obj) {
   const client = containerClient.getBlockBlobClient(blobPath);
   const payload = typeof obj === "string" ? obj : JSON.stringify(obj);
   const bytes = Buffer.byteLength(payload);
   const opts = { blobHTTPHeaders: { blobContentType: "application/json" } };
-  let attempt = 0, lastErr;
+
+  let attempt = 0;
+  let lastErr;
   while (attempt < 3) {
-    try { await client.upload(payload, bytes, opts); return; }
-    catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 200 * (1 << attempt))); attempt++; }
+    try {
+      await client.upload(payload, bytes, opts); // overwrite by default
+      return;
+    } catch (e) {
+      lastErr = e;
+      // 200ms, 400ms, 800ms (cap ~1s total for responsiveness)
+      const backoff = 200 * (1 << attempt);
+      await new Promise(r => setTimeout(r, backoff));
+      attempt++;
+    }
   }
   throw lastErr;
 }
@@ -122,15 +136,14 @@ module.exports = async function (context, queueItem) {
       type: typeof queueItem,
       sample: typeof queueItem === "string" ? queueItem.slice(0, 200) : queueItem
     });
-    const started = Date.now();
+    const __startedAtMs = Date.now();
 
-    // Force object; try best-effort parse if string
-    let message = queueItem;
-    if (typeof message === "string") {
-      try { message = JSON.parse(message); } catch { /* leave as string */ }
+    // -------- Parse and validate the queue message --------
+    let __message = queueItem;
+    if (typeof __message === "string") {
+      try { __message = JSON.parse(__message); } catch { /* keep as string; handled below */ }
     }
-    if (!message || typeof message !== "object") {
-      // bail out early – don’t write under 'default/undefined/'
+    if (!__message || typeof __message !== "object") {
       throw new Error("Invalid queue payload: expected JSON object");
     }
 
@@ -145,57 +158,112 @@ module.exports = async function (context, queueItem) {
       call_type,
       callType,
       correlationId: msgCorrelationId
-    } = message;
+    } = __message;
 
     const correlationId = msgCorrelationId || `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
-    const filtersObj = (filters && typeof filters === "object" && !Array.isArray(filters)) ? filters : null;
-    let containerClient;
-    let prefix;
+    const __filtersObj = (filters && typeof filters === "object" && !Array.isArray(filters)) ? filters : null;
 
-    // Build input envelope up-front (used in status.json and harness)
-    // Source may be local vars OR the queued job object. We defensively read both.
-    const src = (typeof job === "object" && job) || {};
-    const norm = (v) => (v == null ? "" : String(v)).trim();
-    const input = {
-      page,
-      rowCount,
-      filters,
-      notes,
-
-      // --- Normalised keys for harness ---
-      sales_model:
-        (salesModel ?? filtersObj?.salesModel ?? src.sales_model ?? src.salesModel) ?? null,
-      call_type:
-        (call_type ?? callType ?? filtersObj?.call_type ?? filtersObj?.callType ?? src.call_type ?? src.callType) ?? null,
-
-      // --- Company inputs (pass-through) ---
-      // Preferred names
-      prospect_company: norm(src.prospect_company ?? src.company_name),
-      prospect_website: norm(src.prospect_website ?? src.company_website),
-      prospect_linkedin: norm(src.prospect_linkedin ?? src.company_linkedin),
-
-      // USPs as array
-      user_usps: Array.isArray(src.user_usps)
-        ? src.user_usps.map(s => String(s).trim()).filter(Boolean)
-        : [],
-
-      // Optional CSV summary if you capture it earlier in the pipeline
-      csvSummary: src.csvSummary ?? src.csv_summary ?? null,
-
-      // --- Backwards-compat aliases (some prompts/schemas use these) ---
-      company_name: norm(src.prospect_company ?? src.company_name),
-      company_website: norm(src.prospect_website ?? src.company_website),
-      company_linkedin: norm(src.prospect_linkedin ?? src.company_linkedin),
+    // -------- Helpers (function-scoped, unique names to avoid collisions) --------
+    const __normNonEmpty = (v) => {
+      if (v == null) return undefined;
+      const s = String(v).trim();
+      return s.length ? s : undefined; // never return "" as a value
+    };
+    const __pickFirstPresent = (...vals) => {
+      for (const v of vals) {
+        if (v == null) continue;
+        if (typeof v === "string") {
+          const t = v.trim();
+          if (t) return t;
+        } else {
+          return v;
+        }
+      }
+      return undefined;
     };
 
-    // Optional: lightweight sanity log
-    console.log("worker→harness input snapshot", {
-      page: input.page,
-      sales_model: input.sales_model,
-      has_site: !!input.prospect_website,
-      has_li: !!input.prospect_linkedin,
-      usps: input.user_usps.length
+    // -------- Build the harness input WITHOUT clobbering good values --------
+    // Source of truth = the parsed queue message (not an undefined 'job').
+    const __src = __message;
+
+    // Canonical scalars
+    const __pageVal     = __normNonEmpty(page) || "campaign";
+    const __rowCountVal = Number.isFinite(Number(rowCount)) ? Number(rowCount) : undefined;
+    const __notesVal    = __normNonEmpty(notes);
+
+    // Sales model / call type (normalise to 'direct' | 'partner' when possible; otherwise omit)
+    const __rawSales = __normNonEmpty(__pickFirstPresent(
+      salesModel, __filtersObj?.salesModel, __src.sales_model, __src.salesModel
+    ));
+    const __salesModelVal = (__rawSales && ["direct","partner"].includes(__rawSales.toLowerCase()))
+      ? __rawSales.toLowerCase()
+      : undefined;
+
+    const __rawCall = __normNonEmpty(__pickFirstPresent(
+      call_type, callType, __filtersObj?.call_type, __filtersObj?.callType, __src.call_type, __src.callType
+    ));
+    const __callTypeVal = (__rawCall && ["direct","partner"].includes(__rawCall.toLowerCase()))
+      ? __rawCall.toLowerCase()
+      : undefined;
+
+    // Company inputs (prefer canonical; fall back to legacy/alt names)
+    const __companyVal  = __normNonEmpty(__pickFirstPresent(__src.prospect_company,  __src.company_name,  __src.company));
+    const __websiteVal  = __normNonEmpty(__pickFirstPresent(__src.prospect_website,  __src.company_website, __src.website));
+    const __linkedinVal = __normNonEmpty(__pickFirstPresent(__src.prospect_linkedin, __src.company_linkedin, __src.linkedin));
+
+    // USPs: accept array or comma-separated string; omit if none
+    let __uspsArr;
+    if (Array.isArray(__src.user_usps)) {
+      __uspsArr = __src.user_usps.map(s => String(s ?? "").trim()).filter(Boolean);
+    } else if (typeof __src.user_usps === "string") {
+      __uspsArr = __src.user_usps.split(",").map(s => s.trim()).filter(Boolean);
+    } else if (Array.isArray(__src.usps)) {
+      __uspsArr = __src.usps.map(s => String(s ?? "").trim()).filter(Boolean);
+    } else if (typeof __src.usps === "string") {
+      __uspsArr = __src.usps.split(",").map(s => s.trim()).filter(Boolean);
+    }
+
+    // Optional CSV summary object
+    const __csvSummaryVal = (typeof __src.csvSummary === "object" && __src.csvSummary)
+                         || (typeof __src.csv_summary === "object" && __src.csv_summary)
+                         || undefined;
+
+    // Assemble payload for the harness: only set keys that have meaningful values
+    const inputPayload = {};
+    inputPayload.page = __pageVal;
+    if (__rowCountVal !== undefined) inputPayload.rowCount = __rowCountVal;
+    if (__filtersObj)                 inputPayload.filters  = __filtersObj;
+    if (__notesVal)                   inputPayload.notes    = __notesVal;
+
+    if (__salesModelVal)              inputPayload.sales_model = __salesModelVal;
+    if (__callTypeVal)                inputPayload.call_type   = __callTypeVal;
+
+    if (__companyVal)                 inputPayload.prospect_company  = __companyVal;
+    if (__websiteVal)                 inputPayload.prospect_website  = __websiteVal;
+    if (__linkedinVal)                inputPayload.prospect_linkedin = __linkedinVal;
+
+    if (__uspsArr && __uspsArr.length) inputPayload.user_usps = __uspsArr;
+    if (__csvSummaryVal)               inputPayload.csvSummary = __csvSummaryVal;
+
+    // Legacy aliases only when canonical exists (prevents duplicate empty fields)
+    if (inputPayload.prospect_company)  inputPayload.company_name     = inputPayload.prospect_company;
+    if (inputPayload.prospect_website)  inputPayload.company_website  = inputPayload.prospect_website;
+    if (inputPayload.prospect_linkedin) inputPayload.company_linkedin = inputPayload.prospect_linkedin;
+
+    // Quick snapshot for diagnostics
+    context.log("worker→harness input snapshot", {
+      runId,
+      page: inputPayload.page,
+      sales_model: inputPayload.sales_model || null,
+      call_type: inputPayload.call_type || null,
+      company: inputPayload.prospect_company || null,
+      website_present: !!inputPayload.prospect_website,
+      usps: Array.isArray(inputPayload.user_usps) ? inputPayload.user_usps.length : 0
     });
+
+    // -------- Status writer & event logger (use your existing helpers) --------
+    let containerClient;
+    let prefix;
 
     async function updateStatus(state, extra = {}) {
       try {
@@ -203,7 +271,7 @@ module.exports = async function (context, queueItem) {
         const status = {
           runId,
           state,
-          input,
+          input: inputPayload,   // <— ensures UI sees the exact inputs used
           ...(extra || {}),
           correlationId
         };
@@ -218,13 +286,13 @@ module.exports = async function (context, queueItem) {
         event,
         runId,
         correlationId,
-        durationMs: Date.now() - started,
+        durationMs: Date.now() - __startedAtMs,
         outcome,
         ...extra,
       });
     };
 
-    // ---- Guard configuration BEFORE any storage use ----
+    // -------- Guard configuration BEFORE any storage use --------
     const conn = process.env.AzureWebJobsStorage;
     if (!conn) {
       const msg = "AzureWebJobsStorage not configured";
@@ -232,16 +300,16 @@ module.exports = async function (context, queueItem) {
 
       // Best-effort: write a Failed status so the UI doesn’t stay “Queued”
       try {
-        const parsed = (typeof queueItem === "string")
-          ? (() => { try { return JSON.parse(queueItem); } catch { return undefined; } })()
-          : queueItem;
+        const raw = typeof queueItem === "string" ? queueItem : JSON.stringify(queueItem || {});
+        let parsed;
+        try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
+
         const runId2 = parsed?.runId;
         const page2 = parsed?.page || "default";
         const enq2 = parsed?.enqueuedAt;
 
-        const conn2 = process.env.AzureWebJobsStorage || "";
-        if (conn2 && runId2) {
-          const bs = BlobServiceClient.fromConnectionString(conn2);
+        if (runId2) {
+          const bs = BlobServiceClient.fromConnectionString(conn);
           const cc = bs.getContainerClient(RESULTS_CONTAINER);
           await cc.createIfNotExists();
           const pfx = `${computePrefix({ page: page2, runId: runId2, enqueuedAt: enq2 })}`;
@@ -258,12 +326,12 @@ module.exports = async function (context, queueItem) {
       throw new Error(msg);
     }
 
-    // ---- Storage client + container ----
+    // -------- Storage client + container --------
     const blobService = BlobServiceClient.fromConnectionString(conn);
     containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
     await containerClient.createIfNotExists();
 
-    // --- REQUIRE a container-relative prefix from the starter message ---
+    // Require a container-relative prefix from the starter
     if (!msgPrefix || typeof msgPrefix !== "string") {
       throw new Error("Missing prefix in message");
     }
@@ -271,18 +339,16 @@ module.exports = async function (context, queueItem) {
       throw new Error("Prefix must be container-relative (do not include the container name)");
     }
     prefix = msgPrefix.endsWith("/") ? msgPrefix : (msgPrefix + "/");
-
-    // Optional: log where we will write, for quick diagnostics
     context.log("campaign-worker resolved path", { runId, prefix });
 
-    // ---- Phase 1 – Validate input ----
+    // -------- Phase 1 – Validate input --------
     await updateStatus("ValidatingInput", { startedAt: new Date().toISOString() });
     if (!runId) throw new Error("Missing runId");
     if (rowCount != null && (typeof rowCount !== "number" || rowCount < 0)) {
       throw new Error("rowCount must be a non-negative number when provided");
     }
 
-    // ---- Packs (optional) ----
+    // -------- Packs (optional) --------
     let packsConfig = {};
     try {
       const loadPacks = await loadPackModule();
@@ -293,13 +359,13 @@ module.exports = async function (context, queueItem) {
       packsConfig = {};
     }
 
-    // ---- Phase 2 – Evidence builder ----
+    // -------- Phase 2 – Evidence builder --------
     await updateStatus("EvidenceBuilder");
     let evidence = [];
     try {
       const { buildEvidence } = await loadEvidence();
       if (typeof buildEvidence === "function") {
-        const ev = await buildEvidence({ input, packs: packsConfig, runId, correlationId });
+        const ev = await buildEvidence({ input: inputPayload, packs: packsConfig, runId, correlationId });
         evidence = Array.isArray(ev) ? ev : [];
       }
     } catch (e) {
@@ -310,8 +376,9 @@ module.exports = async function (context, queueItem) {
     }
     await putJson(containerClient, `${prefix}evidence_log.json`, evidence);
 
-    // ---- Phase 3 – Draft campaign (LLM) ----
+    // -------- Phase 3 – Draft campaign (LLM) --------
     await updateStatus("DraftCampaign");
+
     let promptHarness;
     try {
       promptHarness = await loadPromptHarness();
@@ -324,10 +391,10 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
-    // Effective Azure OpenAI config (explicit, to avoid env drift)
-    const AZO_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;
-    const AZO_API_KEY = process.env.AZURE_OPENAI_API_KEY;
-    const AZO_API_VER = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
+    // Effective Azure OpenAI config
+    const AZO_ENDPOINT   = process.env.AZURE_OPENAI_ENDPOINT;
+    const AZO_API_KEY    = process.env.AZURE_OPENAI_API_KEY;
+    const AZO_API_VER    = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
     const AZO_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT;
 
     context.log("[campaign-worker env]", { endpoint: AZO_ENDPOINT, deployment: AZO_DEPLOYMENT, apiVersion: AZO_API_VER });
@@ -340,20 +407,17 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
+    // IMPORTANT: pass the normalised inputs into the harness
     let draft;
     try {
       draft = await promptHarness.generate({
-        schemaPath,
+        schemaPath,               // keep your existing schema wiring if present in module scope
         packs: packsConfig,
         input: {
+          ...inputPayload,        // <-- pass everything the model needs
           runId,
-          page: sanitizePage(page),
-          rowCount,
-          filters,
-          notes,
-          evidence,
-          sales_model: input.sales_model,
-          call_type: input.call_type
+          page: sanitizePage(inputPayload.page), // in case sanitizePage is defined in module scope
+          evidence               // keep evidence alongside input for traceability (harmless if unused by harness)
         },
         options: {
           timeoutMs: LLM_TIMEOUT_MS,
@@ -364,12 +428,13 @@ module.exports = async function (context, queueItem) {
             deployment: AZO_DEPLOYMENT,
             api: "chat"
           },
-          retry: { attempts: 2, backoffMs: 500 }
+          retry: { attempts: 2, backoffMs: 500 },
+          temperature: 0
         }
       });
 
       if (typeof draft === "string") {
-        try { draft = JSON.parse(draft); } catch { /* keep as string */ }
+        try { draft = JSON.parse(draft); } catch { /* leave as string */ }
       }
 
       await putJson(containerClient, `${prefix}campaign.json`, draft);
@@ -382,17 +447,15 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
-    // ---- Phase 4 – Quality Gate (no-op placeholder, but visible to UI) ----
+    // -------- Phase 4 – Quality Gate (placeholder) --------
     await updateStatus("QualityGate");
 
-    // ---- Phase 5 – Completed ----
+    // -------- Phase 5 – Completed --------
     await updateStatus("Completed", { completedAt: new Date().toISOString() });
     logEvent("campaign_worker_completed", "OK");
   } catch (error) {
-    // Catch absolutely everything (including early-phase exceptions)
     context.log.error("campaign_worker_failed", error);
     try {
-      // Best-effort: write a clear Failed status where the UI is polling
       const conn = process.env.AzureWebJobsStorage;
       if (!conn) return;
 
@@ -400,7 +463,6 @@ module.exports = async function (context, queueItem) {
       const container = blobService.getContainerClient(RESULTS_CONTAINER);
       await container.createIfNotExists();
 
-      // Recover routing from original message
       const raw = typeof queueItem === "string" ? queueItem : JSON.stringify(queueItem || {});
       let parsed;
       try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
@@ -417,7 +479,6 @@ module.exports = async function (context, queueItem) {
         failedAt: new Date().toISOString()
       });
     } catch (writeErr) {
-      // Best effort; do not rethrow
       context.log.warn("campaign_worker_failure_status_write_failed", String(writeErr?.message || writeErr));
     }
   }
