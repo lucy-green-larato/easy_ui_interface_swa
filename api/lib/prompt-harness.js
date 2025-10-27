@@ -1,4 +1,4 @@
-// /api/lib/prompt-harness.js 2025-10-27 v 8
+// /api/lib/prompt-harness.js 2025-10-27 v 9
 // Exports:
 //   - buildDefaultMessages({ inputs, evidencePack })
 //   - buildCustomMessages({ customPromptText, evidencePack })
@@ -49,7 +49,11 @@ function loadJsonFile(absOrRelPath) {
     ? absOrRelPath
     : path.join(process.cwd(), "api", absOrRelPath);
   const raw = fs.readFileSync(abs, "utf8");
-  return JSON.parse(raw);
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Schema must be a JSON object");
+  }
+  return parsed;
 }
 
 function tryLoadDefaultSchema() {
@@ -148,7 +152,7 @@ CSV MAPPING (ground truth for targeting/messaging)
 - Do NOT use AdopterProfile or TopConnectivity.
 
 ALLOWED INLINE CITATION TAGS (IN TEXT, not source_type): (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).
-`.trim(); F
+`.trim();
 
 const PARTNER_PERSONA = `
 You are a top-performing UK B2B channel strategist (tech markets) and CMO. 
@@ -253,7 +257,8 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
     deployment: options.azure?.deployment || ENV_DEPLOYMENT,
     api: (options.azure?.api || "chat").toLowerCase()
   };
-  if (!azure.endpoint || !azure.deployment) throw new Error("OpenAI endpoint/deployment not configured");
+  if (!azure.endpoint) throw new Error("AZURE_OPENAI_ENDPOINT not configured");
+  if (!azure.deployment) throw new Error("AZURE_OPENAI_DEPLOYMENT not configured");
   if (!azure.apiKey) throw new Error("AZURE_OPENAI_API_KEY not configured");
 
   // --- 3) Build messages (prefer a builder that includes DOC_SPEC/CSV rules)
@@ -320,8 +325,8 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
   const backoffMs = Math.max(0, Number(options.retry?.backoffMs ?? 600));
 
   const maxTokens = Number.isFinite(Number(options.maxTokens))
-  ? Number(options.maxTokens)
-  : (ENV_MAX_TOKENS || 3072);
+    ? Number(options.maxTokens)
+    : (ENV_MAX_TOKENS || 3072);
   const temperature = (typeof options.temperature === "number") ? options.temperature : 0;
   const seedEnv = (process.env.LLM_SEED != null ? Number(process.env.LLM_SEED) : undefined);
   const seed = (options.seed != null ? Number(options.seed) : seedEnv);
