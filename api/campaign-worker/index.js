@@ -129,6 +129,78 @@ async function putJson(containerClient, blobPath, obj) {
   throw lastErr;
 }
 
+// ---- Case study sanitizer helpers (host-verified; safe) ----
+function hostnameOf(u) {
+  try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return null; }
+}
+
+function buildAllowedSets(evidence, prospectWebsite) {
+  const allowedUrls = new Set();
+  const allowedHosts = new Set();
+
+  const siteHost = hostnameOf(prospectWebsite);
+  if (siteHost) allowedHosts.add(siteHost);
+
+  const list = Array.isArray(evidence) ? evidence : [];
+  for (const it of list) {
+    const url = it?.url || it?.link;
+    if (typeof url === "string" && url) {
+      allowedUrls.add(url);
+      const h = hostnameOf(url);
+      if (h) allowedHosts.add(h);
+    }
+  }
+  return { allowedUrls, allowedHosts };
+}
+
+function sanitizeCaseStudyLibrary(draft, evidence, prospectWebsite, context) {
+  if (!draft || typeof draft !== "object") return draft;
+
+  const original =
+    Array.isArray(draft.case_study_library) ? draft.case_study_library
+      : Array.isArray(draft.case_studies) ? draft.case_studies
+        : null;
+
+  if (!original) return draft;
+
+  const { allowedUrls, allowedHosts } = buildAllowedSets(evidence, prospectWebsite);
+
+  const filtered = original.filter((row) => {
+    if (!row || typeof row !== "object") return false;
+
+    const url = row.url || row.link || "";
+    const host = hostnameOf(url);
+    if (!url || !host) return false;
+
+    // must be same host as company site and/or present in evidence URLs
+    const hostOK = allowedHosts.has(host);
+    const urlOK = allowedUrls.size ? allowedUrls.has(url) : true;
+
+    const headlineOK = typeof row.headline === "string" && row.headline.trim().length > 0;
+    const bulletsOK = Array.isArray(row.bullets) && row.bullets.filter(b => String(b).trim()).length >= 2;
+
+    return hostOK && urlOK && headlineOK && bulletsOK;
+  }).map(row => ({ ...row, verified: true }));
+
+  // Prefer the new key; keep shape consistent
+  draft.case_study_library = filtered;
+
+  if ("case_studies" in draft) {
+    draft.case_studies = filtered;
+  }
+
+  if (context && typeof context.log === "function") {
+    context.log({
+      event: "case_study_sanitizer",
+      removed: (original.length - filtered.length),
+      kept: filtered.length
+    });
+  }
+  return draft;
+}
+
+
+
 module.exports = async function (context, queueItem) {
   try {
     context.log("campaign-worker TRIGGERED");
@@ -438,7 +510,13 @@ module.exports = async function (context, queueItem) {
       }
 
       const prospectSite = inputPayload.prospect_website || inputPayload.company_website || "";
-      draft = __sanitizeCaseStudyLibrary(draft, evidence, prospectSite, context);
+
+      try {
+        draft = sanitizeCaseStudyLibrary(draft, evidence, prospectSite, context);
+      } catch (sanErr) {
+        // Don’t fail the run if sanitizer has an issue; just log and continue
+        context.log.warn("case_study_sanitizer_failed", String(sanErr?.message || sanErr));
+      }
 
       await putJson(containerClient, `${prefix}campaign.json`, draft);
     } catch (e) {
