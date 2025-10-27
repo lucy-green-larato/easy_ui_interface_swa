@@ -391,11 +391,18 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
   // --- 4) Retry/jitter + behavior knobs
   const attempts = Math.max(1, Number(options.retry?.attempts ?? 2));
   const backoffMs = Math.max(0, Number(options.retry?.backoffMs ?? 600));
-
+  try {
+    console.log("[harness] limits", {
+      maxTokens,
+      evidenceCharsMax: MAX_STR,
+      timeoutMs: Number(options.timeoutMs ?? LLM_TIMEOUT_MS_DEFAULT)
+    });
+  } catch { }
   const maxTokens = Number.isFinite(Number(options.maxTokens))
     ? Number(options.maxTokens)
     : (ENV_MAX_TOKENS || 3072);
   const temperature = (typeof options.temperature === "number") ? options.temperature : 0;
+
   const seedEnv = (process.env.LLM_SEED != null ? Number(process.env.LLM_SEED) : undefined);
   const seed = (options.seed != null ? Number(options.seed) : seedEnv);
 
@@ -406,7 +413,7 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
   const url = `${base}/openai/deployments/${dep}/chat/completions?api-version=${ver}`;
 
   // --- 6) Fresh body per attempt (adds a tiny non-semantic attempt hint in system on retries)
-  const mkReqBody = (attemptIndex) => {
+  const mkReqBody = (format, attemptIndex) => {
     const bumped = (attemptIndex > 0)
       ? messages.map(m => (m.role === "system")
         ? { ...m, content: `${m.content}\n\n[attempt:${attemptIndex + 1}]` }
@@ -416,17 +423,22 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
     const body = {
       messages: bumped,
       temperature,
-      max_tokens: maxTokens,
-      response_format: {
+      max_tokens: maxTokens
+    };
+
+    if (format === "json_object") {
+      body.response_format = { type: "json_object" };
+    } else {
+      body.response_format = {
         type: "json_schema",
         json_schema: {
           name: (effectiveSchema.title || "campaign_schema").replace(/[^\w\-]/g, "_"),
           schema: effectiveSchema,
           strict: true
         }
-      }
-    };
-    // Only pass seed if explicitly allowed (some Azure deployments 400 on unknown param)
+      };
+    }
+
     if (options.useSeed === true && seed != null && Number.isFinite(seed)) {
       body.seed = Number(seed);
     }
@@ -445,30 +457,60 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
     const timer = setTimeout(() => controller.abort("llm_timeout"), timeoutMs);
 
     try {
-      const res = await fetch(url, {
+      // 1) First attempt: strict json_schema
+      let res = await fetch(url, {
         method: "POST",
         signal: controller.signal,
         headers: { "Content-Type": "application/json", "api-key": azure.apiKey },
-        body: JSON.stringify(mkReqBody(i))
+        body: JSON.stringify(mkReqBody("json_schema", i))
       });
 
-      const raw = await res.text();
+      let raw = await res.text();
       if (!res.ok) {
         const msg = raw && raw.length > 2000 ? raw.slice(0, 2000) + "…(truncated)" : (raw || res.statusText);
         throw new Error(`OpenAI error ${res.status}: ${msg}`);
       }
 
-      let wire;
-      try { wire = raw ? JSON.parse(raw) : null; } catch { wire = null; }
-      const content = wire?.choices?.[0]?.message?.content;
+      let wire; try { wire = raw ? JSON.parse(raw) : null; } catch { wire = null; }
+      let content = wire?.choices?.[0]?.message?.content;
       if (!content) throw new Error("Empty model response");
 
-      // Robust parse with fenced/repair handling
-      const obj = parseModelJsonOrRepair(content);
-      if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
-        throw new Error("Model returned non-object JSON");
+      try {
+        const obj = parseModelJsonOrRepair(content);
+        if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+          throw new Error("Model returned non-object JSON");
+        }
+        return obj;
+      } catch (parseErr) {
+        // Fallback: one lightweight re-ask in json_object mode (same messages)
+        // Only do this when the parse truly failed
+        if (!(parseErr && parseErr.code === "draft_json_parse_error")) throw parseErr;
+
+        // Re-issue once with json_object (same timeout & headers)
+        res = await fetch(url, {
+          method: "POST",
+          signal: controller.signal,
+          headers: { "Content-Type": "application/json", "api-key": azure.apiKey },
+          body: JSON.stringify(mkReqBody("json_object", i))
+        });
+
+        raw = await res.text();
+        if (!res.ok) {
+          const msg2 = raw && raw.length > 2000 ? raw.slice(0, 2000) + "…(truncated)" : (raw || res.statusText);
+          throw new Error(`OpenAI error ${res.status}: ${msg2}`);
+        }
+        try { wire = raw ? JSON.parse(raw) : null; } catch { wire = null; }
+        content = wire?.choices?.[0]?.message?.content || "";
+
+        const obj2 = parseModelJsonOrRepair(content); // still fenced/repair aware
+        if (obj2 === null || typeof obj2 !== "object" || Array.isArray(obj2)) {
+          const e2 = new Error("draft_json_parse_error: unrecoverable JSON in fallback");
+          e2.code = "draft_json_parse_error";
+          e2.details = { head: String(content).slice(0, 1200), tail: String(content).slice(-1200), length: String(content).length };
+          throw e2;
+        }
+        return obj2;
       }
-      return obj;
     } catch (e) {
       // Normalize and tag the error so the caller can distinguish timeout vs generic LLM error
       const err = (e instanceof Error) ? e : new Error(String(e));

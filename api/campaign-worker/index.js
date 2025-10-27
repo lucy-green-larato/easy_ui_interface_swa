@@ -468,11 +468,35 @@ module.exports = async function (context, queueItem) {
     try {
       promptHarness = await loadPromptHarness();
     } catch (e) {
+      // Capture harness signals (e.g., draft_json_parse_error with details.head/tail)
+      const code = e?.code || "draft_error";
+      const details = e?.details && typeof e.details === "object" ? e.details : undefined;
+
+      // Write a small debug artifact alongside status to inspect parse failures
+      try {
+        if (details) {
+          await putJson(containerClient, `${prefix}draft_parse_debug.json`, {
+            code,
+            ...details,
+            // ensure we don’t write megabytes by accident
+            head: String(details.head || "").slice(0, 4000),
+            tail: String(details.tail || "").slice(-4000)
+          });
+        }
+      } catch (writeDbgErr) {
+        context.log.warn("draft_parse_debug_write_failed", String(writeDbgErr?.message || writeDbgErr));
+      }
+
       await updateStatus("Failed", {
-        error: { code: "loader_error", message: String(e?.message || e) },
+        error: {
+          code,
+          message: String(e?.message || e),
+          ...(details ? { details: { length: details.length || null } } : {})
+        },
         failedAt: new Date().toISOString()
       });
-      logEvent("campaign_worker_completed", "Failed", { error: "prompt harness load failed" });
+
+      logEvent("campaign_worker_completed", "Failed", { error: String(e?.message || e), code });
       return;
     }
 
