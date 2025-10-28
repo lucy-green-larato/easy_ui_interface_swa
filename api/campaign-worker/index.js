@@ -463,7 +463,6 @@ module.exports = async function (context, queueItem) {
 
     // -------- Phase 3 – Draft campaign (LLM) --------
     await updateStatus("DraftCampaign");
-
     let promptHarness;
     try {
       promptHarness = await loadPromptHarness();
@@ -486,7 +485,6 @@ module.exports = async function (context, queueItem) {
       } catch (writeDbgErr) {
         context.log.warn("draft_parse_debug_write_failed", String(writeDbgErr?.message || writeDbgErr));
       }
-
       await updateStatus("Failed", {
         error: {
           code,
