@@ -267,9 +267,6 @@ Evidence pack (prioritise Company site → LinkedIn → Regulator/Gov → Other)
 - PDF_EXTRACTS: ${safe(evidencePack.pdf || [])}
 - DIRECTORY_MATCHES: ${safe(evidencePack.directories || [])}
 - CSV_SUMMARY: ${safe(evidencePack.csv || inputs?.csvSummary || {})}
-
-Return only JSON for this schema:
-${JSON.stringify(schemaJson)}
 `.trim();
 
   return { messages: [{ role: "system", content: system }, { role: "user", content: user }], schemaJson };
@@ -285,11 +282,7 @@ Evidence pack (may be partial)
 - IXBRL_SUMMARY: ${safe(evidencePack.ixbrl || {})}
 - PDF_EXTRACTS: ${safe(evidencePack.pdf || [])}
 - DIRECTORY_MATCHES: ${safe(evidencePack.directories || [])}
-
-Return only JSON for this schema:
-${JSON.stringify(schemaJson)}
 `.trim();
-
   return { messages: [{ role: "system", content: system }, { role: "user", content: user }], schemaJson };
 }
 
@@ -379,8 +372,6 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
       "",
       evidenceText,
       "",
-      "Return only JSON for this schema:",
-      JSON.stringify(effectiveSchema)
     ].join("\n");
 
     messages = [
@@ -474,9 +465,28 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
       let wire; try { wire = raw ? JSON.parse(raw) : null; } catch { wire = null; }
       let content = wire?.choices?.[0]?.message?.content;
       if (!content) throw new Error("Empty model response");
+      function stripLeadingSchemaEcho(s) {
+        try {
+          const firstOpen = s.indexOf("{");
+          const lastClose = s.lastIndexOf("}");
+          if (firstOpen === -1 || lastClose === -1) return s;
+
+          // Take the first top-level object block
+          const firstBlock = s.slice(firstOpen, s.indexOf("}", firstOpen) + 1);
+          const firstObj = JSON.parse(firstBlock);
+
+          // If it looks like a JSON-Schema (has $schema & properties), drop it and keep the next object
+          if (firstObj && typeof firstObj === "object" && firstObj.$schema && firstObj.properties) {
+            const rest = s.slice(firstOpen + firstBlock.length);
+            const nextObjStart = rest.indexOf("{");
+            if (nextObjStart !== -1) return rest.slice(nextObjStart);
+          }
+          return s;
+        } catch { return s; }
+      }
 
       try {
-        const obj = parseModelJsonOrRepair(content);
+        const obj = parseModelJsonOrRepair(stripLeadingSchemaEcho(content));
         if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
           throw new Error("Model returned non-object JSON");
         }
@@ -502,7 +512,7 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
         try { wire = raw ? JSON.parse(raw) : null; } catch { wire = null; }
         content = wire?.choices?.[0]?.message?.content || "";
 
-        const obj2 = parseModelJsonOrRepair(content); // still fenced/repair aware
+        const obj2 = parseModelJsonOrRepair(stripLeadingSchemaEcho(content));
         if (obj2 === null || typeof obj2 !== "object" || Array.isArray(obj2)) {
           const e2 = new Error("draft_json_parse_error: unrecoverable JSON in fallback");
           e2.code = "draft_json_parse_error";
