@@ -8,7 +8,7 @@ const crypto = require("crypto");
 
 // ---- Config ----
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
-const QUEUE_NAME = process.env.CAMPAIGN_JOBS_QUEUE || "campaign-jobs";
+const QUEUE_NAME = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const MAX_BYTES_DEFAULT = 48 * 1024; // 49152
 const MAX_BYTES_ENV = Number.parseInt(process.env.CAMPAIGN_MAX_MSG_BYTES, 10);
 const MAX_BYTES =
@@ -40,13 +40,12 @@ async function enqueueMessage(queueClient, jsonString) {
   return queueClient.sendMessage(jsonString);
 }
 
-// IMPORTANT: container-relative prefix (NO container name here)
+// IMPORTANT: container-relative prefix ---
 function computePrefix(page, runId, now = new Date()) {
-  const yyyy = now.getUTCFullYear();
-  const MM = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(now.getUTCDate()).padStart(2, "0");
-  const p = sanitizePage(page);
-  return `campaign/${p}/${yyyy}/${MM}/${dd}/${runId}/`;
+  if (!runId || typeof runId !== "string") {
+    throw new Error("computePrefix: runId is required and must be a string");
+  }
+  return `runs/${runId}/`;
 }
 
 async function writeInitialStatus(containerClient, relPrefix, status) {
@@ -230,6 +229,7 @@ module.exports = async function (context, req) {
 
     // Build queue message (container-relative prefix)
     const msg = {
+      op: "kickoff",
       runId,
       page: effectivePage,
       rowCount: rc ?? null,

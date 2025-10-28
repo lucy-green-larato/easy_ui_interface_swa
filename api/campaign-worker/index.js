@@ -82,6 +82,9 @@ async function loadPackModule() {
 
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || "45000");
+// Staged mode: skip LLM and finish after evidence build
+const CAMPAIGN_STAGED = /^(1|true|yes)$/i.test(String(process.env.CAMPAIGN_STAGED || ""));
+
 
 // ----- Utils -----
 function utcParts(date = new Date()) {
@@ -97,12 +100,8 @@ function sanitizePage(page) {
   return cleaned || "default";
 }
 
-function computePrefix({ page = "default", runId, enqueuedAt }) {
-  const now = enqueuedAt ? new Date(enqueuedAt) : new Date();
-  const { yyyy, MM, dd } = utcParts(now);
-  const p = sanitizePage(page);
-  // Container-relative path (RESULTS_CONTAINER is the container)
-  return `campaign/${p}/${yyyy}/${MM}/${dd}/${runId}/`;
+function computePrefix({ runId }) {
+  return `runs/${runId}/`;
 }
 
 // Idempotent write with small retries (overwrite allowed by default)
@@ -349,6 +348,54 @@ module.exports = async function (context, queueItem) {
           correlationId
         };
         await putJson(containerClient, `${prefix}status.json`, status);
+        // ---------- STAGED MODE: stop here, write evidence pack + minimal scaffold, and return ----------
+        if (CAMPAIGN_STAGED) {
+          // Persist the bucketed evidence the harness would normally consume
+          try {
+            await putJson(containerClient, `${prefix}evidence_pack.json`, evidencePack);
+          } catch (e) {
+            context.log.warn("staged_write_evidence_pack_failed", String(e?.message || e));
+          }
+
+          // (Optional) write a tiny scaffold campaign so the UI can render tabs without the LLM
+          const scaffold = {
+            meta: { staged: true, note: "Staged mode: LLM drafting skipped", runId },
+            executive_summary: [],
+            evidence_log: [],                    // UI can read evidence_log.json instead
+            case_study_library: [],
+            positioning_and_differentiation: {},
+            messaging_matrix: { nonnegotiables: [], matrix: [] },
+            offer_strategy: { landing_page: {}, assets_checklist: [] },
+            channel_plan: { emails: [], linkedin: {} },
+            sales_enablement: { discovery_questions: [], objection_cards: [] },
+            measurement_and_learning: {},
+            compliance_and_governance: {},
+            risks_and_contingencies: [],
+            one_pager_summary: []
+          };
+          try {
+            await putJson(containerClient, `${prefix}campaign.json`, scaffold);
+          } catch (e) {
+            context.log.warn("staged_write_scaffold_failed", String(e?.message || e));
+          }
+
+          // Surface a friendly, explicit state for the UI
+          await updateStatus("DraftReady", {
+            staged: true,
+            completedAt: new Date().toISOString(),
+            evidenceCounts: {
+              website: Array.isArray(evidencePack.website) ? evidencePack.website.length : 0,
+              linkedin: Array.isArray(evidencePack.linkedin) ? evidencePack.linkedin.length : 0,
+              pdf: Array.isArray(evidencePack.pdf) ? evidencePack.pdf.length : 0,
+              directories: Array.isArray(evidencePack.directories) ? evidencePack.directories.length : 0,
+              ixbrlKeys: Object.keys(evidencePack.ixbrl || {}).length,
+              csvKeys: Object.keys(evidencePack.csv || {}).length
+            }
+          });
+
+          logEvent("campaign_worker_completed", "STAGED", { staged: true });
+          return; // <<< short-circuit: skip Phase 3 (LLM) onwards
+        }
       } catch (e) {
         context.log.warn("status_write_failed", { runId, correlationId, message: String(e?.message || e) });
       }

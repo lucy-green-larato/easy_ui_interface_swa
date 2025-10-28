@@ -1,14 +1,15 @@
 // /api/campaign-status/index.js 22-10-2025 v1 
-// Classic Azure Functions (function.json + scriptFile), CommonJS.
-// GET /api/campaign/status?runId=... -> reads status.json under the discovered prefix.
-// Finds the blob by scanning for ".../<runId>/status.json" to avoid date/page ambiguity.
+// /api/campaign-status/index.js — canonical status reader (CommonJS, Node 20/Azure Functions v4)
+// Route: GET /api/campaign-status/{runId}  (also accepts ?runId=… as fallback)
+// Reads: runs/<runId>/status.json in the CAMPAIGN_RESULTS_CONTAINER container.
+// Returns: JSON text with strong validators (ETag, Last-Modified). No scanning, no date/page drift.
 
 const { BlobServiceClient } = require("@azure/storage-blob");
+
 let requireAuth;
 try {
-  ({ requireAuth } = require("../lib/auth")); // your existing helper (awaited below)
+  ({ requireAuth } = require("../lib/auth")); // optional; if not present we fall back below
 } catch {
-  // Minimal fallback; in production your real helper should be present.
   requireAuth = async () => ({ correlationId: genId() });
 }
 
@@ -18,14 +19,12 @@ const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 function readHeader(req, name) {
   if (!req || !req.headers) return undefined;
   const h = req.headers;
+  // Node lower-cases header keys; include defensives for safety.
   return h[name] ?? h[name.toLowerCase()] ?? h[name.toUpperCase()];
 }
 
 function genId() {
-  const s = () =>
-    Math.floor((1 + Math.random()) * 0x10000)
-      .toString(16)
-      .slice(1);
+  const s = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).slice(1);
   return `${s()}${s()}-${s()}-${s()}-${s()}-${s()}${s()}${s()}`;
 }
 
@@ -40,16 +39,6 @@ async function streamToString(readable) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-// Search for any blob ending with `/<runId>/status.json` under campaign/
-async function findStatusBlob(containerClient, runId) {
-  const suffix = `/${runId}/status.json`;
-  const prefixRoot = `campaign/`; // container-relative (RESULTS_CONTAINER is the container)
-  for await (const item of containerClient.listBlobsFlat({ prefix: prefixRoot })) {
-    if (item.name.endsWith(suffix)) return item.name;
-  }
-  return null;
-}
-
 module.exports = async function (context, req) {
   // Enforce GET only
   if (String(req?.method || "").toUpperCase() !== "GET") {
@@ -59,14 +48,14 @@ module.exports = async function (context, req) {
       headers: {
         "Content-Type": "application/json",
         "x-correlation-id": cid,
-        "allow": "GET"
+        "Allow": "GET"
       },
-      body: { error: "method_not_allowed", message: "Only GET is supported" },
+      body: { error: "method_not_allowed", message: "Only GET is supported" }
     };
     return;
   }
 
-  // Auth (awaited). If your requireAuth denies, it will set context.res and we return.
+  // Auth (optional helper). If it denies, it sets context.res and we return.
   const auth = await requireAuth(context, req, ["campaign", "campaign-admin"]);
   if (!auth) return;
   const correlationId = auth.correlationId || correlationIdFrom(req);
@@ -76,55 +65,59 @@ module.exports = async function (context, req) {
       context.res = {
         status: 500,
         headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "config", message: "AzureWebJobsStorage app setting is missing" },
+        body: { error: "config", message: "AzureWebJobsStorage app setting is missing" }
       };
       return;
     }
-    const runId = (req.query?.runId || "").trim();
+
+    // Prefer route param, fallback to query
+    const routeRunId = (req.params && req.params.runId) ? String(req.params.runId).trim() : "";
+    const queryRunId = (req.query && req.query.runId) ? String(req.query.runId).trim() : "";
+    const runId = routeRunId || queryRunId;
+
     if (!runId) {
       context.res = {
         status: 400,
         headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "bad_request", message: "Missing runId" },
+        body: { error: "bad_request", message: "Missing runId" }
       };
       return;
     }
-    // Accept hex/uuid-like IDs with dashes; adjust if you later switch ID shape.
+
+    // Accept alphanumeric + dash IDs; adjust if you later change ID shape.
     const RUNID_RE = /^[A-Za-z0-9-]{8,64}$/;
     if (!RUNID_RE.test(runId)) {
       context.res = {
         status: 400,
         headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "bad_request", message: "Invalid runId format" },
+        body: { error: "bad_request", message: "Invalid runId format" }
       };
       return;
     }
 
     const blobService = BlobServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
-    const containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
-    context.log({
-      event: "campaign_status_storage_target",
-      blobContainerUrl: containerClient.url
-    });
+    const container = blobService.getContainerClient(RESULTS_CONTAINER);
+    const blobName = `runs/${runId}/status.json`;
+    const client = container.getBlockBlobClient(blobName);
 
-    const blobName = await findStatusBlob(containerClient, runId);
-    if (!blobName) {
+    context.log({ event: "campaign_status_target", blob: `${RESULTS_CONTAINER}/${blobName}` });
+
+    // Fast 404 if missing
+    if (!(await client.exists())) {
       context.res = {
         status: 404,
         headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
-        body: { state: "Unknown", runId },
+        body: { state: "Unknown", runId }
       };
       return;
     }
 
-    const block = containerClient.getBlockBlobClient(blobName);
-
-    // Get ETag / Last-Modified first
-    const props = await block.getProperties();
+    // Read properties for validators
+    const props = await client.getProperties();
     const etag = props.etag;
     const lastModified = props.lastModified ? props.lastModified.toUTCString() : undefined;
 
-    // Conditional GET support
+    // Conditional GET via If-None-Match
     const ifNoneMatch = readHeader(req, "if-none-match");
     if (ifNoneMatch && etag && ifNoneMatch === etag) {
       context.res = {
@@ -139,18 +132,22 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // Download body (small JSON)
-    const dl = await block.download();
+    // Download JSON text
+    const dl = await client.download();
     const body = await streamToString(dl.readableStreamBody);
 
-    context.log(
-      JSON.stringify({
-        event: "campaign_status_read",
-        runId,
-        correlationId,
-        outcome: "OK",
-      })
-    );
+    // Validate it is JSON; if invalid, treat as server error to protect clients
+    try { JSON.parse(body); } catch (e) {
+      context.log.warn("[campaign-status] status.json is not valid JSON", { runId, error: String(e?.message || e) });
+      context.res = {
+        status: 502,
+        headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
+        body: { error: "bad_status_payload", message: "status.json is not valid JSON" }
+      };
+      return;
+    }
+
+    context.log(JSON.stringify({ event: "campaign_status_read", runId, correlationId, outcome: "OK" }));
 
     context.res = {
       status: 200,
@@ -161,20 +158,18 @@ module.exports = async function (context, req) {
         "Cache-Control": "no-cache",
         "x-correlation-id": correlationId
       },
-      body, // already JSON text
+      body // already JSON text
     };
   } catch (err) {
-    context.log.error(
-      JSON.stringify({
-        event: "campaign_status_error",
-        correlationId,
-        error: String(err?.message || err),
-      })
-    );
+    context.log.error(JSON.stringify({
+      event: "campaign_status_error",
+      correlationId,
+      error: String(err?.message || err)
+    }));
     context.res = {
       status: 500,
       headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
-      body: { error: "internal", message: "Unexpected error" },
+      body: { error: "internal", message: "Unexpected error" }
     };
   }
 };

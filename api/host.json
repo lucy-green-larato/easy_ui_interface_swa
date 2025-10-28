@@ -35,9 +35,12 @@
     "ch-strategic-start",
     "ch-strategic",
     "ch-strategic-worker",
-    "campaign-fetch",
     "campaign-start",
+    "campaign-worker",
+    "campaign-evidence",
+    "campaign-outline",
+    "campaign-write",
     "campaign-status",
-    "campaign-worker"
+    "campaign-fetch"
   ]
 }

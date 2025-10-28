@@ -4,7 +4,7 @@
       "name": "job",
       "type": "queueTrigger",
       "direction": "in",
-      "queueName": "%CAMPAIGN_QUEUE_NAME%",
+      "queueName": "%Q_CAMPAIGN_EVIDENCE%",
       "connection": "AzureWebJobsStorage"
     }
   ],
