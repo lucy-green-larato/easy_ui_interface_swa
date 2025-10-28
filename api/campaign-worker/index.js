@@ -1,6 +1,6 @@
-// /api/campaign-worker/index.js 2025-10-27 v12
+// /api/campaign-worker/index.js 2025-10-28 v13 (staged logic removed)
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
-// Writes under results/campaign/{page}/{yyyy}/{MM}/{dd}/{runId}/(status.json|evidence_log.json|campaign.json)
+// Writes under results/runs/<runId>/(status.json|evidence_log.json|campaign.json)
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const path = require("path");
@@ -82,18 +82,8 @@ async function loadPackModule() {
 
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || "45000");
-// Staged mode: skip LLM and finish after evidence build
-const CAMPAIGN_STAGED = /^(1|true|yes)$/i.test(String(process.env.CAMPAIGN_STAGED || ""));
-
 
 // ----- Utils -----
-function utcParts(date = new Date()) {
-  const yyyy = date.getUTCFullYear();
-  const MM = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(date.getUTCDate()).padStart(2, "0");
-  return { yyyy, MM, dd };
-}
-
 function sanitizePage(page) {
   const s = String(page || "default").trim().toLowerCase();
   const cleaned = s.replace(/[^a-z0-9._-]/g, "-").replace(/-+/g, "-");
@@ -119,7 +109,7 @@ async function putJson(containerClient, blobPath, obj) {
       return;
     } catch (e) {
       lastErr = e;
-      // 200ms, 400ms, 800ms (cap ~1s total for responsiveness)
+      // 200ms, 400ms, 800ms (cap ~1s total)
       const backoff = 200 * (1 << attempt);
       await new Promise(r => setTimeout(r, backoff));
       attempt++;
@@ -168,7 +158,7 @@ function sanitizeCaseStudyLibrary(draft, evidence, prospectWebsite, context) {
     if (!row || typeof row !== "object") return false;
 
     const url = row.url || row.link || "";
-    const host = hostnameOf(url);
+       const host = hostnameOf(url);
     if (!url || !host) return false;
 
     // must be same host as company site and/or present in evidence URLs
@@ -198,8 +188,6 @@ function sanitizeCaseStudyLibrary(draft, evidence, prospectWebsite, context) {
   return draft;
 }
 
-
-
 module.exports = async function (context, queueItem) {
   try {
     context.log("campaign-worker TRIGGERED");
@@ -207,6 +195,7 @@ module.exports = async function (context, queueItem) {
       type: typeof queueItem,
       sample: typeof queueItem === "string" ? queueItem.slice(0, 200) : queueItem
     });
+
     const __startedAtMs = Date.now();
     const HOST_FUNCTION_BUDGET_MS = Number(process.env.HOST_FUNCTION_BUDGET_MS || 0); // 0 = disabled
 
@@ -235,11 +224,11 @@ module.exports = async function (context, queueItem) {
     const correlationId = msgCorrelationId || `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
     const __filtersObj = (filters && typeof filters === "object" && !Array.isArray(filters)) ? filters : null;
 
-    // -------- Helpers (function-scoped, unique names to avoid collisions) --------
+    // -------- Helpers (function-scoped) --------
     const __normNonEmpty = (v) => {
       if (v == null) return undefined;
       const s = String(v).trim();
-      return s.length ? s : undefined; // never return "" as a value
+      return s.length ? s : undefined;
     };
     const __pickFirstPresent = (...vals) => {
       for (const v of vals) {
@@ -254,16 +243,12 @@ module.exports = async function (context, queueItem) {
       return undefined;
     };
 
-    // -------- Build the harness input WITHOUT clobbering good values --------
-    // Source of truth = the parsed queue message (not an undefined 'job').
+    // -------- Build harness input --------
     const __src = __message;
-
-    // Canonical scalars
     const __pageVal = __normNonEmpty(page) || "campaign";
     const __rowCountVal = Number.isFinite(Number(rowCount)) ? Number(rowCount) : undefined;
     const __notesVal = __normNonEmpty(notes);
 
-    // Sales model / call type (normalise to 'direct' | 'partner' when possible; otherwise omit)
     const __rawSales = __normNonEmpty(__pickFirstPresent(
       salesModel, __filtersObj?.salesModel, __src.sales_model, __src.salesModel
     ));
@@ -278,12 +263,10 @@ module.exports = async function (context, queueItem) {
       ? __rawCall.toLowerCase()
       : undefined;
 
-    // Company inputs (prefer canonical; fall back to legacy/alt names)
     const __companyVal = __normNonEmpty(__pickFirstPresent(__src.prospect_company, __src.company_name, __src.company));
     const __websiteVal = __normNonEmpty(__pickFirstPresent(__src.prospect_website, __src.company_website, __src.website));
     const __linkedinVal = __normNonEmpty(__pickFirstPresent(__src.prospect_linkedin, __src.company_linkedin, __src.linkedin));
 
-    // USPs: accept array or comma-separated string; omit if none
     let __uspsArr;
     if (Array.isArray(__src.user_usps)) {
       __uspsArr = __src.user_usps.map(s => String(s ?? "").trim()).filter(Boolean);
@@ -295,12 +278,10 @@ module.exports = async function (context, queueItem) {
       __uspsArr = __src.usps.split(",").map(s => s.trim()).filter(Boolean);
     }
 
-    // Optional CSV summary object
     const __csvSummaryVal = (typeof __src.csvSummary === "object" && __src.csvSummary)
       || (typeof __src.csv_summary === "object" && __src.csv_summary)
       || undefined;
 
-    // Assemble payload for the harness: only set keys that have meaningful values
     const inputPayload = {};
     inputPayload.page = __pageVal;
     if (__rowCountVal !== undefined) inputPayload.rowCount = __rowCountVal;
@@ -317,12 +298,11 @@ module.exports = async function (context, queueItem) {
     if (__uspsArr && __uspsArr.length) inputPayload.user_usps = __uspsArr;
     if (__csvSummaryVal) inputPayload.csvSummary = __csvSummaryVal;
 
-    // Legacy aliases only when canonical exists (prevents duplicate empty fields)
+    // Legacy mirror keys (UI convenience)
     if (inputPayload.prospect_company) inputPayload.company_name = inputPayload.prospect_company;
     if (inputPayload.prospect_website) inputPayload.company_website = inputPayload.prospect_website;
     if (inputPayload.prospect_linkedin) inputPayload.company_linkedin = inputPayload.prospect_linkedin;
 
-    // Quick snapshot for diagnostics
     context.log("worker→harness input snapshot", {
       runId,
       page: inputPayload.page,
@@ -333,69 +313,21 @@ module.exports = async function (context, queueItem) {
       usps: Array.isArray(inputPayload.user_usps) ? inputPayload.user_usps.length : 0
     });
 
-    // -------- Status writer & event logger (use your existing helpers) --------
+    // -------- Status writer & event logger --------
     let containerClient;
     let prefix;
 
     async function updateStatus(state, extra = {}) {
       try {
-        if (!containerClient || !prefix) return; // cannot write before setup
+        if (!containerClient || !prefix) return;
         const status = {
           runId,
           state,
-          input: inputPayload,   // <— ensures UI sees the exact inputs used
+          input: inputPayload,
           ...(extra || {}),
           correlationId
         };
         await putJson(containerClient, `${prefix}status.json`, status);
-        // ---------- STAGED MODE: stop here, write evidence pack + minimal scaffold, and return ----------
-        if (CAMPAIGN_STAGED) {
-          // Persist the bucketed evidence the harness would normally consume
-          try {
-            await putJson(containerClient, `${prefix}evidence_pack.json`, evidencePack);
-          } catch (e) {
-            context.log.warn("staged_write_evidence_pack_failed", String(e?.message || e));
-          }
-
-          // (Optional) write a tiny scaffold campaign so the UI can render tabs without the LLM
-          const scaffold = {
-            meta: { staged: true, note: "Staged mode: LLM drafting skipped", runId },
-            executive_summary: [],
-            evidence_log: [],                    // UI can read evidence_log.json instead
-            case_study_library: [],
-            positioning_and_differentiation: {},
-            messaging_matrix: { nonnegotiables: [], matrix: [] },
-            offer_strategy: { landing_page: {}, assets_checklist: [] },
-            channel_plan: { emails: [], linkedin: {} },
-            sales_enablement: { discovery_questions: [], objection_cards: [] },
-            measurement_and_learning: {},
-            compliance_and_governance: {},
-            risks_and_contingencies: [],
-            one_pager_summary: []
-          };
-          try {
-            await putJson(containerClient, `${prefix}campaign.json`, scaffold);
-          } catch (e) {
-            context.log.warn("staged_write_scaffold_failed", String(e?.message || e));
-          }
-
-          // Surface a friendly, explicit state for the UI
-          await updateStatus("DraftReady", {
-            staged: true,
-            completedAt: new Date().toISOString(),
-            evidenceCounts: {
-              website: Array.isArray(evidencePack.website) ? evidencePack.website.length : 0,
-              linkedin: Array.isArray(evidencePack.linkedin) ? evidencePack.linkedin.length : 0,
-              pdf: Array.isArray(evidencePack.pdf) ? evidencePack.pdf.length : 0,
-              directories: Array.isArray(evidencePack.directories) ? evidencePack.directories.length : 0,
-              ixbrlKeys: Object.keys(evidencePack.ixbrl || {}).length,
-              csvKeys: Object.keys(evidencePack.csv || {}).length
-            }
-          });
-
-          logEvent("campaign_worker_completed", "STAGED", { staged: true });
-          return; // <<< short-circuit: skip Phase 3 (LLM) onwards
-        }
       } catch (e) {
         context.log.warn("status_write_failed", { runId, correlationId, message: String(e?.message || e) });
       }
@@ -408,7 +340,7 @@ module.exports = async function (context, queueItem) {
         correlationId,
         durationMs: Date.now() - __startedAtMs,
         outcome,
-        ...extra,
+        ...extra
       });
     };
 
@@ -417,22 +349,17 @@ module.exports = async function (context, queueItem) {
     if (!conn) {
       const msg = "AzureWebJobsStorage not configured";
       context.log.error(msg);
-
-      // Best-effort: write a Failed status so the UI doesn’t stay “Queued”
+      // Best-effort failed status
       try {
         const raw = typeof queueItem === "string" ? queueItem : JSON.stringify(queueItem || {});
         let parsed;
         try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
-
         const runId2 = parsed?.runId;
-        const page2 = parsed?.page || "default";
-        const enq2 = parsed?.enqueuedAt;
-
         if (runId2) {
           const bs = BlobServiceClient.fromConnectionString(conn);
           const cc = bs.getContainerClient(RESULTS_CONTAINER);
           await cc.createIfNotExists();
-          const pfx = `${computePrefix({ page: page2, runId: runId2, enqueuedAt: enq2 })}`;
+          const pfx = `${computePrefix({ runId: runId2 })}`;
           await putJson(cc, `${pfx}status.json`, {
             runId: runId2,
             state: "Failed",
@@ -440,9 +367,7 @@ module.exports = async function (context, queueItem) {
             failedAt: new Date().toISOString()
           });
         }
-      } catch { /* best effort; ignore */ }
-
-      // Throw so the message retries (prevents false "success" + poison)
+      } catch { /* ignore */ }
       throw new Error(msg);
     }
 
@@ -494,7 +419,8 @@ module.exports = async function (context, queueItem) {
       });
       evidence = [];
     }
-    // Build a bucketed pack the harness expects (all env-driven limits remain in the harness)
+
+    // Bucket evidence (used by the harness)
     const evidencePack = { website: [], linkedin: [], ixbrl: {}, pdf: [], directories: [], csv: {} };
     for (const item of (Array.isArray(evidence) ? evidence : [])) {
       const t = String(item?.type || "").toLowerCase();
@@ -506,6 +432,7 @@ module.exports = async function (context, queueItem) {
       else evidencePack.website.push(item);
     }
 
+    // Persist raw evidence log for traceability
     await putJson(containerClient, `${prefix}evidence_log.json`, evidence);
 
     // -------- Phase 3 – Draft campaign (LLM) --------
@@ -517,14 +444,11 @@ module.exports = async function (context, queueItem) {
       // Capture harness signals (e.g., draft_json_parse_error with details.head/tail)
       const code = e?.code || "draft_error";
       const details = e?.details && typeof e.details === "object" ? e.details : undefined;
-
-      // Write a small debug artifact alongside status to inspect parse failures
       try {
         if (details) {
           await putJson(containerClient, `${prefix}draft_parse_debug.json`, {
             code,
             ...details,
-            // ensure we don’t write megabytes by accident
             head: String(details.head || "").slice(0, 4000),
             tail: String(details.tail || "").slice(-4000)
           });
@@ -540,12 +464,11 @@ module.exports = async function (context, queueItem) {
         },
         failedAt: new Date().toISOString()
       });
-
       logEvent("campaign_worker_completed", "Failed", { error: String(e?.message || e), code });
       return;
     }
 
-    // Effective Azure OpenAI config
+    // Azure OpenAI config
     const AZO_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;
     const AZO_API_KEY = process.env.AZURE_OPENAI_API_KEY;
     const AZO_API_VER = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview";
@@ -561,7 +484,7 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
-    // IMPORTANT: pass the normalised inputs into the harness
+    // Generate draft via harness
     let draft;
     try {
       context.log("worker evidencePack summary", {
@@ -572,6 +495,7 @@ module.exports = async function (context, queueItem) {
         ixbrlKeys: Object.keys(evidencePack.ixbrl || {}).length,
         csvKeys: Object.keys(evidencePack.csv || {}).length
       });
+
       draft = await promptHarness.generate({
         schemaPath,
         packs: packsConfig,
@@ -580,10 +504,9 @@ module.exports = async function (context, queueItem) {
           runId,
           page: sanitizePage(inputPayload.page)
         },
-        // pass evidence at the top level (not inside input)
         evidencePack,
         options: {
-          timeoutMs: Number(LLM_TIMEOUT_MS), // env-driven
+          timeoutMs: Number(LLM_TIMEOUT_MS),
           azure: {
             endpoint: AZO_ENDPOINT,
             apiKey: AZO_API_KEY,
@@ -602,11 +525,11 @@ module.exports = async function (context, queueItem) {
       if (typeof draft === "string") {
         try { draft = JSON.parse(draft); } catch { /* leave as string */ }
       }
+
       const prospectSite = inputPayload.prospect_website || inputPayload.company_website || "";
       try {
         draft = sanitizeCaseStudyLibrary(draft, evidence, prospectSite, context);
       } catch (sanErr) {
-        // Don’t fail the run if sanitizer has an issue; just log and continue
         context.log.warn("case_study_sanitizer_failed", String(sanErr?.message || sanErr));
       }
 
@@ -614,8 +537,6 @@ module.exports = async function (context, queueItem) {
     } catch (e) {
       const code = e?.code || "draft_error";
       const details = (e && typeof e.details === "object") ? e.details : undefined;
-
-      // Persist head/tail when the harness says JSON parsing failed
       try {
         if (code === "draft_json_parse_error" && details) {
           await putJson(containerClient, `${prefix}draft_parse_debug.json`, {
@@ -637,10 +558,10 @@ module.exports = async function (context, queueItem) {
         },
         failedAt: new Date().toISOString()
       });
-
       logEvent("campaign_worker_completed", "Failed", { error: String(e?.message || e), code });
       return;
     }
+
     // -------- Phase 4 – Quality Gate (placeholder) --------
     await updateStatus("QualityGate");
 
@@ -673,7 +594,7 @@ module.exports = async function (context, queueItem) {
       const runIdSafe = parsed?.runId ?? "unknown";
       const prefixSafe = typeof parsed?.prefix === "string" && parsed.prefix.length > 0
         ? (parsed.prefix.endsWith("/") ? parsed.prefix : `${parsed.prefix}/`)
-        : computePrefix({ page: parsed?.page || "default", runId: runIdSafe, enqueuedAt: parsed?.enqueuedAt });
+        : computePrefix({ runId: runIdSafe });
 
       await putJson(container, `${prefixSafe}status.json`, {
         runId: runIdSafe,
