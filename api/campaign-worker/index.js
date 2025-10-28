@@ -565,14 +565,35 @@ module.exports = async function (context, queueItem) {
 
       await putJson(containerClient, `${prefix}campaign.json`, draft);
     } catch (e) {
+      const code = e?.code || "draft_error";
+      const details = (e && typeof e.details === "object") ? e.details : undefined;
+
+      // Persist head/tail when the harness says JSON parsing failed
+      try {
+        if (code === "draft_json_parse_error" && details) {
+          await putJson(containerClient, `${prefix}draft_parse_debug.json`, {
+            code,
+            ...details,
+            head: String(details.head || "").slice(0, 4000),
+            tail: String(details.tail || "").slice(-4000)
+          });
+        }
+      } catch (writeDbgErr) {
+        context.log.warn("draft_parse_debug_write_failed", String(writeDbgErr?.message || writeDbgErr));
+      }
+
       await updateStatus("Failed", {
-        error: { code: "draft_error", message: String(e?.message || e) },
+        error: {
+          code,
+          message: String(e?.message || e),
+          ...(details ? { details: { length: details.length ?? null } } : {})
+        },
         failedAt: new Date().toISOString()
       });
-      logEvent("campaign_worker_completed", "Failed", { error: String(e?.message || e) });
+
+      logEvent("campaign_worker_completed", "Failed", { error: String(e?.message || e), code });
       return;
     }
-
     // -------- Phase 4 – Quality Gate (placeholder) --------
     await updateStatus("QualityGate");
 
