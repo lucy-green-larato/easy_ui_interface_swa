@@ -156,6 +156,9 @@ CAMPAIGN NAMING
 - Put a programme name at the TOP of meta.icp_from_csv, first line only, formatted:
   "Campaign: Demand programme for <market> by <company>"
   Then append any ICP notes below (newline-separated).
+  
+SIZE LIMITS
+- Keep arrays compact so the whole document fits: evidence_log ≤ 14 items, case_study_library ≤ 3, competitor_set = 5, discovery_questions 5–7, objection_cards 3, emails exactly 4. Email bodies ~90–120 words each.
 
 EXECUTIVE SUMMARY
 - executive_summary is an array of strings.
@@ -390,7 +393,7 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
   } catch { }
   const maxTokens = Number.isFinite(Number(options.maxTokens))
     ? Number(options.maxTokens)
-    : (ENV_MAX_TOKENS || 3072);
+    : (ENV_MAX_TOKENS || 8192);
   const temperature = (typeof options.temperature === "number") ? options.temperature : 0;
 
   const seedEnv = (process.env.LLM_SEED != null ? Number(process.env.LLM_SEED) : undefined);
