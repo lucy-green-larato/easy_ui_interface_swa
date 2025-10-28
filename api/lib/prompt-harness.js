@@ -22,7 +22,7 @@ const ENV_API_VER = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview"
 const ENV_API_KEY = process.env.AZURE_OPENAI_API_KEY;
 const LLM_TIMEOUT_MS_DEFAULT = Number(process.env.LLM_TIMEOUT_MS || "45000");
 
-const ENV_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS || process.env.AZURE_OPENAI_MAX_TOKENS || "4096");
+const ENV_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS || process.env.AZURE_OPENAI_MAX_TOKENS || "8192");
 
 // Evidence clipping limit driven by env
 const ENV_MAX_EVIDENCE_CHARS = (() => {
@@ -331,12 +331,11 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
     const built = buildDefaultMessages({
       inputs: input,
       evidencePack,
-      packs,           // <- don’t drop this
-      useDocSpec: true // <- your builder can append DOC_SPEC/CSV fusion rules if it supports this flag
+      packs,           
+      useDocSpec: true 
     });
     messages = built.messages;
   } else {
-    // Fallback inline build (keeps you safe even if builder signature lags)
     // Fallback inline build (if builders aren't available)
     const personaText = selectPersona(input);
     const packsLine = (packs?.enabled && Array.isArray(packs.enabled) && packs.enabled.length)
