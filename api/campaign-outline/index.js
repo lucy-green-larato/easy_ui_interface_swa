@@ -1,4 +1,4 @@
-// api/campaign-outline/index.js // v2 · 28-10-2025
+// api/campaign-outline/index.js // v3 · 29-10-2025
 // Queue-triggered function that builds a prose-free campaign outline
 // Inputs:  runs/<runId>/{evidence_log.json, csv_normalized.json, site.json}
 // Output:  runs/<runId>/outline.json
@@ -18,7 +18,7 @@ const fs = require("fs");
 
 // ---- CONFIG ----
 const STORAGE_CONN = process.env.AzureWebJobsStorage;
-const CONTAINER = process.env.RESULTS_CONTAINER || "results";
+const CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 45000);
 const CAMPAIGN_STAGED = String(process.env.CAMPAIGN_STAGED || "").toLowerCase() === "true";
 
@@ -238,16 +238,7 @@ module.exports = async function (context, queueItem) {
     const page = queueItem.page || queueItem?.data?.page || "campaign";
 
     context.log("[campaign-outline] begin", { runId, staged: CAMPAIGN_STAGED });
-    await patchStatus(container, prefix, "Outline", { runId, outlineStartedAt: startedAt, outlineCompletedAt: new Date().toISOString() });
-    try {
-      const { QueueClient } = require("@azure/storage-queue");
-      const qc = new QueueClient(process.env.AzureWebJobsStorage, process.env.CAMPAIGN_QUEUE_NAME || "campaign");
-      await qc.createIfNotExists();
-      const msg = { op: "afteroutline", runId, page, prefix };
-      await qc.sendMessage(Buffer.from(JSON.stringify(msg), "utf8").toString("base64"));
-    } catch (notifyErr) {
-      context.log.warn("[campaign-outline] notify orchestrator failed", String(notifyErr?.message || notifyErr));
-    }
+    await patchStatus(container, prefix, "Outline", { runId, outlineStartedAt: startedAt });
 
     // STAGED MODE: short-circuit with deterministic outline shell
     if (CAMPAIGN_STAGED) {
@@ -276,48 +267,77 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
-    // Inputs
-    const evidenceLog = await getJson(container, `${prefix}evidence_log.json`);
-    if (!evidenceLog || !Array.isArray(evidenceLog.evidence_log)) {
-      throw new Error("Missing or invalid evidence_log.json");
-    }
-    const csvNorm = await getJson(container, `${prefix}csv_normalized.json`); // may be null
-    const site = await getJson(container, `${prefix}site.json`);             // may be null
-
-    // CSV → signal extraction (industry always honoured if present)
-    const csvSignal = {
-      industry:
-        csvNorm?.selectedIndustry ??
-        csvNorm?.industry ??
-        csvNorm?.meta?.industry ??
-        null,
-      spend_band: csvNorm?.ITSpendBand ?? csvNorm?.SpendBand ?? null,
-      top_blockers: csvNorm?.TopBlockers ?? csvNorm?.top_blockers ?? [],
-      top_needs_supplier: csvNorm?.TopNeedsSupplier ?? csvNorm?.top_needs_supplier ?? [],
-      top_purchases: csvNorm?.TopPurchases ?? csvNorm?.top_purchases ?? []
-    };
-
-    // Extract product names from site.json
-    const productNames = (() => {
-      const names = new Set();
-      const add = v => { if (typeof v === "string" && v.trim()) names.add(v.trim()); };
-      try {
-        if (Array.isArray(site?.products)) site.products.forEach(add);
-        if (Array.isArray(site?.pages)) {
-          site.pages.forEach(p => {
-            if (typeof p?.product === "string") add(p.product);
-            if (Array.isArray(p?.headings)) p.headings.forEach(add);
-          });
-        }
-      } catch { }
-      return Array.from(names).slice(0, 12);
+    // ---- Load artifacts (tolerant, validated) ----
+    const evidenceLog = await (async () => {
+      const v = await getJson(container, `${prefix}evidence_log.json`);
+      // evidence_log.json is an ARRAY by contract (can be empty). Fail if wrong shape.
+      if (v == null) return [];
+      if (!Array.isArray(v)) {
+        throw new Error("Invalid evidence_log.json: expected an array");
+      }
+      return v;
     })();
 
+    const csvNorm = await (async () => {
+      const v = await getJson(container, `${prefix}csv_normalized.json`);
+      // tolerate missing/corrupt; downstream will use agnostic defaults
+      return (v && typeof v === "object") ? v : null;
+    })();
+
+    const site = await (async () => {
+      const v = await getJson(container, `${prefix}site.json`);
+      // site.json is currently an array of snapshots; keep as-is (may be null)
+      return v ?? null;
+    })();
+
+    const productsFile = await getJson(container, `${prefix}products.json`); // may be null
+
+    let productNames = Array.isArray(productsFile?.products) ? productsFile.products : null;
+
+    if (!productNames || productNames.length === 0) {
+      // Fallback: extract product-like labels from the site snapshot you already have
+      productNames = (() => {
+        const names = new Set();
+        const add = (v) => { if (typeof v === "string" && v.trim()) names.add(v.trim()); };
+        try {
+          if (Array.isArray(site?.products)) site.products.forEach(add);
+          if (Array.isArray(site?.pages)) {
+            site.pages.forEach(p => {
+              if (typeof p?.product === "string") add(p.product);
+              if (Array.isArray(p?.headings)) p.headings.forEach(add);
+            });
+          }
+        } catch { /* best-effort */ }
+        return Array.from(names).slice(0, 12);
+      })();
+    }
+
+    // ---- CSV → derive mode + active signals (industry honoured if present) ----
+    const mode = (csvNorm && csvNorm.industry_mode === "specific" && csvNorm.selected_industry)
+      ? "specific"
+      : "agnostic";
+
+    const selectedIndustry = (mode === "specific")
+      ? String(csvNorm.selected_industry || "").trim().toLowerCase()
+      : null;
+
+    const srcSignals = (mode === "specific")
+      ? (csvNorm?.signals || {})
+      : (csvNorm?.global_signals || {});
+
+    const csvSignal = {
+      industry_mode: mode,
+      selected_industry: selectedIndustry,
+      spend_band: srcSignals?.spend_band ?? null,
+      top_blockers: Array.isArray(srcSignals?.top_blockers) ? srcSignals.top_blockers : [],
+      top_needs_supplier: Array.isArray(srcSignals?.top_needs_supplier) ? srcSignals.top_needs_supplier : [],
+      top_purchases: Array.isArray(srcSignals?.top_purchases) ? srcSignals.top_purchases : []
+    };
     const harness = loadHarness();
 
     const SYSTEM = `
 Return STRICTLY valid JSON that conforms to the provided outline schema.
-NO prose, NO markdown fences. Use ONLY claim_ids that exist in evidence_log.evidence_log[].claim_id.
+NO prose, NO markdown fences. Use ONLY claim_ids that exist in evidenceLog[].claim_id
 
 GOALS
 - Pick a single selected_industry using CSV signals if present; otherwise choose the closest fit (or "General").
@@ -376,7 +396,6 @@ Return only JSON for this outline schema:
 
     // Write per-run schema and call harness with schemaPath override
     const schemaPathAbs = writeTempOutlineSchema(runId);
-
     let out;
     try {
       const messages = [
@@ -386,6 +405,23 @@ Return only JSON for this outline schema:
 
       out = await harness.generate({
         schemaPath: schemaPathAbs, // <-- CRITICAL: constrain to the outline schema
+
+        // NEW: pass deterministic industry context + buyer signals to the model
+        input: {
+          industry_mode: csvSignal.industry_mode,                 // "specific" | "agnostic"
+          selected_industry: csvSignal.selected_industry,         // string | null
+          csv_signals: {
+            spend_band: csvSignal.spend_band ?? null,
+            top_blockers: csvSignal.top_blockers || [],
+            top_needs_supplier: csvSignal.top_needs_supplier || [],
+            top_purchases: csvSignal.top_purchases || []
+          },
+          product_names: productNames,
+          industry_mode: mode,
+          selected_industry:
+            mode === "specific" ? csvSignal.selected_industry : null
+        },
+
         options: {
           messages,
           timeoutMs: LLM_TIMEOUT_MS,
@@ -430,34 +466,117 @@ Return only JSON for this outline schema:
       return;
     }
 
-    // Post-validate & enrich meta
-    if (!out || typeof out !== "object" || !out.sections) {
-      throw new Error("Model returned invalid outline payload");
-    }
-    out.meta = out.meta || {};
-    out.meta.run_id = runId;
-    out.meta.phase = "Outline";
-    if (!out.meta.selected_industry || typeof out.meta.selected_industry !== "string") {
-      out.meta.selected_industry = csvSignal.industry || "General";
+    // ---- Validate / repair outline BEFORE persisting ----
+    if (!out || typeof out !== "object") {
+      throw new Error("outline_generation_failed: no outline object returned");
     }
 
-    // Persist artifacts
+    // Ensure meta object exists with required fields
+    if (!out.meta || typeof out.meta !== "object") out.meta = {};
+    if (!out.meta.run_id) out.meta.run_id = runId;
+    out.meta.phase = "Outline";
+
+    // Selected industry enforcement (schema puts this under meta)
+    const csvInd = (csvSignal.selected_industry || "").trim().toLowerCase();
+    const outInd = String(out.meta.selected_industry || "").trim().toLowerCase();
+
+    if (mode === "specific") {
+      if (!outInd || outInd !== csvInd) {
+        context.log.warn("[campaign-outline] forcing meta.selected_industry to CSV industry", { csvInd, outInd });
+        out.meta.selected_industry = csvInd || "general";
+      }
+    } else {
+      // agnostic: clear selected_industry (schema still allows string, so set to "General" for clarity)
+      if (outInd) {
+        context.log.warn("[campaign-outline] clearing meta.selected_industry for agnostic mode", { had: outInd });
+      }
+      out.meta.selected_industry = "General";
+    }
+
+    // Ensure input_notes exists and reflect csvSignal + productNames
+    if (!out.input_notes || typeof out.input_notes !== "object") out.input_notes = {};
+    const inNotes = out.input_notes;
+    if (!Array.isArray(inNotes.top_blockers)) inNotes.top_blockers = [];
+    if (!Array.isArray(inNotes.top_needs_supplier)) inNotes.top_needs_supplier = [];
+    if (!Array.isArray(inNotes.top_purchases)) inNotes.top_purchases = [];
+    if (!Array.isArray(inNotes.product_mentions)) inNotes.product_mentions = [];
+
+    inNotes.spend_band = inNotes.spend_band ?? (csvSignal.spend_band ?? "unknown");
+
+    // Merge CSV lists in if model omitted them
+    if (inNotes.top_blockers.length === 0 && csvSignal.top_blockers.length) inNotes.top_blockers = csvSignal.top_blockers;
+    if (inNotes.top_needs_supplier.length === 0 && csvSignal.top_needs_supplier.length) inNotes.top_needs_supplier = csvSignal.top_needs_supplier;
+    if (inNotes.top_purchases.length === 0 && csvSignal.top_purchases.length) inNotes.top_purchases = csvSignal.top_purchases;
+
+    // Add product names if missing
+    if (inNotes.product_mentions.length === 0 && Array.isArray(productNames) && productNames.length) {
+      inNotes.product_mentions = productNames.slice(0, 12);
+    }
+
+    // Ensure sections object and required section keys exist (empty scaffolds if missing)
+    if (!out.sections || typeof out.sections !== "object") out.sections = {};
+    const reqObj = (name) => { if (!out.sections[name] || typeof out.sections[name] !== "object") out.sections[name] = {}; return out.sections[name]; };
+
+    const exec = reqObj("exec");
+    if (!Array.isArray(exec.why_now_ids)) exec.why_now_ids = [];
+    if (!Array.isArray(exec.product_anchor_names)) exec.product_anchor_names = [];
+
+    const positioning = reqObj("positioning");
+    if (!Array.isArray(positioning.differentiator_ids)) positioning.differentiator_ids = [];
+
+    if (!Array.isArray(out.sections.messaging)) out.sections.messaging = [];
+    const offer = reqObj("offer");
+    if (!Array.isArray(offer.what_you_get_from_csv)) offer.what_you_get_from_csv = [];
+    if (!Array.isArray(offer.proof_ids)) offer.proof_ids = [];
+    if (!Array.isArray(offer.outcome_ids)) offer.outcome_ids = [];
+
+    const channel = reqObj("channel");
+    if (!Array.isArray(channel.email_themes)) channel.email_themes = [];
+    if (!Array.isArray(channel.linkedin_themes)) channel.linkedin_themes = [];
+
+    const risks = reqObj("risks");
+    if (!Array.isArray(risks.claim_ids)) risks.claim_ids = [];
+
+    const compliance = reqObj("compliance");
+    if (!Array.isArray(compliance.checklist_ids)) compliance.checklist_ids = [];
+
+    // ---- Persist artifacts AFTER validation/repair ----
     await putJson(container, `${prefix}outline.json`, out);
     await patchStatus(container, prefix, "Outline", { outlineCompletedAt: new Date().toISOString() });
 
+    // Notify orchestrator only after successful persist + status
+    try {
+      const { QueueClient } = require("@azure/storage-queue");
+      const qc = new QueueClient(process.env.AzureWebJobsStorage, process.env.CAMPAIGN_QUEUE_NAME || "campaign");
+      await qc.createIfNotExists();
+      const msg = { op: "afteroutline", runId, page, prefix };
+      await qc.sendMessage(Buffer.from(JSON.stringify(msg), "utf8").toString("base64"));
+    } catch (notifyErr) {
+      context.log.warn("[campaign-outline] notify orchestrator failed", String(notifyErr?.message || notifyErr));
+    }
     context.log("[campaign-outline] success", { runId });
   } catch (err) {
     context.log.error("[campaign-outline] top-level error", String(err?.message || err));
-    // best-effort status
+
+    // ---- Best-effort status write even if local vars are missing ----
     try {
-      const runId = queueItem?.runId || queueItem?.data?.runId || queueItem?.id || "unknown";
-      const svc = blobSvc();
-      const container = svc.getContainerClient(CONTAINER);
-      const prefix = `runs/${runId}/`;
-      await patchStatus(container, prefix, "Failed", {
+      const rid = queueItem?.runId || queueItem?.data?.runId || queueItem?.id || runId || "unknown";
+      const pref = (typeof prefix === "string" && prefix)
+        ? (prefix.endsWith("/") ? prefix : `${prefix}/`)
+        : `runs/${rid}/`;
+
+      // Prefer existing container; else reconstruct one safely
+      const cont = container || (() => {
+        const svc = BlobServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
+        return svc.getContainerClient(CONTAINER);
+      })();
+
+      await patchStatus(cont, pref, "Failed", {
         error: { code: "outline_error", message: String(err?.message || err) },
         outlineFailedAt: new Date().toISOString()
       });
-    } catch { }
+    } catch (writeErr) {
+      context.log.warn("[campaign-outline] failed to write failure status", String(writeErr?.message || writeErr));
+    }
   }
 };

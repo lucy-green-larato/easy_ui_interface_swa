@@ -24,7 +24,6 @@
 //  - When assembling:         Status: "Assemble"  → finally "Completed"
 //
 // SAFETY:
-//  - CAMPAIGN_STAGED short-circuit (writes deterministic stubs; never calls LLM)
 //  - Strong defensive JSON parse/repair for model outputs
 //  - Idempotent writes (overwrites same blob path safely)
 //  - No schema stringify in prompts; we use response_format=json_object and validate ourselves
@@ -37,7 +36,6 @@ const crypto = require("crypto");
 const STORAGE_CONN = process.env.AzureWebJobsStorage;
 const CONTAINER = process.env.RESULTS_CONTAINER || "results";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 60000);
-const CAMPAIGN_STAGED = String(process.env.CAMPAIGN_STAGED || "").toLowerCase() === "true";
 
 // Azure OpenAI (Chat Completions)
 const AZO_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;
@@ -308,14 +306,43 @@ module.exports = async function (context, queueItem) {
   try {
     // Load common inputs
     const outline = await getJson(container, `${prefix}outline.json`);
-    const evidence = await getJson(container, `${prefix}evidence_log.json`);
+    const rawEvidence = await getJson(container, `${prefix}evidence_log.json`);
     const csvNorm = await getJson(container, `${prefix}csv_normalized.json`);
     const site = await getJson(container, `${prefix}site.json`);
+    const evidenceLog = rawEvidence.evidence_log;
+
+    // ---- Product names (single definition) ----
+    let productNames = Array.isArray(outline?.input_notes?.product_mentions)
+      ? outline.input_notes.product_mentions
+      : null;
+
+    if (!productNames || productNames.length === 0) {
+      const productsFile = await getJson(container, `${prefix}products.json`).catch(() => null);
+      productNames = Array.isArray(productsFile?.products) ? productsFile.products : null;
+    }
+
+    if (!productNames || productNames.length === 0) {
+      // site.json fallback — note: NO const here; reuse the same variable
+      productNames = (() => {
+        const names = new Set();
+        const add = v => { if (typeof v === "string" && v.trim()) names.add(v.trim()); };
+        try {
+          if (Array.isArray(site?.products)) site.products.forEach(add);
+          if (Array.isArray(site?.pages)) {
+            site.pages.forEach(p => {
+              if (typeof p?.product === "string") add(p.product);
+              if (Array.isArray(p?.headings)) p.headings.forEach(add);
+            });
+          }
+        } catch { /* best-effort */ }
+        return Array.from(names).slice(0, 12);
+      })();
+    }
 
     if (!outline || !outline.sections) {
       throw new Error("Missing or invalid outline.json");
     }
-    if (!evidence || !Array.isArray(evidence.evidence_log)) {
+    if (!rawEvidence || !Array.isArray(rawEvidence.evidence_log)) {
       throw new Error("Missing or invalid evidence_log.json");
     }
 
@@ -333,128 +360,86 @@ module.exports = async function (context, queueItem) {
       top_purchases: csvNorm?.TopPurchases || csvNorm?.top_purchases || []
     };
 
-    // Product anchors
-    const productNames = (() => {
-      const names = new Set();
-      const add = v => { if (typeof v === "string" && v.trim()) names.add(v.trim()); };
-      try {
-        if (Array.isArray(site?.products)) site.products.forEach(add);
-        if (Array.isArray(site?.pages)) {
-          site.pages.forEach(p => {
-            if (typeof p?.product === "string") add(p.product);
-            if (Array.isArray(p?.headings)) p.headings.forEach(add);
-          });
-        }
-      } catch { }
-      return Array.from(names).slice(0, 12);
-    })();
-
     // Branch by job type
     if (type === "write_section") {
-      const outlineKey = outlineSectionRaw.toLowerCase();
+      const outlineKey = String(outlineSectionRaw || "").toLowerCase();
       if (!SECTION_MAP[outlineKey]) {
         throw new Error(`Unknown section "${outlineSectionRaw}". Expected one of: ${Object.keys(SECTION_MAP).join(", ")}`);
       }
       const finalKey = SECTION_MAP[outlineKey];
 
+      // Status: we're starting this section
       await patchStatus(container, prefix, "SectionWrites", {
         runId,
         writing: finalKey,
         updatedAt: new Date().toISOString()
       });
 
-      // STAGED: write deterministic stub
-      if (CAMPAIGN_STAGED) {
-        const stub = buildStubFor(finalKey, csvSignal, productNames);
-        await putJson(container, `${prefix}sections/${finalKey}.json`, stub);
-        context.log(`[campaign-write] staged stub written: ${finalKey}`);
-        try {
-          const { QueueClient } = require("@azure/storage-queue");
-          const qc = new QueueClient(process.env.AzureWebJobsStorage, process.env.CAMPAIGN_QUEUE_NAME || "campaign");
-          await qc.createIfNotExists();
-          const page = (queueItem && (queueItem.page || queueItem?.data?.page)) || "campaign";
-          const msg = { op: "aftersection", runId, page, prefix, section: finalKey };
-          await qc.sendMessage(Buffer.from(JSON.stringify(msg), "utf8").toString("base64"));
-        } catch (notifyErr) {
-          context.log.warn("[campaign-write] notify aftersection failed", String(notifyErr?.message || notifyErr));
-        }
-        return;
-      }
+      // Plan for this section (from outline); empty object if missing
+      const plan = outline?.sections?.[outlineKey] ?? {};
 
-      // REAL mode: produce section JSON and write it
-      // Real mode: produce section JSON and write it
+      // Hard rule to force product→need mapping in every section
+      const MAP_PRODUCTS_TO_NEEDS_RULE =
+        "When creating the campaign outline or final messaging, always map the company’s products (from product_names) " +
+        "to the buyer needs and blockers (from csv_signals). Each section must reference how at least one of the products " +
+        "addresses a specific buyer need or purchase driver.";
+
+      // Build the section JSON using your builder (LLM or deterministic)
+      // NOTE: evidenceLog is the ARRAY (validated earlier). Use it for prompts/builders.
       const sectionJson = await buildSectionJson({
         finalKey,
-        evidenceLog,
-        outline,
-        csvSignal,
-        siteDoc,
-        options
-      });
-      await putJson(container, `${prefix}sections/${finalKey}.json`, sectionJson);
-      context.log(`[campaign-write] section written: ${finalKey}`);
-
-      // Notify orchestrator (aftersection) — only after successful write + status patch
-      try {
-        const { QueueClient } = require("@azure/storage-queue");
-        const qc = new QueueClient(
-          process.env.AzureWebJobsStorage,
-          process.env.CAMPAIGN_QUEUE_NAME || "campaign"
-        );
-        await qc.createIfNotExists();
-        const page =
-          (queueItem && (queueItem.page || queueItem?.data?.page)) || "campaign";
-        const msg = { op: "aftersection", runId, page, prefix, section: finalKey };
-        await qc.sendMessage(
-          Buffer.from(JSON.stringify(msg), "utf8").toString("base64")
-        );
-      } catch (notifyErr) {
-        context.log.warn(
-          "[campaign-write] notify aftersection failed",
-          String(notifyErr?.message || notifyErr)
-        );
-      }
-
-      // Pull plan for this section from outline
-      const plan = outline.sections[outlineKey] || {};
-
-      // Build prompts and call LLM
-      const system = buildSectionSystem(finalKey);
-      const user = buildSectionUser(finalKey, {
         outline,
         sectionPlan: plan,
-        evidence,
+        evidence: evidenceLog,      // ← array form only
         csvSignal,
-        products: productNames
+        products: productNames,
+        site,
+        rules: { mapProductsToNeeds: MAP_PRODUCTS_TO_NEEDS_RULE }
+        // If your builder supports extra context (industry_mode/selected_industry), add here.
       });
 
-      let out;
-      try {
-        out = await callChatJsonObject({ system, user, timeoutMs: LLM_TIMEOUT_MS });
-      } catch (e) {
-        // write parse debug if present
-        const details = e?.details && typeof e.details === "object" ? e.details : undefined;
-        if (details) {
-          try {
-            await putJson(container, `${prefix}draft_parse_debug.json`, {
-              code: e.code || "draft_error",
-              ...details,
-              head: String(details.head || "").slice(0, 4000),
-              tail: String(details.tail || "").slice(-4000)
-            });
-          } catch { }
-        }
-        throw e;
+      // Keep only the requested section key (defensive)
+      const filtered = filterToSection(finalKey, sectionJson);
+
+      // Invariant: ensure at least one explicit product→need mapping exists
+      function hasProductMapping(sec, names) {
+        if (!sec || !names || names.length === 0) return false;
+        // Preferred: structured mappings, if your builder emits them
+        if (Array.isArray(sec.mappings) && sec.mappings.some(m => m?.product && m?.need)) return true;
+        // Fallback: simple heuristic — any product name present in this section’s JSON
+        const hay = JSON.stringify(sec).toLowerCase();
+        return names.some(n => typeof n === "string" && n && hay.includes(n.toLowerCase()));
       }
 
-      // Ensure we only keep the section key we asked for (defensive)
-      const filtered = filterToSection(finalKey, out);
+      if (!hasProductMapping(filtered[finalKey], productNames)) {
+        const msg = `[campaign-write] invariant failed: no product→need mapping for section '${finalKey}'`;
+        context.log.warn(msg);
+        await patchStatus(container, prefix, "Failed", {
+          error: { code: "product_mapping_missing", message: msg },
+          section: finalKey,
+          failedAt: new Date().toISOString()
+        });
+        throw new Error("product_mapping_missing");
+      }
 
+      // Persist this section
       await putJson(container, `${prefix}sections/${finalKey}.json`, filtered);
       context.log(`[campaign-write] wrote section ${finalKey}`);
+
+      // Notify orchestrator AFTER successful write
+      try {
+        const { QueueClient } = require("@azure/storage-queue");
+        const qc = new QueueClient(process.env.AzureWebJobsStorage, process.env.CAMPAIGN_QUEUE_NAME || "campaign");
+        await qc.createIfNotExists();
+        const page = (queueItem && (queueItem.page || queueItem?.data?.page)) || "campaign";
+        const msg = { op: "aftersection", runId, page, prefix, section: finalKey };
+        await qc.sendMessage(Buffer.from(JSON.stringify(msg), "utf8").toString("base64"));
+      } catch (notifyErr) {
+        context.log.warn("[campaign-write] notify aftersection failed", String(notifyErr?.message || notifyErr));
+      }
+
       return;
     }
-
     // ASSEMBLE
     if (type === "assemble") {
       await patchStatus(container, prefix, "Assemble", {
@@ -471,7 +456,7 @@ module.exports = async function (context, queueItem) {
         },
         input_proof: {
           outline_sha256: sha256OfJson(outline),
-          evidence_log_sha256: sha256OfJson(evidence),
+          evidence_log_sha256: sha256OfJson(rawEvidence),
           csv_normalized_sha256: sha256OfJson(csvNorm || {}),
           site_sha256: sha256OfJson(site || {})
         }

@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js Split campaign build. 28-10-2025- v1.1
+// /api/campaign-evidence/index.js Split campaign build. 28-10-2025- v1.2
 // Node 20, Azure Functions v4
 // Purpose: Fetch/prepare raw evidence artifacts + CSV normalization for a run.
 // Artifacts written under: <prefix>/
@@ -6,28 +6,31 @@
 //   - linkedin.json
 //   - pdf_extracts.json
 //   - directories.json
-//   - csv_normalized.json
-//   - status.json (state=EvidenceFetch or Failed)
+//   - csv_normalized.json  (canonical: industry_mode/specific-vs-agnostic + signals)
+//   - evidence_log.json    (array; empty placeholder for now)
+//   - status.json          (state=EvidenceDigest or Failed)
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const crypto = require("node:crypto");
 
 // ---------- Config ----------
-const CONTAINER = process.env.CAMPAIGN_CONTAINER || "campaign";
+const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const FETCH_TIMEOUT_MS = Number(process.env.HTTP_FETCH_TIMEOUT_MS || 8000);
+const START_QUEUE_NAME = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 
 // ---------- Azure helpers ----------
-function getBlobClient() {
+function getContainerClient() {
   const svc = BlobServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
-  return svc.getContainerClient(CONTAINER);
+  return svc.getContainerClient(RESULTS_CONTAINER);
 }
 
 async function getJson(containerClient, blobPath) {
   try {
     const blob = containerClient.getBlobClient(blobPath);
     if (!(await blob.exists())) return null;
-    const buf = await (await blob.download()).readableStreamBody?.transformToByteArray();
-    return buf ? JSON.parse(Buffer.from(buf).toString("utf8")) : null;
+    const dl = await blob.download();
+    const text = await streamToString(dl.readableStreamBody);
+    return JSON.parse(text);
   } catch {
     return null;
   }
@@ -53,8 +56,19 @@ async function downloadText(containerClient, blobPath) {
   const blob = containerClient.getBlobClient(blobPath);
   if (!(await blob.exists())) return null;
   const resp = await blob.download();
-  const arr = await resp.readableStreamBody?.transformToByteArray();
-  return arr ? Buffer.from(arr).toString("utf8") : null;
+  return streamToString(resp.readableStreamBody);
+}
+
+// ---------- Generic utils ----------
+async function streamToString(readable) {
+  if (!readable) return "";
+  const chunks = [];
+  for await (const chunk of readable) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function hostnameOf(u) {
+  try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return null; }
 }
 
 // ---------- Status helpers ----------
@@ -94,8 +108,7 @@ async function httpGet(url, timeoutMs = FETCH_TIMEOUT_MS) {
 
 // ---------- CSV normaliser (no external deps) ----------
 function parseCsvLoose(csvText) {
-  // Simple CSV (comma or semicolon; quotes respected for commas/newlines)
-  // For your data this is sufficient; upgrade to csv-parse if needed later.
+  // Simple CSV parser; quotes for commas/newlines respected.
   const rows = [];
   if (!csvText || !csvText.trim()) return rows;
 
@@ -103,7 +116,7 @@ function parseCsvLoose(csvText) {
   const pushCell = () => { row.push(cur); cur = ""; };
   const pushRow = () => { rows.push(row.map(s => s.trim())); row = []; };
 
-  const s = csvText.replace(/\r\n/g, "\n"); // normalise
+  const s = csvText.replace(/\r\n/g, "\n");
   while (i < s.length) {
     const ch = s[i];
     if (inQ) {
@@ -119,25 +132,29 @@ function parseCsvLoose(csvText) {
       cur += ch; i++; continue;
     }
   }
-  pushCell(); // last cell
+  pushCell();
   pushRow();
   return rows;
 }
 
 function normalizeCsv(rows) {
-  // Expect headers with industry-related fields; keep robust defaults.
+  // Returns per-industry aggregates and dominant industry by sample size.
   if (!rows.length) {
     return { industries: [], dominant_industry: null, by_industry: {} };
   }
-  const header = rows[0].map(h => h.toLowerCase());
-  const idx = (name) => header.findIndex(h => h === name.toLowerCase());
+  const header = rows[0].map(h => h.trim());
+  const idx = (name) => header.findIndex(h => h.toLowerCase() === name.toLowerCase());
 
-  // Example expected headers (adjust to your real CSV):
-  const iIndustry = idx("SimplifiedIndustry") >= 0 ? idx("SimplifiedIndustry") : idx("industry");
+  // Try flexible header keys
+  const iIndustry = (() => {
+    const keys = ["SimplifiedIndustry", "Industry", "industry"];
+    for (const k of keys) { const i = idx(k); if (i >= 0) return i; }
+    return -1;
+  })();
   const iBlockers = idx("TopBlockers");
   const iPurchases = idx("TopPurchases");
   const iNeeds = idx("TopNeedsSupplier");
-  const iSpend = idx("SpendDistribution"); // can be JSON or "7–10%:38|10%+:19" etc.
+  const iSpend = idx("SpendDistribution");
 
   const agg = new Map(); // industry -> { TopBlockers:Set, TopPurchases:Set, TopNeedsSupplier:Set, SpendDistribution:Object, SampleSize:Number }
 
@@ -169,10 +186,8 @@ function normalizeCsv(rows) {
       let obj = {};
       const raw = row[iSpend].trim();
       try {
-        // Try JSON first
         obj = JSON.parse(raw);
       } catch {
-        // Accept "7–10%:38|10%+:19"
         raw.split("|").forEach(kv => {
           const [k, v] = kv.split(":");
           if (k && v && Number.isFinite(Number(v))) obj[k.trim()] = Number(v);
@@ -186,7 +201,6 @@ function normalizeCsv(rows) {
     bucket.SampleSize++;
   }
 
-  // Build output
   const by_industry = {};
   let dominant = null, bestN = -1;
   for (const [ind, b] of agg.entries()) {
@@ -209,6 +223,49 @@ function normalizeCsv(rows) {
   };
 }
 
+// --- Product extraction (lightweight heuristic)
+async function extractProductsFromSite(html) {
+  if (!html || typeof html !== "string") return [];
+  const lines = html.split(/\r?\n/).slice(0, 1000); // safety cap
+  const out = new Set();
+
+  for (const line of lines) {
+    // look at headings, list items, obvious “product” blocks
+    if (/(<h2|<h3|<li|product|solutions|services)/i.test(line)) {
+      const m = line.match(/>([^<>]{3,80})</);
+      if (m) {
+        const val = m[1].trim();
+        // filter obvious nav/utility labels
+        if (val && !/^(home|about|contact|login|support|learn|blog)$/i.test(val)) {
+          out.add(val);
+        }
+      }
+    }
+  }
+  return Array.from(out);
+}
+
+// Helpers for canonical csv_normalized
+function topByFrequency(arr, limit = 8) {
+  const freq = new Map();
+  for (const s of Array.isArray(arr) ? arr : []) {
+    const t = String(s || "").trim();
+    if (!t) continue;
+    freq.set(t, (freq.get(t) || 0) + 1);
+  }
+  return [...freq.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([k]) => k)
+    .slice(0, limit);
+}
+function resolveIndustry({ userIndustry, csvIndustry, csvHasMultipleSectors }) {
+  const u = (userIndustry || "").trim().toLowerCase();
+  if (u) return u;
+  const c = (csvIndustry || "").trim().toLowerCase();
+  if (c && !csvHasMultipleSectors) return c;
+  return null; // agnostic
+}
+
 // ---------- Evidence collectors (lightweight & safe) ----------
 async function collectWebsiteSnapshots(url) {
   if (!url) return [];
@@ -219,21 +276,22 @@ async function collectWebsiteSnapshots(url) {
   return [
     {
       url,
+      host: hostnameOf(url),
       fetchedAt: nowIso(),
       type: "html",
       bytes: Buffer.byteLength(html, "utf8"),
       sha1: hash,
-      snippet: html.slice(0, 4000) // short preview, not full page dump
+      snippet: html.slice(0, 4000)
     }
   ];
 }
 
 async function collectLinkedInSnapshot(url) {
   if (!url) return [];
-  // LI often blocks; we only record metadata without scraping.
   return [
     {
       url,
+      host: hostnameOf(url),
       fetchedAt: nowIso(),
       type: "link",
       note: "LinkedIn metadata not scraped; stored as reference only."
@@ -243,30 +301,34 @@ async function collectLinkedInSnapshot(url) {
 
 // ---------- Main ----------
 module.exports = async function (context, job) {
-  const container = getBlobClient();
+  const container = getContainerClient();
 
   // Validate/shape incoming job
-  const runId = job?.runId || "";
+  const runId = job?.runId || crypto.randomUUID();
   let prefix = job?.prefix || "";
   const input = job?.input || job?.inputs || job || {};
 
-  if (!prefix) {
-    // Normalise to "<some-prefix>/"
-    const y = new Date();
-    prefix = `campaign/campaign/${y.getUTCFullYear()}/${String(y.getUTCMonth() + 1).padStart(2, "0")}/${String(y.getUTCDate()).padStart(2, "0")}/${runId || crypto.randomUUID()}/`;
+  // Canonical prefix fallback if absent
+  if (!prefix || typeof prefix !== "string") {
+    prefix = `runs/${runId}/`;
+  } else if (!prefix.endsWith("/")) {
+    prefix = `${prefix}/`;
   }
 
-  // Write status: EvidenceFetch (entered)
+  // Enter EvidenceDigest
   await updateStatus(container, prefix, {
     runId,
-    state: "EvidenceFetch",
+    state: "EvidenceDigest",
     input: {
       page: input.page || null,
       rowCount: Number(input.rowCount || 0),
       prospect_company: input.prospect_company || input.company_name || null,
       prospect_website: input.prospect_website || input.company_website || null,
       prospect_linkedin: input.prospect_linkedin || input.company_linkedin || null,
-      user_usps: Array.isArray(input.user_usps) ? input.user_usps : (input.user_usps ? String(input.user_usps).split(/[;,]/).map(s => s.trim()).filter(Boolean) : [])
+      user_usps: Array.isArray(input.user_usps)
+        ? input.user_usps
+        : (input.user_usps ? String(input.user_usps).split(/[;,]/).map(s => s.trim()).filter(Boolean) : []),
+      selected_industry: (input.selected_industry || input.industry || "").trim().toLowerCase() || null
     },
     updatedAt: nowIso()
   });
@@ -276,6 +338,14 @@ module.exports = async function (context, job) {
     const site = await collectWebsiteSnapshots(
       input.prospect_website || input.company_website || ""
     );
+    // NEW: derive products.json from the first site HTML snapshot
+    try {
+      const html = site?.[0]?.snippet || "";
+      const products = await extractProductsFromSite(html);
+      await putJson(container, `${prefix}products.json`, { products });
+    } catch (e) {
+      context.log.warn("[campaign-evidence] product extraction skipped", String(e?.message || e));
+    }
     await putJson(container, `${prefix}site.json`, site);
 
     // 2) LINKEDIN
@@ -285,31 +355,97 @@ module.exports = async function (context, job) {
     await putJson(container, `${prefix}linkedin.json`, li);
 
     // 3) Placeholders for PDF & directories (ready for later enrichers)
-    await putJson(container, `${prefix}pdf_extracts.json`, []);     // to be filled by a PDF worker
-    await putJson(container, `${prefix}directories.json`, []);      // to be filled by a directory worker
+    await putJson(container, `${prefix}pdf_extracts.json`, []);
+    await putJson(container, `${prefix}directories.json`, []);
 
-    // 4) CSV → csv_normalized.json
-    //    - Look for any .csv file under the run prefix
-    //    - If none: write an empty structure
+    // 4) CSV → csv_normalized.json (canonical)
     let csvText = null;
     const csvNames = await listCsvUnderPrefix(container, prefix);
     if (csvNames.length) {
       // Pick the first CSV found under the run prefix
       csvText = await downloadText(container, csvNames[0]);
     }
-    // Allow CSV text to be inlined in job.input.csvText (dev convenience)
-    if (!csvText && typeof input.csvText === "string") csvText = input.csvText;
+    if (!csvText && typeof input.csvText === "string") csvText = input.csvText; // dev convenience
 
-    let csvNormalized = { industries: [], dominant_industry: null, by_industry: {} };
+    // Always materialize an evidence_log.json (even if empty) to satisfy downstream readers
+    await putJson(container, `${prefix}evidence_log.json`, []);
+
+    // Default scaffold
+    let csvNormalizedCanonical = {
+      selected_industry: null,
+      industry_mode: "agnostic",
+      signals: { spend_band: null, top_blockers: [], top_needs_supplier: [], top_purchases: [] },
+      global_signals: { spend_band: null, top_blockers: [], top_needs_supplier: [], top_purchases: [] },
+      meta: { rows: 0, source: null, csv_has_multiple_sectors: false }
+    };
+
     if (csvText && csvText.trim()) {
       const rows = parseCsvLoose(csvText);
-      csvNormalized = normalizeCsv(rows);
+      const agg = normalizeCsv(rows);
+
+      // Resolve mixed/separate industry state
+      const industries = Array.isArray(agg.industries) ? agg.industries : [];
+      const csvHasMultipleSectors = industries.filter(x => x && x !== "Unknown").length > 1;
+      const userSelectedIndustry = (input?.selected_industry || input?.industry || "").trim().toLowerCase() || "";
+      const csvIndustry = (agg.dominant_industry || "").trim().toLowerCase();
+      const selectedIndustry = resolveIndustry({
+        userIndustry: userSelectedIndustry,
+        csvIndustry,
+        csvHasMultipleSectors
+      });
+
+      // Build global frequency lists across all industries
+      const allBlockers = [];
+      const allNeeds = [];
+      const allPurchases = [];
+      let totalRows = 0;
+
+      for (const ind of industries) {
+        const pack = agg.by_industry[ind] || {};
+        allBlockers.push(...(Array.isArray(pack.TopBlockers) ? pack.TopBlockers : []));
+        allNeeds.push(...(Array.isArray(pack.TopNeedsSupplier) ? pack.TopNeedsSupplier : []));
+        allPurchases.push(...(Array.isArray(pack.TopPurchases) ? pack.TopPurchases : []));
+        totalRows += Number(pack.SampleSize || 0);
+      }
+
+      const globalSignals = {
+        spend_band: null, // optional: infer from SpendDistribution if you want
+        top_blockers: topByFrequency(allBlockers, 8),
+        top_needs_supplier: topByFrequency(allNeeds, 8),
+        top_purchases: topByFrequency(allPurchases, 8)
+      };
+
+      const industryMode = selectedIndustry ? "specific" : "agnostic";
+      let industrySignals = { spend_band: null, top_blockers: [], top_needs_supplier: [], top_purchases: [] };
+
+      if (selectedIndustry) {
+        const pack = agg.by_industry[industries.find(x => x.toLowerCase() === selectedIndustry)] || {};
+        industrySignals = {
+          spend_band: null,
+          top_blockers: Array.isArray(pack.TopBlockers) ? pack.TopBlockers : [],
+          top_needs_supplier: Array.isArray(pack.TopNeedsSupplier) ? pack.TopNeedsSupplier : [],
+          top_purchases: Array.isArray(pack.TopPurchases) ? pack.TopPurchases : []
+        };
+      }
+
+      csvNormalizedCanonical = {
+        selected_industry: selectedIndustry,
+        industry_mode: industryMode,
+        signals: industrySignals,
+        global_signals: globalSignals,
+        meta: {
+          rows: Math.max(0, rows.length - 1),
+          source: csvNames[0] || "inline",
+          csv_has_multiple_sectors: !!csvHasMultipleSectors
+        }
+      };
     }
-    await putJson(container, `${prefix}csv_normalized.json`, csvNormalized);
+
+    await putJson(container, `${prefix}csv_normalized.json`, csvNormalizedCanonical);
 
     // 5) Finalise phase
     await updateStatus(container, prefix, {
-      state: "EvidenceFetch",
+      state: "EvidenceDigest",
       phase: "completed",
       updatedAt: nowIso(),
       artifacts: {
@@ -317,28 +453,31 @@ module.exports = async function (context, job) {
         linkedin: "linkedin.json",
         pdf_extracts: "pdf_extracts.json",
         directories: "directories.json",
-        csv: "csv_normalized.json"
+        csv: "csv_normalized.json",
+        evidence_log: "evidence_log.json"
       }
     });
+
     // Notify orchestrator (afterevidence)
     try {
       const { QueueClient } = require("@azure/storage-queue");
-      const qc = new QueueClient(process.env.AzureWebJobsStorage, process.env.CAMPAIGN_QUEUE_NAME || "campaign");
+      const qc = new QueueClient(process.env.AzureWebJobsStorage, START_QUEUE_NAME);
       await qc.createIfNotExists();
       const msg = { op: "afterevidence", runId, page: (input.page || "campaign"), prefix };
       await qc.sendMessage(Buffer.from(JSON.stringify(msg), "utf8").toString("base64"));
     } catch (notifyErr) {
       context.log.warn("[campaign-evidence] notify orchestrator failed", String(notifyErr?.message || notifyErr));
     }
+
     context.log("[campaign-evidence] completed", { runId, prefix });
   } catch (e) {
     const message = String(e?.message || e);
     context.log.error("[campaign-evidence] failed", message);
 
-    await updateStatus(container, prefix, {
+    await updateStatus(getContainerClient(), prefix, {
       state: "Failed",
       error: { code: "evidence_error", message },
       failedAt: nowIso()
     });
   }
-}
+};

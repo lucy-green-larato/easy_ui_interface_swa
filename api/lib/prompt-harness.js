@@ -131,6 +131,9 @@ EVIDENCE RULES
   • For company site claims, reference the exact product page (title + URL), and include a short verbatim quote in 'quote' when available.
   • Avoid generic marketing claims with no figures; omit if not evidenced.
 
+CAMPAIGN CREATION RULES
+- When creating the campaign outline or final messaging, always map the company’s products (from product_names) to the buyer needs and blockers (from csv_signals). Each section must reference how at least one of the products addresses a specific buyer need or purchase driver.
+
 - STRICT NO-FABRICATION FOR CASE STUDIES:
   • Only include case studies that are evidenced by the evidence pack OR are direct pages on the same host as the provided company website.
   • If you cannot find any genuine case studies, return an empty array for the case_study_library section (do not invent customers or URLs).
