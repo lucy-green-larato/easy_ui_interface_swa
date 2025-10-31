@@ -500,16 +500,22 @@ Return only JSON for this outline schema:
     // Ensure input_notes exists and reflect csvSignal + productNames
     if (!out.input_notes || typeof out.input_notes !== "object") out.input_notes = {};
     const inNotes = out.input_notes;
+
+    // Normalise array fields
     if (!Array.isArray(inNotes.top_blockers)) inNotes.top_blockers = [];
     if (!Array.isArray(inNotes.top_needs_supplier)) inNotes.top_needs_supplier = [];
     if (!Array.isArray(inNotes.top_purchases)) inNotes.top_purchases = [];
     if (!Array.isArray(inNotes.product_mentions)) inNotes.product_mentions = [];
-    if (typeof inNotes.campaign_requirements !== "string") {
-      inNotes.campaign_requirement = (typeof runConfig.campaign_requirement === "string" &&
-        ["upsell", "win-back", "growth"].includes(runConfig.campaign_requirement))
-        ? runConfig.campaign_requirement
-        : null;
+
+    // --- NEW: persist objective + competitors (singular: campaign_requirement) ---
+    if (typeof inNotes.campaign_requirement !== "string") {
+      inNotes.campaign_requirement =
+        (typeof runConfig.campaign_requirement === "string" &&
+          ["upsell", "win-back", "growth"].includes(runConfig.campaign_requirement))
+          ? runConfig.campaign_requirement
+          : null;
     }
+
     if (!Array.isArray(inNotes.relevant_competitors)) inNotes.relevant_competitors = [];
     if (Array.isArray(runConfig.relevant_competitors) && runConfig.relevant_competitors.length) {
       const cleaned = runConfig.relevant_competitors
@@ -519,13 +525,18 @@ Return only JSON for this outline schema:
       if (inNotes.relevant_competitors.length === 0) inNotes.relevant_competitors = cleaned;
     }
 
-
+    // Carry over CSV-derived signals if model omitted them
     inNotes.spend_band = inNotes.spend_band ?? (csvSignal.spend_band ?? "unknown");
 
-    // Merge CSV lists in if model omitted them
-    if (inNotes.top_blockers.length === 0 && csvSignal.top_blockers.length) inNotes.top_blockers = csvSignal.top_blockers;
-    if (inNotes.top_needs_supplier.length === 0 && csvSignal.top_needs_supplier.length) inNotes.top_needs_supplier = csvSignal.top_needs_supplier;
-    if (inNotes.top_purchases.length === 0 && csvSignal.top_purchases.length) inNotes.top_purchases = csvSignal.top_purchases;
+    if (inNotes.top_blockers.length === 0 && Array.isArray(csvSignal.top_blockers) && csvSignal.top_blockers.length) {
+      inNotes.top_blockers = csvSignal.top_blockers;
+    }
+    if (inNotes.top_needs_supplier.length === 0 && Array.isArray(csvSignal.top_needs_supplier) && csvSignal.top_needs_supplier.length) {
+      inNotes.top_needs_supplier = csvSignal.top_needs_supplier;
+    }
+    if (inNotes.top_purchases.length === 0 && Array.isArray(csvSignal.top_purchases) && csvSignal.top_purchases.length) {
+      inNotes.top_purchases = csvSignal.top_purchases;
+    }
 
     // Add product names if missing
     if (inNotes.product_mentions.length === 0 && Array.isArray(productNames) && productNames.length) {

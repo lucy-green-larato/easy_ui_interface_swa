@@ -685,6 +685,7 @@ window.CampaignUI = window.CampaignUI || {};
       user_usps,
       buyer_industry,
       csvSummary,
+      relevant_competitors,
       campaign_requirement
     };
 
