@@ -94,8 +94,19 @@
         <datalist id="industryOptions"></datalist>
         <label style="margin-top:8px">USPs / differentiators</label>
         <textarea id="companyUsps" class="textarea" rows="3"
-          placeholder="Resilient connectivity; Millisecond failover"></textarea>
+          placeholder="List your differentiatorss here. (Comma, semicolon, or newline separated)"></textarea>
       </div>
+
+      <label style="margin-top:8px">Relevant competitors (comma, semicolon, or newline separated)</label>
+      <textarea id="relevantCompetitors" class="textarea" rows="2" placeholder="Gamma; Colt; Kerv"></textarea>
+
+      <label style="margin-top:8px">Campaign goal</label>
+      <select id="campaignRequirement">
+        <option value="">(unspecified)</option>
+        <option value="upsell">Upsell</option>
+        <option value="win-back">Win-back</option>
+        <option value="growth">Growth</option>
+      </select>
 
       <div class="group">
         <h3>Options</h3>

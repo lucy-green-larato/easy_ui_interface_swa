@@ -651,6 +651,18 @@ window.CampaignUI = window.CampaignUI || {};
       ? uspsText.split(/\r?\n|;|,/).map(s => s.trim()).filter(Boolean)
       : [];
 
+    // Competitors: accept comma/semicolon/newline; normalise to array, cap at 8
+    const compText = ($("#relevantCompetitors")?.value || "").trim();
+    const relevant_competitors = compText
+      ? compText.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 8)
+      : [];
+
+    // Campaign requirement: strict enum or null
+    const campaign_requirement_raw = ($("#campaignRequirement")?.value || "").trim().toLowerCase();
+    const campaign_requirement = ["upsell", "win-back", "growth"].includes(campaign_requirement_raw)
+      ? campaign_requirement_raw
+      : null;
+
     // Optional industry (if you add the field in index.html)
     const buyer_industry = ($("#buyerIndustry")?.value || "").trim() || null;
 
@@ -672,7 +684,8 @@ window.CampaignUI = window.CampaignUI || {};
       prospect_linkedin,
       user_usps,
       buyer_industry,
-      csvSummary
+      csvSummary,
+      campaign_requirement
     };
 
     const startResp = await http("POST", API.start, { body: payload, timeoutMs: 25000 });

@@ -115,6 +115,20 @@ module.exports = async function (context, req) {
         body.user_usps = body.usps.map(s => String(s ?? "").trim()).filter(Boolean);
       }
     }
+    // Relevant competitors: array or delimited string; cap to 8
+    let relevant_competitors = [];
+    if (Array.isArray(body.relevant_competitors)) {
+      relevant_competitors = body.relevant_competitors.map(s => (s == null ? "" : String(s)).trim()).filter(Boolean).slice(0, 8);
+    } else if (typeof body.relevant_competitors === "string") {
+      relevant_competitors = body.relevant_competitors.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 8);
+    }
+
+    // Campaign requirement: strict enum
+    let campaign_requirement = null;
+    if (typeof body.campaign_requirement === "string") {
+      const v = body.campaign_requirement.trim().toLowerCase();
+      campaign_requirement = ["upsell", "win-back", "growth"].includes(v) ? v : null;
+    }
 
     // sales model / call type normalisation
     if (!body.sales_model && body.salesModel) body.sales_model = String(body.salesModel).trim();
@@ -244,7 +258,11 @@ module.exports = async function (context, req) {
       prospect_company,
       prospect_website,
       prospect_linkedin,
-      user_usps
+      user_usps,
+      runConfig: {
+        campaign_requirement,
+        relevant_competitors
+      }
     };
 
     // Trim oversized payload (Azure Queue limit ~64KB post-base64)

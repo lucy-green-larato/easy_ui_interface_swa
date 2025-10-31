@@ -236,6 +236,7 @@ module.exports = async function (context, queueItem) {
     const container = svc.getContainerClient(CONTAINER);
     const prefix = queueItem.prefix || `runs/${runId}/`;
     const page = queueItem.page || queueItem?.data?.page || "campaign";
+    const runConfig = (queueItem && queueItem.runConfig) || {};
 
     context.log("[campaign-outline] begin", { runId, staged: CAMPAIGN_STAGED });
     await patchStatus(container, prefix, "Outline", { runId, outlineStartedAt: startedAt });
@@ -359,6 +360,9 @@ ${safeForPrompt(csvSignal)}
 
 Input: site product/name hints (if any):
 ${safeForPrompt(productNames)}
+
+Objective (campaignRequirement): ${safeForPrompt(runConfig.campaign_requirement || "unspecified")}
+Competitors (if any): ${safeForPrompt(runConfig.relevant_competitors || [])}
 
 Return only JSON for this outline schema:
 {
@@ -500,6 +504,21 @@ Return only JSON for this outline schema:
     if (!Array.isArray(inNotes.top_needs_supplier)) inNotes.top_needs_supplier = [];
     if (!Array.isArray(inNotes.top_purchases)) inNotes.top_purchases = [];
     if (!Array.isArray(inNotes.product_mentions)) inNotes.product_mentions = [];
+    if (typeof inNotes.campaign_requirements !== "string") {
+      inNotes.campaign_requirement = (typeof runConfig.campaign_requirement === "string" &&
+        ["upsell", "win-back", "growth"].includes(runConfig.campaign_requirement))
+        ? runConfig.campaign_requirement
+        : null;
+    }
+    if (!Array.isArray(inNotes.relevant_competitors)) inNotes.relevant_competitors = [];
+    if (Array.isArray(runConfig.relevant_competitors) && runConfig.relevant_competitors.length) {
+      const cleaned = runConfig.relevant_competitors
+        .filter(x => typeof x === "string" && x.trim())
+        .map(x => x.trim())
+        .slice(0, 8);
+      if (inNotes.relevant_competitors.length === 0) inNotes.relevant_competitors = cleaned;
+    }
+
 
     inNotes.spend_band = inNotes.spend_band ?? (csvSignal.spend_band ?? "unknown");
 

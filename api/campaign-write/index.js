@@ -186,6 +186,10 @@ STYLE:
 VALIDATION:
 - All URLs must be https.
 - Arrays must be present even if empty when specified below.
+
+MANDATORY INPUT USAGE:
+- If an objective (campaignRequirement) is provided, tune tone, prioritisation, channels, and KPIs to that objective ("upsell" | "win-back" | "growth").
+- If competitors are provided, reflect them concisely in Positioning (clear, fair contrasts with citations). Do not fabricate claims; if no citation exists, state "no external citation available".
 `.trim();
 }
 
@@ -194,6 +198,16 @@ function buildSectionUser(finalKey, { outline, sectionPlan, evidence, csvSignal,
   const ev = safeForPrompt(evidence);
   const csv = safeForPrompt(csvSignal);
   const prod = safeForPrompt(products);
+  // Pull objective + competitors from outline.input_notes (persisted by campaign-outline)
+  const inNotes = (outline && outline.input_notes) || {};
+  const campaignRequirement = (typeof inNotes.campaign_requirement === "string" &&
+    ["upsell", "win-back", "growth"].includes(inNotes.campaign_requirement))
+    ? inNotes.campaign_requirement
+    : null;
+
+  const competitors = Array.isArray(inNotes.relevant_competitors)
+    ? inNotes.relevant_competitors.filter(x => typeof x === "string" && x.trim()).slice(0, 8)
+    : [];
 
   // Minimal target JSON shape is described to the model per section
   const targets = {
@@ -274,6 +288,8 @@ Context:
 - Evidence catalog (claim_id, title, url, source_type, summary, quote): ${ev}
 - CSV signals (industry, spend band, blockers, needs, purchases): ${csv}
 - Product name anchors (from site): ${prod}
+- Objective (campaignRequirement): ${campaignRequirement ?? "unspecified"}
+- Competitors (if any): ${safeForPrompt(competitors)}
 
 Use ONLY claim_ids present in the evidence catalog when citing; prefer Ofcom/ONS/DSIT where relevant.
 Select content aligned with the outline plan (claim_ids/themes provided for this section).
