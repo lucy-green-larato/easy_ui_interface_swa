@@ -7,7 +7,7 @@
     {
       "route": "/api/campaign-start",
       "methods": ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
-      "allowedRoles": ["anonymous"],   // TEMP to isolate auth vs routing
+      "allowedRoles": ["anonymous"],
       "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/campaign-start"
     },
     {
