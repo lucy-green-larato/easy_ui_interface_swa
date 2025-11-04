@@ -1,4 +1,21 @@
 {
+  "routes": [
+    {
+      "route": "/api/campaign-start",
+      "methods": ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+      "allowedRoles": ["authenticated"],
+      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/campaign-start"
+    },
+    {
+      "route": "/api/*",
+      "methods": ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+      "allowedRoles": ["authenticated"],
+      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/*"
+    },
+    { "route": "/engagement/*",    "rewrite": "/engagement/index.html" },
+    { "route": "/qualification/*", "rewrite": "/qualification/index.html" },
+    { "route": "/*", "allowedRoles": ["anonymous"] }
+  ],
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": [
@@ -9,47 +26,5 @@
       "/content/*",
       "/src/*"
     ]
-  },
-  "routes": [
-    {
-      "route": "/api/campaign-start",
-      "allowedRoles": [
-        "authenticated"
-      ],
-      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/campaign-start"
-    },
-    {
-      "route": "/api/*",
-      "methods": [
-        "GET",
-        "POST",
-        "PUT",
-        "PATCH",
-        "DELETE",
-        "OPTIONS"
-      ],
-      "allowedRoles": [
-        "authenticated"
-      ],
-      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/*"
-    },
-    {
-      "route": "/engagement/*",
-      "rewrite": "/engagement/index.html"
-    },
-    {
-      "route": "/qualification/*",
-      "rewrite": "/qualification/index.html"
-    },
-    {
-      "route": "/*",
-      "allowedRoles": [
-        "anonymous"
-      ]
-    }
-  ],
-  "mimeTypes": {
-    ".json": "application/json",
-    ".md": "text/markdown"
   }
 }
