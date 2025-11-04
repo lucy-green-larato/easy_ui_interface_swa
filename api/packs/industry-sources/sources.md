@@ -1,0 +1,11 @@
+# General Reputable Sources (UK tech & connectivity) Keep list to 12 or less
+- Ofcom — market/coverage reports (Connected Nations, etc.): https://www.ofcom.org.uk/research-and-data/multi-sector-research/infrastructure-research/connected-nations
+- ONS — sector growth, business demography: https://www.ons.gov.uk/
+- DSIT — Cyber Security Breaches Survey: https://www.gov.uk/government/collections/cyber-security-breaches-survey
+- NCSC — cyber guidance and incident trends: https://www.ncsc.gov.uk/section/guidance/all-topics
+- ICO — PECR/GDPR direct marketing guidance: https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/marketing/direct-marketing/
+- McKinsey & Company — technology trends and digital insights: https://www.mckinsey.com/capabilities/mckinsey-digital/our-insights
+- Deloitte Insights — annual enterprise tech trends: https://www.deloitte.com/insights/tech-trends
+- RSM UK — technology industry insights: https://www.rsmuk.com/insights/technology
+- Insight UK — technology reports and resources: https://uk.insight.com/en_GB/content-and-resources/reports.html
+- Gartner — research and emerging tech forecasts: https://www.gartner.com/en/insights/technology

@@ -1,4 +1,4 @@
-<!-- web/campaign/index.html 27-10-2025 v 3 -->
+<!-- web/campaign/index.html 31-10-2025 v 4 -->
 <!doctype html>
 <html lang="en">
 
@@ -49,8 +49,8 @@
     </div>
     <div class="header-right" style="display:flex;gap:8px;align-items:center">
       <span class="chip chip-amethyst" id="envChip">Dev</span>
-      <button class="btn secondary small" id="newRunBtn">New run</button>
-      <button class="btn secondary small" id="loadRecentBtn">Load recent</button>
+      <button class="btn secondary small" id="newRunBtn" type="button">New run</button>
+      <button class="btn secondary small" id="loadRecentBtn" type="button">Load recent</button>
       <div id="download-docx-mount"></div>
       <a href="#" class="btn btn-tertiary small" id="helpLink">Help</a>
     </div>
@@ -58,13 +58,7 @@
 
   <main class="workboard">
     <!-- Left rail: inputs -->
-    <label style="margin-top:8px">Sales model</label>
-    <select id="salesModel">
-      <option value="">(unspecified)</option>
-      <option value="direct">Direct</option>
-      <option value="partner">Partner</option>
-    </select>
-    <aside class="panel left card rail" id="inputs">
+    <aside class="panel left card rail" id="inputs" aria-label="Run inputs">
       <div class="group">
         <h3>Data source</h3>
         <label for="runSelect">Pick a recent Power BI run</label>
@@ -75,50 +69,62 @@
         <label for="csvUpload" style="margin-top:6px">Upload CSV (testing only)</label>
         <input id="csvUpload" type="file" accept=".csv" />
         <div style="display:flex; gap:8px; align-items:center; margin-top:8px">
-          <button id="goBtn" class="btn primary btn-cta" disabled>Go</button>
+          <button id="goBtn" class="btn primary btn-cta" type="button" disabled>Go</button>
           <div class="muted"><span id="csvBadge">(no file)</span></div>
         </div>
       </div>
 
       <div class="group">
         <h3>Company</h3>
-        <label>Company name</label>
+        <label for="companyName">Company name</label>
         <input id="companyName" type="text" placeholder="Comms 365" />
-        <label style="margin-top:8px">Website</label>
+        <label for="companyWebsite" style="margin-top:8px">Website</label>
         <input id="companyWebsite" type="url" placeholder="https://www.example.com" />
-        <label style="margin-top:8px">LinkedIn</label>
+        <label for="companyLinkedIn" style="margin-top:8px">LinkedIn</label>
         <input id="companyLinkedIn" type="url" placeholder="https://www.linkedin.com/company/..." />
         <label for="buyerIndustry">Industry (optional)</label>
-        <input id="buyerIndustry" name="buyerIndustry" type="text" placeholder="e.g., Construction"
-          list="industryOptions" />
+        <input id="buyerIndustry" name="buyerIndustry" type="text" placeholder="e.g., Construction" list="industryOptions" />
         <datalist id="industryOptions"></datalist>
-        <label style="margin-top:8px">USPs / differentiators</label>
+        <label for="companyUsps" style="margin-top:8px">USPs / differentiators</label>
         <textarea id="companyUsps" class="textarea" rows="3"
-          placeholder="List your differentiatorss here. (Comma, semicolon, or newline separated)"></textarea>
+          placeholder="List your differentiators here. (Comma, semicolon, or newline separated)"></textarea>
       </div>
 
-      <label style="margin-top:8px">Relevant competitors (comma, semicolon, or newline separated)</label>
-      <textarea id="relevantCompetitors" class="textarea" rows="2" placeholder="Gamma; Colt; Kerv"></textarea>
+      <div class="group">
+        <h3>Campaign</h3>
+        <label for="salesModel">Sales model</label>
+        <select id="salesModel">
+          <option value="">(unspecified)</option>
+          <option value="direct">Direct</option>
+          <option value="partner">Partner</option>
+        </select>
 
-      <label style="margin-top:8px">Campaign goal</label>
-      <select id="campaignRequirement">
-        <option value="">(unspecified)</option>
-        <option value="upsell">Upsell</option>
-        <option value="win-back">Win-back</option>
-        <option value="growth">Growth</option>
-      </select>
+        <label for="relevantCompetitors" style="margin-top:8px">Relevant competitors (comma, semicolon, or newline separated)</label>
+        <textarea id="relevantCompetitors" class="textarea" rows="2" placeholder="Gamma; Colt; Kerv"></textarea>
+
+        <label for="campaignRequirement" style="margin-top:8px">Campaign goal</label>
+        <select id="campaignRequirement">
+          <option value="">(unspecified)</option>
+          <option value="upsell">Upsell</option>
+          <option value="win-back">Win-back</option>
+          <option value="growth">Growth</option>
+        </select>
+
+        <label for="notes" style="margin-top:8px">Notes (optional)</label>
+        <textarea id="notes" class="textarea" rows="2" placeholder="Any extra guidance for this campaign run"></textarea>
+      </div>
 
       <div class="group">
         <h3>Options</h3>
-        <label>Page (folder key)</label>
+        <label for="pageKey">Page (folder key)</label>
         <input id="pageKey" type="text" placeholder="Direct" value="Direct" />
-        <label style="margin-top:8px">Tone</label>
+        <label for="tone" style="margin-top:8px">Tone</label>
         <select id="tone">
           <option value="match">Match company website (recommended)</option>
           <option value="professional" selected>Professional</option>
           <option value="warm">Warm</option>
         </select>
-        <label style="margin-top:8px">Evidence window (months)</label>
+        <label for="evidenceWindow" style="margin-top:8px">Evidence window (months)</label>
         <select id="evidenceWindow">
           <option>6</option>
           <option>9</option>
@@ -131,13 +137,13 @@
 
       <div class="group">
         <h3>Status</h3>
-        <div><span id="statusDot" class="status-dot"></span><span id="statusText">Idle</span></div>
+        <div><span id="statusDot" class="status-dot" aria-hidden="true"></span><span id="statusText">Idle</span></div>
         <div class="muted" style="margin-top:6px">Run: <span id="currentRunId">–</span></div>
       </div>
     </aside>
 
     <!-- Center: workspace -->
-    <section class="panel middle card workspace">
+    <section class="panel middle card workspace" aria-live="polite">
       <div class="tabs">
         <div class="tabs-left" id="sectionTabs" role="tablist" aria-label="Campaign sections"></div>
       </div>
@@ -165,7 +171,7 @@
       JavaScript is required to run the Campaign builder UI.
     </div>
   </noscript>
-  <div id="campaign-toast" class="toast"></div>
+  <div id="campaign-toast" class="toast" role="status" aria-live="polite"></div>
   <script src="/src/js/campaign.js" defer></script>
 </body>
 

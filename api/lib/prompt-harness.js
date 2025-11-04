@@ -1,4 +1,4 @@
-// /api/lib/prompt-harness.js 2025-10-27 v 9
+// /api/lib/prompt-harness.js 2025-11-03 v 10
 // Exports:
 //   - buildDefaultMessages({ inputs, evidencePack })
 //   - buildCustomMessages({ customPromptText, evidencePack })
@@ -14,6 +14,18 @@
 
 const fs = require("fs");
 const path = require("path");
+function loadIndustrySources(industryRaw) {
+  try {
+    const industry = String(industryRaw || "").toLowerCase().replace(/\s+/g, "-");
+    const baseDir = path.join(__dirname, "..", "packs", "industry-sources");
+    const general = fs.existsSync(path.join(baseDir, "sources.md"))
+      ? fs.readFileSync(path.join(baseDir, "sources.md"), "utf8")
+      : "";
+    const sectPath = path.join(baseDir, `${industry}.md`);
+    const sector = fs.existsSync(sectPath) ? fs.readFileSync(sectPath, "utf8") : "";
+    return { general, sector };
+  } catch { return { general: "", sector: "" }; }
+}
 
 // ---- Env defaults (override with options.azure below) ----
 const ENV_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;
@@ -122,6 +134,9 @@ function parseModelJsonOrRepair(rawText) {
 // ---- Personas & rules ----
 const BASE_RULES = `
 Return STRICTLY valid JSON that conforms to the provided schema. Do NOT include any prose before or after the JSON.
+PLACEHOLDERS
+- Never invent placeholder names (e.g., "Product A/B", "Vendor A–E"). If a real product/vendor name or page is unknown, omit the item.
+- Do not use example.com or dummy URLs. Prefer deterministic evidence supplied by the worker (industry sources, CSV population, company site).
 
 EVIDENCE RULES
 - Every bullet/statement must end with a short source tag in parentheses, e.g., (Company site), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).
@@ -144,7 +159,7 @@ SOURCE MIX (hard requirement; map to schema-safe source_type)
 
 CSV & USPs
 - Treat CSV as current market research for targeting/messaging (tag inline as (CSV)). The schema does not capture CSV as source_type; keep "Company site"/regulator/etc. in evidence_log.source_type and reserve "(CSV)" for inline tags.
-- USER_USPS are accepted inputs; use them directly where relevant and tag inline with (Company site) if corroborated, otherwise leave the inline tag off and incorporate them as inputs.
+- SUPPLIER_USPS are accepted inputs; use them directly where relevant and tag inline with (Company site) if corroborated, otherwise leave the inline tag off and incorporate them as inputs.
 
 STYLE & FORMATTING
 - UK currency & numerals: £20.756m, £1,421,646, 8.4%.
@@ -173,15 +188,39 @@ EXECUTIVE SUMMARY
   { claim_id: "CLM-###", summary (cited), source_type (enum-compliant), url, title, quote? }.
 - Ensure at least 2 items are clearly from the company (Company site source_type), and ≥3 items from external sources (Ofcom/ONS/DSIT/PDF extract/Trade press/Directory).
 - When using LinkedIn, set source_type="Company site" but keep the inline "(LinkedIn)" tag inside the summary.
+- Include an addressable-market item from CSV (use the pattern:
+  "Addressable market: <rows> companies in <csvFileName>. <focusComment>" and source_type="Directory", title="CSV population", url=<csvFileName>).
+- [ ] No placeholder items ("Product A/B", "Vendor A–E") and no dummy URLs.
+
+
+  MANDATORY EVIDENCE CHECKLIST (reject output if missing):
+- [ ] CSV addressable market (Directory)
+- [ ] ≥1 regulator/government source relevant to the industry (e.g., Ofcom/ONS/DSIT/NCSC)
+- [ ] ≥2 Company site items (product/capability pages)
+- [ ] All user-supplied competitors + ≥1 inferred alternatives (with product-page deep links)
+- [ ] ≥1 LinkedIn items (use post permalinks; mark "(LinkedIn)" in summary)
 
 CASE STUDY LIBRARY
 - case_study_library is an array. Each item must be sourced from the company website (same host as prospect_website) or appear in the evidence pack.
 - Required fields per item: { customer, industry?, headline, bullets[] (2–4), url, source_type="Company site" }.
 - Do NOT invent customers or URLs. If none are found, return [].
 
+SALES MODEL EVIDENCE
+- If Sales model is "direct": do NOT include partner recruitment/enablement claims in evidence_log.
+  Focus evidence on direct-customer proof (product pages, service specs, case studies, pricing/SLAs).
+- If Sales model is "partner"/"channel"/"indirect": do NOT include direct-only onboarding unless it demonstrates partner value
+  (e.g., incentives, enablement, co-sell, margin).
+
+COMPETITOR COVERAGE
+- Include all user-supplied competitors AND infer at least two additional relevant alternatives
+  (similar products into similar markets solving CSV buyer problems). Prefer deep links to product pages.
+
+INDUSTRY SOURCES
+- Prefer reputable UK sources (use INDUSTRY_SOURCES_GENERAL_MD/SECTOR_MD as the shortlist) for market statistics.
+
 POSITIONING & DIFFERENTIATION
 - Provide a concise value_prop for the UK context.
-- differentiators: ≥3 items; incorporate ≥2 USER_USPS if given (cite Company site if possible; otherwise keep without citation).
+- differentiators: ≥3 items; incorporate ≥2 SUPPLIER_USPS if given (cite Company site if possible; otherwise keep without citation).
 - competitor_set: 5 vendors with reason_in_set and URL.
 
 MESSAGING MATRIX
@@ -190,7 +229,7 @@ MESSAGING MATRIX
 - Use CSV fields to drive wording: SimplifiedIndustry → persona context; TopBlockers → pains; TopNeedsSupplier → nonnegotiables; TopPurchases → value/what_you_get.
 
 OFFER STRATEGY
-- landing_page: hero, why_it_matters[] (cited), what_you_get[] (cited; reflect CSV + USER_USPS), how_it_works[], outcomes[] (cited), proof[] (cited), cta.
+- landing_page: hero, why_it_matters[] (cited), what_you_get[] (cited; reflect CSV + SUPPLIER_USPS), how_it_works[], outcomes[] (cited), proof[] (cited), cta.
 - assets_checklist: ≥5 items tied to the above.
 
 CHANNEL PLAN
@@ -260,9 +299,10 @@ Company inputs
 - Name: ${inputs.prospect_company || ""}
 - Website: ${inputs.prospect_website || ""}
 - Buyer type: ${inputs.buyer_type || ""}
-- Sales model: ${inputs.sales_model || inputs.salesModel || inputs.call_type || ""}
+- Sales model (strict): ${inputs.sales_model || inputs.salesModel || inputs.call_type || ""}
+- USER_NOTES (integrate explicitly): ${safe(inputs.notes || "")}
 - Product/service focus: ${inputs.product_service || ""}
-- USER_USPS (comma-separated): ${inputs.user_usps || inputs.usps || ""}
+- SUPPLIER_USPS (comma-separated): ${inputs.supplier_usps || inputs.usps || ""}
 - Personas (comma-separated): ${inputs.personas || ""}
 - Extra context: ${inputs.context || ""}
 
@@ -273,6 +313,8 @@ Evidence pack (prioritise Company site → LinkedIn → Regulator/Gov → Other)
 - PDF_EXTRACTS: ${safe(evidencePack.pdf || [])}
 - DIRECTORY_MATCHES: ${safe(evidencePack.directories || [])}
 - CSV_SUMMARY: ${safe(evidencePack.csv || inputs?.csvSummary || {})}
+- INDUSTRY_SOURCES_GENERAL_MD: ${safe(loadIndustrySources(inputs?.campaign_industry || inputs?.buyer_industry || inputs?.industry).general)}
+- INDUSTRY_SOURCES_SECTOR_MD: ${safe(loadIndustrySources(inputs?.campaign_industry || inputs?.buyer_industry || inputs?.industry).sector)}
 `.trim();
 
   return { messages: [{ role: "system", content: system }, { role: "user", content: user }], schemaJson };
@@ -337,8 +379,8 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
     const built = buildDefaultMessages({
       inputs: input,
       evidencePack,
-      packs,           
-      useDocSpec: true 
+      packs,
+      useDocSpec: true
     });
     messages = built.messages;
   } else {
@@ -371,7 +413,7 @@ async function generate({ schemaPath, packs = {}, input = {}, evidencePack = {},
       `- Buyer type: ${input.buyer_type || ""}`,
       `- Sales model: ${input.sales_model || input.salesModel || input.call_type || ""}`,
       `- Product/service focus: ${input.product_service || ""}`,
-      `- USER_USPS (comma-separated): ${input.user_usps || input.usps || ""}`,
+      `- SUPPLIER_USPS (comma-separated): ${input.supplier_usps || input.usps || ""}`,
       `- Personas (comma-separated): ${input.personas || ""}`,
       `- Extra context: ${input.context || ""}`,
       "",

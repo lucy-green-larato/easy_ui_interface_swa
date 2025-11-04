@@ -1,6 +1,6 @@
-// /api/campaign-start/index.js 26-10-2025 v8
+// /api/campaign-start/index.js 04-10-2025 v10.0
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
-// POST /api/campaign/start → enqueues job to campaign-jobs, writes initial status.json ("Queued"), returns 202 { runId }.
+// POST /api/campaign/start → enqueues job to campaign queue, writes initial status.json ("Queued"), returns 202 { runId }.
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { QueueServiceClient } = require("@azure/storage-queue");
@@ -49,12 +49,22 @@ function computePrefix(page, runId, now = new Date()) {
 }
 
 async function writeInitialStatus(containerClient, relPrefix, status) {
-  // relPrefix is container-relative (e.g., "campaign/.../<runId>/")
+  // relPrefix is container-relative (e.g., "runs/<runId>/")
   const client = containerClient.getBlockBlobClient(`${relPrefix}status.json`);
   const payload = JSON.stringify(status);
   await client.upload(payload, Buffer.byteLength(payload), {
     blobHTTPHeaders: { blobContentType: "application/json" },
   });
+}
+
+// Enforce https:// for downstream schema expectations
+function toHttps(u) {
+  if (!u) return u;
+  const s = String(u).trim();
+  if (!s) return s;
+  if (/^https:\/\//i.test(s)) return s;
+  if (/^http:\/\//i.test(s)) return s.replace(/^http:\/\//i, "https://");
+  return `https://${s}`; // no scheme -> assume https
 }
 
 module.exports = async function (context, req) {
@@ -91,12 +101,19 @@ module.exports = async function (context, req) {
       context.res = {
         status: 500,
         headers: { "content-type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "config", message: "CAMPAIGN_JOBS_QUEUE app setting is missing" }
+        body: { error: "config", message: "CAMPAIGN_QUEUE_NAME app setting is missing" }
       };
       return;
     }
     // Parse/normalise input
     const body = (typeof req.body === "object" && req.body) || {};
+    const csvText = (typeof body.csvText === "string" && body.csvText.trim().length)
+      ? body.csvText
+      : null;
+    const csvFilename = (typeof body.csvFilename === "string" && body.csvFilename.trim().length)
+      ? body.csvFilename.trim()
+      : null;
+
     // --- Normalise alternate client field names to the canonical ones ---
     if (body.company && !body.prospect_company) body.prospect_company = String(body.company).trim();
     if (body.company_name && !body.prospect_company) body.prospect_company = String(body.company_name).trim();
@@ -108,84 +125,98 @@ module.exports = async function (context, req) {
     if (body.company_linkedin && !body.prospect_linkedin) body.prospect_linkedin = String(body.company_linkedin).trim();
 
     // USPs: allow comma-separated string or array
-    if (!Array.isArray(body.user_usps)) {
+    if (!Array.isArray(body.supplier_usps)) {
       if (typeof body.usps === "string") {
-        body.user_usps = body.usps.split(",").map(s => s.trim()).filter(Boolean);
+        body.supplier_usps = body.usps.split(",").map(s => s.trim()).filter(Boolean);
       } else if (Array.isArray(body.usps)) {
-        body.user_usps = body.usps.map(s => String(s ?? "").trim()).filter(Boolean);
+        body.supplier_usps = body.usps.map(s => String(s ?? "").trim()).filter(Boolean);
       }
     }
-    // Relevant competitors: array or delimited string; cap to 8
+
+    // Relevant competitors: array or delimited string; cap to 8 + dedupe
     let relevant_competitors = [];
     if (Array.isArray(body.relevant_competitors)) {
-      relevant_competitors = body.relevant_competitors.map(s => (s == null ? "" : String(s)).trim()).filter(Boolean).slice(0, 8);
+      relevant_competitors = body.relevant_competitors.map(s => (s == null ? "" : String(s))).filter(Boolean);
     } else if (typeof body.relevant_competitors === "string") {
-      relevant_competitors = body.relevant_competitors.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 8);
+      relevant_competitors = body.relevant_competitors.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+    }
+    if (Array.isArray(relevant_competitors) && relevant_competitors.length) {
+      const seen = new Set();
+      relevant_competitors = relevant_competitors
+        .map(s => s.trim())
+        .filter(s => s && !seen.has(s.toLowerCase()) && (seen.add(s.toLowerCase()) || true))
+        .slice(0, 8);
     }
 
-    // Campaign requirement: strict enum
+    // Campaign requirement: strict enum → default to "unspecified"
     let campaign_requirement = null;
     if (typeof body.campaign_requirement === "string") {
       const v = body.campaign_requirement.trim().toLowerCase();
       campaign_requirement = ["upsell", "win-back", "growth"].includes(v) ? v : null;
     }
+    const campaign_requirement_effective = campaign_requirement ?? "unspecified";
 
     // sales model / call type normalisation
     if (!body.sales_model && body.salesModel) body.sales_model = String(body.salesModel).trim();
     if (!body.call_type && body.callType) body.call_type = String(body.callType).trim();
 
-    // --- Minimal validation (fail fast if truly empty) ---
-    const missing = [];
-    if (!body.prospect_company) missing.push("prospect_company");
-    if (!body.prospect_website) missing.push("prospect_website");
-    // LinkedIn optional; add if you want: if (!body.prospect_linkedin) missing.push("prospect_linkedin");
+    // --- Normalise campaign context (industry, supplier inputs) ---
+    const campaign_industry = (body.campaign_industry ?? body.companyIndustry ?? body.industry ?? "").trim();
 
-    if (missing.length) {
-      context.res = {
-        status: 400,
-        headers: { "content-type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "bad_request", message: `Missing required field(s): ${missing.join(", ")}` }
-      };
-      return;
-    }
+    // Canonical supplier inputs (prefer supplier_*; fallback to legacy prospect_*)
+    const supplier_company_raw = (body.supplier_company ?? body.prospect_company ?? "").trim();
+    const supplier_website_raw = (body.supplier_website ?? body.prospect_website ?? "").trim();
+    const supplier_linkedin_raw = (body.supplier_linkedin ?? body.prospect_linkedin ?? body.companyLinkedIn ?? "").trim();
 
-    // --- Company inputs from the body (parse only; no validation here) ---
-    const prospect_company = (body.prospect_company || "").toString().trim();
-    const prospect_website = (body.prospect_website || "").toString().trim();
-    const prospect_linkedin = (body.prospect_linkedin || "").toString().trim();
-    const user_usps = Array.isArray(body.user_usps)
-      ? body.user_usps.map(s => (s == null ? "" : String(s)).trim()).filter(Boolean)
-      : [];
+    // HTTPS-normalised
+    const supplier_company = supplier_company_raw;
+    const supplier_website_https = toHttps(supplier_website_raw);
+    const supplier_linkedin_https = supplier_linkedin_raw ? toHttps(supplier_linkedin_raw) : "";
+
+    // Supplier USPs: array or delimited string; cap to 12 (re-checked here)
+    const supplier_usps = Array.isArray(body.supplier_usps)
+      ? body.supplier_usps.map(s => String(s || "").trim()).filter(Boolean).slice(0, 12)
+      : (typeof body.supplier_usps === "string"
+        ? body.supplier_usps.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 12)
+        : (typeof body.user_usps === "string"
+          ? body.user_usps.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 12)
+          : Array.isArray(body.user_usps)
+            ? body.user_usps.map(s => String(s || "").trim()).filter(Boolean).slice(0, 12)
+            : []));
+
+    // Page routing
     const pageRaw = body.page || "campaign";
     const effectivePage = sanitizePage(pageRaw);
 
-    let salesModel =
-      body.salesModel ??
-      body.sales_model ??
-      body.filters?.salesModel ??
-      body.filters?.sales_model ??
-      null;
+    // salesModel / callType (canonical normalisation; default to 'direct')
+    // Collect all possible inputs (including legacy & filter paths), coerce to lower-case strings
+    const _salesCandidates = [
+      body.sales_model,
+      body.salesModel,
+      body.filters?.sales_model,
+      body.filters?.salesModel,
+      body.call_type,          // legacy shim
+      body.callType,           // legacy shim
+      body.filters?.call_type, // legacy shim
+      body.filters?.callType   // legacy shim
+    ].map(v => (v == null ? "" : String(v).trim().toLowerCase()));
 
-    let callType = body.call_type ?? body.callType ?? body.filters?.call_type ?? body.filters?.callType ?? null;
+    // Pick first valid; default to 'direct'
+    let salesModel = _salesCandidates.find(v => v === "direct" || v === "partner") || "direct";
 
-    if (salesModel != null) {
-      const sm = String(salesModel).trim().toLowerCase();
-      if (sm !== "direct" && sm !== "partner") {
-        context.res = {
-          status: 400,
-          headers: {
-            "content-type": "application/json",
-            "x-correlation-id": correlationId,
-          },
-          body: { error: "bad_request", message: "salesModel must be 'direct' or 'partner' if provided" },
-        };
-        return;
-      }
-      salesModel = sm;
-    }
+    // Write back the canonical key so every downstream stage sees the same field
+    body.sales_model = salesModel;
+
+    // Keep (optional) legacy field as read-only shim for full traceability
+    // (do NOT rely on it downstream)
+    const callTypeRaw =
+      body.call_type ?? body.callType ?? body.filters?.call_type ?? body.filters?.callType ?? null;
+    const callType = (callTypeRaw == null) ? null : String(callTypeRaw).trim().toLowerCase();
+
 
     // numeric rowCount (optional)
-    let rc = body.rowCount;
+    // numeric rowCount (optional) — canonical variable is `rc`
+    let rc = (body.rowCount !== undefined && body.rowCount !== null) ? body.rowCount : null;
     if (rc != null) {
       const n = Number(rc);
       if (!Number.isFinite(n) || n < 0) {
@@ -200,6 +231,15 @@ module.exports = async function (context, req) {
         return;
       }
       rc = Math.floor(n);
+    } else {
+      // Optional: if client didn't send rowCount but did send CSV text, estimate from CSV
+      if (typeof csvText === "string" && csvText.trim()) {
+        // count non-empty lines minus 1 header row
+        const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
+        rc = Math.max(0, lines.length - 1);
+      } else {
+        rc = null;
+      }
     }
 
     // Idempotency support
@@ -210,6 +250,23 @@ module.exports = async function (context, req) {
 
     const now = new Date();
     const relPrefix = computePrefix(effectivePage, runId, now); // container-relative (no 'results/' here)
+    const prefix = `runs/${runId}/`;
+
+    // --- Minimal validation (fail fast if truly empty) ---
+    const missing = [];
+    if (!supplier_company) missing.push("supplier_company");
+    if (!supplier_website_https) missing.push("supplier_website");
+    // LinkedIn optional; uncomment to enforce:
+    // if (!supplier_linkedin_https) missing.push("supplier_linkedin");
+
+    if (missing.length) {
+      context.res = {
+        status: 400,
+        headers: { "content-type": "application/json", "x-correlation-id": correlationId },
+        body: { error: "bad_request", message: `Missing required field(s): ${missing.join(", ")}` }
+      };
+      return;
+    }
 
     // Blob container client
     const blobService = BlobServiceClient.fromConnectionString(STORAGE_CONN);
@@ -229,11 +286,21 @@ module.exports = async function (context, req) {
         sales_model: salesModel ?? null,
         call_type: callType ?? null,
 
-        // keep for traceability
-        prospect_company,
-        prospect_website,
-        prospect_linkedin,
-        user_usps
+        // Canonical (preferred)
+        supplier_company,
+        supplier_website: supplier_website_https,
+        supplier_linkedin: supplier_linkedin_https,
+        supplier_usps,
+        campaign_industry,
+        campaign_requirement: campaign_requirement_effective,
+        relevant_competitors,
+
+        // Legacy aliases (traceability/back-compat) — mirror HTTPS values
+        prospect_company: supplier_company,
+        prospect_website: supplier_website_https,
+        prospect_linkedin: supplier_linkedin_https,
+        user_usps: supplier_usps,
+        company_industry: campaign_industry
       },
       enqueuedAt,
       correlationId,
@@ -241,49 +308,167 @@ module.exports = async function (context, req) {
 
     await writeInitialStatus(containerClient, relPrefix, initialStatus);
 
-    // Build queue message (container-relative prefix)
-    const msg = {
-      op: "kickoff",
-      runId,
+    // ---- Build the INPUT payload workers ----
+    const input = {
       page: effectivePage,
       rowCount: rc ?? null,
       filters: body.filters ?? null,
       notes: body.notes ?? null,
-      salesModel: salesModel ?? null,
+      sales_model: salesModel ?? null,
       call_type: callType ?? null,
+
+      // canonical supplier/company fields
+      supplier_company,
+      supplier_website: supplier_website_https,
+      supplier_linkedin: supplier_linkedin_https,
+      supplier_usps,
+      campaign_industry,
+      selected_industry: campaign_industry || undefined,
+
+      // commercial intent & competition
+      campaign_requirement: campaign_requirement_effective,
+      relevant_competitors: Array.isArray(relevant_competitors) ? relevant_competitors : [],
+
+      // CSV from the browser (inline fallback used by campaign-evidence)
+      csvText: csvText || null,
+      csvFilename: csvFilename || null,
+      csvSummary: body.csvSummary || null,
+
+      // back-compat mirrors (several workers still read these)
+      prospect_company: supplier_company,
+      prospect_website: supplier_website_https,
+      prospect_linkedin: supplier_linkedin_https,
+      user_usps: supplier_usps,
+      company_industry: campaign_industry
+    };
+
+    // ---- Queue message ---------//
+    const msg = {
+      op: "kickoff",
+      runId,
+      page: effectivePage,
       enqueuedAt,
       prefix: relPrefix,
       correlationId,
       clientRunKey: clientRunKey ?? null,
-      prospect_company,
-      prospect_website,
-      prospect_linkedin,
-      user_usps,
+
+      // Keep runConfig for writer/outline
       runConfig: {
-        campaign_requirement,
-        relevant_competitors
-      }
+        campaign_requirement: campaign_requirement_effective,
+        relevant_competitors: Array.isArray(relevant_competitors) ? relevant_competitors : []
+      },
+
+      // ✅ Canonical input (single source of truth)
+      input,
+
+      // ✅ Back-compat mirrors (read by some stages that expect top-level fields)
+      page: input?.page,
+      rowCount: input?.rowCount,
+      filters: input?.filters,
+      notes: input?.notes,
+      sales_model: input?.sales_model,
+      call_type: input?.call_type,
+      supplier_company: input?.supplier_company,
+      supplier_website: input?.supplier_website,
+      supplier_linkedin: input?.supplier_linkedin,
+      supplier_usps: input?.supplier_usps,
+      campaign_industry: input?.campaign_industry,
+      selected_industry: input?.selected_industry,
+      campaign_requirement: input?.campaign_requirement,
+      relevant_competitors: Array.isArray(input?.relevant_competitors) ? input.relevant_competitors : [],
+      csvText: input?.csvText,
+      csvFilename: input?.csvFilename,
+      csvSummary: input?.csvSummary,
+      prospect_company: input?.prospect_company,
+      prospect_website: input?.prospect_website,
+      prospect_linkedin: input?.prospect_linkedin,
+      user_usps: input?.user_usps,
+      company_industry: input?.company_industry
     };
 
     // Trim oversized payload (Azure Queue limit ~64KB post-base64)
     function safeStringify(obj) {
       try { return JSON.stringify(obj); } catch { return "{}"; }
     }
-    let payload = safeStringify(msg);
 
+    let payload = safeStringify(msg);
     if (Buffer.byteLength(payload) > MAX_BYTES) {
-      const slim = { ...msg, notes: null };
+      const slim = { ...msg, input: { ...(msg.input || {}) } };
       let s = safeStringify(slim);
-      if (Buffer.byteLength(s) > MAX_BYTES) {
-        slim.filters = null;
+
+      // Drop biggest offenders first, in order
+      const shrink = () => Buffer.byteLength(s) > MAX_BYTES;
+
+      // Protect critical inputs from being dropped (worker + harness rely on these)
+      const PROTECT = new Set([
+        "notes",
+        "rowCount",
+        "campaign_industry",
+        "company_industry",
+        "relevant_competitors",
+        "sales_model",
+        "salesModel",
+        "call_type",
+        "callType",
+        "supplier_company",
+        "supplier_website",
+        "supplier_linkedin",
+        "prospect_company",
+        "prospect_website",
+        "prospect_linkedin",
+        "csvFilename"
+      ]);
+
+      // helper: null a field if not protected
+      function nullIfAllowed(obj, pathArr) {
+        const last = pathArr[pathArr.length - 1];
+        if (PROTECT.has(last)) return false;
+        let ref = obj;
+        for (let i = 0; i < pathArr.length - 1; i++) {
+          if (!ref) return false;
+          ref = ref[pathArr[i]];
+        }
+        const key = last;
+        if (ref && Object.prototype.hasOwnProperty.call(ref, key)) {
+          ref[key] = null;
+          return true;
+        }
+        return false;
+      }
+
+      // 1) Inline CSV text (usually the largest)
+      if (slim.input && typeof slim.input.csvText === "string") {
+        slim.input.csvText = null;
         s = safeStringify(slim);
-        if (Buffer.byteLength(s) > MAX_BYTES) {
-          slim.rowCount = null;
-          s = safeStringify(slim);
+      }
+
+      // 2) CSV summary (can be large if included)
+      if (shrink()) nullIfAllowed(slim, ["input", "csvSummary"]);
+
+      // 3) Filters (often chunky)
+      if (shrink()) nullIfAllowed(slim, ["input", "filters"]);
+
+      // 4) USPS arrays (can be verbose) — safe to drop if needed
+      if (shrink()) nullIfAllowed(slim, ["input", "user_usps"]);
+      if (shrink()) nullIfAllowed(slim, ["input", "supplier_usps"]);
+
+      // 5) As a last resort, trim non-critical items under runConfig
+      if (shrink()) nullIfAllowed(slim, ["runConfig", "relevant_competitors"]);
+
+      // 6) Absolute last resort: null any remaining non-protected extras under input
+      if (shrink() && slim.input && typeof slim.input === "object") {
+        for (const k of Object.keys(slim.input)) {
+          if (!shrink()) break;
+          if (!PROTECT.has(k) && slim.input[k] != null) {
+            slim.input[k] = null;
+            s = safeStringify(slim);
+          }
         }
       }
       payload = s;
+      context.log.warn("campaign_start_payload_slimmed", { bytes: Buffer.byteLength(payload) });
     }
+
     // Enqueue (SDK handles base64 encoding; send plain JSON string)
     const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
     const q = qs.getQueueClient(QUEUE_NAME);
@@ -298,10 +483,13 @@ module.exports = async function (context, req) {
     try {
       context.log({
         event: "campaign_start_inputs",
-        prospect_company,
-        has_site: !!prospect_website,
-        has_linkedin: !!prospect_linkedin,
-        user_usps_count: user_usps.length
+        supplier_company,
+        has_site: !!supplier_website_https,
+        has_linkedin: !!supplier_linkedin_https,
+        supplier_usps_count: supplier_usps.length,
+        campaign_industry,
+        campaign_requirement: campaign_requirement_effective,
+        relevant_competitors_count: Array.isArray(relevant_competitors) ? relevant_competitors.length : 0
       });
       const resp = await enqueueMessage(q, payload);
       context.log({

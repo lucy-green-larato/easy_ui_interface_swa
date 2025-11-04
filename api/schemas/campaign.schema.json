@@ -21,7 +21,7 @@
     },
     "httpsUrl": {
       "type": "string",
-      "pattern": "^https?://\\S+$"
+      "pattern": "^https://\\S+$"
     }
   },
   "required": [
@@ -42,23 +42,105 @@
   ],
   "properties": {
     "executive_summary": {
-      "type": "array",
-      "minItems": 4,
-      "maxItems": 8,
-      "items": {
-        "$ref": "#/definitions/citedString"
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "industry",
+        "objective",
+        "headline",
+        "why_now",
+        "addressable_market",
+        "buyer_needs",
+        "buyer_blockers",
+        "supplier_solution",
+        "competitors_mentioned",
+        "products_anchors"
+      ],
+      "properties": {
+        "industry": {
+          "type": "string"
+        },
+        "objective": {
+          "type": "string",
+          "enum": [
+            "upsell",
+            "win-back",
+            "growth",
+            "unspecified"
+          ]
+        },
+        "headline": {
+          "$ref": "#/definitions/citedString"
+        },
+        "why_now": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "$ref": "#/definitions/citedString"
+          }
+        },
+        "addressable_market": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cohort_size",
+            "note"
+          ],
+          "properties": {
+            "cohort_size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "note": {
+              "$ref": "#/definitions/citedString"
+            }
+          }
+        },
+        "buyer_needs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/citedString"
+          }
+        },
+        "buyer_blockers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/citedString"
+          }
+        },
+        "supplier_solution": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/citedString"
+          }
+        },
+        "competitors_mentioned": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "products_anchors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "evidence_log": {
       "type": "array",
-      "minItems": 6,
+      "minItems": 3,
       "items": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "claim_id": {
             "type": "string",
-            "pattern": "^CLM-[0-9]{3}$"
+            "pattern": "^[A-Za-z0-9._-]{3,}$"
           },
           "summary": {
             "$ref": "#/definitions/citedString"
@@ -66,13 +148,15 @@
           "source_type": {
             "type": "string",
             "enum": [
+              "CSV",
+              "Company site",
+              "LinkedIn",
+              "PDF extract",
+              "Directory",
+              "Trade press",
               "Ofcom",
               "ONS",
-              "DSIT",
-              "Company site",
-              "Trade press",
-              "PDF extract",
-              "Directory"
+              "DSIT"
             ]
           },
           "url": {
@@ -97,7 +181,7 @@
     },
     "case_studies": {
       "type": "array",
-      "minItems": 2,
+      "minItems": 0,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -194,7 +278,7 @@
         },
         "competitor_set": {
           "type": "array",
-          "minItems": 5,
+          "minItems": 3,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -573,10 +657,23 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "selected_industry",
+        "addressable_market_count",
+        "csv_source",
         "icp_from_csv",
         "it_spend_buckets"
       ],
       "properties": {
+        "selected_industry": {
+          "type": "string"
+        },
+        "addressable_market_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "csv_source": {
+          "type": "string"
+        },
         "icp_from_csv": {
           "type": "string"
         },
@@ -591,7 +688,65 @@
     "input_proof": {
       "type": "object",
       "additionalProperties": false,
-      "properties": {}
+      "properties": {
+        "outline_sha256": {
+          "type": "string"
+        },
+        "evidence_log_sha256": {
+          "type": "string"
+        },
+        "csv_normalized_sha256": {
+          "type": "string"
+        },
+        "site_sha256": {
+          "type": "string"
+        },
+        "evidence_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "website": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "linkedin": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "pdf": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "directories": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ixbrl": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "csv": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "website",
+            "linkedin",
+            "pdf",
+            "directories",
+            "ixbrl",
+            "csv"
+          ]
+        }
+      },
+      "required": [
+        "outline_sha256",
+        "evidence_log_sha256",
+        "csv_normalized_sha256",
+        "site_sha256",
+        "evidence_counts"
+      ]
     }
   }
 }

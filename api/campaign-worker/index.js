@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 2025-10-28 v13 (staged logic removed)
+// /api/campaign-worker/index.js 31-10-2025 v14
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // Writes under results/runs/<runId>/(status.json|evidence_log.json|campaign.json)
 
@@ -158,7 +158,7 @@ function sanitizeCaseStudyLibrary(draft, evidence, prospectWebsite, context) {
     if (!row || typeof row !== "object") return false;
 
     const url = row.url || row.link || "";
-       const host = hostnameOf(url);
+    const host = hostnameOf(url);
     if (!url || !host) return false;
 
     // must be same host as company site and/or present in evidence URLs
@@ -218,7 +218,20 @@ module.exports = async function (context, queueItem) {
       salesModel,
       call_type,
       callType,
-      correlationId: msgCorrelationId
+      correlationId: msgCorrelationId,
+
+      // CRITICAL: new inputs carried from start
+      supplier_company,
+      supplier_website,
+      supplier_linkedin,
+      supplier_usps,
+      campaign_industry,
+      selected_industry,
+      campaign_requirement,
+      relevant_competitors,
+
+      // And/or nested runConfig for back-compat
+      runConfig
     } = __message;
 
     const correlationId = msgCorrelationId || `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
@@ -243,44 +256,52 @@ module.exports = async function (context, queueItem) {
       return undefined;
     };
 
-    // -------- Build harness input --------
-    const __src = __message;
+    // -------- Build harness input (fully-populated) --------
     const __pageVal = __normNonEmpty(page) || "campaign";
     const __rowCountVal = Number.isFinite(Number(rowCount)) ? Number(rowCount) : undefined;
     const __notesVal = __normNonEmpty(notes);
 
     const __rawSales = __normNonEmpty(__pickFirstPresent(
-      salesModel, __filtersObj?.salesModel, __src.sales_model, __src.salesModel
+      salesModel, __filtersObj?.salesModel, __message.sales_model, __message.salesModel
     ));
     const __salesModelVal = (__rawSales && ["direct", "partner"].includes(__rawSales.toLowerCase()))
       ? __rawSales.toLowerCase()
       : undefined;
 
     const __rawCall = __normNonEmpty(__pickFirstPresent(
-      call_type, callType, __filtersObj?.call_type, __filtersObj?.callType, __src.call_type, __src.callType
+      call_type, callType, __filtersObj?.call_type, __filtersObj?.callType, __message.call_type, __message.callType
     ));
     const __callTypeVal = (__rawCall && ["direct", "partner"].includes(__rawCall.toLowerCase()))
       ? __rawCall.toLowerCase()
       : undefined;
 
-    const __companyVal = __normNonEmpty(__pickFirstPresent(__src.prospect_company, __src.company_name, __src.company));
-    const __websiteVal = __normNonEmpty(__pickFirstPresent(__src.prospect_website, __src.company_website, __src.website));
-    const __linkedinVal = __normNonEmpty(__pickFirstPresent(__src.prospect_linkedin, __src.company_linkedin, __src.linkedin));
+    const __companyVal = __normNonEmpty(__pickFirstPresent(supplier_company, __message.company_name, __message.prospect_company, __message.company));
+    const __websiteVal = __normNonEmpty(__pickFirstPresent(supplier_website, __message.company_website, __message.prospect_website, __message.website));
+    const __linkedinVal = __normNonEmpty(__pickFirstPresent(supplier_linkedin, __message.company_linkedin, __message.prospect_linkedin, __message.linkedin));
 
+    // USPs (array or delimited string)
     let __uspsArr;
-    if (Array.isArray(__src.user_usps)) {
-      __uspsArr = __src.user_usps.map(s => String(s ?? "").trim()).filter(Boolean);
-    } else if (typeof __src.user_usps === "string") {
-      __uspsArr = __src.user_usps.split(",").map(s => s.trim()).filter(Boolean);
-    } else if (Array.isArray(__src.usps)) {
-      __uspsArr = __src.usps.map(s => String(s ?? "").trim()).filter(Boolean);
-    } else if (typeof __src.usps === "string") {
-      __uspsArr = __src.usps.split(",").map(s => s.trim()).filter(Boolean);
+    if (Array.isArray(supplier_usps)) {
+      __uspsArr = supplier_usps.map(s => String(s ?? "").trim()).filter(Boolean);
+    } else if (typeof supplier_usps === "string") {
+      __uspsArr = supplier_usps.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+    } else if (Array.isArray(__message.usps)) {
+      __uspsArr = __message.usps.map(s => String(s ?? "").trim()).filter(Boolean);
+    } else if (typeof __message.usps === "string") {
+      __uspsArr = __message.usps.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
     }
 
-    const __csvSummaryVal = (typeof __src.csvSummary === "object" && __src.csvSummary)
-      || (typeof __src.csv_summary === "object" && __src.csv_summary)
-      || undefined;
+    // Objective + competitors (prefer top-level; fallback to runConfig)
+    const __objectiveEffective =
+      (__normNonEmpty(campaign_requirement) || __normNonEmpty(runConfig?.campaign_requirement) || "unspecified").toLowerCase();
+
+    let __competitors = [];
+    if (Array.isArray(relevant_competitors)) __competitors = relevant_competitors;
+    else if (Array.isArray(runConfig?.relevant_competitors)) __competitors = runConfig.relevant_competitors;
+    __competitors = (__competitors || []).map(s => String(s || "").trim()).filter(Boolean).slice(0, 8);
+
+    const __campaignIndustry = __normNonEmpty(campaign_industry) || __normNonEmpty(selected_industry);
+    const __selectedIndustry = __normNonEmpty(selected_industry) || __normNonEmpty(campaign_industry);
 
     const inputPayload = {};
     inputPayload.page = __pageVal;
@@ -291,26 +312,34 @@ module.exports = async function (context, queueItem) {
     if (__salesModelVal) inputPayload.sales_model = __salesModelVal;
     if (__callTypeVal) inputPayload.call_type = __callTypeVal;
 
-    if (__companyVal) inputPayload.prospect_company = __companyVal;
-    if (__websiteVal) inputPayload.prospect_website = __websiteVal;
-    if (__linkedinVal) inputPayload.prospect_linkedin = __linkedinVal;
+    if (__companyVal) inputPayload.supplier_company = __companyVal;
+    if (__websiteVal) inputPayload.supplier_website = __websiteVal;
+    if (__linkedinVal) inputPayload.supplier_linkedin = __linkedinVal;
+    if (__uspsArr && __uspsArr.length) inputPayload.supplier_usps = __uspsArr;
 
-    if (__uspsArr && __uspsArr.length) inputPayload.user_usps = __uspsArr;
-    if (__csvSummaryVal) inputPayload.csvSummary = __csvSummaryVal;
+    // New, schema-critical intent signals:
+    if (__objectiveEffective) inputPayload.campaign_requirement = __objectiveEffective;       // "upsell" | "win-back" | "growth" | "unspecified"
+    if (__competitors.length) inputPayload.relevant_competitors = __competitors;              // up to 8 vendor names
+    if (__campaignIndustry) inputPayload.campaign_industry = __campaignIndustry;            // for copy
+    if (__selectedIndustry) inputPayload.selected_industry = __selectedIndustry;            // for system selection
 
     // Legacy mirror keys (UI convenience)
-    if (inputPayload.prospect_company) inputPayload.company_name = inputPayload.prospect_company;
-    if (inputPayload.prospect_website) inputPayload.company_website = inputPayload.prospect_website;
-    if (inputPayload.prospect_linkedin) inputPayload.company_linkedin = inputPayload.prospect_linkedin;
+    if (inputPayload.supplier_company) inputPayload.company_name = inputPayload.supplier_company;
+    if (inputPayload.supplier_website) inputPayload.company_website = inputPayload.supplier_website;
+    if (inputPayload.supplier_linkedin) inputPayload.company_linkedin = inputPayload.supplier_linkedin;
 
     context.log("worker→harness input snapshot", {
       runId,
       page: inputPayload.page,
       sales_model: inputPayload.sales_model || null,
       call_type: inputPayload.call_type || null,
-      company: inputPayload.prospect_company || null,
-      website_present: !!inputPayload.prospect_website,
-      usps: Array.isArray(inputPayload.user_usps) ? inputPayload.user_usps.length : 0
+      company: inputPayload.supplier_company || null,
+      website_present: !!inputPayload.supplier_website,
+      usps: Array.isArray(inputPayload.supplier_usps) ? inputPayload.supplier_usps.length : 0,
+      objective: inputPayload.campaign_requirement || "unspecified",
+      competitors: Array.isArray(inputPayload.relevant_competitors) ? inputPayload.relevant_competitors.length : 0,
+      campaign_industry: inputPayload.campaign_industry || null,
+      selected_industry: inputPayload.selected_industry || null
     });
 
     // -------- Status writer & event logger --------
@@ -404,36 +433,71 @@ module.exports = async function (context, queueItem) {
       packsConfig = {};
     }
 
-    // -------- Phase 2 – Evidence builder --------
-    await updateStatus("EvidenceBuilder");
+    // -------- Phase 2 – Evidence ingest (prefer prebuilt evidence_log.json) --------
+    await updateStatus("EvidenceBuilder", { phase: "ingest", note: "prefer prebuilt evidence_log.json" });
     let evidence = [];
     try {
-      const { buildEvidence } = await loadEvidence();
-      if (typeof buildEvidence === "function") {
+      const prebuilt = await readJsonIfExists(`${prefix}evidence_log.json`);
+
+      if (Array.isArray(prebuilt) && prebuilt.length) {
+        evidence = prebuilt;
+        context.log("worker: using prebuilt evidence_log.json", { count: evidence.length });
+      } else {
+        // Back-compat fallback to in-process builder (kept, but make it visible)
+        const { buildEvidence } = await loadEvidence();
         const ev = await buildEvidence({ input: inputPayload, packs: packsConfig, runId, correlationId });
         evidence = Array.isArray(ev) ? ev : [];
+
+        await updateStatus("EvidenceBuilder", {
+          warning: { code: "fallback_evidence_builder", message: "Prebuilt evidence_log.json missing; used fallback builder" }
+        });
       }
-    } catch (e) {
-      await updateStatus("EvidenceBuilder", {
-        warning: { code: "evidence_error", message: String(e?.message || e) }
-      });
+    } catch (err) {
+      context.log.warn("worker: evidence ingest error; proceeding empty", { err: String(err) });
       evidence = [];
     }
-
-    // Bucket evidence (used by the harness)
+    // Bucket evidence by new schema enums
     const evidencePack = { website: [], linkedin: [], ixbrl: {}, pdf: [], directories: [], csv: {} };
     for (const item of (Array.isArray(evidence) ? evidence : [])) {
-      const t = String(item?.type || "").toLowerCase();
-      if (t.includes("linkedin")) evidencePack.linkedin.push(item);
-      else if (t.includes("ixbrl")) Object.assign(evidencePack.ixbrl, item.data || {});
-      else if (t.includes("pdf")) evidencePack.pdf.push(item);
-      else if (t.includes("directory")) evidencePack.directories.push(item);
-      else if (t.includes("csv")) Object.assign(evidencePack.csv, item.data || {});
-      else evidencePack.website.push(item);
+      const st = String(item?.source_type || "").toLowerCase();
+      if (st === "company site") {
+        evidencePack.website.push(item);
+      } else if (st === "pdf extract") {
+        evidencePack.pdf.push(item);
+      } else if (st === "linkedin") {
+        evidencePack.linkedin.push(item);
+      } else if (st === "directory") {
+        evidencePack.directories.push(item);
+      } else {
+        // Unknown → conservative
+        evidencePack.directories.push(item);
+      }
     }
+    // Load csv_normalized.json to populate evidencePack.csv
+    try {
+      const csvBlob = containerClient.getBlockBlobClient(`${prefix}csv_normalized.json`);
+      if (await csvBlob.exists()) {
+        const dl = await csvBlob.download();
+        const txt = await streamToString(dl.readableStreamBody);
+        evidencePack.csv = JSON.parse(txt);
+      }
+    } catch { /* leave csv as {} */ }
 
-    // Persist raw evidence log for traceability
-    await putJson(containerClient, `${prefix}evidence_log.json`, evidence);
+    // Helpful signals for the harness & schema (addressable market + CSV signals)
+    const csvMeta = (evidencePack.csv && evidencePack.csv.meta) || {};
+    const addressable_market = Number.isFinite(Number(csvMeta.rows)) ? Number(csvMeta.rows) : null;
+
+    const csvSignals = (() => {
+      const sig = {};
+      const cn = evidencePack.csv || {};
+      // Canonical fields as produced by campaign-evidence/csv_normalized.json
+      if (typeof cn.industry_mode === "string") sig.industry_mode = cn.industry_mode;
+      if (typeof cn.selected_industry === "string") sig.selected_industry = cn.selected_industry;
+      if (cn.signals && typeof cn.signals === "object") sig.signals = cn.signals;
+      if (cn.global_signals && typeof cn.global_signals === "object") sig.global_signals = cn.global_signals;
+      if (cn.meta && typeof cn.meta === "object") sig.meta = cn.meta;
+      return sig;
+    })();
 
     // -------- Phase 3 – Draft campaign (LLM) --------
     await updateStatus("DraftCampaign");
@@ -441,7 +505,6 @@ module.exports = async function (context, queueItem) {
     try {
       promptHarness = await loadPromptHarness();
     } catch (e) {
-      // Capture harness signals (e.g., draft_json_parse_error with details.head/tail)
       const code = e?.code || "draft_error";
       const details = e?.details && typeof e.details === "object" ? e.details : undefined;
       try {
@@ -493,7 +556,8 @@ module.exports = async function (context, queueItem) {
         pdf: Array.isArray(evidencePack.pdf) ? evidencePack.pdf.length : 0,
         directories: Array.isArray(evidencePack.directories) ? evidencePack.directories.length : 0,
         ixbrlKeys: Object.keys(evidencePack.ixbrl || {}).length,
-        csvKeys: Object.keys(evidencePack.csv || {}).length
+        csvKeys: Object.keys(evidencePack.csv || {}).length,
+        addressable_market
       });
 
       draft = await promptHarness.generate({
@@ -502,7 +566,11 @@ module.exports = async function (context, queueItem) {
         input: {
           ...inputPayload,
           runId,
-          page: sanitizePage(inputPayload.page)
+          page: sanitizePage(inputPayload.page),
+
+          // NEW: pass explicit buyer-data & schema-critical context to the model
+          addressable_market,          // number | null
+          csv_signals: csvSignals      // includes industry_mode, selected_industry, signals/global_signals, meta
         },
         evidencePack,
         options: {
@@ -526,7 +594,7 @@ module.exports = async function (context, queueItem) {
         try { draft = JSON.parse(draft); } catch { /* leave as string */ }
       }
 
-      const prospectSite = inputPayload.prospect_website || inputPayload.company_website || "";
+      const prospectSite = inputPayload.supplier_website || inputPayload.company_website || "";
       try {
         draft = sanitizeCaseStudyLibrary(draft, evidence, prospectSite, context);
       } catch (sanErr) {

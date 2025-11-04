@@ -1,5 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs)
-   26-10-2025 v3 (drop-in)
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 01-11-2025 v5
 
    Expects these elements in the page:
    - #sectionTabs (left tabs, role=tablist in HTML)
@@ -15,7 +14,7 @@ window.CampaignUI = window.CampaignUI || {};
   const rowsOf = (v) => Array.isArray(v) ? v : (v == null ? [] : [v]);
 
   // ---------- App state ----------
-  const state = { contract: null, active: "exec", tabsMounted: false };
+  const state = { contract: null, evidence: [], active: "exec", tabsMounted: false };
 
   // ---------- Generic UI helpers ----------
   function setPanelContent(node) {
@@ -136,25 +135,46 @@ window.CampaignUI = window.CampaignUI || {};
   }
 
   function renderExecutiveSummary() {
-    // Use the same pattern as the other renderers (read from state)
-    const list = rowsOf(state.contract?.executive_summary);
+    const listRaw = rowsOf(state.contract?.executive_summary);
 
-    if (!list.length) {
+    if (!listRaw.length) {
       setPanelContent(makePre("The executive summary will show here when your campaign has been created."));
       return;
     }
 
+    const toText = (item) => {
+      if (item == null) return "";
+      if (typeof item === "string") return item;
+      if (typeof item === "number") return String(item);
+      if (typeof item === "object") {
+        // Prefer common fields if present; else join stringy values
+        const prefer = item.paragraph || item.text || item.value || item.content;
+        if (typeof prefer === "string") return prefer;
+        const vals = Object.values(item).filter(v => typeof v === "string");
+        return vals.join(" ").trim() || JSON.stringify(item);
+      }
+      return String(item);
+    };
+
+    const list = listRaw.map(toText).filter(s => s && s.trim());
+
     const wrap = document.createElement("div");
 
-    // Item #1 → paragraph (product-specific content comes from the harness)
+    // Item #1 → paragraph
+    const first = list[0];
     const para = document.createElement("p");
-    para.textContent = String(list[0] || "");
+    if (first && typeof first === "object") {
+      // Prefer common keys if object sneaks in
+      para.textContent = first.text || first.paragraph || JSON.stringify(first);
+    } else {
+      para.textContent = String(first || "");
+    }
     wrap.appendChild(para);
 
-    // Items #2..N → bullets (Why now)
+    // Items #2..N → bullets
     if (list.length > 1) {
       const ul = document.createElement("ul");
-      ul.className = "list"; // to match your existing CSS list styling
+      ul.className = "list";
       for (let i = 1; i < list.length; i++) {
         const li = document.createElement("li");
         li.textContent = String(list[i] || "");
@@ -167,34 +187,32 @@ window.CampaignUI = window.CampaignUI || {};
   }
 
   function renderEvidenceLog() {
-    const entries = rowsOf(state.contract?.evidence_log);
+    const entries = Array.isArray(state.evidence) && state.evidence.length
+      ? state.evidence
+      : rowsOf(state.contract?.evidence_log);
 
-    // ---- helpers (scoped to this renderer; no globals) ----
     const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
     const truncate = (s, n = 240) => (typeof s === "string" && s.length > n) ? (s.slice(0, n - 1) + "…") : (s || "");
     const hasNumbers = (s) => /\d/.test(String(s || ""));
     const isSpecific = (e) => {
-      // Must have URL + Title + a substantive summary (numbers OR quote)
+      // Show items that have URL + Title + some summary/quote text.
       if (!e || !e.url || !e.title) return false;
-      const summary = String(e.summary || "");
-      const quote = String(e.quote || "");
-      const longEnough = summary.trim().length >= 20 || quote.trim().length >= 20;
-      const hasSubstance = hasNumbers(summary) || hasNumbers(quote) || quote.trim().length >= 20;
-      return longEnough && hasSubstance;
+      const summary = String(e.summary || "").trim();
+      const quote = String(e.quote || "").trim();
+      return (summary.length >= 8 || quote.length >= 8);
     };
     const srcRank = (t) => {
       const k = String(t || "").toLowerCase();
       if (k.includes("ofcom")) return 1;
       if (k.includes("ons")) return 2;
       if (k.includes("dsit")) return 3;
-      if (k.includes("company")) return 4;         // "Company site"
+      if (k.includes("company")) return 4;
       if (k.includes("pdf")) return 5;
       if (k.includes("trade")) return 6;
       if (k.includes("directory")) return 7;
       return 9;
     };
 
-    // ---- de-dup (prefer first occurrence) ----
     const seen = new Set();
     const deduped = entries.filter(e => {
       const key = e?.claim_id || `${e?.title || ""}|${e?.url || ""}`;
@@ -204,11 +222,9 @@ window.CampaignUI = window.CampaignUI || {};
       return true;
     });
 
-    // ---- filter for specificity ----
     const strong = deduped.filter(isSpecific);
     const removedCount = deduped.length - strong.length;
 
-    // ---- sort: regulator/government first, then company site, then others; secondary by host then title ----
     strong.sort((a, b) => {
       const r = srcRank(a.source_type) - srcRank(b.source_type);
       if (r !== 0) return r;
@@ -217,20 +233,7 @@ window.CampaignUI = window.CampaignUI || {};
       return String(a.title || "").localeCompare(String(b.title || ""));
     });
 
-    // ---- build table rows (keep your column order) ----
-    const headers = ["ClaimID", "Summary", "Source type", "Title", "URL", "Quote"];
-    const rows = strong.map(e => [
-      e.claim_id ? { __link: true, href: `#${e.claim_id}`, text: e.claim_id } : "",
-      truncate(e.summary, 280),
-      e.source_type || "",
-      e.title || "",
-      e.url ? { __link: true, href: e.url, text: hostOf(e.url) || e.url } : "",
-      truncate(e.quote, 220)
-    ]);
-
-    // ---- assemble UI: note + table or empty state ----
     const wrap = document.createElement("div");
-
     const note = document.createElement("div");
     note.className = "muted";
     note.style.marginBottom = ".5rem";
@@ -245,14 +248,23 @@ window.CampaignUI = window.CampaignUI || {};
       return;
     }
 
+    const headers = ["ClaimID", "Summary", "Source type", "Title", "URL", "Quote"];
+    const rows = strong.map(e => [
+      e.claim_id ? { __link: true, href: `#${e.claim_id}`, text: e.claim_id } : "",
+      truncate(e.summary, 280),
+      e.source_type || "",
+      e.title || "",
+      e.url ? { __link: true, href: e.url, text: hostOf(e.url) || e.url } : "",
+      truncate(e.quote, 220)
+    ]);
+
     const table = makeTable(headers, rows);
 
-    // Cross-nav: click CLM-xxx → switch to ICP tab + highlight
     table.addEventListener("click", (ev) => {
       const a = ev.target.closest('a[href^="#CLM-"]');
       if (!a) return;
       ev.preventDefault();
-      const claimId = a.getAttribute("href").slice(1); // CLM-001
+      const claimId = a.getAttribute("href").slice(1);
       const icpBtn = document.querySelector('[data-section="icp"]');
       if (icpBtn) icpBtn.click();
       setTimeout(() => {
@@ -551,8 +563,9 @@ window.CampaignUI = window.CampaignUI || {};
 
   // ---------- Public API for the poller ----------
   window.CampaignUI = Object.assign(window.CampaignUI || {}, {
-    setContract(contract_v1) {
+    setContract(contract_v1, opts = {}) {
       state.contract = contract_v1 || null;
+      state.evidence = Array.isArray(opts.evidence) ? opts.evidence : [];
       state.active = "exec";
       mountTabs(true);
       renderActive();
@@ -561,7 +574,7 @@ window.CampaignUI = window.CampaignUI || {};
     _debug: {
       mountTabs,
       renderActive: () => renderActive(),
-      getState: () => ({ active: state.active, hasContract: !!state.contract })
+      getState: () => ({ active: state.active, hasContract: !!state.contract, evidenceCount: state.evidence.length })
     }
   });
 
@@ -629,7 +642,8 @@ window.CampaignUI = window.CampaignUI || {};
   const API = {
     start: "/api/campaign-start",
     status: (runId) => `/api/campaign-status?runId=${encodeURIComponent(runId)}`,
-    fetchContract: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign`
+    fetchContract: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign`,
+    fetchEvidenceLog: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence_log`
   };
 
   async function startRun() {
@@ -638,53 +652,57 @@ window.CampaignUI = window.CampaignUI || {};
     UI.log("Submitting job to /api/campaign-start");
 
     // ---- Collect UI inputs (defensive) ----
-    const salesModel = ($("#salesModel")?.value || "").trim().toLowerCase() || null; // "partner" | "direct" | null
+    const salesModel = ($("#salesModel")?.value || "").trim().toLowerCase() || null;
     const notes = ($("#notes")?.value || "").trim() || null;
 
-    const prospect_company = ($("#companyName")?.value || "").trim();
-    const prospect_website = ($("#companyWebsite")?.value || "").trim();
-    const prospect_linkedin = ($("#companyLinkedIn")?.value || "").trim();
+    const supplier_company = ($("#companyName")?.value || "").trim();
+    const supplier_website = ($("#companyWebsite")?.value || "").trim();
+    const supplier_linkedin = ($("#companyLinkedIn")?.value || "").trim();
 
-    // USPs: allow newline / semicolon / comma separated; normalise to array
     const uspsText = ($("#companyUsps")?.value || "").trim();
-    const user_usps = uspsText
-      ? uspsText.split(/\r?\n|;|,/).map(s => s.trim()).filter(Boolean)
-      : [];
+    const supplier_usps = uspsText ? uspsText.split(/\r?\n|;|,/).map(s => s.trim()).filter(Boolean) : [];
 
-    // Competitors: accept comma/semicolon/newline; normalise to array, cap at 8
     const compText = ($("#relevantCompetitors")?.value || "").trim();
-    const relevant_competitors = compText
-      ? compText.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 8)
-      : [];
+    const relevant_competitors = compText ? compText.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 8) : [];
 
-    // Campaign requirement: strict enum or null
     const campaign_requirement_raw = ($("#campaignRequirement")?.value || "").trim().toLowerCase();
     const campaign_requirement = ["upsell", "win-back", "growth"].includes(campaign_requirement_raw)
-      ? campaign_requirement_raw
-      : null;
+      ? campaign_requirement_raw : null;
 
-    // Optional industry (if you add the field in index.html)
     const buyer_industry = ($("#buyerIndustry")?.value || "").trim() || null;
 
     // CSV: build compact summary if a file is present
     let csvSummary = null;
+    let csvTextRaw = null;
+    let rowCount = null;
+
     const fileEl = $("#csvUpload");
     if (fileEl?.files?.[0]) {
       const text = await fileEl.files[0].text();
+      csvTextRaw = text;
+
+      // csvToArray() returns ONLY data rows (header already removed),
+      // so rowCount is simply rows.length
       const rows = csvToArray(text);
+      rowCount = rows.length;
+
       csvSummary = buildCsvSummary(rows, buyer_industry || "");
     }
+
     const payload = {
       page: "campaign",
       salesModel,
       notes,
-      rowCount: null,
-      prospect_company,
-      prospect_website,
-      prospect_linkedin,
-      user_usps,
-      buyer_industry,
+      rowCount,
+      csvText: csvTextRaw,
       csvSummary,
+      csvFilename: fileEl?.files?.[0]?.name || null,
+      supplier_company,
+      supplier_website,
+      supplier_linkedin,
+      supplier_usps,
+      // map UI field to the server's expected key
+      campaign_industry: buyer_industry,
       relevant_competitors,
       campaign_requirement
     };
@@ -699,7 +717,17 @@ window.CampaignUI = window.CampaignUI || {};
 
     const contract = await pollToCompletion(runId);
     UI.log("Contract fetched; keys=" + Object.keys(contract || {}).join(","));
-    window.CampaignUI?.setContract?.(contract);
+
+    // Try to fetch evidence_log (non-fatal if missing)
+    let evidenceItems = [];
+    try {
+      const ev = await http("GET", API.fetchEvidenceLog(runId), { timeoutMs: 20000 });
+      if (Array.isArray(ev)) evidenceItems = ev;
+    } catch (e) {
+      UI.log("Evidence fetch skipped: " + (e?.message || e));
+    }
+
+    window.CampaignUI?.setContract?.(contract, { evidence: evidenceItems });
     UI.setStatus("Completed", "ok");
   }
 
@@ -707,6 +735,16 @@ window.CampaignUI = window.CampaignUI || {};
     const started = Date.now();
     const MAX_MS = 8 * 60 * 1000; // 8 minutes
     let attempt = 0;
+
+    const okDuring = new Set([
+      "Queued",
+      "DraftCampaign",
+      "EvidenceDigest", // ← actual evidence phase name
+      "Outline",
+      "SectionWrites",
+      "Assemble",
+      "Completed"
+    ]);
 
     while (true) {
       if (Date.now() - started > MAX_MS) throw new Error("Timed out waiting for completion");
@@ -721,8 +759,9 @@ window.CampaignUI = window.CampaignUI || {};
         if (!contract || typeof contract !== "object") throw new Error("Empty or invalid contract JSON");
         return contract;
       }
-      if (stateName === "Failed" || stateName === "Unknown") {
-        const msg = st?.error?.message || `Run ended with state: ${stateName}`;
+
+      if (stateName === "Failed" || stateName === "Unknown" || !okDuring.has(stateName)) {
+        const msg = st?.error?.message || `Run ended with unexpected state: ${stateName}`;
         throw new Error(msg);
       }
 
