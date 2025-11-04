@@ -40,12 +40,46 @@ async function enqueueMessage(queueClient, jsonString) {
   return queueClient.sendMessage(jsonString);
 }
 
-// IMPORTANT: container-relative prefix ---
-function computePrefix(page, runId, now = new Date()) {
+// ---- Auth helpers (SWA) ----
+function decodeClientPrincipal(req) {
+  const b64 = readHeader(req, "x-ms-client-principal");
+  if (!b64) return null;
+  try {
+    const json = Buffer.from(b64, "base64").toString("utf8");
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+function getUserIdFromReq(req) {
+  // Prefer AAD object id / sub; fall back to email; last resort: anonymous
+  const cp = decodeClientPrincipal(req) || {};
+  const claims = cp?.claims || [];
+  const byType = Object.create(null);
+  for (const c of claims) byType[c.typ?.toLowerCase?.() || ""] = c.val;
+
+  const oid = byType["http://schemas.microsoft.com/identity/claims/objectidentifier"]
+    || byType["oid"]
+    || null;
+  const sub = byType["sub"] || null;
+  const email = (byType["emails"] || byType["email"] || cp?.userDetails || "").toLowerCase();
+
+  const chosen = oid || sub || email || "anonymous";
+  // Sanitize to a path segment
+  return String(chosen).trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, "-").replace(/-+/g, "-");
+}
+
+// IMPORTANT: container-relative prefix (user-scoped, date-bucketed)
+function computePrefix({ page = "campaign", runId, userId, now = new Date() }) {
   if (!runId || typeof runId !== "string") {
     throw new Error("computePrefix: runId is required and must be a string");
   }
-  return `runs/${runId}/`;
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(now.getUTCDate()).padStart(2, "0");
+  const segPage = String(page).trim().toLowerCase().replace(/[^a-z0-9._-]/g, "-").replace(/-+/g, "-") || "campaign";
+  const segUser = String(userId || "anonymous").trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, "-").replace(/-+/g, "-");
+  return `runs/${segPage}/${segUser}/${y}/${m}/${d}/${runId}/`;
 }
 
 async function writeInitialStatus(containerClient, relPrefix, status) {
@@ -213,8 +247,6 @@ module.exports = async function (context, req) {
       body.call_type ?? body.callType ?? body.filters?.call_type ?? body.filters?.callType ?? null;
     const callType = (callTypeRaw == null) ? null : String(callTypeRaw).trim().toLowerCase();
 
-
-    // numeric rowCount (optional)
     // numeric rowCount (optional) — canonical variable is `rc`
     let rc = (body.rowCount !== undefined && body.rowCount !== null) ? body.rowCount : null;
     if (rc != null) {
@@ -247,10 +279,9 @@ module.exports = async function (context, req) {
     const runId = clientRunKey
       ? crypto.createHash("sha1").update(String(clientRunKey)).digest("hex")
       : (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`);
-
     const now = new Date();
-    const relPrefix = computePrefix(effectivePage, runId, now); // container-relative (no 'results/' here)
-    const prefix = `runs/${runId}/`;
+    const userId = getUserIdFromReq(req); // ← SWA-auth derived (safe fallback to 'anonymous')
+    const relPrefix = computePrefix({ page: effectivePage, runId, userId, now }); // container-relative
 
     // --- Minimal validation (fail fast if truly empty) ---
     const missing = [];
@@ -307,6 +338,70 @@ module.exports = async function (context, req) {
     };
 
     await writeInitialStatus(containerClient, relPrefix, initialStatus);
+    // --- Persist canonical input.json at the run prefix ---
+    const inputBlob = containerClient.getBlockBlobClient(`${relPrefix}input.json`);
+    await inputBlob.upload(JSON.stringify({
+      page: effectivePage,
+      rowCount: rc ?? null,
+      filters: body.filters ?? null,
+      notes: body.notes ?? null,
+      sales_model: salesModel ?? null,
+      call_type: callType ?? null,
+      supplier_company,
+      supplier_website: supplier_website_https,
+      supplier_linkedin: supplier_linkedin_https,
+      supplier_usps,
+      campaign_industry,
+      selected_industry: campaign_industry || undefined,
+      campaign_requirement: campaign_requirement_effective,
+      relevant_competitors: Array.isArray(relevant_competitors) ? relevant_competitors : [],
+      csvText: csvText || null,
+      csvFilename: csvFilename || null,
+      csvSummary: body.csvSummary || null,
+      prospect_company: supplier_company,
+      prospect_website: supplier_website_https,
+      prospect_linkedin: supplier_linkedin_https,
+      user_usps: supplier_usps,
+      company_industry: campaign_industry
+    }, null, 2), Buffer.byteLength(JSON.stringify({})), {
+      blobHTTPHeaders: { blobContentType: "application/json" }
+    });
+
+    // --- Update per-user recent runs index: results/users/<userId>/recent.json ---
+    const userIdxPath = `users/${userId}/recent.json`;
+    const userIdxClient = containerClient.getBlockBlobClient(userIdxPath);
+    let idx = { userId, items: [] };
+    try {
+      const dl = await userIdxClient.download();
+      const buf = await streamToBuffer(dl.readableStreamBody);
+      idx = JSON.parse(buf.toString("utf8"));
+    } catch { /* not found → create */ }
+
+    idx.items = [
+      {
+        runId,
+        page: effectivePage,
+        when: now.toISOString(),
+        prefix: relPrefix,
+        summary: {
+          supplier_company,
+          campaign_industry,
+          rowCount: rc ?? null
+        }
+      },
+      ...(Array.isArray(idx.items) ? idx.items : [])
+    ].slice(0, 50);
+
+    await userIdxClient.upload(JSON.stringify(idx, null, 2), Buffer.byteLength(JSON.stringify(idx)), {
+      blobHTTPHeaders: { blobContentType: "application/json" }
+    });
+
+    // small helper to read blob stream
+    async function streamToBuffer(readable) {
+      const chunks = [];
+      for await (const chunk of readable) chunks.push(chunk);
+      return Buffer.concat(chunks);
+    }
 
     // ---- Build the INPUT payload workers ----
     const input = {
@@ -346,6 +441,7 @@ module.exports = async function (context, req) {
     const msg = {
       op: "kickoff",
       runId,
+      userId,
       page: effectivePage,
       enqueuedAt,
       prefix: relPrefix,
@@ -480,6 +576,20 @@ module.exports = async function (context, req) {
       queueName: QUEUE_NAME
     });
 
+    // --- ALSO enqueue to the evidence queue so evidence_log.json is built ---
+    const EVIDENCE_QUEUE = process.env.Q_CAMPAIGN_EVIDENCE || "campaign-evidence-jobs";
+    const eq = qs.getQueueClient(EVIDENCE_QUEUE);
+    await eq.createIfNotExists();
+
+    // Important: send the SAME payload (already includes prefix + userId)
+    await enqueueMessage(eq, payload);
+    context.log({
+      event: "campaign_start_enqueued_evidence",
+      runId,
+      queue: EVIDENCE_QUEUE,
+      correlationId
+    });
+
     try {
       context.log({
         event: "campaign_start_inputs",
@@ -490,6 +600,16 @@ module.exports = async function (context, req) {
         campaign_industry,
         campaign_requirement: campaign_requirement_effective,
         relevant_competitors_count: Array.isArray(relevant_competitors) ? relevant_competitors.length : 0
+      });
+      const EVIDENCE_QUEUE = process.env.Q_CAMPAIGN_EVIDENCE || "campaign-evidence-jobs";
+      const eq = qs.getQueueClient(EVIDENCE_QUEUE);
+      await eq.createIfNotExists();
+      await enqueueMessage(eq, payload);
+      context.log({
+        event: "campaign_start_enqueued_evidence",
+        runId,
+        queue: EVIDENCE_QUEUE,
+        correlationId,
       });
       const resp = await enqueueMessage(q, payload);
       context.log({

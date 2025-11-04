@@ -342,21 +342,45 @@ module.exports = async function (context, queueItem) {
       selected_industry: inputPayload.selected_industry || null
     });
 
-    // -------- Status writer & event logger --------
+    // -------- Status writer & event logger (append model) --------
     let containerClient;
-    let prefix;
+
+    // Authoritative container-relative prefix: trust message, fallback for legacy
+    const prefix = (() => {
+      let p = (typeof msgPrefix === "string" && msgPrefix.trim()) ? msgPrefix.trim() : `runs/${runId}/`;
+      if (!p.endsWith("/")) p += "/";
+      if (p.startsWith("/")) p = p.replace(/^\/+/, "");
+      return p;
+    })();
 
     async function updateStatus(state, extra = {}) {
       try {
-        if (!containerClient || !prefix) return;
-        const status = {
-          runId,
-          state,
-          input: inputPayload,
-          ...(extra || {}),
-          correlationId
-        };
-        await putJson(containerClient, `${prefix}status.json`, status);
+        if (!containerClient) return;
+        const path = `${prefix}status.json`;
+
+        // read current status (if any)
+        let cur = null;
+        try {
+          const bb = containerClient.getBlockBlobClient(path);
+          if (await bb.exists()) {
+            const dl = await bb.download();
+            const chunks = [];
+            for await (const c of dl.readableStreamBody) chunks.push(c);
+            cur = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+          }
+        } catch { /* ignore */ }
+
+        // append model
+        const now = new Date().toISOString();
+        const next = cur && typeof cur === "object" ? cur : { runId, history: [] };
+        next.state = state;
+        if (!Array.isArray(next.history)) next.history = [];
+        next.history.push({ phase: state, at: now, correlationId, ...extra, input: undefined }); // keep phase payload small
+
+        // keep the latest canonical input snapshot in the root (not in every history node)
+        next.input = inputPayload;
+
+        await putJson(containerClient, path, next);
       } catch (e) {
         context.log.warn("status_write_failed", { runId, correlationId, message: String(e?.message || e) });
       }
@@ -405,14 +429,13 @@ module.exports = async function (context, queueItem) {
     containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
     await containerClient.createIfNotExists();
 
-    // Require a container-relative prefix from the starter
-    if (!msgPrefix || typeof msgPrefix !== "string") {
-      throw new Error("Missing prefix in message");
+    // Validate container-relative prefix (computed earlier)
+    if (typeof prefix !== "string" || !prefix.length) {
+      throw new Error("Missing prefix in message or legacy fallback failed");
     }
-    if (msgPrefix.startsWith(`${RESULTS_CONTAINER}/`)) {
-      throw new Error("Prefix must be container-relative (do not include the container name)");
+    if (prefix.startsWith(`${RESULTS_CONTAINER}/`)) {
+      throw new Error("Prefix must be container-relative (must not include the container name)");
     }
-    prefix = msgPrefix.endsWith("/") ? msgPrefix : (msgPrefix + "/");
     context.log("campaign-worker resolved path", { runId, prefix });
 
     // -------- Phase 1 – Validate input --------
@@ -435,26 +458,23 @@ module.exports = async function (context, queueItem) {
 
     // -------- Phase 2 – Evidence ingest (prefer prebuilt evidence_log.json) --------
     await updateStatus("EvidenceBuilder", { phase: "ingest", note: "prefer prebuilt evidence_log.json" });
-    let evidence = [];
-    try {
-      const prebuilt = await readJsonIfExists(`${prefix}evidence_log.json`);
 
-      if (Array.isArray(prebuilt) && prebuilt.length) {
-        evidence = prebuilt;
-        context.log("worker: using prebuilt evidence_log.json", { count: evidence.length });
-      } else {
-        // Back-compat fallback to in-process builder (kept, but make it visible)
-        const { buildEvidence } = await loadEvidence();
-        const ev = await buildEvidence({ input: inputPayload, packs: packsConfig, runId, correlationId });
-        evidence = Array.isArray(ev) ? ev : [];
-
+    let evidence = await readJsonIfExists(`${prefix}evidence_log.json`);
+    if (Array.isArray(evidence) && evidence.length) {
+      context.log("worker: using prebuilt evidence_log.json", { runId, count: evidence.length });
+    } else {
+      context.log.warn("worker: prebuilt evidence_log.json missing/empty; invoking fallback builder", { runId });
+      try {
+        const { buildEvidence } = await loadEvidence(); // your existing loader
+        const built = await buildEvidence({ input: inputPayload, packs: packsConfig, runId, prefix, correlationId });
+        evidence = Array.isArray(built) ? built : [];
         await updateStatus("EvidenceBuilder", {
-          warning: { code: "fallback_evidence_builder", message: "Prebuilt evidence_log.json missing; used fallback builder" }
+          warning: { code: "fallback_evidence_builder", count: evidence.length }
         });
+      } catch (err) {
+        context.log.error("worker: fallback buildEvidence failed", String(err?.message || err));
+        evidence = [];
       }
-    } catch (err) {
-      context.log.warn("worker: evidence ingest error; proceeding empty", { err: String(err) });
-      evidence = [];
     }
     // Bucket evidence by new schema enums
     const evidencePack = { website: [], linkedin: [], ixbrl: {}, pdf: [], directories: [], csv: {} };
@@ -500,7 +520,10 @@ module.exports = async function (context, queueItem) {
     })();
 
     // -------- Phase 3 – Draft campaign (LLM) --------
-    await updateStatus("DraftCampaign");
+    await updateStatus("DraftCampaign", {
+      evidence_items: Array.isArray(evidence) ? evidence.length : 0,
+      at: new Date().toISOString()
+    });
     let promptHarness;
     try {
       promptHarness = await loadPromptHarness();

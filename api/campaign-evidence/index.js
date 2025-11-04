@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js  — Split campaign build. 04-11-2025 — v5
+// /api/campaign-evidence/index.js  — Split campaign build. 04-11-2025 — v6
 // Node 20, Azure Functions v4
 // Purpose: make evidence log the single comprehensive evidence source
 // Artifacts written under: <prefix>/
@@ -14,6 +14,21 @@
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { QueueClient } = require("@azure/storage-queue");
 const crypto = require("node:crypto");
+import { putJson } from "../lib/prefix.js";
+
+// inside your handler:
+const { prefix, input } = message; // prefer prefix from message
+// … build evidenceLog and csvNormalized …
+
+await putJson(`${prefix}evidence_log.json`, evidenceLog, container);
+await putJson(`${prefix}csv_normalized.json`, csvNormalized, container);
+
+// signal status
+const status = (await readJsonIfExists(`${prefix}status.json`, container)) || { runId: input?.runId, history: [] };
+status.state = "EvidenceDigest";
+status.history.push({ phase: "EvidenceDigest", at: new Date().toISOString(), count: evidenceLog.length });
+await putJson(`${prefix}status.json`, status, container);
+
 
 // ---------- Config ----------
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
@@ -752,20 +767,28 @@ function competitorsSummaryEvidenceFactory(containerUrl, prefix) {
 // ---------- Main ----------
 module.exports = async function (context, job) {
   const container = getContainerClient();
+  // ---- Normalise incoming queue payload (object or string) ----
+  const msg = (typeof job === "string")
+    ? (() => { try { return JSON.parse(job); } catch { return {}; } })()
+    : (job || {});
 
-  // Validate/shape incoming job
-  const runId = job?.runId || crypto.randomUUID();
-  let prefix = job?.prefix || "";
-  const input = job?.input || job?.inputs || job || {};
+  // Canonical fields
+  const runId = (msg.runId && String(msg.runId)) || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+  const input = msg.input || msg.inputs || msg || {};
 
-  // Canonical prefix fallback if absent
-  if (!prefix || typeof prefix !== "string") {
+  // Prefix: trust message.prefix if present (from /campaign-start), otherwise fallback
+  let prefix = (msg.prefix && String(msg.prefix).trim()) || "";
+  if (!prefix) {
+    // Fallback for legacy callers 
     prefix = `runs/${runId}/`;
-  } else if (!prefix.endsWith("/")) {
-    prefix = `${prefix}/`;
   }
+  // Ensure trailing slash exactly once
+  if (!prefix.endsWith("/")) prefix = `${prefix}/`;
 
-  // Enter EvidenceDigest
+  // Keep to container-relative paths only
+  if (prefix.startsWith("/")) prefix = prefix.replace(/^\/+/, "");
+
+  // ---- Enter EvidenceDigest  ----
   await updateStatus(container, prefix, {
     runId,
     state: "EvidenceDigest",
@@ -777,12 +800,15 @@ module.exports = async function (context, job) {
       supplier_linkedin: input.supplier_linkedin || input.company_linkedin || input.prospect_linkedin || null,
       supplier_usps: Array.isArray(input.supplier_usps)
         ? input.supplier_usps
-        : (input.supplier_usps ? String(input.supplier_usps).split(/[;,\n]/).map(s => s.trim()).filter(Boolean) : []),
-      selected_industry: (input.selected_industry || input.campaign_industry || input.company_industry || input.industry || "").trim().toLowerCase() || null
+        : (input.supplier_usps
+          ? String(input.supplier_usps).split(/[;,\n]/).map(s => s.trim()).filter(Boolean)
+          : []),
+      selected_industry:
+        (input.selected_industry || input.campaign_industry || input.company_industry || input.industry || "")
+          .trim().toLowerCase() || null
     },
     updatedAt: nowIso()
   });
-
   try {
     const supplierWebsiteRaw = (input.supplier_website || input.company_website || input.prospect_website || "").trim();
     const supplierLinkedInRaw = (input.supplier_linkedin || input.company_linkedin || input.prospect_linkedin || "").trim();

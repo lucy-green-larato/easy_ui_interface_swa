@@ -346,7 +346,22 @@ module.exports = async function (context, queueItem) {
     return;
   }
   const outlineSectionRaw = queueItem.section || ""; // may be blank for assemble jobs
-  const prefix = `runs/${runId}/`;
+  // Resolve authoritative container-relative prefix from the queue message.
+  // Fall back to legacy runs/<runId>/ if not provided.
+  let prefix = (typeof queueItem.prefix === "string" && queueItem.prefix.trim())
+    ? queueItem.prefix.trim()
+    : `runs/${runId}/`;
+
+  // If someone accidentally included the container name, strip it.
+  if (prefix.startsWith(`${CONTAINER}/`)) {
+    prefix = prefix.slice(`${CONTAINER}/`.length);
+  }
+
+  // Normalise to container-relative with a single trailing slash
+  if (prefix.startsWith("/")) prefix = prefix.replace(/^\/+/, "");
+  if (!prefix.endsWith("/")) prefix += "/";
+
+  context.log("[campaign-write] resolved prefix", { runId, prefix });
 
   try {
     // Load common inputs
@@ -545,12 +560,11 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
       return;
     }
 
-    throw new Error(`Unknown job type "${type}". Use "write_section" or "assemble".`);
+    throw new Error(`Unknown job type "${op}". Use "write_section" or "assemble".`);
   } catch (err) {
     context.log.error("[campaign-write] error", String(err?.message || err));
-    // Best-effort failure mark
+    // Best-effort failure mark (use the same resolved prefix)
     try {
-      const prefix = `runs/${runId}/`;
       await patchStatus(
         svc.getContainerClient(CONTAINER),
         prefix,
