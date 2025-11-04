@@ -1,19 +1,20 @@
 {
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": [
-      "/.auth/*",
-      "/api/*",
-      "/assets/*",
-      "/vendor/*",
-      "/content/*",
-      "/src/*"
-    ]
+    "exclude": ["/.auth/*", "/api/*", "/assets/*", "/vendor/*", "/content/*", "/src/*"]
   },
   "routes": [
     {
       "route": "/api/*",
-      "allowedRoles": ["authenticated"]
+      "methods": ["OPTIONS"],
+      "allowedRoles": ["anonymous"],
+      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/*"
+    },
+    {
+      "route": "/api/*",
+      "methods": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      "allowedRoles": ["authenticated"],
+      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/*"
     },
     {
       "route": "/engagement/*",
@@ -28,5 +29,6 @@
   "mimeTypes": {
     ".json": "application/json",
     ".md": "text/markdown"
-    }
+  }
 }
+

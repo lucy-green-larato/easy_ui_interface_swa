@@ -1,6 +1,6 @@
 // /api/campaign-start/index.js 04-10-2025 v10.0
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
-// POST /api/campaign/start → enqueues job to campaign queue, writes initial status.json ("Queued"), returns 202 { runId }.
+// POST /api/campaign-start → enqueues job to campaign queue, writes initial status.json ("Queued"), returns 202 { runId }.
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { QueueServiceClient } = require("@azure/storage-queue");
