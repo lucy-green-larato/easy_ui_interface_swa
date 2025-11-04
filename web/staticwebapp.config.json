@@ -6,13 +6,13 @@
   "routes": [
     {
       "route": "/api/campaign-start",
-      "methods": ["POST","OPTIONS"],
-      "allowedRoles": ["authenticated"], 
+      "methods": ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+      "allowedRoles": ["anonymous"],   // TEMP to isolate auth vs routing
       "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/campaign-start"
     },
     {
       "route": "/api/*",
-      "methods": ["GET","PUT","PATCH","DELETE","OPTIONS"],
+      "methods": ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
       "allowedRoles": ["authenticated"],
       "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/*"
     },
@@ -22,3 +22,4 @@
   ],
   "mimeTypes": { ".json": "application/json", ".md": "text/markdown" }
 }
+
