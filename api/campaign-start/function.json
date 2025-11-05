@@ -12,7 +12,7 @@
       "direction": "in",
       "name": "req",
       "methods": [
-        "post"
+        "post", "options"
       ],
       "route": "campaign-start"
     },

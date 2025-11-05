@@ -105,6 +105,18 @@ module.exports = async function (context, req) {
   const method = (req?.method || "GET").toUpperCase();
   const correlationId = getCorrelationId(req);
 
+  if (method === "OPTIONS") {
+    context.res = {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*", 
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, X-Correlation-Id, Authorization"
+      }
+    };
+    return;
+  }
+
   if (method !== "POST") {
     context.res = {
       status: 405,
