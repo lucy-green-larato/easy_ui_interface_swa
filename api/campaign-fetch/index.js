@@ -156,7 +156,9 @@ module.exports = async function (context, req) {
     const exists = await existsWithTinyRetry(blob, shouldRetry);
 
     if (!exists) {
-      // Special fallback: if the caller asked for evidence_log, unwrap it from campaign.json
+      // --- Fallbacks ------------------------------------------------------------
+
+      // 1) evidence_log → unwrap from campaign.json if present
       if (fileKey === "evidence_log") {
         const campaignBlob = container.getBlobClient(`${basePrefix}${VALID_MAP.campaign}`);
         const campaignOk = await existsWithTinyRetry(campaignBlob, true);
@@ -172,6 +174,21 @@ module.exports = async function (context, req) {
         }
       }
 
+      // 2) campaign → serve outline.json if campaign.json not yet written
+      if (fileKey === "campaign") {
+        const outlineBlob = container.getBlobClient(`${basePrefix}${VALID_MAP.outline}`);
+        const outlineOk = await existsWithTinyRetry(outlineBlob, true);
+        if (outlineOk) {
+          const outlineObj = await jsonOrNull(outlineBlob);
+          context.res = {
+            status: 200,
+            headers: { ...extraHeaders, "content-type": "application/json; charset=utf-8" },
+            body: outlineObj ?? {}
+          };
+          return;
+        }
+      }
+
       // Nothing to return → 404
       context.res = {
         status: 404,
@@ -179,6 +196,30 @@ module.exports = async function (context, req) {
         body: { error: "not_found", message: "File not found" }
       };
       return;
+    }
+
+    // --- Success path: blob exists ----------------------------------------------
+    if (relName.endsWith(".json")) {
+      const obj = await jsonOrNull(blob);
+
+      // Special unwrap for evidence_log.json files that may contain { evidence_log: [...] }
+      const bodyOut = (fileKey === "evidence_log")
+        ? (Array.isArray(obj) ? obj : (Array.isArray(obj?.evidence_log) ? obj.evidence_log : []))
+        : (obj ?? {});
+
+      context.res = {
+        status: 200,
+        headers: { ...extraHeaders, "content-type": "application/json; charset=utf-8" },
+        body: bodyOut
+      };
+    } else {
+      const dl = await blob.download();
+      const text = await streamToString(dl.readableStreamBody);
+      context.res = {
+        status: 200,
+        headers: { ...extraHeaders, "content-type": dl?.contentType || "application/octet-stream" },
+        body: text
+      };
     }
 
     // Download + content-type
