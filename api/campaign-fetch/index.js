@@ -1,5 +1,5 @@
-// /api/campaign-fetch/index.js  · 03-11-2025 v4
-// GET /api/campaign-fetch?runId=<id>&file=<campaign|evidence_log|csv|status|outline>
+// /api/campaign-fetch/index.js  · 05-11-2025 v5
+// GET /api/campaign-fetch?runId=<id>&file=<campaign|evidence_log|csv|status|outline>[&prefix=<container-relative/>]
 // Strict whitelist so only known artifacts are retrievable.
 
 const { BlobServiceClient } = require("@azure/storage-blob");
@@ -46,6 +46,16 @@ async function streamToString(readable) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+function cleanPrefix(pfx) {
+  if (!pfx) return "";
+  let s = String(pfx).trim();
+  // container-relative only
+  s = s.replace(/^\/+/, "");
+  // ensure trailing slash exactly once
+  if (!s.endsWith("/")) s += "/";
+  return s;
+}
+
 // --- handler -----------------------------------------------------------------
 module.exports = async function (context, req) {
   // prefer auth(context, req); fall back to a fresh correlation id
@@ -53,18 +63,29 @@ module.exports = async function (context, req) {
   try {
     const auth = await requireAuth(context, req);
     if (auth?.correlationId) correlationId = auth.correlationId;
-  } catch {
-    /* noop */
-  }
+  } catch { /* noop */ }
+
+  // OPTIONAL CORS (enable if your UI is cross-origin)
+  // const corsHeaders = {
+  //   "access-control-allow-origin": "*",
+  //   "access-control-allow-methods": "GET, OPTIONS",
+  //   "access-control-allow-headers": "content-type, x-requested-with"
+  // };
+  const extraHeaders = {}; // swap to corsHeaders if enabling CORS
 
   const method = (req?.method || "GET").toUpperCase();
+  if (method === "OPTIONS") {
+    context.res = { status: 204, headers: { ...extraHeaders, "x-correlation-id": correlationId } };
+    return;
+  }
   if (method !== "GET") {
     context.res = {
       status: 405,
       headers: {
+        ...extraHeaders,
         "content-type": "application/json",
         "x-correlation-id": correlationId,
-        "Allow": "GET"
+        "Allow": "GET, OPTIONS"
       },
       body: { error: "method_not_allowed", message: "Only GET is supported" }
     };
@@ -74,12 +95,13 @@ module.exports = async function (context, req) {
   try {
     const runId = (req.query?.runId || "").trim();
     const fileKey = (req.query?.file || "campaign").trim().toLowerCase();
+    const prefixParam = cleanPrefix(req.query?.prefix || "");
 
-    if (!runId) {
+    if (!runId && !prefixParam) {
       context.res = {
         status: 400,
-        headers: { "content-type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "bad_request", message: "Missing runId" }
+        headers: { ...extraHeaders, "content-type": "application/json", "x-correlation-id": correlationId },
+        body: { error: "bad_request", message: "Missing runId (or provide 'prefix' instead)" }
       };
       return;
     }
@@ -88,19 +110,23 @@ module.exports = async function (context, req) {
     if (!relName) {
       context.res = {
         status: 400,
-        headers: { "content-type": "application/json", "x-correlation-id": correlationId },
+        headers: { ...extraHeaders, "content-type": "application/json", "x-correlation-id": correlationId },
         body: { error: "bad_request", message: `Unknown file '${fileKey}'` }
       };
       return;
     }
 
     const container = blobSvc().getContainerClient(RESULTS_CONTAINER);
-    const blobPath = `runs/${runId}/${relName}`;
+
+    // Prefer explicit prefix if supplied; otherwise default to runs/<runId>/
+    const basePrefix = prefixParam || (runId ? `runs/${runId}/` : "");
+    const blobPath = `${basePrefix}${relName}`;
+
     const blob = container.getBlobClient(blobPath);
     if (!(await blob.exists())) {
       // Fallback: if the caller asked for evidence_log, try to read it from campaign.json
       if (fileKey === "evidence_log") {
-        const campaignBlob = container.getBlobClient(`runs/${runId}/${VALID_MAP.campaign}`);
+        const campaignBlob = container.getBlobClient(`${basePrefix}${VALID_MAP.campaign}`);
         if (await campaignBlob.exists()) {
           const dl2 = await campaignBlob.download();
           const text2 = await streamToString(dl2.readableStreamBody);
@@ -110,6 +136,7 @@ module.exports = async function (context, req) {
             context.res = {
               status: 200,
               headers: {
+                ...extraHeaders,
                 "content-type": "application/json; charset=utf-8",
                 "cache-control": "no-store",
                 "x-correlation-id": correlationId
@@ -117,12 +144,14 @@ module.exports = async function (context, req) {
               body: arr
             };
             return;
-          } catch { /* fall through to 404 below */ }
+          } catch {
+            // fall through to 404 below
+          }
         }
       }
       context.res = {
         status: 404,
-        headers: { "content-type": "application/json", "x-correlation-id": correlationId },
+        headers: { ...extraHeaders, "content-type": "application/json", "x-correlation-id": correlationId },
         body: { error: "not_found", message: "File not found" }
       };
       return;
@@ -151,13 +180,15 @@ module.exports = async function (context, req) {
           bodyOut = []; // graceful empty
         }
       } else {
-        bodyOut = parsed;
+        // Keep backward-compatibility: return parsed (may be null on parse failure)
+        bodyOut = parsed ?? null;
       }
     }
 
     context.res = {
       status: 200,
       headers: {
+        ...extraHeaders,
         "content-type": contentType,
         "cache-control": "no-store",
         "x-correlation-id": correlationId
@@ -165,11 +196,14 @@ module.exports = async function (context, req) {
       body: bodyOut
     };
   } catch (err) {
-    context.log.error("[campaign-fetch] failed", err?.stack || String(err));
+    const code = err?.code === "config" ? "config" : "server_error";
+    const status = code === "config" ? 500 : 500;
+    const message = String(err?.message || err);
+    context.log.error("[campaign-fetch] failed", err?.stack || message);
     context.res = {
-      status: 500,
+      status,
       headers: { "content-type": "application/json", "x-correlation-id": correlationId || genId() },
-      body: { error: "server_error", message: String(err?.message || err) }
+      body: { error: code, message }
     };
   }
 };

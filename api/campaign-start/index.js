@@ -1,4 +1,4 @@
-// /api/campaign-start/index.js 05-11-2025 v12 (drop-in)
+// /api/campaign-start/index.js 05-11-2025 v12
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign-start → enqueues job to campaign queue, writes initial status.json ("Queued"), returns 202 { runId }.
 

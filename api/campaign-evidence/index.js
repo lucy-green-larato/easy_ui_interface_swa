@@ -1,48 +1,35 @@
-// /api/campaign-evidence/index.js  — Split campaign build. 04-11-2025 — v6
-// Node 20, Azure Functions v4
-// Purpose: make evidence log the single comprehensive evidence source
+// /api/campaign-evidence/index.js — Split campaign build. 05-11-2025 — v7
+// Node 20, Azure Functions v4 (CommonJS)
+// Purpose: build the canonical evidence set for a run.
 // Artifacts written under: <prefix>/
-//   - site.json               (homepage snapshot + lightweight link graph)
-//   - products.json           (very light product/solution name extraction from homepage)
-//   - linkedin.json           (linked reference only; no scraping)
+//   - site.json               (homepage snapshot + lightweight link graph — array, legacy compatible)
+//   - products.json           (very light product/solution names from homepage)
+//   - linkedin.json           (reference link only; no scraping)
 //   - pdf_extracts.json       (links discovered incl. PDFs/case studies; shallow metadata)
-//   - directories.json        (placeholder for business directories; empty for now)
-//   - csv_normalized.json     (canonical: industry_mode/specific-vs-agnostic + signals)
-//   - evidence_log.json       (array; includes CSV summary + supplier artefacts/case study items)
-//   - status.json             (state=EvidenceDigest or Failed)
+//   - directories.json        (placeholder; empty array)
+//   - csv_normalized.json     (canonical: industry_mode + signals + meta)
+//   - evidence_log.json       (ARRAY; CSV summary + supplier artefacts + regulator/sector seeds + LI hooks)
+//   - status.json             (state=EvidenceDigest or Failed; with history[])
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { QueueClient } = require("@azure/storage-queue");
 const crypto = require("node:crypto");
-import { putJson } from "../lib/prefix.js";
-
-// inside your handler:
-const { prefix, input } = message; // prefer prefix from message
-// … build evidenceLog and csvNormalized …
-
-await putJson(`${prefix}evidence_log.json`, evidenceLog, container);
-await putJson(`${prefix}csv_normalized.json`, csvNormalized, container);
-
-// signal status
-const status = (await readJsonIfExists(`${prefix}status.json`, container)) || { runId: input?.runId, history: [] };
-status.state = "EvidenceDigest";
-status.history.push({ phase: "EvidenceDigest", at: new Date().toISOString(), count: evidenceLog.length });
-await putJson(`${prefix}status.json`, status, container);
-
+const fs = require("fs");
+const path = require("path");
 
 // ---------- Config ----------
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const START_QUEUE_NAME = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const FETCH_TIMEOUT_MS = Number(process.env.HTTP_FETCH_TIMEOUT_MS || 8000);
-const MAX_SITE_PAGES = 8;  // crawl budget (homepage + up to 7 pages)
-const MAX_CASESTUDIES = 8;  // cap case study items
+const MAX_SITE_PAGES = 8;                  // crawl budget (homepage + up to 7 pages)
+const MAX_CASESTUDIES = 8;                 // cap case study items stored
 const MAX_EVIDENCE_ITEMS = parseInt(process.env.MAX_EVIDENCE_ITEMS || "24", 10);
-const fs = require("fs");
-const path = require("path");
 
 // ---------- Azure helpers ----------
 function getContainerClient() {
-  const svc = BlobServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
+  const conn = process.env.AzureWebJobsStorage;
+  if (!conn) throw new Error("AzureWebJobsStorage not configured");
+  const svc = BlobServiceClient.fromConnectionString(conn);
   return svc.getContainerClient(RESULTS_CONTAINER);
 }
 
@@ -113,10 +100,12 @@ function toHttps(u) {
 }
 
 // ---------- Status helpers ----------
-async function updateStatus(containerClient, prefix, patch) {
+async function updateStatus(containerClient, prefix, patch, historyNode) {
   const statusPath = `${prefix}status.json`;
-  const cur = (await getJson(containerClient, statusPath)) || {};
+  const cur = (await getJson(containerClient, statusPath)) || { runId: patch?.runId, history: [] };
   const next = { ...cur, ...patch };
+  if (!Array.isArray(next.history)) next.history = [];
+  if (historyNode) next.history.push({ at: nowIso(), ...historyNode });
   await putJson(containerClient, statusPath, next);
 }
 
@@ -182,8 +171,11 @@ function normalizeCsv(rows) {
 
   // Flexible header keys
   const iIndustry = (() => {
-    const keys = ["SimplifiedIndustry", "Industry", "industry"];
-    for (const k of keys) { const i = idx(k); if (i >= 0) return i; }
+    const keys = ["SimplifiedIndustry", "Industry", "industry", "buyer_industry", "vertical", "sector"];
+    for (const k of keys) {
+      const i = header.findIndex(h => h.toLowerCase() === k.toLowerCase());
+      if (i >= 0) return i;
+    }
     return -1;
   })();
   const iBlockers = idx("TopBlockers");
@@ -195,7 +187,7 @@ function normalizeCsv(rows) {
 
   for (let r = 1; r < rows.length; r++) {
     const row = rows[r];
-    const industry = (row[iIndustry] || "").trim() || "Unknown";
+    const industry = (iIndustry >= 0 ? (row[iIndustry] || "") : "").trim() || "Unknown";
     if (!agg.has(industry)) {
       agg.set(industry, {
         TopBlockers: new Set(),
@@ -436,7 +428,7 @@ function pushIfRoom(arr, item, cap = MAX_EVIDENCE_ITEMS) {
 }
 function safePushIfRoom(arr, item, cap) {
   if (!item) return;
-  if (isPlaceholderEvidence(item)) return;    // <- central guard
+  if (isPlaceholderEvidence(item)) return;    // central guard
   pushIfRoom(arr, item, cap);
 }
 
@@ -451,19 +443,18 @@ function loadIndustrySources(industryRaw) {
   return { general, sector };
 }
 
-// Parse markdown bullets like: "- Title — note: https://url"
+// Parse markdown bullets like: "- Title : https://url"
 function mdToSourceItems(md) {
   const items = [];
   const lines = String(md || "").split(/\r?\n/);
   for (const line of lines) {
-    const m = line.match(/^\s*-\s*([^:]+?)\s*:\s*(https?:\/\/\S+)/i); // "Title : URL"
+    const m = line.match(/^\s*-\s*([^:—]+?)(?:\s*[—-]\s*[^:]+?)?\s*:\s*(https?:\/\/\S+)/i);
     if (!m) continue;
     const title = m[1].trim();
     const url = m[2].trim();
     try {
       const u = new URL(toHttps(url));
-      // skip obviously truncated placeholders
-      if (u.href.includes("...")) continue;
+      if (u.href.includes("...")) continue; // skip obviously truncated placeholders
       items.push({ title, url: u.href });
     } catch { /* skip invalid url */ }
   }
@@ -473,30 +464,25 @@ function mdToSourceItems(md) {
 // Reject invented placeholders and junk (stronger guard)
 function isPlaceholderEvidence(it) {
   if (!it) return true;
-
   const url = (it.url || "").trim();
   const title = (it.title || "").trim();
   const summary = (it.summary || "").trim();
 
-  // 1) No substance at all
+  // 1) No substance
   if (!url && !title && !summary) return true;
 
-  // 2) Weak titles that look like scaffolding
+  // 2) Weak scaffold titles
   if (/^(?:products|product|placeholder|lorem ipsum)$/i.test(title)) return true;
 
-  // 3) Junk/placeholder hostnames or missing https scheme
+  // 3) Non-https or junk hostnames
   if (!/^https:\/\//i.test(url)) return true;            // enforce https only
   const u = url.toLowerCase();
-
-  // block about:*, example/test hosts, local, and known fake vendor domains
   if (u.startsWith("about:")) return true;
   if (u.includes("example.com")) return true;
-
   if (/\b(companywebsite\.com|companyx\.com|competitor\d+\.com|vendora\.com|vendorb\.com|vendorc\.com|vendord\.com|vendore\.com|test\.(com|net)|localhost|127\.0\.0\.1)\b/i.test(u)) {
     return true;
   }
 
-  // 4) Looks fine
   return false;
 }
 
@@ -510,6 +496,23 @@ function dedupeEvidence(list) {
     out.push(it);
   }
   return out;
+}
+
+function addCitation(text, tag) {
+  const t = String(text || "").trim();
+  if (!t) return `(${tag})`;
+  return /\([^()]{2,}\)\.?$/.test(t) ? t : `${t} (${tag})`;
+}
+
+function classifySourceType(url) {
+  const u = String(url || "").toLowerCase();
+  if (u.includes("linkedin.com")) return "LinkedIn";
+  if (u.includes("ofcom")) return "Ofcom";
+  if (u.includes("ons.gov")) return "ONS";
+  if (u.includes("dsit.gov") || (u.includes("gov.uk") && u.includes("dsit"))) return "DSIT";
+  if (u.endsWith(".pdf")) return "PDF extract";
+  if (u.includes("google.")) return "Directory";
+  return "Company site";
 }
 
 function csvSummaryEvidence(csvCanonical, input, prefix, containerUrl) {
@@ -538,26 +541,68 @@ function csvSummaryEvidence(csvCanonical, input, prefix, containerUrl) {
   };
 }
 
+function csvSignalsEvidence(csvCanonical, prefix, containerUrl) {
+  if (!csvCanonical || typeof csvCanonical !== "object") return null;
+
+  const sig = csvCanonical?.signals || {};
+  const gsig = csvCanonical?.global_signals || {};
+  const selInd = csvCanonical?.selected_industry || null;
+  const rowCount = Number(csvCanonical?.meta?.rows || 0);
+
+  const topBlockers = (Array.isArray(sig.top_blockers) && sig.top_blockers.length ? sig.top_blockers : gsig.top_blockers) || [];
+  const topNeeds = (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length ? sig.top_needs_supplier : gsig.top_needs_supplier) || [];
+  const topPurch = (Array.isArray(sig.top_purchases) && sig.top_purchases.length ? sig.top_purchases : gsig.top_purchases) || [];
+
+  const parts = [];
+  if (selInd) parts.push(`Selected industry: ${selInd}`);
+  if (rowCount > 0) parts.push(`Row count: ${rowCount}`);
+  if (topBlockers.length) parts.push(`Top blockers: ${topBlockers.slice(0, 8).join("; ")}`);
+  if (topNeeds.length) parts.push(`Top needs from supplier: ${topNeeds.slice(0, 8).join("; ")}`);
+  if (topPurch.length) parts.push(`Top intended purchases: ${topPurch.slice(0, 8).join("; ")}`);
+
+  if (!parts.length) return null;
+
+  const csvUrl = `${String(containerUrl).replace(/\/+$/, "")}/${String(prefix).replace(/^\/+/, "")}csv_normalized.json`;
+
+  return {
+    claim_id: nextClaimId(),
+    source_type: "CSV",
+    title: "CSV signals (buyer problems & intent)",
+    url: csvUrl,
+    summary: addCitation(parts.join(" — "), "CSV"),
+    quote: ""
+  };
+}
+
+function supplierIdentityEvidence(company, website, fallbackUrl) {
+  const host = hostnameOf(website || "");
+  const name = (company || "").trim();
+  if (!name && !host) return null;
+  const summary = [name ? `Supplier: ${name}` : null, host ? `Website host: ${host}` : null]
+    .filter(Boolean).join(" — ");
+  return {
+    claim_id: nextClaimId(),
+    source_type: "Company site",
+    title: "Supplier identity",
+    url: toHttps(website || fallbackUrl || "https://inside-track.local/site"),
+    summary: addCitation(summary, "Company site"),
+    quote: ""
+  };
+}
+
 function siteProductsEvidence(products, website, containerUrl, prefix) {
   if (!Array.isArray(products) || !products.length) return null;
-
   const base = website ? toHttps(website).replace(/\/+$/, "") : null;
-
   const items = products.slice(0, 12).map(p => {
     const name = (typeof p === "string" ? p : (p?.name || p?.title || "")).trim();
     if (!name) return null;
-    const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9\-]/g, "");
-    const url = base ? `${base}/${slug}` : null; // ← no placeholder fallback
-    return { name, url };
+    return { name };
   }).filter(Boolean);
-
   if (!items.length) return null;
-
   return {
     claim_id: nextClaimId(),
     source_type: "Company site",
     title: "Products (homepage-derived)",
-    // Prefer the actual supplier site. If unknown, fall back to our own artifact (still https).
     url: base || (containerUrl && prefix ? `${containerUrl.replace(/\/+$/, "")}/${prefix}products.json` : undefined),
     summary: addCitation(items.map(i => i.name).slice(0, 8).join(", "), "Company site"),
     quote: ""
@@ -603,170 +648,9 @@ function linkedinSearchEvidence({ url, title }) {
   };
 }
 
-function homepageEvidence(homepageUrl) {
-  if (!homepageUrl) return null;
-  return {
-    claim_id: nextClaimId(),
-    source_type: "Company site",
-    title: "Homepage fetched",
-    url: toHttps(homepageUrl),
-    summary: addCitation("Homepage snapshot retrieved for product and messaging cues.", "Company site"),
-    quote: "Homepage content captured to inform positioning. (Company site)"
-  };
-}
-
-function caseStudyEvidenceItems(cs) {
-  const out = [];
-  for (const item of Array.isArray(cs) ? cs : []) {
-    const tag = (item.type === "pdf") ? "PDF extract" : "Company site";
-    out.push({
-      claim_id: nextClaimId(),
-      source_type: tag,
-      title: item.title || "Case study",
-      url: toHttps(item.url),
-      summary: `Supplier case study reference discovered on company site.`,
-      quote: (item.type === "pdf")
-        ? "PDF referenced; text not extracted in this phase. (PDF extract)"
-        : (String(item.quote || "").slice(0, 300) || "Case study page captured. (Company site)")
-    });
-  }
-  return out.slice(0, MAX_CASESTUDIES);
-}
-
-function addCitation(text, tag) {
-  // Ensure summary ends with "(Tag)" or "(Tag)."
-  const t = String(text || "").trim();
-  if (!t) return `(${tag})`;
-  return /\([^()]{2,}\)\.?$/.test(t) ? t : `${t} (${tag})`;
-}
-function classifySourceType(url) {
-  const u = String(url || "").toLowerCase();
-  if (u.includes("linkedin.com")) return "LinkedIn";
-  if (u.includes("ofcom")) return "Ofcom";
-  if (u.includes("ons.gov")) return "ONS";
-  if (u.includes("dsit.gov") || (u.includes("gov.uk") && u.includes("dsit"))) return "DSIT";
-  if (u.endsWith(".pdf")) return "PDF extract";
-  if (u.includes("google.")) return "Directory";
-  return "Company site";
-}
-
-function csvSignalsEvidence(csvCanonical, prefix, containerUrl) {
-  if (!csvCanonical || typeof csvCanonical !== "object") return null;
-
-  const sig = csvCanonical?.signals || {};
-  const gsig = csvCanonical?.global_signals || {};
-  const selInd = csvCanonical?.selected_industry || null;
-  const rowCount = Number(csvCanonical?.meta?.rows || 0);
-
-  const topBlockers = (Array.isArray(sig.top_blockers) && sig.top_blockers.length ? sig.top_blockers : gsig.top_blockers) || [];
-  const topNeeds = (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length ? sig.top_needs_supplier : gsig.top_needs_supplier) || [];
-  const topPurch = (Array.isArray(sig.top_purchases) && sig.top_purchases.length ? sig.top_purchases : gsig.top_purchases) || [];
-
-  const parts = [];
-  if (selInd) parts.push(`Selected industry: ${selInd}`);
-  if (rowCount > 0) parts.push(`Row count: ${rowCount}`);
-  if (topBlockers.length) parts.push(`Top blockers: ${topBlockers.slice(0, 8).join("; ")}`);
-  if (topNeeds.length) parts.push(`Top needs from supplier: ${topNeeds.slice(0, 8).join("; ")}`);
-  if (topPurch.length) parts.push(`Top intended purchases: ${topPurch.slice(0, 8).join("; ")}`);
-
-  if (!parts.length) return null;
-
-  // Always point to the *real* blob path (container-relative prefix)
-  const csvUrl = `${String(containerUrl).replace(/\/+$/, "")}/${String(prefix).replace(/^\/+/, "")}csv_normalized.json`;
-
-  return {
-    claim_id: nextClaimId(),
-    source_type: "CSV",
-    title: "CSV signals (buyer problems & intent)",
-    url: csvUrl,
-    summary: addCitation(parts.join(" — "), "CSV"),
-    quote: ""
-  };
-}
-
-function supplierIdentityEvidence(company, website, fallbackUrl) {
-  const host = hostnameOf(website || "");
-  const name = (company || "").trim();
-  if (!name && !host) return null;
-  const summary = [name ? `Supplier: ${name}` : null, host ? `Website host: ${host}` : null]
-    .filter(Boolean).join(" — ");
-  return {
-    claim_id: nextClaimId(),
-    source_type: "Company site",
-    title: "Supplier identity",
-    url: toHttps(website || fallbackUrl || "https://inside-track.local/site"),
-    summary: addCitation(summary, "Company site"),
-    quote: ""
-  };
-}
-
-function userNotesEvidence(notes) {
-  const n = (notes || "").trim();
-  if (!n) return null;
-  return {
-    claim_id: nextClaimId(),
-    source_type: "Directory",
-    title: "User notes (must integrate)",
-    url: "about:notes",
-    summary: n.length > 240 ? `${n.slice(0, 240)}…` : n,
-    quote: "",
-    origin: "user-notes"
-  };
-}
-
-function competitorsSummaryEvidence(list) {
-  const arr = Array.isArray(list) ? list.map(s => String(s || "").trim()).filter(Boolean) : [];
-  if (!arr.length) return null;
-  return {
-    claim_id: nextClaimId(),
-    source_type: "Directory",
-    title: "Competitors (user-supplied)",
-    url: "about:competitors",
-    summary: `${arr.length} competitor(s): ${arr.slice(0, 8).join(", ")}`,
-    quote: "",
-    origin: "competitors"
-  };
-}
-
-function userNotesEvidenceFactory(containerUrl, prefix) {
-  return async function userNotesEvidencePersisted(notes) {
-    const n = (notes || "").trim();
-    if (!n) return null;
-    const rel = `${prefix}notes.txt`;
-    try { await putText(getContainerClient(), rel, n); } catch { }
-    return {
-      claim_id: nextClaimId(),
-      source_type: "Directory",
-      title: "User notes (must integrate)",
-      url: `${containerUrl}/${rel}`,
-      summary: addCitation(n.length > 240 ? `${n.slice(0, 240)}…` : n, "Directory"),
-      quote: ""
-    };
-  };
-}
-
-function competitorsSummaryEvidenceFactory(containerUrl, prefix) {
-  return async function competitorsSummaryEvidencePersisted(list) {
-    const arr = Array.isArray(list) ? list.map(s => String(s || "").trim()).filter(Boolean) : [];
-    if (!arr.length) return null;
-    const rel = `${prefix}competitors.json`;
-    try { await putJson(getContainerClient(), rel, { competitors: arr }); } catch { }
-    return {
-      claim_id: nextClaimId(),
-      source_type: "Directory",
-      title: "Competitors (user-supplied)",
-      url: `${containerUrl}/${rel}`,
-      summary: addCitation(`${arr.length} competitor(s): ${arr.slice(0, 8).join(", ")}`, "Directory"),
-      quote: ""
-    };
-  };
-}
-
-
-
-// ---------- Main ----------
 module.exports = async function (context, job) {
   const container = getContainerClient();
+
   // ---- Normalise incoming queue payload (object or string) ----
   const msg = (typeof job === "string")
     ? (() => { try { return JSON.parse(job); } catch { return {}; } })()
@@ -777,38 +661,39 @@ module.exports = async function (context, job) {
   const input = msg.input || msg.inputs || msg || {};
 
   // Prefix: trust message.prefix if present (from /campaign-start), otherwise fallback
-  let prefix = (msg.prefix && String(msg.prefix).trim()) || "";
-  if (!prefix) {
-    // Fallback for legacy callers 
-    prefix = `runs/${runId}/`;
-  }
-  // Ensure trailing slash exactly once
+  let prefix = (msg.prefix && String(msg.prefix).trim()) || `runs/${runId}/`;
+  // Normalise to container-relative (strip container name, strip leading slash, ensure trailing slash)
+  if (prefix.startsWith(`${RESULTS_CONTAINER}/`)) prefix = prefix.slice(`${RESULTS_CONTAINER}/`.length);
+  if (prefix.startsWith("/")) prefix = prefix.replace(/^\/+/, "");
   if (!prefix.endsWith("/")) prefix = `${prefix}/`;
 
-  // Keep to container-relative paths only
-  if (prefix.startsWith("/")) prefix = prefix.replace(/^\/+/, "");
-
   // ---- Enter EvidenceDigest  ----
-  await updateStatus(container, prefix, {
-    runId,
-    state: "EvidenceDigest",
-    input: {
-      page: input.page || null,
-      rowCount: Number(input.rowCount || 0),
-      supplier_company: input.supplier_company || input.company_name || input.prospect_company || null,
-      supplier_website: input.supplier_website || input.company_website || input.prospect_website || null,
-      supplier_linkedin: input.supplier_linkedin || input.company_linkedin || input.prospect_linkedin || null,
-      supplier_usps: Array.isArray(input.supplier_usps)
-        ? input.supplier_usps
-        : (input.supplier_usps
-          ? String(input.supplier_usps).split(/[;,\n]/).map(s => s.trim()).filter(Boolean)
-          : []),
-      selected_industry:
-        (input.selected_industry || input.campaign_industry || input.company_industry || input.industry || "")
-          .trim().toLowerCase() || null
+  await updateStatus(
+    container,
+    prefix,
+    {
+      runId,
+      state: "EvidenceDigest",
+      input: {
+        page: input.page || null,
+        rowCount: Number(input.rowCount || 0),
+        supplier_company: input.supplier_company || input.company_name || input.prospect_company || null,
+        supplier_website: input.supplier_website || input.company_website || input.prospect_website || null,
+        supplier_linkedin: input.supplier_linkedin || input.company_linkedin || input.prospect_linkedin || null,
+        supplier_usps: Array.isArray(input.supplier_usps)
+          ? input.supplier_usps
+          : (input.supplier_usps
+            ? String(input.supplier_usps).split(/[;,\n]/).map(s => s.trim()).filter(Boolean)
+            : []),
+        selected_industry:
+          (input.selected_industry || input.campaign_industry || input.company_industry || input.industry || "")
+            .trim().toLowerCase() || null
+      },
+      updatedAt: nowIso()
     },
-    updatedAt: nowIso()
-  });
+    { phase: "EvidenceDigest", note: "start" }
+  );
+
   try {
     const supplierWebsiteRaw = (input.supplier_website || input.company_website || input.prospect_website || "").trim();
     const supplierLinkedInRaw = (input.supplier_linkedin || input.company_linkedin || input.prospect_linkedin || "").trim();
@@ -827,9 +712,7 @@ module.exports = async function (context, job) {
     }
 
     // Store homepage snapshot array-shaped (prev format compatibility)
-    const siteJson = siteGraph.pages.length
-      ? [siteGraph.pages[0]]
-      : [];
+    const siteJson = siteGraph.pages.length ? [siteGraph.pages[0]] : [];
     await putJson(container, `${prefix}site.json`, siteJson);
 
     // 1a) Products (from homepage snippet)
@@ -870,8 +753,6 @@ module.exports = async function (context, job) {
     await putJson(container, `${prefix}directories.json`, []);
 
     // 5) CSV → csv_normalized.json (canonical)
-    // Prefer inline CSV from the kickoff (browser upload). If absent, fall back to any CSV under the prefix.
-    // If a filename was sent, try to match it.
     let csvText = null;
     let chosenCsvName = null;
 
@@ -895,6 +776,7 @@ module.exports = async function (context, job) {
         chosenCsvName = chosen;
       }
     }
+
     let csvNormalizedCanonical = {
       selected_industry: null,
       industry_mode: "agnostic",
@@ -905,7 +787,8 @@ module.exports = async function (context, job) {
 
     if (csvText && csvText.trim()) {
       const rows = parseCsvLoose(csvText);
-      const agg = normalizeCsv(rows);
+      const nonEmptyRows = rows.filter(r => Array.isArray(r) && r.some(c => String(c || "").trim().length));
+      const agg = normalizeCsv(nonEmptyRows);
 
       const industries = Array.isArray(agg.industries) ? agg.industries : [];
       const csvHasMultipleSectors = industries.filter(x => x && x !== "Unknown").length > 1;
@@ -961,9 +844,10 @@ module.exports = async function (context, job) {
         }
       };
     }
+
     await putJson(container, `${prefix}csv_normalized.json`, csvNormalizedCanonical);
 
-    // 6) evidence_log.json (non-empty, CSV-first + supplier artefacts)
+    // 6) evidence_log.json (CSV-first + supplier artefacts)
     let evidenceLog = [];
 
     // 6.1 CSV summary first (if any)
@@ -975,7 +859,7 @@ module.exports = async function (context, job) {
       );
     }
 
-    // EXTRA: CSV buyer signals (blockers / needs / purchases)
+    // 6.1b CSV buyer signals (blockers/needs/purchases)
     {
       const _csvSignalsItem = csvSignalsEvidence(csvNormalizedCanonical, prefix, container.url);
       if (_csvSignalsItem) safePushIfRoom(evidenceLog, _csvSignalsItem, MAX_EVIDENCE_ITEMS);
@@ -988,31 +872,58 @@ module.exports = async function (context, job) {
         supplierWebsite,
         `${container.url}/${prefix}site.json`
       );
-      if (_supplierItem) {
-        safePushIfRoom(evidenceLog, _supplierItem, MAX_EVIDENCE_ITEMS);
+      if (_supplierItem) safePushIfRoom(evidenceLog, _supplierItem, MAX_EVIDENCE_ITEMS);
+
+      // Persisted user notes & competitors (write side artifacts)
+      const notesRel = `${prefix}notes.txt`;
+      const notesVal = (input?.notes || "").trim();
+      if (notesVal) {
+        try { await putText(container, notesRel, notesVal); } catch { /* ignore */ }
+        safePushIfRoom(
+          evidenceLog,
+          {
+            claim_id: nextClaimId(),
+            source_type: "Directory",
+            title: "User notes (must integrate)",
+            url: `${container.url}/${notesRel}`,
+            summary: addCitation(notesVal.length > 240 ? `${notesVal.slice(0, 240)}…` : notesVal, "Directory"),
+            quote: ""
+          },
+          MAX_EVIDENCE_ITEMS
+        );
       }
-      const makeUserNotesEvidence = userNotesEvidenceFactory(container.url, prefix);
-      const makeCompetitorsEvidence = competitorsSummaryEvidenceFactory(container.url, prefix);
 
-      // User notes (must integrate)
-      const _notesItem = await makeUserNotesEvidence(input?.notes);
-      if (_notesItem) safePushIfRoom(evidenceLog, _notesItem, MAX_EVIDENCE_ITEMS);
-
-      // Competitors summary (user-supplied list only; never fabricate)
-      const _compsItem = await makeCompetitorsEvidence(input?.relevant_competitors);
-      if (_compsItem) safePushIfRoom(evidenceLog, _compsItem, MAX_EVIDENCE_ITEMS);
+      const competitors = Array.isArray(input?.relevant_competitors)
+        ? input.relevant_competitors.map(s => String(s || "").trim()).filter(Boolean).slice(0, 8)
+        : [];
+      if (competitors.length) {
+        const rel = `${prefix}competitors.json`;
+        try { await putJson(container, rel, { competitors }); } catch { /* ignore */ }
+        safePushIfRoom(
+          evidenceLog,
+          {
+            claim_id: nextClaimId(),
+            source_type: "Directory",
+            title: "Competitors (user-supplied)",
+            url: `${container.url}/${rel}`,
+            summary: addCitation(`${competitors.length} competitor(s): ${competitors.join(", ")}`, "Directory"),
+            quote: ""
+          },
+          MAX_EVIDENCE_ITEMS
+        );
+      }
     }
 
-    // 6.3 Case studies (PDF extracts) — push concrete items only
+    // 6.3 Case studies / PDF extracts
     {
-      let pdfExtracts = [];
+      let pdfs = [];
       try {
         const v = await getJson(container, `${prefix}pdf_extracts.json`);
-        if (Array.isArray(v)) pdfExtracts = v;
-      } catch { /* no-op if missing or unreadable */ }
+        if (Array.isArray(v)) pdfs = v;
+      } catch { /* ignore */ }
 
-      if (pdfExtracts.length) {
-        for (const ex of pdfExtracts) {
+      if (pdfs.length) {
+        for (const ex of pdfs.slice(0, MAX_CASESTUDIES)) {
           const url = ex?.url ? String(ex.url).trim() : "";
           if (!/^https:\/\//i.test(url)) continue; // enforce https only
 
@@ -1027,10 +938,10 @@ module.exports = async function (context, job) {
             evidenceLog,
             {
               claim_id: nextClaimId(),
-              source_type: "PDF extract",
+              source_type: ex?.type === "pdf" ? "PDF extract" : "Company site",
               title,
               url,
-              summary: addCitation(summaryText, "PDF extract"),
+              summary: addCitation(summaryText, ex?.type === "pdf" ? "PDF extract" : "Company site"),
               quote
             },
             MAX_EVIDENCE_ITEMS
@@ -1039,17 +950,17 @@ module.exports = async function (context, job) {
       }
     }
 
-    // 6.4 Deterministic industry sources (do NOT let model invent)
+    // 6.4 Deterministic industry sources
     {
       try {
         const { general, sector } = loadIndustrySources(
           input?.campaign_industry || input?.company_industry || ""
         );
-        const generalItems = mdToSourceItems(general).slice(0, 2); // keep it tight
+        const generalItems = mdToSourceItems(general).slice(0, 2);
         const sectorItems = mdToSourceItems(sector).slice(0, 2);
 
         for (const it of generalItems) {
-          const t = classifySourceType(it.url); // Ofcom/ONS/DSIT/Trade press/Directory/Company site/PDF extract
+          const t = classifySourceType(it.url);
           safePushIfRoom(
             evidenceLog,
             {
@@ -1085,17 +996,17 @@ module.exports = async function (context, job) {
     {
       try {
         const productsObj = await getJson(container, `${prefix}products.json`);
-        const prodItem = siteProductsEvidence(productsObj?.products || [], supplierWebsite);
+        const prodItem = siteProductsEvidence(productsObj?.products || [], supplierWebsite, container.url, prefix);
         if (prodItem) safePushIfRoom(evidenceLog, prodItem, MAX_EVIDENCE_ITEMS);
       } catch { /* no-op */ }
     }
 
-    // 6.6 LinkedIn reference (as "Directory")
+    // 6.6 LinkedIn reference
     if (supplierLinkedIn) {
       safePushIfRoom(evidenceLog, linkedinEvidence(supplierLinkedIn), MAX_EVIDENCE_ITEMS);
     }
 
-    // 6.7 LinkedIn relevance hooks (supplier, products, competitors)
+    // 6.7 LinkedIn relevance hooks
     {
       try {
         const liHooks = [];
@@ -1139,7 +1050,7 @@ module.exports = async function (context, job) {
       } catch { /* ignore LI hook failures */ }
     }
 
-    // 6.8 Homepage evidence (explicit, inline; no helper dependency)
+    // 6.8 Homepage evidence (explicit)
     if (supplierWebsite) {
       const host = hostnameOf(supplierWebsite) || supplierWebsite;
       safePushIfRoom(
@@ -1156,13 +1067,13 @@ module.exports = async function (context, job) {
       );
     }
 
-    // Sales-model context item (deterministic, no filtering)
+    // Sales-model context item (deterministic)
     {
       const salesModel = String(input?.sales_model || input?.salesModel || input?.call_type || "").toLowerCase();
       if (salesModel === "direct" || salesModel === "partner") {
         const relSm = `${prefix}sales-model.txt`;
         const smNote = `Sales model selected: ${salesModel}. Evidence context recorded (no filtering applied).`;
-        try { await putText(container, relSm, smNote); } catch { }
+        try { await putText(container, relSm, smNote); } catch { /* ignore */ }
         safePushIfRoom(
           evidenceLog,
           {
@@ -1190,24 +1101,29 @@ module.exports = async function (context, job) {
     await putJson(container, `${prefix}evidence_log.json`, evidenceLog);
 
     // 7) Finalise phase
-    await updateStatus(container, prefix, {
-      state: "EvidenceDigest",
-      phase: "completed",
-      updatedAt: nowIso(),
-      artifacts: {
-        site: "site.json",
-        products: "products.json",
-        linkedin: "linkedin.json",
-        pdf_extracts: "pdf_extracts.json",
-        directories: "directories.json",
-        csv: "csv_normalized.json",
-        evidence_log: "evidence_log.json"
+    await updateStatus(
+      container,
+      prefix,
+      {
+        state: "EvidenceDigest",
+        phase: "completed",
+        updatedAt: nowIso(),
+        artifacts: {
+          site: "site.json",
+          products: "products.json",
+          linkedin: "linkedin.json",
+          pdf_extracts: "pdf_extracts.json",
+          directories: "directories.json",
+          csv: "csv_normalized.json",
+          evidence_log: "evidence_log.json"
+        },
+        evidence_counts: {
+          csv_rows: Number(csvNormalizedCanonical?.meta?.rows || 0),
+          items_total: evidenceLog.length
+        }
       },
-      evidence_counts: {
-        csv_rows: Number(csvNormalizedCanonical?.meta?.rows || 0),
-        items_total: evidenceLog.length
-      }
-    });
+      { phase: "EvidenceDigest", note: "completed", count: evidenceLog.length }
+    );
 
     // Notify orchestrator (afterevidence)
     try {
@@ -1224,12 +1140,16 @@ module.exports = async function (context, job) {
     const message = String(e?.message || e);
     context.log.error("[campaign-evidence] failed", message);
     try {
-      await updateStatus(container, prefix, {
-        state: "Failed",
-        error: { code: "evidence_error", message },
-        failedAt: nowIso()
-      });
+      await updateStatus(
+        container,
+        prefix,
+        {
+          state: "Failed",
+          error: { code: "evidence_error", message },
+          failedAt: nowIso()
+        },
+        { phase: "EvidenceDigest", note: "failed", error: message }
+      );
     } catch { /* no-op */ }
   }
 };
-

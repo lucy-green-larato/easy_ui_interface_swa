@@ -1,14 +1,17 @@
-// api/campaign-write/index.js v3 04-11-2025  (schema-aligned, evidence/CSV canonical shapes)
-// Queue-triggered writer that generates each campaign section to runs/<runId>/sections/<section>.json,
-// then merges all sections into runs/<runId>/campaign.json.
+// api/campaign-write/index.js v4 05-11-2025 (drop-in, bugfixes + robustness)
+// Queue-triggered writer that generates each campaign section to
+// <container>/<prefix>sections/<section>.json, then assembles <prefix>campaign.json.
 
 const path = require("path");
-const { BlobServiceClient } = require("@azure/storage-blob");
 const crypto = require("crypto");
+const { BlobServiceClient } = require("@azure/storage-blob");
+const { QueueServiceClient } = require("@azure/storage-queue");
 
 // ---- ENV / CONFIG ----
 const STORAGE_CONN = process.env.AzureWebJobsStorage;
 const CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
+const CAMPAIGN_QUEUE = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
+
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 60000);
 
 // Azure OpenAI (Chat Completions)
@@ -18,7 +21,6 @@ const AZO_API_VER = process.env.AZURE_OPENAI_API_VERSION || "2024-08-01-preview"
 const AZO_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT;
 
 // ---- SECTION MAPS ----
-// Outline → final campaign keys (must match new schema)
 const SECTION_MAP = {
   exec: "executive_summary",
   positioning: "positioning_and_differentiation",
@@ -29,15 +31,20 @@ const SECTION_MAP = {
   compliance: "compliance_and_governance",
   one: "one_pager_summary"
 };
-
 const SECTION_ORDER = [
   "exec", "positioning", "messaging", "offer", "channel", "risks", "compliance", "one"
 ];
 
-// ---- UTIL: blob + json ----
+// ---- Blob helpers ----
 function blobSvc() {
   if (!STORAGE_CONN) throw new Error("AzureWebJobsStorage not configured");
   return BlobServiceClient.fromConnectionString(STORAGE_CONN);
+}
+async function streamToString(readable) {
+  if (!readable) return "";
+  const chunks = [];
+  for await (const c of readable) chunks.push(c);
+  return Buffer.concat(chunks).toString("utf8");
 }
 async function getJson(containerClient, blobPath) {
   const b = containerClient.getBlockBlobClient(blobPath);
@@ -51,54 +58,45 @@ async function putJson(containerClient, blobPath, obj) {
   const buf = Buffer.from(JSON.stringify(obj, null, 2), "utf8");
   await b.uploadData(buf, { blobHTTPHeaders: { blobContentType: "application/json" } });
 }
-async function streamToString(rs) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    rs.on("data", d => chunks.push(d));
-    rs.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    rs.on("error", reject);
-  });
-}
 async function patchStatus(containerClient, prefix, state, extra = {}) {
   const p = `${prefix}status.json`;
   const cur = (await getJson(containerClient, p)) || {};
   const next = { ...cur, state, ...extra };
   await putJson(containerClient, p, next);
 }
+
+// ---- Prompt helpers ----
 function safeForPrompt(v, max = 280000) {
   try {
     const s = typeof v === "string" ? v : JSON.stringify(v ?? "");
     if (s.length <= max) return s;
-    const keep = Math.floor(max / 2);
-    return s.slice(0, keep) + " …TRUNCATED… " + s.slice(-keep);
+    const k = Math.floor(max / 2);
+    return s.slice(0, k) + " …TRUNCATED… " + s.slice(-k);
   } catch { return "null"; }
 }
-
-// ---- UTIL: robust JSON repair ----
 function extractJsonCandidate(s) {
   if (!s) return "";
   const fence = s.match(/```json\s*([\s\S]*?)```/i);
   if (fence && fence[1]) return fence[1].trim();
-  const start = s.indexOf("{");
-  const end = s.lastIndexOf("}");
+  const start = s.indexOf("{"); const end = s.lastIndexOf("}");
   if (start !== -1 && end !== -1 && end > start) return s.slice(start, end + 1).trim();
   return s.trim();
 }
 function tryParseOrRepair(rawText) {
   const candidate = extractJsonCandidate(String(rawText || ""));
-  try { return JSON.parse(candidate); } catch { /* repair below */ }
+  try { return JSON.parse(candidate); } catch { /* repair */ }
   const repaired = candidate
     .replace(/^\uFEFF/, "")
     .replace(/"([^"\\]*(\\.[^"\\]*)*)"/g, m => m.replace(/\r?\n/g, "\\n"))
     .replace(/,\s*([}\]])/g, "$1");
   try { return JSON.parse(repaired); } catch { }
-  const err = new Error("draft_json_parse_error: unrecoverable JSON");
+  const err = new Error("draft_json_parse_error");
   err.code = "draft_json_parse_error";
-  err.details = { length: candidate.length, head: candidate.slice(0, 1200), tail: candidate.slice(-1200) };
+  err.details = { length: candidate.length, head: candidate.slice(0, 1000), tail: candidate.slice(-1000) };
   throw err;
 }
 
-// ---- LLM call (json_object) ----
+// ---- LLM (json_object) ----
 async function callChatJsonObject({ system, user, timeoutMs }) {
   if (!AZO_ENDPOINT || !AZO_API_KEY || !AZO_DEPLOYMENT) {
     const e = new Error("Missing Azure OpenAI configuration");
@@ -136,7 +134,7 @@ async function callChatJsonObject({ system, user, timeoutMs }) {
       e.code = "llm_error";
       throw e;
     }
-    let wire; try { wire = raw ? JSON.parse(raw) : null; } catch { }
+    const wire = raw ? JSON.parse(raw) : null;
     const content = wire?.choices?.[0]?.message?.content || "";
     return tryParseOrRepair(content);
   } finally {
@@ -144,7 +142,7 @@ async function callChatJsonObject({ system, user, timeoutMs }) {
   }
 }
 
-// ---- SECTION PROMPTS (schema-aligned targets) ----
+// ---- Section prompt builders (unchanged in spirit) ----
 function buildSectionSystem(finalKey, persona) {
   return `
 ${persona ? `PERSONA\n${persona}\n\n` : ""}You are a senior UK B2B strategist. Generate STRICT JSON only for the requested section "${finalKey}".
@@ -165,9 +163,8 @@ OUTPUT DISCIPLINE:
 - Emit exactly the JSON object for "${finalKey}" matching the shapes described in the user message. No extra fields.
 `.trim();
 }
-
 function targetsFor(finalKey) {
-  // Minimal, schema-true shapes to guide the model per section
+  // Schema-true, guided targets to steer quality & citations
   const t = {
     executive_summary: `{
   "executive_summary": [
@@ -262,13 +259,11 @@ function targetsFor(finalKey) {
   };
   return t[finalKey] || "{}";
 }
-
 function buildSectionUser(finalKey, { outline, sectionPlan, evidence, csvCanon, products }) {
   const outlineNotes = safeForPrompt(sectionPlan);
   const ev = safeForPrompt(evidence);
   const prod = safeForPrompt(products);
 
-  // From normalized CSV canonical (industry_mode/signals/global_signals/meta.rows)
   const mode = (csvCanon && csvCanon.industry_mode === "specific" && csvCanon.selected_industry) ? "specific" : "agnostic";
   const sig = mode === "specific" ? (csvCanon?.signals || {}) : (csvCanon?.global_signals || {});
   const csv = safeForPrompt({
@@ -280,7 +275,6 @@ function buildSectionUser(finalKey, { outline, sectionPlan, evidence, csvCanon, 
     top_purchases: sig.top_purchases || []
   });
 
-  // Inputs from outline.input_notes (supplier + objective + competitors)
   const inNotes = (outline && outline.input_notes) ? outline.input_notes : {};
   const campaignRequirement =
     (typeof inNotes.campaign_requirement === "string" &&
@@ -304,7 +298,7 @@ Context:
 - Outline plan for "${finalKey}": ${outlineNotes}
 - Evidence catalog ARRAY (items have claim_id, title, url, source_type, summary, quote): ${ev}
 - CSV canonical (industry_mode/selected_industry/rows/signals): ${csv}
-- Product name anchors (from site): ${prod}
+- Product name anchors (from site or products file): ${prod}
 - Supplier: ${company || "unknown"} | website: ${website || "unknown"} | LinkedIn: ${linkedin || "unknown"}
 - Supplier USPs (if any): ${safeForPrompt(usps)}
 - Objective (campaignRequirement): ${campaignRequirement}
@@ -321,8 +315,6 @@ ${targetsFor(finalKey)}
 Return JSON only.
 `.trim();
 }
-
-// ---- Section builder using the LLM helper (kept local, no external harness) ----
 async function buildSectionJson({ finalKey, outline, sectionPlan, evidence, csvCanon, products, persona }) {
   const system = buildSectionSystem(finalKey, persona);
   const user = buildSectionUser(finalKey, { outline, sectionPlan, evidence, csvCanon, products });
@@ -346,18 +338,13 @@ module.exports = async function (context, queueItem) {
     return;
   }
   const outlineSectionRaw = queueItem.section || ""; // may be blank for assemble jobs
-  // Resolve authoritative container-relative prefix from the queue message.
-  // Fall back to legacy runs/<runId>/ if not provided.
+
+  // Resolve authoritative container-relative prefix from the queue message,
+  // fallback to legacy runs/<runId>/ if not provided.
   let prefix = (typeof queueItem.prefix === "string" && queueItem.prefix.trim())
     ? queueItem.prefix.trim()
     : `runs/${runId}/`;
-
-  // If someone accidentally included the container name, strip it.
-  if (prefix.startsWith(`${CONTAINER}/`)) {
-    prefix = prefix.slice(`${CONTAINER}/`.length);
-  }
-
-  // Normalise to container-relative with a single trailing slash
+  if (prefix.startsWith(`${CONTAINER}/`)) prefix = prefix.slice(`${CONTAINER}/`.length);
   if (prefix.startsWith("/")) prefix = prefix.replace(/^\/+/, "");
   if (!prefix.endsWith("/")) prefix += "/";
 
@@ -369,7 +356,6 @@ module.exports = async function (context, queueItem) {
     const evRaw = await getJson(container, `${prefix}evidence_log.json`);
     const csvCanon = await getJson(container, `${prefix}csv_normalized.json`);
     const site = await getJson(container, `${prefix}site.json`);
-    // Load normalized input for persona (sales_model)
     const input = await getJson(container, `${prefix}input.json`);
     const salesModel = String(
       (input?.sales_model ?? input?.salesModel ?? input?.call_type ?? "")
@@ -395,44 +381,34 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
     // evidence_log as array (new canonical) with old-shape fallback
     const evidenceLog = Array.isArray(evRaw) ? evRaw
       : (Array.isArray(evRaw?.evidence_log) ? evRaw.evidence_log : []);
-
     if (!Array.isArray(evidenceLog)) throw new Error("Missing or invalid evidence_log.json (expected array)");
 
-    // ---- Product names (priority: products.json → outline notes → site heuristic) ----
+    // ---- Product names
     let productNames = Array.isArray(outline?.input_notes?.product_mentions)
-      ? outline.input_notes.product_mentions
-      : null;
+      ? outline.input_notes.product_mentions : null;
 
     if (!productNames || productNames.length === 0) {
-      try {
-        const productsFile = await getJson(container, `${prefix}products.json`);
-        if (Array.isArray(productsFile?.products)) productNames = productsFile.products;
-      } catch { /* ignore */ }
+      const productsFile = await getJson(container, `${prefix}products.json`);
+      if (Array.isArray(productsFile?.products)) productNames = productsFile.products;
     }
-
     if (!productNames || productNames.length === 0) {
-      // Strict, local heuristic on site.json snapshot
+      // Heuristic on site.json snapshot
       productNames = (() => {
         const names = new Set();
         const add = v => { if (typeof v === "string" && v.trim()) names.add(v.trim()); };
         try {
           if (Array.isArray(site?.products)) site.products.forEach(add);
           if (Array.isArray(site)) {
-            // older shape: array of snapshots
-            site.forEach(p => {
-              if (Array.isArray(p?.headings)) p.headings.forEach(add);
-            });
+            site.forEach(p => { if (Array.isArray(p?.headings)) p.headings.forEach(add); });
           } else if (Array.isArray(site?.pages)) {
-            site.pages.forEach(p => {
-              if (Array.isArray(p?.headings)) p.headings.forEach(add);
-            });
+            site.pages.forEach(p => { if (Array.isArray(p?.headings)) p.headings.forEach(add); });
           }
         } catch { /* best-effort */ }
         return Array.from(names).slice(0, 12);
       })();
     }
 
-    // Branch by job type
+    // ---------- Branch by job type ----------
     if (op === "write_section" || op === "section") {
       const outlineKey = String(outlineSectionRaw || "").toLowerCase();
       if (!SECTION_MAP[outlineKey]) {
@@ -440,17 +416,14 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
       }
       const finalKey = SECTION_MAP[outlineKey];
 
-      // Status: starting this section
       await patchStatus(container, prefix, "SectionWrites", {
         runId,
         writing: finalKey,
         updatedAt: new Date().toISOString()
       });
 
-      // Section plan (outline.sections.<key>) — object or array depending on section
       const plan = outline?.sections?.[outlineKey] ?? {};
 
-      // Build the section via LLM
       const sectionJson = await buildSectionJson({
         finalKey,
         outline,
@@ -461,18 +434,17 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
         persona: PERSONA
       });
 
-      // Persist this section (exact section object only)
       await putJson(container, `${prefix}sections/${finalKey}.json`, sectionJson);
       context.log(`[campaign-write] wrote section ${finalKey}`);
 
       // Notify orchestrator AFTER successful write
       try {
-        const { QueueClient } = require("@azure/storage-queue");
-        const qc = new QueueClient(process.env.AzureWebJobsStorage, process.env.CAMPAIGN_QUEUE_NAME || "campaign");
+        const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
+        const qc = qs.getQueueClient(CAMPAIGN_QUEUE);
         await qc.createIfNotExists();
         const page = (queueItem && (queueItem.page || queueItem?.data?.page)) || "campaign";
         const msg = { op: "aftersection", runId, page, prefix, section: finalKey };
-        await qc.sendMessage(Buffer.from(JSON.stringify(msg), "utf8").toString("base64"));
+        await qc.sendMessage(JSON.stringify(msg)); // SDK base64 encodes for us
       } catch (notifyErr) {
         context.log.warn("[campaign-write] notify aftersection failed", String(notifyErr?.message || notifyErr));
       }
@@ -486,11 +458,11 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
         assembleStartedAt: new Date().toISOString()
       });
 
-      // Normalise CSV selected industry to carry into meta
       const selectedIndustry =
         (csvCanon && csvCanon.industry_mode === "specific" && csvCanon.selected_industry)
           ? String(csvCanon.selected_industry || "").toLowerCase() || "general"
           : (outline?.meta?.selected_industry || "General");
+
       const productsObj = await getJson(container, `${prefix}products.json`);
       const pdfExtracts = await getJson(container, `${prefix}pdf_extracts.json`);
 
@@ -515,15 +487,12 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
           site_sha256: sha256OfJson(site || {}),
           evidence_counts: evidenceCounts
         },
-
-        // evidence_log is required by the new schema — include array directly
         evidence_log: evidenceLog
       };
 
       for (const outlineKey of SECTION_ORDER) {
         const finalKey = SECTION_MAP[outlineKey];
-        const blobPath = `${prefix}sections/${finalKey}.json`;
-        const obj = await getJson(container, blobPath);
+        const obj = await getJson(container, `${prefix}sections/${finalKey}.json`);
         if (obj && obj[finalKey] != null) {
           merged[finalKey] = obj[finalKey];
         } else {
@@ -534,7 +503,6 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
       const normalised = normaliseContract(merged);
       await putJson(container, `${prefix}campaign.json`, normalised);
 
-      // Patch statuses in order
       await patchStatus(container, prefix, "Assemble", {
         runId,
         assembleCompletedAt: new Date().toISOString()
@@ -548,12 +516,12 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
 
       // Notify orchestrator (afterassemble)
       try {
-        const { QueueClient } = require("@azure/storage-queue");
-        const qc = new QueueClient(process.env.AzureWebJobsStorage, process.env.CAMPAIGN_QUEUE_NAME || "campaign");
+        const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
+        const qc = qs.getQueueClient(CAMPAIGN_QUEUE);
         await qc.createIfNotExists();
         const page = (queueItem && (queueItem.page || queueItem?.data?.page)) || "campaign";
         const msg = { op: "afterassemble", runId, page, prefix };
-        await qc.sendMessage(Buffer.from(JSON.stringify(msg), "utf8").toString("base64"));
+        await qc.sendMessage(JSON.stringify(msg));
       } catch (notifyErr) {
         context.log.warn("[campaign-write] notify afterassemble failed", String(notifyErr?.message || notifyErr));
       }
@@ -563,10 +531,9 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
     throw new Error(`Unknown job type "${op}". Use "write_section" or "assemble".`);
   } catch (err) {
     context.log.error("[campaign-write] error", String(err?.message || err));
-    // Best-effort failure mark (use the same resolved prefix)
     try {
       await patchStatus(
-        svc.getContainerClient(CONTAINER),
+        blobSvc().getContainerClient(CONTAINER),
         prefix,
         "Failed",
         { error: { code: err.code || "writer_error", message: String(err?.message || err) } }
@@ -575,9 +542,8 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
   }
 };
 
-// ---- UI schema normalisers (ensure stable shapes for the frontend) ----
+// ---- UI schema normalisers ----
 function rowsOf(v) { return Array.isArray(v) ? v : (v == null ? [] : [v]); }
-
 function toStringArray(listish) {
   const out = [];
   for (const it of rowsOf(listish)) {
@@ -591,14 +557,11 @@ function toStringArray(listish) {
   }
   return out.filter(Boolean);
 }
-
 function normaliseContract(raw) {
   const c = raw && typeof raw === "object" ? raw : {};
 
-  // 1) Executive summary as array<string>
   c.executive_summary = toStringArray(c.executive_summary);
 
-  // 2) Messaging matrix shape
   const mm = c.messaging_matrix || {};
   c.messaging_matrix = {
     nonnegotiables: rowsOf(mm.nonnegotiables).map(String).filter(Boolean),
@@ -611,34 +574,24 @@ function normaliseContract(raw) {
     }))
   };
 
-  // 3) Case studies: prefer case_study_library, fallback from case_studies
   if (!Array.isArray(c.case_study_library) && Array.isArray(c.case_studies)) {
     c.case_study_library = c.case_studies;
   }
 
-  // 4) Ensure objects exist for optional sections the UI reads
   c.positioning_and_differentiation = c.positioning_and_differentiation || {};
   c.offer_strategy = c.offer_strategy || {};
   c.channel_plan = c.channel_plan || {};
   c.compliance_and_governance = c.compliance_and_governance || {};
-
-  // 5) Lists that the UI iterates
   c.one_pager_summary = rowsOf(c.one_pager_summary).map(String);
 
   return c;
 }
-
-// ---- helpers specific to writer ----
 function filterToSection(finalKey, obj) {
   const out = {};
-  if (obj && typeof obj === "object" && obj[finalKey] != null) {
-    out[finalKey] = obj[finalKey];
-  } else {
-    out[finalKey] = obj || {};
-  }
+  if (obj && typeof obj === "object" && obj[finalKey] != null) out[finalKey] = obj[finalKey];
+  else out[finalKey] = obj || {};
   return out;
 }
-
 function sha256OfJson(o) {
   const h = crypto.createHash("sha256");
   h.update(Buffer.from(JSON.stringify(o || {})));

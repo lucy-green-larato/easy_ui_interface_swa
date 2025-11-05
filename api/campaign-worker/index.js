@@ -1,6 +1,6 @@
-// /api/campaign-worker/index.js 31-10-2025 v14
+// /api/campaign-worker/index.js 05-11-2025 v15
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
-// Writes under results/runs/<runId>/(status.json|evidence_log.json|campaign.json)
+// Writes under results/<prefix> (status.json | campaign.json). Uses prebuilt evidence_log.json when present.
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const path = require("path");
@@ -94,6 +94,13 @@ function computePrefix({ runId }) {
   return `runs/${runId}/`;
 }
 
+async function streamToString(readable) {
+  if (!readable) return "";
+  const chunks = [];
+  for await (const c of readable) chunks.push(c);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 // Idempotent write with small retries (overwrite allowed by default)
 async function putJson(containerClient, blobPath, obj) {
   const client = containerClient.getBlockBlobClient(blobPath);
@@ -109,9 +116,7 @@ async function putJson(containerClient, blobPath, obj) {
       return;
     } catch (e) {
       lastErr = e;
-      // 200ms, 400ms, 800ms (cap ~1s total)
-      const backoff = 200 * (1 << attempt);
-      await new Promise(r => setTimeout(r, backoff));
+      await new Promise(r => setTimeout(r, 200 * (1 << attempt))); // 200/400/800ms
       attempt++;
     }
   }
@@ -122,14 +127,11 @@ async function putJson(containerClient, blobPath, obj) {
 function hostnameOf(u) {
   try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return null; }
 }
-
 function buildAllowedSets(evidence, prospectWebsite) {
   const allowedUrls = new Set();
   const allowedHosts = new Set();
-
   const siteHost = hostnameOf(prospectWebsite);
   if (siteHost) allowedHosts.add(siteHost);
-
   const list = Array.isArray(evidence) ? evidence : [];
   for (const it of list) {
     const url = it?.url || it?.link;
@@ -141,50 +143,35 @@ function buildAllowedSets(evidence, prospectWebsite) {
   }
   return { allowedUrls, allowedHosts };
 }
-
 function sanitizeCaseStudyLibrary(draft, evidence, prospectWebsite, context) {
   if (!draft || typeof draft !== "object") return draft;
-
   const original =
     Array.isArray(draft.case_study_library) ? draft.case_study_library
       : Array.isArray(draft.case_studies) ? draft.case_studies
         : null;
-
   if (!original) return draft;
 
   const { allowedUrls, allowedHosts } = buildAllowedSets(evidence, prospectWebsite);
-
   const filtered = original.filter((row) => {
     if (!row || typeof row !== "object") return false;
-
     const url = row.url || row.link || "";
     const host = hostnameOf(url);
     if (!url || !host) return false;
-
-    // must be same host as company site and/or present in evidence URLs
     const hostOK = allowedHosts.has(host);
     const urlOK = allowedUrls.size ? allowedUrls.has(url) : true;
-
     const headlineOK = typeof row.headline === "string" && row.headline.trim().length > 0;
     const bulletsOK = Array.isArray(row.bullets) && row.bullets.filter(b => String(b).trim()).length >= 2;
-
     return hostOK && urlOK && headlineOK && bulletsOK;
   }).map(row => ({ ...row, verified: true }));
 
-  // Prefer the new key; keep shape consistent
   draft.case_study_library = filtered;
+  if ("case_studies" in draft) draft.case_studies = filtered;
 
-  if ("case_studies" in draft) {
-    draft.case_studies = filtered;
-  }
-
-  if (context && typeof context.log === "function") {
-    context.log({
-      event: "case_study_sanitizer",
-      removed: (original.length - filtered.length),
-      kept: filtered.length
-    });
-  }
+  context?.log?.({
+    event: "case_study_sanitizer",
+    removed: (original.length - filtered.length),
+    kept: filtered.length
+  });
   return draft;
 }
 
@@ -317,13 +304,13 @@ module.exports = async function (context, queueItem) {
     if (__linkedinVal) inputPayload.supplier_linkedin = __linkedinVal;
     if (__uspsArr && __uspsArr.length) inputPayload.supplier_usps = __uspsArr;
 
-    // New, schema-critical intent signals:
-    if (__objectiveEffective) inputPayload.campaign_requirement = __objectiveEffective;       // "upsell" | "win-back" | "growth" | "unspecified"
-    if (__competitors.length) inputPayload.relevant_competitors = __competitors;              // up to 8 vendor names
-    if (__campaignIndustry) inputPayload.campaign_industry = __campaignIndustry;            // for copy
-    if (__selectedIndustry) inputPayload.selected_industry = __selectedIndustry;            // for system selection
+    // schema-critical signals:
+    if (__objectiveEffective) inputPayload.campaign_requirement = __objectiveEffective;
+    if (__competitors.length) inputPayload.relevant_competitors = __competitors;
+    if (__campaignIndustry) inputPayload.campaign_industry = __campaignIndustry;
+    if (__selectedIndustry) inputPayload.selected_industry = __selectedIndustry;
 
-    // Legacy mirror keys (UI convenience)
+    // Legacy mirrors
     if (inputPayload.supplier_company) inputPayload.company_name = inputPayload.supplier_company;
     if (inputPayload.supplier_website) inputPayload.company_website = inputPayload.supplier_website;
     if (inputPayload.supplier_linkedin) inputPayload.company_linkedin = inputPayload.supplier_linkedin;
@@ -342,44 +329,47 @@ module.exports = async function (context, queueItem) {
       selected_industry: inputPayload.selected_industry || null
     });
 
-    // -------- Status writer & event logger (append model) --------
-    let containerClient;
+    // -------- Guard configuration BEFORE any storage use --------
+    const conn = process.env.AzureWebJobsStorage;
+    if (!conn) {
+      const msg = "AzureWebJobsStorage not configured";
+      context.log.error(msg);
+      throw new Error(msg);
+    }
 
-    // Authoritative container-relative prefix: trust message, fallback for legacy
+    // -------- Storage client + container --------
+    const blobService = BlobServiceClient.fromConnectionString(conn);
+    const containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
+    await containerClient.createIfNotExists();
+
+    // Helper now that containerClient exists
+    async function readJsonIfExists(blobPath) {
+      const b = containerClient.getBlockBlobClient(blobPath);
+      if (!(await b.exists())) return null;
+      const dl = await b.download();
+      const txt = await streamToString(dl.readableStreamBody);
+      try { return JSON.parse(txt); } catch { return null; }
+    }
+
+    // Authoritative container-relative prefix: trust message, normalise
     const prefix = (() => {
       let p = (typeof msgPrefix === "string" && msgPrefix.trim()) ? msgPrefix.trim() : `runs/${runId}/`;
-      if (!p.endsWith("/")) p += "/";
+      if (p.startsWith(`${RESULTS_CONTAINER}/`)) p = p.slice(`${RESULTS_CONTAINER}/`.length);
       if (p.startsWith("/")) p = p.replace(/^\/+/, "");
+      if (!p.endsWith("/")) p += "/";
       return p;
     })();
 
     async function updateStatus(state, extra = {}) {
       try {
-        if (!containerClient) return;
         const path = `${prefix}status.json`;
-
-        // read current status (if any)
-        let cur = null;
-        try {
-          const bb = containerClient.getBlockBlobClient(path);
-          if (await bb.exists()) {
-            const dl = await bb.download();
-            const chunks = [];
-            for await (const c of dl.readableStreamBody) chunks.push(c);
-            cur = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
-          }
-        } catch { /* ignore */ }
-
-        // append model
+        let cur = await readJsonIfExists(path);
         const now = new Date().toISOString();
         const next = cur && typeof cur === "object" ? cur : { runId, history: [] };
         next.state = state;
         if (!Array.isArray(next.history)) next.history = [];
-        next.history.push({ phase: state, at: now, correlationId, ...extra, input: undefined }); // keep phase payload small
-
-        // keep the latest canonical input snapshot in the root (not in every history node)
+        next.history.push({ phase: state, at: now, correlationId, ...extra, input: undefined });
         next.input = inputPayload;
-
         await putJson(containerClient, path, next);
       } catch (e) {
         context.log.warn("status_write_failed", { runId, correlationId, message: String(e?.message || e) });
@@ -397,45 +387,8 @@ module.exports = async function (context, queueItem) {
       });
     };
 
-    // -------- Guard configuration BEFORE any storage use --------
-    const conn = process.env.AzureWebJobsStorage;
-    if (!conn) {
-      const msg = "AzureWebJobsStorage not configured";
-      context.log.error(msg);
-      // Best-effort failed status
-      try {
-        const raw = typeof queueItem === "string" ? queueItem : JSON.stringify(queueItem || {});
-        let parsed;
-        try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
-        const runId2 = parsed?.runId;
-        if (runId2) {
-          const bs = BlobServiceClient.fromConnectionString(conn);
-          const cc = bs.getContainerClient(RESULTS_CONTAINER);
-          await cc.createIfNotExists();
-          const pfx = `${computePrefix({ runId: runId2 })}`;
-          await putJson(cc, `${pfx}status.json`, {
-            runId: runId2,
-            state: "Failed",
-            error: { code: "config", message: msg },
-            failedAt: new Date().toISOString()
-          });
-        }
-      } catch { /* ignore */ }
-      throw new Error(msg);
-    }
-
-    // -------- Storage client + container --------
-    const blobService = BlobServiceClient.fromConnectionString(conn);
-    containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
-    await containerClient.createIfNotExists();
-
-    // Validate container-relative prefix (computed earlier)
-    if (typeof prefix !== "string" || !prefix.length) {
-      throw new Error("Missing prefix in message or legacy fallback failed");
-    }
-    if (prefix.startsWith(`${RESULTS_CONTAINER}/`)) {
-      throw new Error("Prefix must be container-relative (must not include the container name)");
-    }
+    // Validate prefix (container-relative)
+    if (!prefix || typeof prefix !== "string") throw new Error("Missing prefix after normalisation");
     context.log("campaign-worker resolved path", { runId, prefix });
 
     // -------- Phase 1 – Validate input --------
@@ -465,7 +418,7 @@ module.exports = async function (context, queueItem) {
     } else {
       context.log.warn("worker: prebuilt evidence_log.json missing/empty; invoking fallback builder", { runId });
       try {
-        const { buildEvidence } = await loadEvidence(); // your existing loader
+        const { buildEvidence } = await loadEvidence();
         const built = await buildEvidence({ input: inputPayload, packs: packsConfig, runId, prefix, correlationId });
         evidence = Array.isArray(built) ? built : [];
         await updateStatus("EvidenceBuilder", {
@@ -476,31 +429,22 @@ module.exports = async function (context, queueItem) {
         evidence = [];
       }
     }
+
     // Bucket evidence by new schema enums
     const evidencePack = { website: [], linkedin: [], ixbrl: {}, pdf: [], directories: [], csv: {} };
     for (const item of (Array.isArray(evidence) ? evidence : [])) {
       const st = String(item?.source_type || "").toLowerCase();
-      if (st === "company site") {
-        evidencePack.website.push(item);
-      } else if (st === "pdf extract") {
-        evidencePack.pdf.push(item);
-      } else if (st === "linkedin") {
-        evidencePack.linkedin.push(item);
-      } else if (st === "directory") {
-        evidencePack.directories.push(item);
-      } else {
-        // Unknown → conservative
-        evidencePack.directories.push(item);
-      }
+      if (st === "company site") evidencePack.website.push(item);
+      else if (st === "pdf extract") evidencePack.pdf.push(item);
+      else if (st === "linkedin") evidencePack.linkedin.push(item);
+      else if (st === "directory") evidencePack.directories.push(item);
+      else evidencePack.directories.push(item); // conservative bucket
     }
+
     // Load csv_normalized.json to populate evidencePack.csv
     try {
-      const csvBlob = containerClient.getBlockBlobClient(`${prefix}csv_normalized.json`);
-      if (await csvBlob.exists()) {
-        const dl = await csvBlob.download();
-        const txt = await streamToString(dl.readableStreamBody);
-        evidencePack.csv = JSON.parse(txt);
-      }
+      const cn = await readJsonIfExists(`${prefix}csv_normalized.json`);
+      if (cn && typeof cn === "object") evidencePack.csv = cn;
     } catch { /* leave csv as {} */ }
 
     // Helpful signals for the harness & schema (addressable market + CSV signals)
@@ -510,7 +454,6 @@ module.exports = async function (context, queueItem) {
     const csvSignals = (() => {
       const sig = {};
       const cn = evidencePack.csv || {};
-      // Canonical fields as produced by campaign-evidence/csv_normalized.json
       if (typeof cn.industry_mode === "string") sig.industry_mode = cn.industry_mode;
       if (typeof cn.selected_industry === "string") sig.selected_industry = cn.selected_industry;
       if (cn.signals && typeof cn.signals === "object") sig.signals = cn.signals;
@@ -524,6 +467,7 @@ module.exports = async function (context, queueItem) {
       evidence_items: Array.isArray(evidence) ? evidence.length : 0,
       at: new Date().toISOString()
     });
+
     let promptHarness;
     try {
       promptHarness = await loadPromptHarness();
@@ -590,10 +534,8 @@ module.exports = async function (context, queueItem) {
           ...inputPayload,
           runId,
           page: sanitizePage(inputPayload.page),
-
-          // NEW: pass explicit buyer-data & schema-critical context to the model
-          addressable_market,          // number | null
-          csv_signals: csvSignals      // includes industry_mode, selected_industry, signals/global_signals, meta
+          addressable_market,              // number | null
+          csv_signals: csvSignals          // includes industry_mode, selected_industry, signals/global_signals, meta
         },
         evidencePack,
         options: {
@@ -683,9 +625,10 @@ module.exports = async function (context, queueItem) {
       try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
 
       const runIdSafe = parsed?.runId ?? "unknown";
-      const prefixSafe = typeof parsed?.prefix === "string" && parsed.prefix.length > 0
-        ? (parsed.prefix.endsWith("/") ? parsed.prefix : `${parsed.prefix}/`)
-        : computePrefix({ runId: runIdSafe });
+      let prefixSafe = typeof parsed?.prefix === "string" && parsed.prefix.length > 0
+        ? parsed.prefix : computePrefix({ runId: runIdSafe });
+      if (prefixSafe.startsWith(`${RESULTS_CONTAINER}/`)) prefixSafe = prefixSafe.slice(`${RESULTS_CONTAINER}/`.length);
+      if (!prefixSafe.endsWith("/")) prefixSafe += "/";
 
       await putJson(container, `${prefixSafe}status.json`, {
         runId: runIdSafe,

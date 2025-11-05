@@ -1,11 +1,10 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 01-11-2025 v5
-
-   Expects these elements in the page:
-   - #sectionTabs (left tabs, role=tablist in HTML)
-   - #centerPanel  (middle panel)
-   - #statusText, #statusDot, #debugLog, #runBadgeId, #currentRunId
-   - #goBtn, #csvUpload (optional), #salesModel (optional), #notes (optional)
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 05-11-2025 v6
+   Changes vs v5:
+   - Support resuming an existing run selected in #runSelect (no CSV required)
+   - Poller: tolerate a single transient status fetch error before failing
+   - Clearer logs/status for resume vs new run
 */
+
 window.CampaignUI = window.CampaignUI || {};
 (function () {
   // ---------- DOM helpers ----------
@@ -76,9 +75,10 @@ window.CampaignUI = window.CampaignUI || {};
 
   function csvToArray(text) {
     const lines = text.split(/\r?\n/).filter(Boolean);
-    const headers = lines.shift().split(",").map(h => h.trim());
+    if (!lines.length) return [];
+    const headers = (lines.shift() || "").split(",").map(h => h.trim());
     return lines.map(line => {
-      const cols = line.split(","); // simple CSV (your sample has no quoted commas)
+      const cols = line.split(","); // simple CSV (no quoted commas)
       const row = {};
       headers.forEach((h, i) => row[h] = (cols[i] ?? "").trim());
       return row;
@@ -134,9 +134,9 @@ window.CampaignUI = window.CampaignUI || {};
     };
   }
 
+  // ---------- Renderers (unchanged logic) ----------
   function renderExecutiveSummary() {
     const listRaw = rowsOf(state.contract?.executive_summary);
-
     if (!listRaw.length) {
       setPanelContent(makePre("The executive summary will show here when your campaign has been created."));
       return;
@@ -147,7 +147,6 @@ window.CampaignUI = window.CampaignUI || {};
       if (typeof item === "string") return item;
       if (typeof item === "number") return String(item);
       if (typeof item === "object") {
-        // Prefer common fields if present; else join stringy values
         const prefer = item.paragraph || item.text || item.value || item.content;
         if (typeof prefer === "string") return prefer;
         const vals = Object.values(item).filter(v => typeof v === "string");
@@ -159,19 +158,11 @@ window.CampaignUI = window.CampaignUI || {};
     const list = listRaw.map(toText).filter(s => s && s.trim());
 
     const wrap = document.createElement("div");
-
-    // Item #1 → paragraph
     const first = list[0];
     const para = document.createElement("p");
-    if (first && typeof first === "object") {
-      // Prefer common keys if object sneaks in
-      para.textContent = first.text || first.paragraph || JSON.stringify(first);
-    } else {
-      para.textContent = String(first || "");
-    }
+    para.textContent = String(first || "");
     wrap.appendChild(para);
 
-    // Items #2..N → bullets
     if (list.length > 1) {
       const ul = document.createElement("ul");
       ul.className = "list";
@@ -182,7 +173,6 @@ window.CampaignUI = window.CampaignUI || {};
       }
       wrap.appendChild(ul);
     }
-
     setPanelContent(wrap);
   }
 
@@ -193,9 +183,7 @@ window.CampaignUI = window.CampaignUI || {};
 
     const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
     const truncate = (s, n = 240) => (typeof s === "string" && s.length > n) ? (s.slice(0, n - 1) + "…") : (s || "");
-    const hasNumbers = (s) => /\d/.test(String(s || ""));
     const isSpecific = (e) => {
-      // Show items that have URL + Title + some summary/quote text.
       if (!e || !e.url || !e.title) return false;
       const summary = String(e.summary || "").trim();
       const quote = String(e.quote || "").trim();
@@ -281,27 +269,22 @@ window.CampaignUI = window.CampaignUI || {};
   }
 
   function renderCaseLibrary() {
-    // Accept either schema key (old/new)
     const listRaw =
       rowsOf(state.contract?.case_study_library).length
         ? rowsOf(state.contract?.case_study_library)
         : rowsOf(state.contract?.case_studies);
 
-    // Empty / none verified → clear message
     if (!listRaw.length) {
       setPanelContent(makePre("No verified case studies found on the company website."));
       return;
     }
 
-    // Detect whether any row is marked verified (from worker sanitizer)
     const hasVerifiedFlag = listRaw.some(k => k && k.verified === true);
 
-    // Build headers conditionally
     const headers = hasVerifiedFlag
       ? ["Customer", "Industry", "Headline", "Bullets", "Link", "Source", "Verified"]
       : ["Customer", "Industry", "Headline", "Bullets", "Link", "Source"];
 
-    // Normalise rows for display
     const rows = listRaw.map(k => {
       const customer = k?.customer || "";
       const industry = k?.industry || "";
@@ -309,16 +292,7 @@ window.CampaignUI = window.CampaignUI || {};
       const bullets = rowsOf(k?.bullets);
       const href = k?.link || k?.url || "";
       const source = k?.source || k?.source_type || "";
-
-      const base = [
-        customer,
-        industry,
-        headline,
-        bullets,
-        href ? { __link: true, href, text: href } : "",
-        source
-      ];
-
+      const base = [customer, industry, headline, bullets, href ? { __link: true, href, text: href } : "", source];
       if (hasVerifiedFlag) base.push(k?.verified ? "✓" : "");
       return base;
     });
@@ -334,7 +308,6 @@ window.CampaignUI = window.CampaignUI || {};
     const h1 = document.createElement("h3"); h1.textContent = "Value Proposition";
     wrap.appendChild(h1); wrap.appendChild(makePre(pos.value_prop || ""));
 
-    // SWOT
     const sw = pos.swot || {};
     const hasSw = [sw.strengths, sw.weaknesses, sw.opportunities, sw.threats]
       .some(a => Array.isArray(a) && a.length);
@@ -371,6 +344,7 @@ window.CampaignUI = window.CampaignUI || {};
 
     setPanelContent(wrap);
   }
+
   function renderICPMatrix() {
     const mm = state.contract?.messaging_matrix || {};
     const wrap = document.createElement("div");
@@ -385,7 +359,6 @@ window.CampaignUI = window.CampaignUI || {};
     const rows = rowsOf(mm.matrix).map(r => [r.persona || "", r.pain || "", r.value_statement || "", r.proof || "", r.cta || ""]);
     const table = makeTable(headers, rows);
 
-    // Tag each row with claim ids from value_statement/proof so Evidence Log can jump here
     const TRS = table.querySelectorAll("tbody tr");
     const claimRe = /\bCLM-\d{3}\b/g;
     rowsOf(mm.matrix).forEach((r, i) => {
@@ -521,7 +494,7 @@ window.CampaignUI = window.CampaignUI || {};
 
   function renderActive() {
     if (!state.tabsMounted || !$("#sectionTabs")?.children?.length) {
-      mountTabs(true); // force rebuild if needed
+      mountTabs(true);
     }
     const sec = SECTIONS.find(s => s.id === state.active) || SECTIONS[0];
     (sec?.render || renderExecutiveSummary)();
@@ -530,11 +503,8 @@ window.CampaignUI = window.CampaignUI || {};
   function mountTabs(force = false) {
     const host = $("#sectionTabs");
     if (!host) return false;
-
-    // If already mounted and not forcing, skip
     if (state.tabsMounted && !force && host.childElementCount) return true;
 
-    // (Re)build
     host.replaceChildren();
     host.setAttribute("role", "tablist");
     host.setAttribute("aria-label", "Campaign sections");
@@ -570,7 +540,6 @@ window.CampaignUI = window.CampaignUI || {};
       mountTabs(true);
       renderActive();
     },
-    // optional: small debug surface you can call from DevTools
     _debug: {
       mountTabs,
       renderActive: () => renderActive(),
@@ -618,10 +587,9 @@ window.CampaignUI = window.CampaignUI || {};
   }
 
   async function http(method, url, { headers = {}, body, timeoutMs = 20000 } = {}) {
-    // ---- Guard B: make sure we always pass a clean, root-absolute string URL
-    if (typeof url === 'function') url = url();                // if a function was passed, call it
-    url = String(url || '').trim().replace(/^`|`$/g, '');      // strip accidental backticks/whitespace
-    if (!/^https?:\/\//i.test(url) && url[0] !== '/') url = '/' + url; // ensure root-absolute path
+    if (typeof url === 'function') url = url();
+    url = String(url || '').trim().replace(/^`|`$/g, '');
+    if (!/^https?:\/\//i.test(url) && url[0] !== '/') url = '/' + url;
 
     const cid = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
     const t = withTimeout(timeoutMs);
@@ -643,6 +611,7 @@ window.CampaignUI = window.CampaignUI || {};
       t.clear();
     }
   }
+
   const API = {
     start: () => `/api/campaign-start`,
     status: (runId) => `/api/campaign-status?runId=${encodeURIComponent(runId)}`,
@@ -650,12 +619,11 @@ window.CampaignUI = window.CampaignUI || {};
     fetchEvidenceLog: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence_log`,
   };
 
-  async function startRun() {
+  async function startRunOrResume() {
     UI.setBusy(true);
-    UI.setStatus("Submitting…", "run");
-    UI.log("Submitting job to /api/campaign-start");
+    UI.setStatus("Preparing…", "run");
 
-    // ---- Collect UI inputs (defensive) ----
+    // UI inputs
     const salesModel = ($("#salesModel")?.value || "").trim().toLowerCase() || null;
     const notes = ($("#notes")?.value || "").trim() || null;
 
@@ -675,21 +643,35 @@ window.CampaignUI = window.CampaignUI || {};
 
     const buyer_industry = ($("#buyerIndustry")?.value || "").trim() || null;
 
-    // CSV: build compact summary if a file is present
+    // CSV presence?
+    const fileEl = $("#csvUpload");
+    const hasCsv = !!(fileEl?.files?.[0]);
+
+    // Recent run selected?
+    const recent = $("#runSelect");
+    const selectedRunId = (recent?.value || "").trim();
+
+    // If user selected a recent run and did not attach a CSV, resume it.
+    if (!hasCsv && selectedRunId) {
+      UI.log(`Resuming existing run: ${selectedRunId}`);
+      UI.setRun(selectedRunId);
+      return await fetchCompleteRun(selectedRunId, /*allowPoll*/ true);
+    }
+
+    // Otherwise, we’re starting a fresh run
+    UI.setStatus("Submitting…", "run");
+    UI.log("Submitting job to /api/campaign-start");
+
+    // Build optional CSV summary
     let csvSummary = null;
     let csvTextRaw = null;
     let rowCount = null;
 
-    const fileEl = $("#csvUpload");
-    if (fileEl?.files?.[0]) {
+    if (hasCsv) {
       const text = await fileEl.files[0].text();
       csvTextRaw = text;
-
-      // csvToArray() returns ONLY data rows (header already removed),
-      // so rowCount is simply rows.length
       const rows = csvToArray(text);
       rowCount = rows.length;
-
       csvSummary = buildCsvSummary(rows, buyer_industry || "");
     }
 
@@ -705,7 +687,6 @@ window.CampaignUI = window.CampaignUI || {};
       supplier_website,
       supplier_linkedin,
       supplier_usps,
-      // map UI field to the server's expected key
       campaign_industry: buyer_industry,
       relevant_competitors,
       campaign_requirement
@@ -719,10 +700,14 @@ window.CampaignUI = window.CampaignUI || {};
     UI.log(`Run started: ${runId}`);
     UI.setStatus("Queued", "run");
 
-    const contract = await pollToCompletion(runId);
-    UI.log("Contract fetched; keys=" + Object.keys(contract || {}).join(","));
+    return await fetchCompleteRun(runId, /*allowPoll*/ true);
+  }
 
-    // Try to fetch evidence_log (non-fatal if missing)
+  // Fetch a run to completion (or immediately if already done)
+  async function fetchCompleteRun(runId, allowPoll) {
+    const contract = await pollToCompletion(runId, allowPoll);
+    UI.log("Contract fetched; keys=" + Object.keys(contract || {}).join(","));
+    // Evidence (non-fatal)
     let evidenceItems = [];
     try {
       const ev = await http("GET", API.fetchEvidenceLog(runId), { timeoutMs: 20000 });
@@ -730,20 +715,39 @@ window.CampaignUI = window.CampaignUI || {};
     } catch (e) {
       UI.log("Evidence fetch skipped: " + (e?.message || e));
     }
-
     window.CampaignUI?.setContract?.(contract, { evidence: evidenceItems });
     UI.setStatus("Completed", "ok");
+    return contract;
   }
 
-  async function pollToCompletion(runId) {
+  async function pollToCompletion(runId, allowPoll = true) {
+    // First peek—if already completed, short-circuit
+    try {
+      const peek = await http("GET", API.status(runId), { timeoutMs: 12000 });
+      const stateName = peek?.state || "Unknown";
+      UI.setStatus(stateName, stateName === "Failed" ? "err" : "run");
+      UI.log(`Status: ${stateName}`);
+
+      if (stateName === "Completed") {
+        const contract = await http("GET", API.fetchContract(runId), { timeoutMs: 30000 });
+        if (!contract || typeof contract !== "object") throw new Error("Empty or invalid contract JSON");
+        return contract;
+      }
+      if (!allowPoll) throw new Error(`Run is not completed (state: ${stateName})`);
+    } catch (e) {
+      // If even the first status fails, let the loop try once (below)
+      UI.log("First status check failed, will retry once: " + (e?.message || e));
+    }
+
     const started = Date.now();
     const MAX_MS = 8 * 60 * 1000; // 8 minutes
     let attempt = 0;
+    let consecutiveErrors = 0;
 
     const okDuring = new Set([
       "Queued",
       "DraftCampaign",
-      "EvidenceDigest", // ← actual evidence phase name
+      "EvidenceDigest",
       "Outline",
       "SectionWrites",
       "Assemble",
@@ -753,20 +757,28 @@ window.CampaignUI = window.CampaignUI || {};
     while (true) {
       if (Date.now() - started > MAX_MS) throw new Error("Timed out waiting for completion");
 
-      const st = await http("GET", API.status(runId), { timeoutMs: 15000 });
-      const stateName = st?.state || "Unknown";
-      UI.setStatus(stateName, stateName === "Failed" ? "err" : "run");
-      UI.log(`Status: ${stateName}`);
+      try {
+        const st = await http("GET", API.status(runId), { timeoutMs: 15000 });
+        consecutiveErrors = 0; // success resets the error counter
 
-      if (stateName === "Completed") {
-        const contract = await http("GET", API.fetchContract(runId), { timeoutMs: 30000 });
-        if (!contract || typeof contract !== "object") throw new Error("Empty or invalid contract JSON");
-        return contract;
-      }
+        const stateName = st?.state || "Unknown";
+        UI.setStatus(stateName, stateName === "Failed" ? "err" : "run");
+        UI.log(`Status: ${stateName}`);
 
-      if (stateName === "Failed" || stateName === "Unknown" || !okDuring.has(stateName)) {
-        const msg = st?.error?.message || `Run ended with unexpected state: ${stateName}`;
-        throw new Error(msg);
+        if (stateName === "Completed") {
+          const contract = await http("GET", API.fetchContract(runId), { timeoutMs: 30000 });
+          if (!contract || typeof contract !== "object") throw new Error("Empty or invalid contract JSON");
+          return contract;
+        }
+
+        if (stateName === "Failed" || stateName === "Unknown" || !okDuring.has(stateName)) {
+          const msg = st?.error?.message || `Run ended with unexpected state: ${stateName}`;
+          throw new Error(msg);
+        }
+      } catch (e) {
+        consecutiveErrors += 1;
+        UI.log("Status poll error: " + (e?.message || e));
+        if (consecutiveErrors > 1) throw e; // tolerate one transient error
       }
 
       attempt += 1;
@@ -777,31 +789,21 @@ window.CampaignUI = window.CampaignUI || {};
 
   // ---------- Boot ----------
   document.addEventListener("DOMContentLoaded", () => {
-    // 1) Mount tabs immediately so the UI isn’t blank before data arrives
     mountTabs();
-    // Late retry after paint
     requestAnimationFrame(() => {
-      if (!state.tabsMounted || !$("#sectionTabs")?.children?.length) {
-        mountTabs(true);
-      }
+      if (!state.tabsMounted || !$("#sectionTabs")?.children?.length) mountTabs(true);
     });
-
-    // Also when page is shown from bfcache or after slow CSS loads
     window.addEventListener("pageshow", () => {
-      if (!state.tabsMounted || !$("#sectionTabs")?.children?.length) {
-        mountTabs(true);
-      }
+      if (!state.tabsMounted || !$("#sectionTabs")?.children?.length) mountTabs(true);
     });
     renderExecutiveSummary();
 
-    // 2) Elements we care about
     const go = $("#goBtn");
     const csv = $("#csvUpload");
     const recent = $("#runSelect");
     const csvBadge = $("#csvBadge");
     const leftRail = $("#inputs");
 
-    // 3) Running guard + unified enable/disable
     let isRunning = false;
     function setRunning(b) {
       isRunning = !!b;
@@ -809,7 +811,6 @@ window.CampaignUI = window.CampaignUI || {};
       updateGo();
     }
 
-    // 4) Button enable policy: enabled if CSV chosen OR a recent run selected
     function updateGo() {
       if (!go) return;
       const hasCsv = !!(csv && csv.files && csv.files.length > 0);
@@ -817,7 +818,6 @@ window.CampaignUI = window.CampaignUI || {};
       go.disabled = isRunning || !(hasCsv || hasRecent);
     }
 
-    // 5) CSV badge + enable/disable wiring
     function formatBytes(n) {
       if (!Number.isFinite(n)) return "";
       const units = ["B", "KB", "MB", "GB"];
@@ -840,14 +840,13 @@ window.CampaignUI = window.CampaignUI || {};
       recent.addEventListener("change", updateGo);
     }
 
-    // 6) Go handler with double-click protection and clean teardown
     if (go) {
-      updateGo(); // set initial state
+      updateGo();
       go.addEventListener("click", async () => {
         if (go.disabled || isRunning) return;
         try {
           setRunning(true);
-          await startRun();                 // will update status, poll, fetch, and call CampaignUI.setContract()
+          await startRunOrResume();
         } catch (err) {
           console.error(err);
           UI.log("Error: " + (err?.message || err));
@@ -859,7 +858,6 @@ window.CampaignUI = window.CampaignUI || {};
       });
     }
 
-    // 7) Pressing Enter in the left rail triggers Go (if enabled)
     if (leftRail && go) {
       leftRail.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter" && !go.disabled && !isRunning) {
@@ -870,7 +868,6 @@ window.CampaignUI = window.CampaignUI || {};
     }
   });
 
-  // Section registry lives near tabs so it’s visible here
   const SECTIONS = [
     { id: "exec", label: "Executive Summary", render: renderExecutiveSummary },
     { id: "elog", label: "Evidence Log", render: renderEvidenceLog },
