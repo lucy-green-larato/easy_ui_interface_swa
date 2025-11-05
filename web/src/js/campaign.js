@@ -640,7 +640,7 @@ window.CampaignUI = window.CampaignUI || {};
   }
 
   const API = {
-    start: "/api/campaign-start",
+    start: "/fa/campaign-start",
     status: (runId) => `/api/campaign-status?runId=${encodeURIComponent(runId)}`,
     fetchContract: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign`,
     fetchEvidenceLog: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence_log`
