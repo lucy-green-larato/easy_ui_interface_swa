@@ -2,13 +2,11 @@
   "routes": [
     {
       "route": "/api/_probe",
-      "methods": ["GET", "POST", "OPTIONS"],
       "allowedRoles": ["anonymous"],
       "rewrite": "https://httpbin.org/post"
     },
     {
       "route": "/api/campaign-start",
-      "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       "allowedRoles": ["authenticated"],
       "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/campaign-start"
     },
