@@ -121,13 +121,36 @@ module.exports = async function (context, req) {
     // Prefer explicit prefix if supplied; otherwise default to runs/<runId>/
     const basePrefix = prefixParam || (runId ? `runs/${runId}/` : "");
     const blobPath = `${basePrefix}${relName}`;
-
+    // Get the target blob and perform a short bounded retry if we're fetching the campaign
     const blob = container.getBlobClient(blobPath);
-    if (!(await blob.exists())) {
+
+    // First existence check
+    let exists = await blob.exists();
+
+    // If the UI asks for the final campaign right as it’s written, give it a brief chance to appear
+    if (!exists && fileKey === "campaign") {
+      for (let i = 0; i < 3 && !exists; i++) { // 250ms, 500ms, 750ms
+        await new Promise(r => setTimeout(r, 250 * (i + 1)));
+        exists = await blob.exists();
+      }
+    }
+
+    if (!exists) {
       // Fallback: if the caller asked for evidence_log, try to read it from campaign.json
       if (fileKey === "evidence_log") {
-        const campaignBlob = container.getBlobClient(`${basePrefix}${VALID_MAP.campaign}`);
-        if (await campaignBlob.exists()) {
+        const campaignPath = `${basePrefix}${VALID_MAP.campaign}`;
+        const campaignBlob = container.getBlobClient(campaignPath);
+
+        // Quick retry here too, since this is typically called immediately after completion
+        let campaignExists = await campaignBlob.exists();
+        if (!campaignExists) {
+          for (let i = 0; i < 3 && !campaignExists; i++) {
+            await new Promise(r => setTimeout(r, 250 * (i + 1)));
+            campaignExists = await campaignBlob.exists();
+          }
+        }
+
+        if (campaignExists) {
           const dl2 = await campaignBlob.download();
           const text2 = await streamToString(dl2.readableStreamBody);
           try {
@@ -149,6 +172,8 @@ module.exports = async function (context, req) {
           }
         }
       }
+
+      // Nothing to return → 404
       context.res = {
         status: 404,
         headers: { ...extraHeaders, "content-type": "application/json", "x-correlation-id": correlationId },

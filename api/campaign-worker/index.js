@@ -567,6 +567,26 @@ module.exports = async function (context, queueItem) {
       }
 
       await putJson(containerClient, `${prefix}campaign.json`, draft);
+      // Hard consistency check: do not move to Completed unless the artifact is visible
+      try {
+        const bb = containerClient.getBlockBlobClient(`${prefix}campaign.json`);
+        const exists = await bb.exists();
+        if (!exists) {
+          await updateStatus("Failed", {
+            error: { code: "artifact_missing", message: "campaign.json not found after write" },
+            failedAt: new Date().toISOString()
+          });
+          logEvent("campaign_worker_completed", "Failed", { error: "artifact_missing: campaign.json" });
+          return;
+        }
+      } catch (chkErr) {
+        await updateStatus("Failed", {
+          error: { code: "artifact_check_error", message: String(chkErr?.message || chkErr) },
+          failedAt: new Date().toISOString()
+        });
+        logEvent("campaign_worker_completed", "Failed", { error: "artifact_check_error" });
+        return;
+      }
     } catch (e) {
       const code = e?.code || "draft_error";
       const details = (e && typeof e.details === "object") ? e.details : undefined;

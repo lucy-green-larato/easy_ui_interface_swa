@@ -729,9 +729,19 @@ window.CampaignUI = window.CampaignUI || {};
       UI.log(`Status: ${stateName}`);
 
       if (stateName === "Completed") {
-        const contract = await http("GET", API.fetchContract(runId), { timeoutMs: 30000 });
-        if (!contract || typeof contract !== "object") throw new Error("Empty or invalid contract JSON");
-        return contract;
+        // Short bounded retry loop for contract fetch to avoid a just-written race
+        let lastErr;
+        for (let k = 0; k < 4; k++) { // up to ~2.5s total
+          try {
+            const contract = await http("GET", API.fetchContract(runId), { timeoutMs: 30000 });
+            if (contract && typeof contract === "object") return contract;
+            lastErr = new Error("Empty or invalid contract JSON");
+          } catch (e) {
+            lastErr = e;
+          }
+          await new Promise(r => setTimeout(r, 300 + k * 400)); // 300ms, 700ms, 1100ms, 1500ms
+        }
+        throw lastErr || new Error("Contract fetch failed");
       }
       if (!allowPoll) throw new Error(`Run is not completed (state: ${stateName})`);
     } catch (e) {
