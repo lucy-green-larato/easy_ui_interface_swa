@@ -1,6 +1,5 @@
-// /api/campaign-fetch/index.js  · 05-11-2025 v5
-// GET /api/campaign-fetch?runId=<id>&file=<campaign|evidence_log|csv|status|outline>[&prefix=<container-relative/>]
-// Strict whitelist so only known artifacts are retrievable.
+// /api/campaign-fetch/index.js  · v5 (prefix-aware + micro-retry)
+// GET /api/campaign-fetch?runId=<id>&file=<campaign|evidence_log|csv|status|outline>
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 
@@ -8,6 +7,18 @@ const { BlobServiceClient } = require("@azure/storage-blob");
 function genId() {
   return `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
 }
+async function streamToString(readable) {
+  const chunks = [];
+  for await (const ch of readable) chunks.push(ch);
+  return Buffer.concat(chunks).toString("utf8");
+}
+async function jsonOrNull(blob) {
+  if (!(await blob.exists())) return null;
+  const dl = await blob.download();
+  const text = await streamToString(dl.readableStreamBody);
+  try { return text ? JSON.parse(text) : null; } catch { return null; }
+}
+async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // Optional auth; fall back to noop that still returns a correlation id
 let requireAuth;
@@ -40,20 +51,50 @@ function blobSvc() {
   return BlobServiceClient.fromConnectionString(STORAGE_CONN);
 }
 
-async function streamToString(readable) {
-  const chunks = [];
-  for await (const ch of readable) chunks.push(ch);
-  return Buffer.concat(chunks).toString("utf8");
+/**
+ * Resolve the container-relative base prefix to read artifacts from.
+ * Strategy:
+ *  1) Try `runs/<runId>/status.json` and use that folder if it exists.
+ *  2) If status.json has a `prefix` field, prefer it (defensive if you add it later).
+ *  3) Fallback to `runs/<runId>/`.
+ */
+async function resolveBasePrefix(container, runId) {
+  const defaultPrefix = `runs/${runId}/`;
+  const statusPath = `${defaultPrefix}${VALID_MAP.status}`;
+  const statusBlob = container.getBlobClient(statusPath);
+
+  let prefix = defaultPrefix;
+
+  // If the default status.json exists, keep that folder as canonical
+  if (await statusBlob.exists()) {
+    try {
+      const st = await jsonOrNull(statusBlob);
+      // If a future worker writes an explicit prefix, honour it
+      const hinted =
+        (typeof st?.prefix === "string" && st.prefix.trim()) ||
+        (typeof st?.artifacts_prefix === "string" && st.artifacts_prefix.trim()) ||
+        null;
+      if (hinted) {
+        prefix = hinted.endsWith("/") ? hinted : (hinted + "/");
+      }
+    } catch { /* keep default */ }
+    return prefix;
+  }
+
+  // If there is no status at the default place, just fall back.
+  return prefix;
 }
 
-function cleanPrefix(pfx) {
-  if (!pfx) return "";
-  let s = String(pfx).trim();
-  // container-relative only
-  s = s.replace(/^\/+/, "");
-  // ensure trailing slash exactly once
-  if (!s.endsWith("/")) s += "/";
-  return s;
+/** bounded existence retry (250ms, 500ms, 750ms) */
+async function existsWithTinyRetry(blob, doRetry) {
+  let ok = await blob.exists();
+  if (!ok && doRetry) {
+    for (let i = 0; i < 3 && !ok; i++) {
+      await wait(250 * (i + 1));
+      ok = await blob.exists();
+    }
+  }
+  return ok;
 }
 
 // --- handler -----------------------------------------------------------------
@@ -65,28 +106,13 @@ module.exports = async function (context, req) {
     if (auth?.correlationId) correlationId = auth.correlationId;
   } catch { /* noop */ }
 
-  // OPTIONAL CORS (enable if your UI is cross-origin)
-  // const corsHeaders = {
-  //   "access-control-allow-origin": "*",
-  //   "access-control-allow-methods": "GET, OPTIONS",
-  //   "access-control-allow-headers": "content-type, x-requested-with"
-  // };
-  const extraHeaders = {}; // swap to corsHeaders if enabling CORS
+  const extraHeaders = { "x-correlation-id": correlationId, "cache-control": "no-store" };
 
   const method = (req?.method || "GET").toUpperCase();
-  if (method === "OPTIONS") {
-    context.res = { status: 204, headers: { ...extraHeaders, "x-correlation-id": correlationId } };
-    return;
-  }
   if (method !== "GET") {
     context.res = {
       status: 405,
-      headers: {
-        ...extraHeaders,
-        "content-type": "application/json",
-        "x-correlation-id": correlationId,
-        "Allow": "GET, OPTIONS"
-      },
+      headers: { ...extraHeaders, "content-type": "application/json", "Allow": "GET" },
       body: { error: "method_not_allowed", message: "Only GET is supported" }
     };
     return;
@@ -95,13 +121,12 @@ module.exports = async function (context, req) {
   try {
     const runId = (req.query?.runId || "").trim();
     const fileKey = (req.query?.file || "campaign").trim().toLowerCase();
-    const prefixParam = cleanPrefix(req.query?.prefix || "");
 
-    if (!runId && !prefixParam) {
+    if (!runId) {
       context.res = {
         status: 400,
-        headers: { ...extraHeaders, "content-type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "bad_request", message: "Missing runId (or provide 'prefix' instead)" }
+        headers: { ...extraHeaders, "content-type": "application/json" },
+        body: { error: "bad_request", message: "Missing runId" }
       };
       return;
     }
@@ -110,82 +135,55 @@ module.exports = async function (context, req) {
     if (!relName) {
       context.res = {
         status: 400,
-        headers: { ...extraHeaders, "content-type": "application/json", "x-correlation-id": correlationId },
+        headers: { ...extraHeaders, "content-type": "application/json" },
         body: { error: "bad_request", message: `Unknown file '${fileKey}'` }
       };
       return;
     }
 
-    const container = blobSvc().getContainerClient(RESULTS_CONTAINER);
+    const svc = blobSvc();
+    const container = svc.getContainerClient(RESULTS_CONTAINER);
 
-    // Prefer explicit prefix if supplied; otherwise default to runs/<runId>/
-    const basePrefix = prefixParam || (runId ? `runs/${runId}/` : "");
+    // Resolve base prefix (don’t assume runs/<runId>/)
+    const basePrefix = await resolveBasePrefix(container, runId);
+
+    // Main target blob
     const blobPath = `${basePrefix}${relName}`;
-    // Get the target blob and perform a short bounded retry if we're fetching the campaign
     const blob = container.getBlobClient(blobPath);
 
-    // First existence check
-    let exists = await blob.exists();
-
-    // If the UI asks for the final campaign right as it’s written, give it a brief chance to appear
-    if (!exists && fileKey === "campaign") {
-      for (let i = 0; i < 3 && !exists; i++) { // 250ms, 500ms, 750ms
-        await new Promise(r => setTimeout(r, 250 * (i + 1)));
-        exists = await blob.exists();
-      }
-    }
+    // tiny retry for freshly-written artifacts (esp. campaign.json at completion)
+    const shouldRetry = (fileKey === "campaign" || fileKey === "evidence_log");
+    const exists = await existsWithTinyRetry(blob, shouldRetry);
 
     if (!exists) {
-      // Fallback: if the caller asked for evidence_log, try to read it from campaign.json
+      // Special fallback: if the caller asked for evidence_log, unwrap it from campaign.json
       if (fileKey === "evidence_log") {
-        const campaignPath = `${basePrefix}${VALID_MAP.campaign}`;
-        const campaignBlob = container.getBlobClient(campaignPath);
-
-        // Quick retry here too, since this is typically called immediately after completion
-        let campaignExists = await campaignBlob.exists();
-        if (!campaignExists) {
-          for (let i = 0; i < 3 && !campaignExists; i++) {
-            await new Promise(r => setTimeout(r, 250 * (i + 1)));
-            campaignExists = await campaignBlob.exists();
-          }
-        }
-
-        if (campaignExists) {
-          const dl2 = await campaignBlob.download();
-          const text2 = await streamToString(dl2.readableStreamBody);
-          try {
-            const campaignObj = text2 ? JSON.parse(text2) : {};
-            const arr = Array.isArray(campaignObj?.evidence_log) ? campaignObj.evidence_log : [];
-            context.res = {
-              status: 200,
-              headers: {
-                ...extraHeaders,
-                "content-type": "application/json; charset=utf-8",
-                "cache-control": "no-store",
-                "x-correlation-id": correlationId
-              },
-              body: arr
-            };
-            return;
-          } catch {
-            // fall through to 404 below
-          }
+        const campaignBlob = container.getBlobClient(`${basePrefix}${VALID_MAP.campaign}`);
+        const campaignOk = await existsWithTinyRetry(campaignBlob, true);
+        if (campaignOk) {
+          const campaignObj = await jsonOrNull(campaignBlob);
+          const arr = Array.isArray(campaignObj?.evidence_log) ? campaignObj.evidence_log : [];
+          context.res = {
+            status: 200,
+            headers: { ...extraHeaders, "content-type": "application/json; charset=utf-8" },
+            body: arr
+          };
+          return;
         }
       }
 
       // Nothing to return → 404
       context.res = {
         status: 404,
-        headers: { ...extraHeaders, "content-type": "application/json", "x-correlation-id": correlationId },
+        headers: { ...extraHeaders, "content-type": "application/json" },
         body: { error: "not_found", message: "File not found" }
       };
       return;
     }
 
+    // Download + content-type
     const dl = await blob.download();
     const text = await streamToString(dl.readableStreamBody);
-
-    // Prefer JSON for .json artifacts
     const contentType = relName.endsWith(".json")
       ? "application/json; charset=utf-8"
       : (dl?.contentType || "application/octet-stream");
@@ -205,30 +203,21 @@ module.exports = async function (context, req) {
           bodyOut = []; // graceful empty
         }
       } else {
-        // Keep backward-compatibility: return parsed (may be null on parse failure)
-        bodyOut = parsed ?? null;
+        bodyOut = parsed;
       }
     }
 
     context.res = {
       status: 200,
-      headers: {
-        ...extraHeaders,
-        "content-type": contentType,
-        "cache-control": "no-store",
-        "x-correlation-id": correlationId
-      },
+      headers: { ...extraHeaders, "content-type": contentType },
       body: bodyOut
     };
   } catch (err) {
-    const code = err?.code === "config" ? "config" : "server_error";
-    const status = code === "config" ? 500 : 500;
-    const message = String(err?.message || err);
-    context.log.error("[campaign-fetch] failed", err?.stack || message);
+    context.log.error("[campaign-fetch] failed", err?.stack || String(err));
     context.res = {
-      status,
-      headers: { "content-type": "application/json", "x-correlation-id": correlationId || genId() },
-      body: { error: code, message }
+      status: 500,
+      headers: { "content-type": "application/json", "x-correlation-id": correlationId },
+      body: { error: "server_error", message: String(err?.message || err) }
     };
   }
 };
