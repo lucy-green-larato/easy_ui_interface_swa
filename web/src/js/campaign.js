@@ -618,6 +618,11 @@ window.CampaignUI = window.CampaignUI || {};
   }
 
   async function http(method, url, { headers = {}, body, timeoutMs = 20000 } = {}) {
+    // ---- Guard B: make sure we always pass a clean, root-absolute string URL
+    if (typeof url === 'function') url = url();                // if a function was passed, call it
+    url = String(url || '').trim().replace(/^`|`$/g, '');      // strip accidental backticks/whitespace
+    if (!/^https?:\/\//i.test(url) && url[0] !== '/') url = '/' + url; // ensure root-absolute path
+
     const cid = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
     const t = withTimeout(timeoutMs);
     try {
