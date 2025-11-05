@@ -706,7 +706,7 @@ window.CampaignUI = window.CampaignUI || {};
       campaign_requirement
     };
 
-    const startResp = await http("POST", API.start, { body: payload, timeoutMs: 25000 });
+    const startResp = await http("POST", API.start(), { body: payload, timeoutMs: 25000 });
     const runId = startResp?.runId;
     if (!runId) throw new Error("No runId returned from /api/campaign-start");
 
