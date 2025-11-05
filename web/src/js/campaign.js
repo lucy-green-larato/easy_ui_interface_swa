@@ -638,12 +638,11 @@ window.CampaignUI = window.CampaignUI || {};
       t.clear();
     }
   }
-
   const API = {
-    start: "/api/campaign-start",
+    start: () => `/api/campaign-start`,
     status: (runId) => `/api/campaign-status?runId=${encodeURIComponent(runId)}`,
     fetchContract: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign`,
-    fetchEvidenceLog: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence_log`
+    fetchEvidenceLog: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence_log`,
   };
 
   async function startRun() {

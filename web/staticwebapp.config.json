@@ -1,43 +1,8 @@
 {
   "routes": [
     {
-  "route": "/web/content/*",
-  "statusCode": 301,
-  "redirect": "/content/{*path}"
-},
-{
-  "route": "/web/*",
-  "statusCode": 301,
-  "redirect": "/{*path}"
-},
-    {
-  "route": "/fa/_probe_redirect",
-  "statusCode": 302,
-  "redirect": "https://httpbin.org/post"
-},
-    {
-      "route": "/fa/campaign-start",
-      "allowedRoles": ["authenticated"],
-      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/campaign-start"
-    },
-    {
-      "route": "/fa/*",
-      "allowedRoles": ["authenticated"],
-      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/*"
-    },
-    {
-      "route": "/api/_probe",
-      "allowedRoles": ["anonymous"],
-      "rewrite": "https://httpbin.org/post"
-    },
-    {
-      "route": "/api/campaign-start",
-      "allowedRoles": ["authenticated"],
-      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/campaign-start"
-    },
-    {
       "route": "/api/*",
-      "allowedRoles": ["authenticated"],
+      "allowedRoles": ["anonymous"],
       "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/*"
     },
     { "route": "/engagement/*",    "rewrite": "/engagement/index.html" },
@@ -46,6 +11,14 @@
   ],
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/.auth/*", "/fa/*", "/api/*", "/assets/*", "/vendor/*", "/content/*", "/src/*"]
+    "exclude": ["/.auth/*", "/api/*", "/assets/*", "/vendor/*", "/content/*", "/src/*"]
+  },
+   "mimeTypes": {
+    ".md":  "text/markdown; charset=utf-8",
+    ".csv": "text/csv; charset=utf-8",
+    ".json":"application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".webmanifest": "application/manifest+json",
+    ".wasm": "application/wasm"
   }
 }
