@@ -1,6 +1,16 @@
 {
   "routes": [
     {
+  "route": "/web/content/*",
+  "statusCode": 301,
+  "redirect": "/content/{*path}"
+},
+{
+  "route": "/web/*",
+  "statusCode": 301,
+  "redirect": "/{*path}"
+},
+    {
   "route": "/fa/_probe_redirect",
   "statusCode": 302,
   "redirect": "https://httpbin.org/post"
