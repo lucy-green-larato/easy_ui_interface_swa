@@ -1,6 +1,16 @@
 {
   "routes": [
     {
+      "route": "/fa/campaign-start",
+      "allowedRoles": ["authenticated"],
+      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/campaign-start"
+    },
+    {
+      "route": "/fa/*",
+      "allowedRoles": ["authenticated"],
+      "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/*"
+    },
+    {
       "route": "/api/_probe",
       "allowedRoles": ["anonymous"],
       "rewrite": "https://httpbin.org/post"
@@ -21,6 +31,6 @@
   ],
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/.auth/*", "/api/*", "/assets/*", "/vendor/*", "/content/*", "/src/*"]
+    "exclude": ["/.auth/*", "/fa/*", "/api/*", "/assets/*", "/vendor/*", "/content/*", "/src/*"]
   }
 }
