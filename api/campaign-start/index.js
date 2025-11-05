@@ -1,4 +1,4 @@
-// /api/campaign-start/index.js 26-10-2025 v8. TEST PUTTING OLD ONE BACK. 
+// /api/campaign-start/index.js 26-10-2025 v8
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign/start → enqueues job to campaign-jobs, writes initial status.json ("Queued"), returns 202 { runId }.
 
