@@ -12,7 +12,6 @@
     },
     {
       "route": "/api/*",
-      "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       "allowedRoles": ["authenticated"],
       "rewrite": "https://fa-sales-accelerator-b8cac8cgaufqdrd4.uksouth-01.azurewebsites.net/api/*"
     },
@@ -22,13 +21,6 @@
   ],
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": [
-      "/.auth/*",
-      "/api/*",
-      "/assets/*",
-      "/vendor/*",
-      "/content/*",
-      "/src/*"
-    ]
+    "exclude": ["/.auth/*", "/api/*", "/assets/*", "/vendor/*", "/content/*", "/src/*"]
   }
 }
