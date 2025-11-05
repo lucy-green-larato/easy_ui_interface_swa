@@ -52,6 +52,10 @@ async function getJson(containerClient, blobPath) {
   }
 }
 
+async function readJsonIfExists(containerClient, blobPath) {
+  return getJson(containerClient, blobPath);
+}
+
 async function putJson(containerClient, blobPath, obj) {
   const b = containerClient.getBlockBlobClient(blobPath);
   const body = Buffer.from(JSON.stringify(obj, null, 2), "utf8");
@@ -448,7 +452,7 @@ function mdToSourceItems(md) {
   const items = [];
   const lines = String(md || "").split(/\r?\n/);
   for (const line of lines) {
-    const m = line.match(/^\s*-\s*([^:—]+?)(?:\s*[—-]\s*[^:]+?)?\s*:\s*(https?:\/\/\S+)/i);
+    const m = line.match(/^\s*-\s*([^:]+?)\s*:\s*(https?:\/\/\S+)/i); // "Title : URL"
     if (!m) continue;
     const title = m[1].trim();
     const url = m[2].trim();
@@ -787,8 +791,7 @@ module.exports = async function (context, job) {
 
     if (csvText && csvText.trim()) {
       const rows = parseCsvLoose(csvText);
-      const nonEmptyRows = rows.filter(r => Array.isArray(r) && r.some(c => String(c || "").trim().length));
-      const agg = normalizeCsv(nonEmptyRows);
+      const agg = normalizeCsv(rows);
 
       const industries = Array.isArray(agg.industries) ? agg.industries : [];
       const csvHasMultipleSectors = industries.filter(x => x && x !== "Unknown").length > 1;
