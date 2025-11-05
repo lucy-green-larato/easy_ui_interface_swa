@@ -2,7 +2,7 @@
   "routes": [
     {
   "route": "/fa/_probe_redirect",
-  "statusCode": 307,
+  "statusCode": 302,
   "redirect": "https://httpbin.org/post"
 },
     {
