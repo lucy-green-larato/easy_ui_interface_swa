@@ -102,6 +102,12 @@ function toHttps(u) {
 }
 
 module.exports = async function (context, req) {
+  context.log("campaign-start hit", {
+    method: req?.method,
+    url: req?.url,
+    origin: req?.headers?.origin,
+    acReqMethod: req?.headers?.['access-control-request-method']
+  });
   const method = (req?.method || "GET").toUpperCase();
   const correlationId = getCorrelationId(req);
 
