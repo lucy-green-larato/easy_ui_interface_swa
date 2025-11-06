@@ -1,239 +1,159 @@
-// /api/campaign-fetch/index.js  · v6 (prefix-aware + micro-retry + clean success path)
+// /api/campaign-fetch/index.js  · 06-11-2025 v6 (prefix-aware + robust returns)
 // GET /api/campaign-fetch?runId=<id>&file=<campaign|evidence_log|csv|status|outline>
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 
-// --- small utils -------------------------------------------------------------
-function genId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
-}
+// --- tiny utils --------------------------------------------------------------
+const genId = () => `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function streamToString(readable) {
   const chunks = [];
   for await (const ch of readable) chunks.push(ch);
   return Buffer.concat(chunks).toString("utf8");
 }
-async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-// bounded existence retry (100ms, 250ms) plus an immediate check
-async function existsWithTinyRetry(blobClient, retry) {
-  const tries = retry ? [0, 100, 250] : [0];
-  for (const ms of tries) {
-    if (ms) await wait(ms);
-    try { if (await blobClient.exists()) return true; } catch { /* transient */ }
+async function jsonIfExists(bc) {
+  if (!(await bc.exists())) return null;
+  const dl = await bc.download();
+  const txt = await streamToString(dl.readableStreamBody);
+  try { return txt ? JSON.parse(txt) : null; } catch { return null; }
+}
+async function existsWithTinyRetry(bc, doRetry = false) {
+  let ok = await bc.exists();
+  for (let i = 0; doRetry && !ok && i < 3; i += 1) {
+    await sleep(150 * (i + 1));          // 150 / 300 / 450 ms
+    ok = await bc.exists();
   }
-  return false;
-}
-async function jsonOrNull(blobClient) {
-  try {
-    const dl = await blobClient.download();
-    const text = await streamToString(dl.readableStreamBody);
-    try { return text ? JSON.parse(text) : null; } catch { return null; }
-  } catch { return null; }
+  return ok;
 }
 
-// Optional auth; fall back to noop that still returns a correlation id
+// Optional auth (for correlation id only here)
 let requireAuth;
-try {
-  ({ requireAuth } = require("../lib/auth"));
-} catch {
-  requireAuth = async () => ({ correlationId: genId() });
-}
+try { ({ requireAuth } = require("../lib/auth")); }
+catch { requireAuth = async () => ({ correlationId: genId(), userId: "anonymous" }); }
 
 // --- config ------------------------------------------------------------------
 const STORAGE_CONN = process.env.AzureWebJobsStorage;
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
-
-// Allowed external-facing artifacts only (whitelist)
 const VALID_MAP = Object.freeze({
   campaign: "campaign.json",
-  evidence_log: "evidence_log.json",   // UI fetches evidence directly
-  csv: "csv_normalized.json",          // useful for debugging
+  evidence_log: "evidence_log.json",
+  csv: "csv_normalized.json",
   status: "status.json",
-  outline: "outline.json"              // helpful for troubleshooting
+  outline: "outline.json",
 });
 
-// --- azure helpers -----------------------------------------------------------
-function blobSvc() {
-  if (!STORAGE_CONN) {
-    const e = new Error("AzureWebJobsStorage is not configured");
-    e.code = "config";
-    throw e;
-  }
-  return BlobServiceClient.fromConnectionString(STORAGE_CONN);
-}
-
-/**
- * Resolve the container-relative base prefix to read artifacts from.
- * Strategy:
- *  1) Try `runs/<runId>/status.json`
- *  2) Try `<runId>/status.json` (legacy/bare)
- *  3) Lightweight scan for any */status.json containing the same runId
- * Returns a prefix that ends with '/'.
- */
-async function resolveBasePrefix(containerClient, runId) {
-  // 1) Default path
-  let candidate = `runs/${runId}/`;
-  let statusBlob = containerClient.getBlockBlobClient(`${candidate}status.json`);
-  if (await statusBlob.exists()) return candidate;
-
-  // 2) Bare path fallback
-  candidate = `${runId}/`;
-  statusBlob = containerClient.getBlockBlobClient(`${candidate}status.json`);
-  if (await statusBlob.exists()) return candidate;
-
-  // 3) Lightweight scan (bounded)
-  let seen = 0;
-  for await (const item of containerClient.listBlobsFlat({ prefix: "" })) {
-    if (!item.name.toLowerCase().endsWith("status.json")) continue;
-    if (++seen > 200) break; // bound cost
+// Resolve container-relative prefix for a run
+async function resolvePrefix(container, runId, userIdHint) {
+  // 1) Per-user recent index (fast path)
+  if (userIdHint) {
     try {
-      const bb = containerClient.getBlockBlobClient(item.name);
+      const idx = container.getBlockBlobClient(`users/${userIdHint}/recent.json`);
+      const obj = await jsonIfExists(idx);
+      const hit = (obj?.items || []).find((x) => String(x?.runId) === runId && typeof x?.prefix === "string");
+      if (hit?.prefix && hit.prefix.endsWith("/")) return hit.prefix;
+    } catch { /* noop */ }
+  }
+
+  // 2) Bounded scan for status.json that contains the runId (defensive)
+  let seen = 0;
+  for await (const it of container.listBlobsFlat({ prefix: "runs/" })) {
+    if (!it.name.toLowerCase().endsWith("/status.json")) continue;
+    if (++seen > 500) break; // hard cap
+    try {
+      const bb = container.getBlockBlobClient(it.name);
       const dl = await bb.download();
       const txt = await streamToString(dl.readableStreamBody);
       if (txt && txt.includes(`"runId":"${runId}"`)) {
-        const dir = item.name.slice(0, item.name.length - "status.json".length);
-        return dir; // includes trailing '/'
+        return it.name.slice(0, -("status.json".length)); // keep trailing slash
       }
-    } catch { /* ignore */ }
+    } catch { /* continue */ }
   }
 
-  // best-effort default
+  // 3) Legacy layout fallback
   return `runs/${runId}/`;
 }
 
 // --- handler -----------------------------------------------------------------
 module.exports = async function (context, req) {
-  // prefer auth(context, req); fall back to a fresh correlation id
   let correlationId = genId();
   try {
     const auth = await requireAuth(context, req);
     if (auth?.correlationId) correlationId = auth.correlationId;
   } catch { /* noop */ }
 
-  const extraHeaders = { "x-correlation-id": correlationId, "cache-control": "no-store" };
-
-  const method = (req?.method || "GET").toUpperCase();
+  const extra = { "x-correlation-id": correlationId, "cache-control": "no-store" };
+  const method = String(req?.method || "GET").toUpperCase();
   if (method !== "GET") {
-    context.res = {
-      status: 405,
-      headers: { ...extraHeaders, "content-type": "application/json", "Allow": "GET" },
-      body: { error: "method_not_allowed", message: "Only GET is supported" }
-    };
+    context.res = { status: 405, headers: { ...extra, "content-type": "application/json" },
+      body: { error: "method_not_allowed" } };
     return;
   }
 
-  try {
-    const runId = (req.query?.runId || "").trim();
-    const fileKey = (req.query?.file || "campaign").trim().toLowerCase();
+  const runId = String(req.query?.runId || "").trim();
+  const fileKey = String(req.query?.file || "").trim().toLowerCase();
+  const relName = VALID_MAP[fileKey];
 
-    if (!runId) {
-      context.res = {
-        status: 400,
-        headers: { ...extraHeaders, "content-type": "application/json" },
-        body: { error: "bad_request", message: "Missing runId" }
-      };
-      return;
-    }
-
-    const relName = VALID_MAP[fileKey];
-    if (!relName) {
-      context.res = {
-        status: 400,
-        headers: { ...extraHeaders, "content-type": "application/json" },
-        body: { error: "bad_request", message: `Unknown file '${fileKey}'` }
-      };
-      return;
-    }
-
-    const svc = blobSvc();
-    const container = svc.getContainerClient(RESULTS_CONTAINER);
-
-    // Resolve base prefix (don’t assume runs/<runId>/)
-    const basePrefix = await resolveBasePrefix(container, runId);
-
-    // Main target blob
-    const blobPath = `${basePrefix}${relName}`;
-    const blob = container.getBlobClient(blobPath);
-
-    // Tiny retry for freshly-written artifacts (esp. campaign.json / evidence_log.json)
-    const shouldRetry = (fileKey === "campaign" || fileKey === "evidence_log");
-    const exists = await existsWithTinyRetry(blob, shouldRetry);
-
-    // --- Fallbacks when the target blob isn't there yet -----------------------
-    if (!exists) {
-      // evidence_log → unwrap array from campaign.json
-      if (fileKey === "evidence_log") {
-        const campaignBlob = container.getBlobClient(`${basePrefix}${VALID_MAP.campaign}`);
-        const campaignOk = await existsWithTinyRetry(campaignBlob, true);
-        if (campaignOk) {
-          const campaignObj = await jsonOrNull(campaignBlob);
-          const arr = Array.isArray(campaignObj?.evidence_log) ? campaignObj.evidence_log : [];
-          context.res = {
-            status: 200,
-            headers: { ...extraHeaders, "content-type": "application/json; charset=utf-8" },
-            body: arr
-          };
-          return;
-        }
-      }
-
-      // campaign → fall back to outline.json if present
-      if (fileKey === "campaign") {
-        const outlineBlob = container.getBlobClient(`${basePrefix}${VALID_MAP.outline}`);
-        const outlineOk = await existsWithTinyRetry(outlineBlob, true);
-        if (outlineOk) {
-          const outlineObj = await jsonOrNull(outlineBlob);
-          context.res = {
-            status: 200,
-            headers: { ...extraHeaders, "content-type": "application/json; charset=utf-8" },
-            body: outlineObj ?? {}
-          };
-          return;
-        }
-      }
-
-      // Nothing to return
-      context.res = {
-        status: 404,
-        headers: { ...extraHeaders, "content-type": "application/json" },
-        body: { error: "not_found", message: "File not found" }
-      };
-      return;
-    }
-
-    // --- Success path ---------------------------------------------------------
-    if (relName.endsWith(".json")) {
-      const obj = await jsonOrNull(blob);
-
-      // Unwrap evidence_log.json if it was stored as { evidence_log: [...] }
-      const bodyOut = (fileKey === "evidence_log")
-        ? (Array.isArray(obj) ? obj
-           : (obj && Array.isArray(obj.evidence_log)) ? obj.evidence_log
-           : [])
-        : (obj ?? {});
-
-      context.res = {
-        status: 200,
-        headers: { ...extraHeaders, "content-type": "application/json; charset=utf-8" },
-        body: bodyOut
-      };
-      return;
-    }
-
-    // Non-JSON artifacts (not used today, but kept correct)
-    const dl = await blob.download();
-    const text = await streamToString(dl.readableStreamBody);
-    context.res = {
-      status: 200,
-      headers: { ...extraHeaders, "content-type": dl?.contentType || "application/octet-stream" },
-      body: text
-    };
-  } catch (err) {
-    context.log.error("[campaign-fetch] failed", err?.stack || String(err));
-    context.res = {
-      status: 500,
-      headers: { "content-type": "application/json", "x-correlation-id": genId() },
-      body: { error: "server_error", message: String(err?.message || err) }
-    };
+  if (!runId || !/^[a-z0-9-]{10,}$/i.test(runId)) {
+    context.res = { status: 400, headers: { ...extra, "content-type": "application/json" },
+      body: { error: "bad_request", message: "Missing or invalid runId" } };
+    return;
   }
+  if (!relName) {
+    context.res = { status: 400, headers: { ...extra, "content-type": "application/json" },
+      body: { error: "bad_request", message: "Unknown file parameter" } };
+    return;
+  }
+  if (!STORAGE_CONN) {
+    context.res = { status: 500, headers: { ...extra, "content-type": "application/json" },
+      body: { error: "config", message: "AzureWebJobsStorage is not configured" } };
+    return;
+  }
+
+  const blobSvc = BlobServiceClient.fromConnectionString(STORAGE_CONN);
+  const container = blobSvc.getContainerClient(RESULTS_CONTAINER);
+
+  // Best-effort userId (only for recent.json fast-path)
+  let userIdHint = "anonymous";
+  try {
+    const b64 = req.headers["x-ms-client-principal"];
+    if (b64) {
+      const cp = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+      const claims = cp?.claims || [];
+      const by = Object.create(null);
+      for (const c of claims) by[c.typ?.toLowerCase?.() || ""] = c.val;
+      userIdHint = (by["oid"] || by["sub"] || by["emails"] || by["email"] || "anonymous").toLowerCase();
+    }
+  } catch { /* noop */ }
+
+  const base = await resolvePrefix(container, runId, userIdHint);
+  const blob = container.getBlockBlobClient(`${base}${relName}`);
+
+  // Tiny retry for freshly-written artifacts
+  const shouldRetry = fileKey === "campaign" || fileKey === "evidence_log";
+  const ok = await existsWithTinyRetry(blob, shouldRetry);
+  if (!ok) {
+    // friendly 404 – UI will keep polling
+    context.res = { status: 404, headers: { ...extra, "content-type": "application/json" },
+      body: { error: "not_found", message: "File not found" } };
+    return;
+  }
+
+  const dl = await blob.download();
+  const text = await streamToString(dl.readableStreamBody);
+  const isJson = relName.endsWith(".json");
+  const contentType = isJson ? "application/json; charset=utf-8" : (dl?.contentType || "application/octet-stream");
+
+  let bodyOut = text;
+  if (isJson) {
+    let parsed = null;
+    try { parsed = text ? JSON.parse(text) : null; } catch { parsed = null; }
+    if (fileKey === "evidence_log") {
+      bodyOut = Array.isArray(parsed) ? parsed
+              : (parsed && Array.isArray(parsed.evidence_log) ? parsed.evidence_log : []);
+    } else {
+      bodyOut = parsed;
+    }
+  }
+
+  context.res = { status: 200, headers: { ...extra, "content-type": contentType }, body: bodyOut };
 };
