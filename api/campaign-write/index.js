@@ -9,14 +9,15 @@ const { BlobServiceClient } = require("@azure/storage-blob");
 const { QueueServiceClient } = require("@azure/storage-queue");
 
 // ==== ENV / CONFIG ====
-const STORAGE_CONN   = process.env.AzureWebJobsStorage;
-const CONTAINER      = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
-const MAIN_QUEUE     = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
+const STORAGE_CONN = process.env.AzureWebJobsStorage;
+const CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
+const MAIN_QUEUE = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 60000);
 
 // Final section keys (exact, stable set)
 const FINAL_SECTION_KEYS = [
   "executive_summary",
+  "campaign_strategy",
   "positioning_and_differentiation",
   "offer_strategy",
   "messaging_matrix",
@@ -169,20 +170,47 @@ function buildSectionSystem(finalKey, persona) {
     ].join("\n");
   }
 
-  if (finalKey === "sales_enablement") {
+  if (finalKey === "campaign_strategy") {
     return [
-      personaPrefix + "You are a senior UK B2B sales enablement writer.",
-      "Include discovery questions with 'why_it_matters' for each.",
-      "Use evidence claim_ids where relevant.",
-      'Return STRICT JSON for "sales_enablement".'
+      personaPrefix + "You are a senior UK B2B strategist.",
+      "You are formulating a campaign strategy for a technology supplier.",
+      "Base your reasoning strictly on the supplied evidence and inputs.",
+      "Deliver a coherent, practical plan that positions the supplier to win within the chosen prospect base.",
+      "",
+      "Cover these items explicitly, as concise bullets (≤ 220 words total):",
+      "• Strategic rationale — why the supplier should play in this market.",
+      "• Advantage — how the supplier can be better than competitors (specific differentiators).",
+      "• Coherent choices — the concrete actions and constraints that define the campaign (segments, offer, channels, messaging, sequencing).",
+      "• Feasibility — practical enablers/limits (teams, systems, dependencies).",
+      "• Specific expected outcome — quantified KPI/timeframe if available; otherwise 'TBD'.",
+      "",
+      "Rules:",
+      "• No fabrication. Cite only what is supported by inputs/evidence.",
+      "• Prefer specifics over generalities; avoid marketing fluff.",
+      "• Keep to bullets; do not repeat headings in prose.",
+      "",
+      `Generate STRICT JSON only for the requested section "${finalKey}".`,
+      "Return JSON only, no markdown fences. Do NOT include keys for other sections.",
+      "",
+      "CITATION RULE (inline, end of sentences using external evidence):",
+      "Use short tags in parentheses: (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).",
+      "",
+      "STYLE: UK English, concise, specific, evidence-led. Prefer concrete buyer outcomes with inline citations where used.",
+      "VALIDATION: All URLs https. Arrays required by the schema must be present (empty if necessary). No invented numbers/sources; write 'no external citation available' if needed."
     ].join("\n");
   }
 
-  return [
-    personaPrefix + "You are a senior UK B2B strategist and sales enablement writer.",
-    "Base everything on outline notes, evidence (use claim_ids), and CSV signals. No fabrication.",
-    `Return STRICT JSON for "${finalKey}".`
-  ].join("\n");
+  if (finalKey === "sales_enablement") {
+    return [
+      (persona ? `PERSONA\n${persona}\n\n` : "") + "You are a senior UK B2B sales enablement lead.",
+      "Produce a practical pack for salespeople that they can use immediately.",
+      "Include: campaign rationale, campaign strategy & objective, target prospect overview (why these companies), services included and why, competitor landscape; a master sales pitch; and discovery questions each with a brief explanation of why it matters.",
+      "Ground content in provided evidence and CSV signals; no fabrication.",
+      "",
+      `Generate STRICT JSON only for "${finalKey}" and match the target shapes.`,
+      "Return JSON only; no markdown."
+    ].join("\n");
+  }
 }
 
 function targetsFor(finalKey) {
@@ -215,7 +243,27 @@ function targetsFor(finalKey) {
   }
 }`.trim();
   }
-
+  if (finalKey === "campaign_strategy") {
+    return `{
+  "campaign_strategy": {
+    "strategic_rationale": "<why we should play in this prospect base; tie to CSV addressable_market and evidence (claim_ids)>",
+    "advantage": [
+      "<how we are better than competitors (specific differentiators; cite claim_ids)>"
+    ],
+    "coherent_choices": [
+      "target_segments: <which segments and why>",
+      "offer_outline: <what we will offer and why>",
+      "primary_channels: <channels to prioritise and why>",
+      "messaging_focus: <core themes anchored to evidence>",
+      "sequencing/ordering: <phasing across weeks/waves>"
+    ],
+    "feasibility": [
+      "<key teams/systems/dependencies/constraints>"
+    ],
+    "expected_outcome": "<quantified KPI & timeframe if available; otherwise 'TBD'>"
+  }
+}`.trim();
+  }
   if (finalKey === "sales_enablement") {
     return `{
   "sales_enablement": {
