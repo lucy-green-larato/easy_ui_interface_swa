@@ -141,27 +141,79 @@ async function callChatJsonObject({ system, user, timeoutMs }) {
     clearTimeout(timer);
   }
 }
-
+// ---- Evidence bundling (catalog + signals + productNames) ----
+function deriveSignalsFromCsv(csvCanon) {
+  const isSpecific = (
+    csvCanon &&
+    csvCanon.industry_mode === "specific" &&
+    csvCanon.selected_industry
+  );
+  const mode = isSpecific ? "specific" : "agnostic";
+  const sig = isSpecific ? (csvCanon?.signals || {}) : (csvCanon?.global_signals || {});
+  return {
+    industry_mode: mode,
+    selected_industry: isSpecific ? (csvCanon?.selected_industry || null) : null,
+    row_count: Number(csvCanon?.meta?.rows || 0),
+    top_blockers: Array.isArray(sig.top_blockers) ? sig.top_blockers : [],
+    top_needs: Array.isArray(sig.top_needs) ? sig.top_needs
+      : (Array.isArray(sig.top_needs_supplier) ? sig.top_needs_supplier : []),
+    top_purchases: Array.isArray(sig.top_purchases) ? sig.top_purchases : []
+  };
+}
+function makeEvidenceBundle({ evidenceLog, csvCanon, productNames }) {
+  const catalog = Array.isArray(evidenceLog) ? evidenceLog : [];
+  const signals = deriveSignalsFromCsv(csvCanon);
+  const productNamesArr = Array.isArray(productNames) ? productNames : [];
+  return { catalog, signals, productNames: productNamesArr };
+}
 // ---- Section prompt builders (unchanged in spirit) ----
 function buildSectionSystem(finalKey, persona) {
-  return `
-${persona ? `PERSONA\n${persona}\n\n` : ""}You are a senior UK B2B strategist. Generate STRICT JSON only for the requested section "${finalKey}".
-Return JSON only, no markdown fences. Do NOT include keys for other sections.
+  // Persona prefix (optional)
+  const personaPrefix = persona ? `PERSONA\n${persona}\n\n` : "";
 
-CITATION RULE (inline, end of sentences using external evidence):
-- Use short tags in parentheses: (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).
+  // Specialised system message for campaign strategy
+  if (finalKey === "campaign_strategy") {
+    return [
+      personaPrefix + "You are a senior UK B2B strategist.",
+      "You are formulating a campaign strategy for a technology supplier.",
+      "Base your reasoning strictly on the supplied evidence and inputs.",
+      "Deliver a coherent, practical plan that positions the supplier to win within the chosen prospect base.",
+      "",
+      "Cover these items explicitly, as concise bullets (≤ 220 words total):",
+      "• Strategic rationale — why the supplier should play in this market.",
+      "• Advantage — how the supplier can be better than competitors (specific differentiators).",
+      "• Coherent choices — the concrete actions and constraints that define the campaign (segments, offer, channels, messaging, sequencing).",
+      "• Feasibility — practical enablers/limits (teams, systems, dependencies).",
+      "• Specific expected outcome — quantified KPI/timeframe if available; otherwise 'TBD'.",
+      "",
+      "Rules:",
+      "• No fabrication. Cite only what is supported by inputs/evidence.",
+      "• Prefer specifics over generalities; avoid marketing fluff.",
+      "• Keep to bullets; do not repeat headings in prose.",
+      "",
+      `Generate STRICT JSON only for the requested section "${finalKey}".`,
+      "Return JSON only, no markdown fences. Do NOT include keys for other sections.",
+      "",
+      "CITATION RULE (inline, end of sentences using external evidence):",
+      "Use short tags in parentheses: (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).",
+      "",
+      "STYLE: UK English, concise, specific, evidence-led. Prefer concrete buyer outcomes with inline citations where used.",
+      "VALIDATION: All URLs https. Arrays required by the schema must be present (empty if necessary). No invented numbers/sources; write 'no external citation available' if needed."
+    ].join("\n");
+  }
 
-STYLE:
-- UK English, concise, specific, evidence-led. Prefer concrete buyer outcomes with inline citations where used.
-
-VALIDATION:
-- All URLs must be https.
-- Arrays required by the schema must be present (empty if necessary).
-- Do not invent numbers or sources. If a required datum is unavailable, write a short, honest line and include "no external citation available".
-
-OUTPUT DISCIPLINE:
-- Emit exactly the JSON object for "${finalKey}" matching the shapes described in the user message. No extra fields.
-`.trim();
+  // Default system message for all other sections
+  return [
+    personaPrefix + "You are a senior UK B2B strategist.",
+    `Generate STRICT JSON only for the requested section "${finalKey}".`,
+    "Return JSON only, no markdown fences. Do NOT include keys for other sections.",
+    "",
+    "CITATION RULE (inline, end of sentences using external evidence):",
+    "Use short tags in parentheses: (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).",
+    "",
+    "STYLE: UK English, concise, specific, evidence-led. Prefer concrete buyer outcomes with inline citations where used.",
+    "VALIDATION: All URLs https. Arrays required by the schema must be present (empty if necessary). No invented numbers/sources; write 'no external citation available' if needed."
+  ].join("\n");
 }
 function targetsFor(finalKey) {
   // Schema-true, guided targets to steer quality & citations
@@ -174,6 +226,29 @@ function targetsFor(finalKey) {
     "Supplier fit/outcome (Company site)."
   ]
 }`,
+    // === PLACE inside your sectionTargets map ===
+    campaign_strategy: {
+      audience: "senior management + sales leadership",
+      purpose: "set clear choices that position the supplier to win",
+      format: "bulleted memo",
+      max_words: 220,
+      must_cover: [
+        "Strategic rationale: why we should play in this prospect base",
+        "Advantage: how we can be better than competitors (specific differentiators)",
+        "Coherent choices: what actions/constraints define this campaign (target segments, offer, channels, messages, sequencing)",
+        "Feasibility: practical enablers and limits (teams, systems, budget cues)",
+        "Specific expected outcome (quantified where evidence allows; 'TBD' if unknown)"
+      ],
+      style: {
+        register: "formal, British English",
+        tone: "decisive, realistic, non-promotional",
+        constraints: [
+          "Use evidence; do not fabricate. If unknown, write 'TBD'.",
+          "Prefer specifics over generalities.",
+          "Output as concise bullets; no slogans."
+        ]
+      }
+    },
     positioning_and_differentiation: `{
   "positioning_and_differentiation": {
     "value_prop": "<1–2 sentences>",
@@ -260,21 +335,79 @@ function targetsFor(finalKey) {
   return t[finalKey] || "{}";
 }
 function buildSectionUser(finalKey, { outline, sectionPlan, evidence, csvCanon, products }) {
-  const outlineNotes = safeForPrompt(sectionPlan);
-  const ev = safeForPrompt(evidence);
-  const prod = safeForPrompt(products);
+  // --- Normalise evidence to a bundle (backward compatible) ---
+  const evBundle = (evidence && typeof evidence === "object" && Array.isArray(evidence.catalog))
+    ? evidence
+    : makeEvidenceBundle({
+      evidenceLog: Array.isArray(evidence) ? evidence : [],
+      csvCanon,
+      productNames: Array.isArray(products) ? products : []
+    });
 
-  const mode = (csvCanon && csvCanon.industry_mode === "specific" && csvCanon.selected_industry) ? "specific" : "agnostic";
-  const sig = mode === "specific" ? (csvCanon?.signals || {}) : (csvCanon?.global_signals || {});
+  const outlineNotes = safeForPrompt(sectionPlan);
+  const ev = safeForPrompt(evBundle.catalog);
+  const prod = safeForPrompt(evBundle.productNames);
   const csv = safeForPrompt({
-    industry_mode: mode,
-    selected_industry: mode === "specific" ? (csvCanon?.selected_industry || null) : null,
-    row_count: csvCanon?.meta?.rows || 0,
-    top_blockers: sig.top_blockers || [],
-    top_needs_supplier: sig.top_needs_supplier || [],
-    top_purchases: sig.top_purchases || []
+    industry_mode: evBundle.signals.industry_mode,
+    selected_industry: evBundle.signals.selected_industry,
+    row_count: evBundle.signals.row_count,
+    top_blockers: evBundle.signals.top_blockers,
+    top_needs: evBundle.signals.top_needs,
+    top_purchases: evBundle.signals.top_purchases
   });
 
+  // --- Specialised user message for campaign strategy ---
+  if (finalKey === "campaign_strategy") {
+    const inNotes = (outline && outline.input_notes) ? outline.input_notes : {};
+
+    const supplier_company = (inNotes.supplier_company || inNotes.prospect_company || "").trim();
+    const company_name = supplier_company;
+    const company_website = (inNotes.supplier_website || inNotes.prospect_website || "").trim();
+    const supplier_usps = Array.isArray(inNotes.supplier_usps) && inNotes.supplier_usps.length
+      ? inNotes.supplier_usps : (Array.isArray(inNotes.user_usps) ? inNotes.user_usps : []);
+    const relevant_competitors = Array.isArray(inNotes.relevant_competitors)
+      ? inNotes.relevant_competitors.map(String).filter(Boolean).slice(0, 8) : [];
+    const selected_industry = inNotes.selected_industry || null;
+    const campaign_industry = inNotes.campaign_industry || null;
+    const notes = inNotes.notes || "";
+    // NEW optional fields you may add in the UI/input.json later:
+    const campaign_context = inNotes.campaign_context || null;
+    const competitive_advantage = inNotes.competitive_advantage || null;
+
+    // Narrow evidence to strategy-relevant items (still grounded by the full catalog)
+    const strategyEvidence = evBundle.catalog.filter(e =>
+      /market|competitor|trend|customer|segment|buying/i.test(e?.category || "")
+    );
+
+    return {
+      section: "campaign_strategy",
+      context: {
+        supplier_company,
+        company_name,
+        company_website,
+        campaign_requirement:
+          ["upsell", "win-back", "growth"].includes(inNotes.campaign_requirement)
+            ? inNotes.campaign_requirement
+            : "unspecified",
+        campaign_context,              // optional
+        competitive_advantage,         // optional
+        selected_industry: selected_industry || campaign_industry,
+        usps: supplier_usps,
+        competitors: relevant_competitors,
+        notes,
+        product_names: evBundle.productNames,
+        signals: {
+          top_blockers: evBundle.signals.top_blockers,
+          top_needs: evBundle.signals.top_needs,
+          top_purchases: evBundle.signals.top_purchases
+        },
+        evidence_catalog_for_strategy: strategyEvidence
+      },
+      targets: sectionTargets.campaign_strategy
+    };
+  }
+
+  // --- Default user message for other sections (your original) ---
   const inNotes = (outline && outline.input_notes) ? outline.input_notes : {};
   const campaignRequirement =
     (typeof inNotes.campaign_requirement === "string" &&
@@ -315,6 +448,7 @@ ${targetsFor(finalKey)}
 Return JSON only.
 `.trim();
 }
+
 async function buildSectionJson({ finalKey, outline, sectionPlan, evidence, csvCanon, products, persona }) {
   const system = buildSectionSystem(finalKey, persona);
   const user = buildSectionUser(finalKey, { outline, sectionPlan, evidence, csvCanon, products });
@@ -423,17 +557,16 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
       });
 
       const plan = outline?.sections?.[outlineKey] ?? {};
-
+      const evidenceBundle = makeEvidenceBundle({ evidenceLog, csvCanon, productNames });
       const sectionJson = await buildSectionJson({
         finalKey,
         outline,
         sectionPlan: plan,
-        evidence: evidenceLog,
-        csvCanon,
-        products: productNames,
+        evidence: evidenceBundle, // <-- now a bundle with catalog + signals + productNames
+        csvCanon,                 // keep passing for backward compatibility (used in prompt text)
+        products: productNames,   // keep passing for backward compatibility (used in prompt text)
         persona: PERSONA
       });
-
       await putJson(container, `${prefix}sections/${finalKey}.json`, sectionJson);
       context.log(`[campaign-write] wrote section ${finalKey}`);
 
