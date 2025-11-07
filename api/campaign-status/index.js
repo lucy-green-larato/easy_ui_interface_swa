@@ -1,8 +1,10 @@
-// /api/campaign-status/index.js 05-11-2025 v2 (drop-in)
-// GET /api/campaign-status?runId=...   (route param {runId} also supported if you add it in function.json)
-// Reads status.json from either:
-//   New layout: runs/<page>/<user>/<YYYY>/<MM>/<DD>/<runId>/status.json  (resolved via users/<userId>/recent.json)
-//   Legacy:     runs/<runId>/status.json
+// /api/campaign-status/index.js 07-11-2025 v3 (hardened, drop-in)
+// GET /api/campaign-status?runId=... [&prefix=containerOrRelativePrefix]
+//
+// Resolves status.json in priority order:
+//   1) Explicit ?prefix=… (container-relative normalised; or absolute starting with <container>/)
+//   2) New layout via users/<userId>/recent.json → prefix
+//   3) Legacy fallback runs/<runId>/status.json
 //
 // Node 20 / Azure Functions v4 / CommonJS
 
@@ -15,7 +17,7 @@ const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Correlation-Id, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type, X-Correlation-Id, Authorization, If-None-Match",
 };
 
 // ---------- utils ----------
@@ -31,12 +33,20 @@ function genId() {
 function correlationIdFrom(req) {
   return String(readHeader(req, "x-correlation-id") || genId());
 }
-
 async function streamToString(readable) {
   if (!readable) return "";
   const chunks = [];
   for await (const chunk of readable) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf8");
+}
+function normalizePrefix(p) {
+  let x = String(p || "").trim();
+  if (!x) return null;
+  // Allow "results/…"
+  if (x.startsWith(`${RESULTS_CONTAINER}/`)) x = x.slice(`${RESULTS_CONTAINER}/`.length);
+  x = x.replace(/^\/+/, "");
+  if (!x.endsWith("/")) x += "/";
+  return x;
 }
 
 // ---- SWA auth helpers (to locate users/<userId>/recent.json) ----
@@ -52,14 +62,14 @@ function decodeClientPrincipal(req) {
 }
 function userIdFromReq(req) {
   const cp = decodeClientPrincipal(req) || {};
-  const claims = cp?.claims || [];
+  const claims = Array.isArray(cp.claims) ? cp.claims : [];
   const byType = Object.create(null);
-  for (const c of claims) byType[c.typ?.toLowerCase?.() || ""] = c.val;
+  for (const c of claims) byType[(c.typ || c.type || "").toLowerCase()] = c.val || c.value;
 
   const oid = byType["http://schemas.microsoft.com/identity/claims/objectidentifier"]
     || byType["oid"] || null;
   const sub = byType["sub"] || null;
-  const email = (byType["emails"] || byType["email"] || cp?.userDetails || "").toLowerCase();
+  const email = (byType["emails"] || byType["email"] || cp.userDetails || "").toLowerCase();
 
   const chosen = oid || sub || email || "anonymous";
   return String(chosen).trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, "-").replace(/-+/g, "-");
@@ -79,7 +89,7 @@ module.exports = async function (context, req) {
   if (method !== "GET") {
     context.res = {
       status: 405,
-      headers: { ...CORS, "Content-Type": "application/json", "x-correlation-id": cid, "Allow": "GET" },
+      headers: { ...CORS, "Content-Type": "application/json", "x-correlation-id": cid, "Allow": "GET, OPTIONS" },
       body: { error: "method_not_allowed", message: "Only GET is supported" }
     };
     return;
@@ -97,8 +107,9 @@ module.exports = async function (context, req) {
       return;
     }
 
+    const query = req.query || {};
     const routeRunId = (req.params && req.params.runId) ? String(req.params.runId).trim() : "";
-    const queryRunId = (req.query && req.query.runId) ? String(req.query.runId).trim() : "";
+    const queryRunId = query.runId ? String(query.runId).trim() : "";
     const runId = routeRunId || queryRunId;
 
     if (!runId) {
@@ -110,8 +121,8 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // Be permissive: your starter uses UUID-like ids; allow 8–64 chars of common id chars
-    const RUNID_RE = /^[A-Za-z0-9_-]{8,64}$/;
+    // Accept UUID-like and short ids; keep practical bounds
+    const RUNID_RE = /^[A-Za-z0-9_-]{6,72}$/;
     if (!RUNID_RE.test(runId)) {
       context.res = {
         status: 400,
@@ -124,33 +135,39 @@ module.exports = async function (context, req) {
     const blobService = BlobServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
     const container = blobService.getContainerClient(RESULTS_CONTAINER);
 
-    // -------- Resolve prefix via users/<userId>/recent.json (new layout) --------
-    const userId = userIdFromReq(req);
-    const userIdxPath = `users/${userId}/recent.json`;
+    // -------- Resolve prefix (explicit > recent.json > legacy) --------
     let resolvedPrefix = null;
 
-    try {
-      const idxClient = container.getBlockBlobClient(userIdxPath);
-      if (await idxClient.exists()) {
-        const dl = await idxClient.download();
-        const txt = await streamToString(dl.readableStreamBody);
-        const idx = JSON.parse(txt);
-        const hit = (Array.isArray(idx?.items) ? idx.items : []).find(x => String(x?.runId || "") === runId);
-        if (hit && typeof hit.prefix === "string" && hit.prefix.endsWith("/")) {
-          resolvedPrefix = hit.prefix;
-        }
-      }
-    } catch (e) {
-      // Non-fatal; we’ll fall back to legacy layout next
-      context.log.warn("campaign-status: recent.json lookup failed", { userId, runId, err: String(e?.message || e) });
+    // 1) Explicit ?prefix=...
+    if (typeof query.prefix === "string" && query.prefix.trim()) {
+      resolvedPrefix = normalizePrefix(query.prefix);
     }
 
-    // Build candidate blob names in priority order
-    const candidates = [];
-    if (resolvedPrefix) {
-      candidates.push(`${resolvedPrefix}status.json`); // new hierarchical path
+    // 2) New layout via users/<userId>/recent.json (if no explicit prefix)
+    if (!resolvedPrefix) {
+      const userId = userIdFromReq(req);
+      const userIdxPath = `users/${userId}/recent.json`;
+      try {
+        const idxClient = container.getBlockBlobClient(userIdxPath);
+        if (await idxClient.exists()) {
+          const dl = await idxClient.download();
+          const txt = await streamToString(dl.readableStreamBody);
+          const idx = JSON.parse(txt);
+          const hit = (Array.isArray(idx?.items) ? idx.items : []).find(x => String(x?.runId || "") === runId);
+          if (hit && typeof hit.prefix === "string") {
+            const norm = normalizePrefix(hit.prefix);
+            if (norm) resolvedPrefix = norm;
+          }
+        }
+      } catch (e) {
+        context.log.warn("campaign-status: recent.json lookup failed", { runId, err: String(e?.message || e) });
+      }
     }
-    candidates.push(`runs/${runId}/status.json`);      // legacy flat path (fallback)
+
+    // 3) Legacy fallback
+    const candidates = [];
+    if (resolvedPrefix) candidates.push(`${resolvedPrefix}status.json`);
+    candidates.push(`runs/${runId}/status.json`);
 
     // -------- Try candidates in order --------
     let found = null;
@@ -166,7 +183,7 @@ module.exports = async function (context, req) {
     if (!found) {
       context.res = {
         status: 404,
-        headers: { ...CORS, "Content-Type": "application/json", "x-correlation-id": correlationId },
+        headers: { ...CORS, "Content-Type": "application/json", "x-correlation-id": correlationId, "Cache-Control": "no-cache" },
         body: { state: "Unknown", runId }
       };
       return;
@@ -197,7 +214,7 @@ module.exports = async function (context, req) {
     const dl = await found.download();
     const bodyText = await streamToString(dl.readableStreamBody);
 
-    // Validate JSON
+    // Validate JSON (log but avoid leaking payload)
     try { JSON.parse(bodyText); } catch (e) {
       context.log.warn("[campaign-status] status.json is not valid JSON", { runId, error: String(e?.message || e) });
       context.res = {

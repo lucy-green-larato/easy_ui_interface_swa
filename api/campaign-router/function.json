@@ -1,0 +1,12 @@
+{
+  "bindings": [
+    {
+      "type": "queueTrigger",
+      "direction": "in",
+      "name": "queueItem",
+      "queueName": "%CAMPAIGN_QUEUE_NAME%",
+      "connection": "AzureWebJobsStorage"
+    }
+  ],
+  "scriptFile": "index.js"
+}
