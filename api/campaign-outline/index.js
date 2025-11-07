@@ -244,6 +244,26 @@ function extractProductsFromSnippet(html) {
   }
   return Array.from(out);
 }
+// Prefer claim_ids that mention one of the named competitors (title/summary/quote scan)
+function claimIdsForCompetitors(evidenceArr, namedCompetitors = [], limit = 8) {
+  if (!Array.isArray(evidenceArr) || !evidenceArr.length) return [];
+  const names = new Set(
+    (namedCompetitors || [])
+      .map(s => (typeof s === "string" ? s.trim().toLowerCase() : ""))
+      .filter(Boolean)
+  );
+  if (!names.size) return [];
+  const hits = [];
+  for (const it of evidenceArr) {
+    const text = `${it.title || ""} ${it.summary || ""} ${it.quote || ""}`.toLowerCase();
+    const match = [...names].some(n => text.includes(n));
+    if (match && it.claim_id) {
+      hits.push(it.claim_id);
+      if (hits.length >= limit) break;
+    }
+  }
+  return hits;
+}
 
 module.exports = async function (context, queueItem) {
   const startedAt = new Date().toISOString();
@@ -273,7 +293,7 @@ module.exports = async function (context, queueItem) {
     const runConfig = (queueItem && queueItem.runConfig) || {};
 
     await patchStatus(container, prefix, "Outline", { runId, outlineStartedAt: startedAt });
-  
+
     // ---- Load artifacts ----
     const evidenceRaw = await getJson(container, `${prefix}evidence_log.json`);
     let evidenceLog = Array.isArray(evidenceRaw) ? evidenceRaw
@@ -293,9 +313,9 @@ module.exports = async function (context, queueItem) {
     let productNames = Array.isArray(productsFile?.products) && productsFile.products.length
       ? productsFile.products
       : (() => {
-          const first = siteJson[0]?.snippet || "";
-          return extractProductsFromSnippet(first).slice(0, 12);
-        })();
+        const first = siteJson[0]?.snippet || "";
+        return extractProductsFromSnippet(first).slice(0, 12);
+      })();
 
     // Supplier / run inputs
     const supplierBlock = {
@@ -305,8 +325,8 @@ module.exports = async function (context, queueItem) {
       supplier_usps: Array.isArray(queueItem?.supplier_usps)
         ? queueItem.supplier_usps
         : (typeof queueItem?.user_usps === "string"
-            ? queueItem.user_usps.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 12)
-            : []),
+          ? queueItem.user_usps.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 12)
+          : []),
       notes: (queueItem?.notes || "")?.trim() || ""
     };
 
@@ -561,6 +581,13 @@ Return only JSON for this outline schema:
         .map(x => x.trim())
         .slice(0, 8);
     }
+    // Candidate differentiator ids based on named competitors (optional steering)
+    const competitorClaimIds = claimIdsForCompetitors(
+      evidenceLog,
+      inNotes.relevant_competitors,
+      8
+    );
+
 
     // CSV-derived notes and product names
     inNotes.spend_band = inNotes.spend_band ?? (csvSignal.spend_band ?? "unknown");
@@ -585,7 +612,15 @@ Return only JSON for this outline schema:
 
     const positioning = reqObj("positioning");
     if (!Array.isArray(positioning.differentiator_ids)) positioning.differentiator_ids = [];
-
+    // If model didn’t choose any, seed/augment with competitor-tagged claims (optional)
+    if (Array.isArray(competitorClaimIds) && competitorClaimIds.length) {
+      if (positioning.differentiator_ids.length === 0) {
+        positioning.differentiator_ids = competitorClaimIds;
+      } else {
+        const merged = new Set([...positioning.differentiator_ids, ...competitorClaimIds]);
+        positioning.differentiator_ids = Array.from(merged).slice(0, 12);
+      }
+    }
     if (!Array.isArray(out.sections.messaging)) out.sections.messaging = [];
 
     const offer = reqObj("offer");

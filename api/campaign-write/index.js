@@ -1,4 +1,4 @@
-// api/campaign-write/index.js v4 05-11-2025 (drop-in, bugfixes + robustness)
+// api/campaign-write/index.js v5 07-11-2025
 // Queue-triggered writer that generates each campaign section to
 // <container>/<prefix>sections/<section>.json, then assembles <prefix>campaign.json.
 
@@ -170,7 +170,17 @@ function makeEvidenceBundle({ evidenceLog, csvCanon, productNames }) {
 function buildSectionSystem(finalKey, persona) {
   // Persona prefix (optional)
   const personaPrefix = persona ? `PERSONA\n${persona}\n\n` : "";
-
+  if (finalKey === "executive_summary") {
+    return [
+      (persona ? `PERSONA\n${persona}\n\n` : "") + "You are a senior UK B2B strategist.",
+      "Write a board-ready Executive Summary (≤ 180 words) that enables a go/no-go decision.",
+      "Begin in this exact order: 1) Strategy (one line). 2) Target prospects and why. 3) Buyer problems solved (top 3). 4) Campaign type (upsell/win-back/growth, with one-line rationale).",
+      "Then include: Moore value proposition that explicitly includes the supplier's services; Objective & scope; Expected outcomes (KPIs/timeframes); Competitive position (2–3 differentiators, cite claim_ids); Go-to-market sketch; Risks (Top 3 with Likelihood/Impact/Mitigation/RAG); Dependencies; Decision points; and a Sales enablement note.",
+      "Ground competitive/market statements in provided evidence; include claim_ids inline where used. Use 'TBD' if unknown. No fabrication.",
+      `Generate STRICT JSON only for "${finalKey}" matching the 'targets' shape (array of strings).`,
+      "Return JSON only; no markdown."
+    ].join("\n");
+  }
   // Specialised system message for campaign strategy
   if (finalKey === "campaign_strategy") {
     return [
@@ -201,6 +211,20 @@ function buildSectionSystem(finalKey, persona) {
       "VALIDATION: All URLs https. Arrays required by the schema must be present (empty if necessary). No invented numbers/sources; write 'no external citation available' if needed."
     ].join("\n");
   }
+  if (finalKey === "positioning_and_differentiation") {
+    return [
+      (persona ? `PERSONA\n${persona}\n\n` : "") + "You are a senior UK B2B strategist.",
+      "Enforce Geoffrey Moore's value proposition template and include a compact competitor comparison.",
+      "Rules:",
+      "• Produce a single, crisp Moore-style value prop that explicitly includes the supplier's services.",
+      "• Build a short competitor contrast using named competitors and evidence_log claim_ids for substantiation.",
+      "• Use only evidence we provide (claim_ids). No fabrication; use 'no external citation available' if needed.",
+      "• Keep UK English, concise, specific.",
+      "",
+      `Generate STRICT JSON only for "${finalKey}" and match the shapes provided.`,
+      "Return JSON only; no markdown."
+    ].join("\n");
+  }
 
   // Default system message for all other sections
   return [
@@ -220,45 +244,49 @@ function targetsFor(finalKey) {
   const t = {
     executive_summary: `{
   "executive_summary": [
-    "<~500 words naming supplier + exact product anchors> (CSV).",
-    "Why now point (Ofcom|ONS|DSIT|Company site|PDF extract).",
-    "Why now point (Ofcom|ONS|DSIT|Company site|PDF extract).",
-    "Supplier fit/outcome (Company site)."
+    "Strategy: one-line synopsis of the campaign strategy (specific and actionable).",
+    "Target prospects: who we are going after and why (1–2 lines; evidence-led).",
+    "Buyer problems solved: top 3 pains we address (concise).",
+    "Campaign type: upsell | win-back | growth (state which and why).",
+    "Moore value proposition: For <target> who <need>, <Supplier> provides <category/services> that <primary benefit>. Unlike <primary competitors>, we <key differentiator>.",
+    "Objective & scope: one sentence objective; bullet scope (in/out).",
+    "Expected outcomes: 2–4 bullets with KPIs and timeframes (use 'TBD' if unknown).",
+    "Competitive position: 2–3 differentiators vs named competitors (cite claim_ids where applicable).",
+    "Go-to-market sketch: primary segments, core offer, main channels (1–2 bullets).",
+    "Risks (Top 3): each with Likelihood / Impact / Mitigation / RAG.",
+    "Dependencies: critical inputs/teams/systems.",
+    "Decision points: go/no-go criteria with date or trigger.",
+    "Sales enablement note: how sales will use this (one bullet)."
   ]
 }`,
     // === PLACE inside your sectionTargets map ===
-    campaign_strategy: {
-      audience: "senior management + sales leadership",
-      purpose: "set clear choices that position the supplier to win",
-      format: "bulleted memo",
-      max_words: 220,
-      must_cover: [
-        "Strategic rationale: why we should play in this prospect base",
-        "Advantage: how we can be better than competitors (specific differentiators)",
-        "Coherent choices: what actions/constraints define this campaign (target segments, offer, channels, messages, sequencing)",
-        "Feasibility: practical enablers and limits (teams, systems, budget cues)",
-        "Specific expected outcome (quantified where evidence allows; 'TBD' if unknown)"
-      ],
-      style: {
-        register: "formal, British English",
-        tone: "decisive, realistic, non-promotional",
-        constraints: [
-          "Use evidence; do not fabricate. If unknown, write 'TBD'.",
-          "Prefer specifics over generalities.",
-          "Output as concise bullets; no slogans."
-        ]
-      }
-    },
+    campaign_strategy: `{
+  "campaign_strategy": {
+    "strategic_rationale": "<why we should play in this prospect base>",
+    "advantage": ["<how we are better than competitors (specific differentiators)>"],
+    "coherent_choices": [
+      "<target segments>",
+      "<offer outline>",
+      "<primary channels>",
+      "<messaging focus>",
+      "<sequencing/ordering>"
+    ],
+    "feasibility": ["<key teams/systems/dependencies/constraints>"],
+    "expected_outcome": "<quantified KPI/timeframe if available; otherwise 'TBD'>"
+  }
+}`,
     positioning_and_differentiation: `{
-  "positioning_and_differentiation": {
-    "value_prop": "<1–2 sentences>",
-    "swot": {
-      "strengths": ["<items>"],
-      "weaknesses": ["<items>"],
-      "opportunities": ["<items>"],
-      "threats": ["<items>"]
-    },
-    "differentiators": ["<3–6 cited items>"],
+   "positioning_and_differentiation": {
+    "moore_value_prop": "For <target> who <compelling-need>, <Supplier> provides <category/services> that <primary benefit>. Unlike <primary competitor(s)>, our product/service <key differentiator>.",
+    "competitor_contrast": [
+      {
+        "vendor": "<name>",
+        "what_they_do": "<one line>",
+        "our_differentiators": ["<short, concrete items tied to our services>"],
+        "evidence_claim_ids": ["<claim_id>", "<claim_id>"]
+      }
+    ],
+    "differentiators": ["<3–6 concise items tied to evidence or site>"],
     "competitor_set": [
       { "vendor": "<name>", "reason_in_set": "<short>", "url": "https://<domain>" }
     ]
@@ -359,52 +387,121 @@ function buildSectionUser(finalKey, { outline, sectionPlan, evidence, csvCanon, 
   // --- Specialised user message for campaign strategy ---
   if (finalKey === "campaign_strategy") {
     const inNotes = (outline && outline.input_notes) ? outline.input_notes : {};
-
     const supplier_company = (inNotes.supplier_company || inNotes.prospect_company || "").trim();
-    const company_name = supplier_company;
     const company_website = (inNotes.supplier_website || inNotes.prospect_website || "").trim();
     const supplier_usps = Array.isArray(inNotes.supplier_usps) && inNotes.supplier_usps.length
       ? inNotes.supplier_usps : (Array.isArray(inNotes.user_usps) ? inNotes.user_usps : []);
     const relevant_competitors = Array.isArray(inNotes.relevant_competitors)
       ? inNotes.relevant_competitors.map(String).filter(Boolean).slice(0, 8) : [];
-    const selected_industry = inNotes.selected_industry || null;
-    const campaign_industry = inNotes.campaign_industry || null;
-    const notes = inNotes.notes || "";
-    // NEW optional fields you may add in the UI/input.json later:
+    const selected_industry = inNotes.selected_industry || inNotes.campaign_industry || null;
+    const campaign_requirement =
+      ["upsell", "win-back", "growth"].includes(inNotes.campaign_requirement)
+        ? inNotes.campaign_requirement : "unspecified";
     const campaign_context = inNotes.campaign_context || null;
     const competitive_advantage = inNotes.competitive_advantage || null;
 
-    // Narrow evidence to strategy-relevant items (still grounded by the full catalog)
     const strategyEvidence = evBundle.catalog.filter(e =>
       /market|competitor|trend|customer|segment|buying/i.test(e?.category || "")
     );
 
-    return {
-      section: "campaign_strategy",
-      context: {
-        supplier_company,
-        company_name,
-        company_website,
-        campaign_requirement:
-          ["upsell", "win-back", "growth"].includes(inNotes.campaign_requirement)
-            ? inNotes.campaign_requirement
-            : "unspecified",
-        campaign_context,              // optional
-        competitive_advantage,         // optional
-        selected_industry: selected_industry || campaign_industry,
-        usps: supplier_usps,
-        competitors: relevant_competitors,
-        notes,
-        product_names: evBundle.productNames,
-        signals: {
-          top_blockers: evBundle.signals.top_blockers,
-          top_needs: evBundle.signals.top_needs,
-          top_purchases: evBundle.signals.top_purchases
-        },
-        evidence_catalog_for_strategy: strategyEvidence
-      },
-      targets: sectionTargets.campaign_strategy
-    };
+    return `
+Context:
+- Supplier: ${supplier_company || "unknown"} | website: ${company_website || "unknown"}
+- Industry/segment: ${selected_industry || "General"}
+- Campaign type: ${campaign_requirement}
+- Services/USPs (anchors): ${safeForPrompt(supplier_usps)}
+- Named competitors: ${safeForPrompt(relevant_competitors)}
+- Optional strategy inputs: campaign_context=${safeForPrompt(campaign_context)}, competitive_advantage=${safeForPrompt(competitive_advantage)}
+- Evidence catalog (strategy-filtered): ${safeForPrompt(strategyEvidence)}
+- Full evidence catalog (for citations if needed): ${ev}
+- CSV signals: ${csv}
+- Product anchors: ${prod}
+- Outline plan for "${finalKey}": ${outlineNotes}
+
+Rules:
+- Be concrete and feasible; no fabrication. Cite only from provided evidence (claim_ids) where external facts are stated.
+- Prefer specifics over generalities; UK English; concise bullets (≤ 220 words total).
+
+Emit exactly the following JSON object for "${finalKey}":
+${targetsFor("campaign_strategy")}
+
+Return JSON only.
+`.trim();
+  }
+
+  if (finalKey === "executive_summary") {
+    const inNotes = (outline && outline.input_notes) ? outline.input_notes : {};
+    const supplier = (inNotes.supplier_company || inNotes.prospect_company || "").trim();
+    const services = Array.isArray(inNotes.supplier_usps) && inNotes.supplier_usps.length
+      ? inNotes.supplier_usps : (Array.isArray(inNotes.user_usps) ? inNotes.user_usps : []);
+    const targetSegments = Array.isArray(inNotes.target_segments) ? inNotes.target_segments : [];
+    const competitors = Array.isArray(inNotes.relevant_competitors)
+      ? inNotes.relevant_competitors.map(String).filter(Boolean).slice(0, 8) : [];
+    const campaignType = (typeof inNotes.campaign_requirement === "string" &&
+      ["upsell", "win-back", "growth"].includes(inNotes.campaign_requirement))
+      ? inNotes.campaign_requirement : "unspecified";
+
+    // Evidence + CSV signals already normalised into evBundle
+    const buyerProblems = (evBundle.signals.top_blockers || []).slice(0, 3);
+    const buyerNeeds = (evBundle.signals.top_needs || []).slice(0, 3);
+
+    return `
+Context:
+- Outline plan for "${finalKey}": ${outlineNotes}
+- Supplier: ${supplier || "unknown"}
+- Services to include in Moore value prop: ${safeForPrompt(services)}
+- Target prospects (segments, industries): ${safeForPrompt(targetSegments)}
+- Buyer problems (from CSV signals top_blockers): ${safeForPrompt(buyerProblems)}
+- Buyer needs (from CSV signals top_needs): ${safeForPrompt(buyerNeeds)}
+- Campaign type (from UI): ${campaignType}
+- Named competitors: ${safeForPrompt(competitors)}
+- Evidence catalog ARRAY (use claim_ids when citing): ${ev}
+- CSV signals snapshot: ${csv}
+- Product anchors: ${prod}
+
+Instructions:
+- Start with: Strategy one-liner → Target prospects and why → Buyer problems solved (top 3) → Campaign type (upsell/win-back/growth + brief rationale).
+- Then add the remaining bullets exactly as per targets.
+- When mentioning competitors or market facts, append claim_ids from the evidence catalog.
+- Use specifics if present; otherwise 'TBD'. UK English, concise, decision-oriented.
+
+Emit exactly the following JSON object for "${finalKey}":
+${targetsFor(finalKey)}
+
+Return JSON only.
+`.trim();
+  }
+  if (finalKey === "positioning_and_differentiation") {
+    const inNotes = (outline && outline.input_notes) ? outline.input_notes : {};
+    const supplier = (inNotes.supplier_company || inNotes.prospect_company || "").trim();
+    const services = Array.isArray(inNotes.supplier_usps) && inNotes.supplier_usps.length
+      ? inNotes.supplier_usps : (Array.isArray(inNotes.user_usps) ? inNotes.user_usps : []);
+    const competitors = Array.isArray(inNotes.relevant_competitors)
+      ? inNotes.relevant_competitors.map(String).filter(Boolean).slice(0, 8) : [];
+
+    // Use the evidence bundle you already normalise at the top (evBundle)
+    const evIdsHint = Array.isArray(evBundle.catalog) ? evBundle.catalog.slice(0, 400).map(x => x.claim_id).filter(Boolean) : [];
+    return `
+Context:
+- Outline plan for "${finalKey}": ${outlineNotes}
+- Supplier: ${supplier || "unknown"}
+- Services to include in value prop (anchors): ${safeForPrompt(services)}
+- Named competitors to compare against (if any): ${safeForPrompt(competitors)}
+- Evidence catalog ARRAY with claim_ids (use for competitor contrast substantiation): ${ev}
+- Product anchors: ${prod}
+- CSV signals snapshot: ${csv}
+
+Instructions:
+- Produce a Moore-style value proposition (explicitly include the supplier's services).
+- Create a compact competitor_contrast list/table using the named competitors when present; otherwise pick the most relevant competitors from evidence.
+- For each competitor contrast item, include 1–3 'our_differentiators' and cite evidence via 'evidence_claim_ids' taken from the evidence catalog.
+- Keep it concise and decision-oriented.
+
+Emit exactly the following JSON object for "${finalKey}":
+${targetsFor(finalKey)}
+
+Return JSON only.
+`.trim();
   }
 
   // --- Default user message for other sections (your original) ---
