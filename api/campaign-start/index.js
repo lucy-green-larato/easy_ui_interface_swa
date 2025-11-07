@@ -1,4 +1,4 @@
-// /api/campaign-start/index.js 07-11-2025 v14 (Orchestrated)
+// /api/campaign-start/index.js 07-11-2025 v14 (Option B – orchestrated)
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign-start → writes status/input, enqueues kickoff to main queue + full job to evidence queue.
 
@@ -12,7 +12,7 @@ const QUEUE_NAME = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const EVIDENCE_QUEUE = process.env.Q_CAMPAIGN_EVIDENCE || "campaign-evidence-jobs";
 const STORAGE_CONN = process.env.AzureWebJobsStorage;
 
-const MAX_BYTES_DEFAULT = 48 * 1024; // conservative headroom under Azure Queue 64KB text limit
+const MAX_BYTES_DEFAULT = 48 * 1024; // safe headroom under Azure Queue ~64KB limit
 const MAX_BYTES_ENV = Number.parseInt(process.env.CAMPAIGN_MAX_MSG_BYTES, 10);
 const MAX_BYTES =
   Number.isFinite(MAX_BYTES_ENV) && MAX_BYTES_ENV >= 4096 && MAX_BYTES_ENV <= 62 * 1024
@@ -115,7 +115,6 @@ module.exports = async function (context, req) {
     context.res = { status: 204, headers: CORS };
     return;
   }
-
   if (method !== "POST") {
     context.res = {
       status: 405,
@@ -173,7 +172,7 @@ module.exports = async function (context, req) {
         .slice(0, 8);
     }
 
-    // sales_model / call_type normalization (accept filters mirror)
+    // sales_model / call_type accept mirrors (including filters.*)
     const salesModelRaw = [
       body.sales_model, body.salesModel,
       body.filters?.sales_model, body.filters?.salesModel
@@ -188,7 +187,7 @@ module.exports = async function (context, req) {
      .find(v => v === "direct" || v === "partner");
     const call_type = callTypeRaw || null;
 
-    // Canonical supplier inputs (prefer supplier_*, fallback to prospect_*)
+    // Canonical supplier inputs (prefer supplier_*; fallback to prospect_*)
     const supplier_company = (body.supplier_company ?? body.prospect_company ?? "").toString().trim();
     const supplier_website = normalizeWebsite(body.supplier_website ?? body.prospect_website);
     const supplier_linkedin = normalizeWebsite(body.supplier_linkedin ?? body.prospect_linkedin ?? "");
@@ -440,7 +439,7 @@ module.exports = async function (context, req) {
     context.log.error("campaign_start_failed", e);
     context.res = {
       status: 500,
-      headers: { ...CORS, "content-type": "application/json; charset=utf-8", "x-correlation-id": correlationId },
+      headers: { ...CORS, "content-type": "application/json; charset=utf-8", "x-correlation-id": getCorrelationId(req) },
       body: { error: "server_error", message: String(e?.message || e) },
     };
   }

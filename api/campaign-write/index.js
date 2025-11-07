@@ -1,6 +1,7 @@
-// /api/campaign-write/index.js v7 07-11-2025 (Option B)
-// Queue-triggered writer: generates each section to <container>/<prefix>sections/<section>.json
-// and assembles <prefix>campaign.json, then signals orchestrator (afterassemble).
+// /api/campaign-write/index.js 07-11-2025 v10 (Option B – Writer/Assembler)
+// Queue-triggered on %Q_CAMPAIGN_WRITE%.
+// - op: "section" | "write_section"  -> writes sections/<finalKey>.json
+// - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%
 
 const path = require("path");
 const crypto = require("crypto");
@@ -8,12 +9,12 @@ const { BlobServiceClient } = require("@azure/storage-blob");
 const { QueueServiceClient } = require("@azure/storage-queue");
 
 // ==== ENV / CONFIG ====
-const STORAGE_CONN = process.env.AzureWebJobsStorage;
-const CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
-const CAMPAIGN_QUEUE = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
+const STORAGE_CONN   = process.env.AzureWebJobsStorage;
+const CONTAINER      = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
+const MAIN_QUEUE     = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 60000);
 
-// Final section keys (exact set requested)
+// Final section keys (exact, stable set)
 const FINAL_SECTION_KEYS = [
   "executive_summary",
   "positioning_and_differentiation",
@@ -37,44 +38,46 @@ const SHORT_TO_FINAL = {
   risks: "risks_and_contingencies",
   compliance: "compliance_and_governance",
   sales: "sales_enablement",
-  one: "one_pager_summary",
-  // (we do NOT include campaign_strategy in the final stitched set)
+  one: "one_pager_summary"
 };
 
 // ==== Small utils ====
-function blobSvc() { return BlobServiceClient.fromConnectionString(STORAGE_CONN); }
-async function getJson(containerClient, p) {
-  const bc = containerClient.getBlobClient(p);
+function requireStorage() {
+  if (!STORAGE_CONN) throw new Error("AzureWebJobsStorage not configured");
+  return BlobServiceClient.fromConnectionString(STORAGE_CONN);
+}
+function blobSvc() { return requireStorage(); }
+
+async function getJson(containerClient, relPath) {
+  const bc = containerClient.getBlockBlobClient(relPath);
   if (!(await bc.exists())) return null;
   const dl = await bc.download();
-  const chunks = []; for await (const ch of dl.readableStreamBody) chunks.push(ch);
-  const s = Buffer.concat(chunks).toString("utf8");
-  try { return s ? JSON.parse(s) : null; } catch { return null; }
+  const chunks = [];
+  for await (const ch of dl.readableStreamBody) chunks.push(ch);
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return null; }
 }
-async function putJson(containerClient, p, obj) {
-  const bb = containerClient.getBlockBlobClient(p);
+
+async function putJson(containerClient, relPath, obj) {
+  const bb = containerClient.getBlockBlobClient(relPath);
   const body = Buffer.from(JSON.stringify(obj, null, 2), "utf8");
   await bb.uploadData(body, { blobHTTPHeaders: { blobContentType: "application/json; charset=utf-8" } });
 }
-async function patchStatus(containerClient, prefix, state, extra = {}) {
-  const p = `${prefix}status.json`;
-  const cur = (await getJson(containerClient, p)) || {};
-  const next = { ...cur, state, ...extra };
-  await putJson(containerClient, p, next);
-}
+
 function normalizePrefix(p) {
   let x = String(p || "").trim();
   if (!x) return null;
   if (x.startsWith(`${CONTAINER}/`)) x = x.slice(`${CONTAINER}/`.length);
-  if (x.startsWith("/")) x = x.replace(/^\/+/, "");
+  x = x.replace(/^\/+/, "");
   if (!x.endsWith("/")) x += "/";
   return x;
 }
+
 function sha256OfJson(o) {
   const h = crypto.createHash("sha256");
   h.update(Buffer.from(JSON.stringify(o || {})));
   return h.digest("hex");
 }
+
 function safeForPrompt(v, max = 280000) {
   try {
     const s = typeof v === "string" ? v : JSON.stringify(v ?? "");
@@ -82,6 +85,23 @@ function safeForPrompt(v, max = 280000) {
     const k = Math.floor(max / 2);
     return s.slice(0, k) + " …TRUNCATED… " + s.slice(-k);
   } catch { return "null"; }
+}
+
+function nowISO() { return new Date().toISOString(); }
+
+// ---- status (append-only history; do NOT bloat input) ----
+async function patchStatus(container, prefix, state, extra = {}) {
+  const p = `${prefix}status.json`;
+  const cur = (await getJson(container, p)) || {};
+  const next = { ...cur, state, history: Array.isArray(cur.history) ? cur.history.slice() : [] };
+  next.history.push({ state, at: nowISO(), ...(extra.op ? { op: extra.op } : {}) });
+  if (!next.markers) next.markers = {};
+  // copy only explicit extras (no input echo)
+  for (const [k, v] of Object.entries(extra)) {
+    if (k !== "op") next[k] = v;
+  }
+  await putJson(container, p, next);
+  return next; // return to allow callers to check markers etc.
 }
 
 // ==== Harness loader (CJS → ESM) ====
@@ -96,9 +116,9 @@ async function loadPromptHarness() {
     if (typeof callChatJsonObject !== "function") throw new Error("prompt-harness missing callChatJsonObject()");
     _ph = { callChatJsonObject };
     return _ph;
-  } catch (e1) {
-    const modUrl = new URL("../lib/prompt-harness.js", `file://${__dirname}/`);
-    const esm = await import(modUrl.href);
+  } catch {
+    const url = path.join(__dirname, "../lib/prompt-harness.mjs");
+    const esm = await import(url);
     const callChatJsonObject =
       esm.callChatJsonObject || esm.default?.callChatJsonObject || esm.callChat || esm.default?.callChat;
     if (typeof callChatJsonObject !== "function") throw new Error("prompt-harness missing callChatJsonObject()");
@@ -125,6 +145,7 @@ function makeEvidenceBundle({ evidenceLog, csvCanon, productNames }) {
 }
 
 // ==== Prompts ====
+// Executive Summary must be ARRAY OF STRINGS so the UI can render it fully.
 function buildSectionSystem(finalKey, persona) {
   const personaPrefix = persona ? `PERSONA\n${persona}\n\n` : "";
 
@@ -132,37 +153,69 @@ function buildSectionSystem(finalKey, persona) {
     return [
       personaPrefix + "You are a senior UK B2B strategist.",
       "Write a board-ready Executive Summary (≤250 words) for a go/no-go decision.",
-      "Begin exactly in this order: 1) Strategy. 2) Target prospects. 3) Buyer problems. 4) Campaign type (upsell/win-back/growth + one-line rationale).",
-      "Then include: Moore value proposition; Addressable market size (use CSV row count if provided); Dependencies; Decision points; Sales enablement note.",
-      "Ground claims in evidence only; cite claim_ids inline; use 'TBD' if unknown. Return JSON only.",
-      `Generate STRICT JSON for "${finalKey}" as an object, not markdown.`
+      "Begin exactly in this order (one compact paragraph): Strategy → Target prospects → Buyer problems → Campaign type (upsell/win-back/growth + one-line rationale).",
+      "Then add 3–6 concise bullets covering: Moore value proposition; Addressable market (CSV row count if present); Dependencies; Decision points; Sales enablement note.",
+      "Ground claims in evidence only; cite claim_ids inline; use 'TBD' if unknown.",
+      'Return STRICT JSON: executive_summary as an array of strings (first = paragraph, rest = bullets).'
     ].join("\n");
   }
 
   if (finalKey === "positioning_and_differentiation") {
     return [
       personaPrefix + "You are a senior UK B2B strategist.",
-      "Produce Geoffrey Moore’s value proposition and add competitor contrast.",
-      "Ground claims in evidence only; cite claim_ids inline; Return JSON only."
+      "Provide Geoffrey Moore’s value proposition and a competitor contrast table.",
+      "Ground claims in evidence only; include claim_ids inline.",
+      'Return STRICT JSON for "positioning_and_differentiation".'
     ].join("\n");
   }
 
   if (finalKey === "sales_enablement") {
     return [
       personaPrefix + "You are a senior UK B2B sales enablement writer.",
-      "Include rationale for discovery questions ('why_it_matters').",
-      "Use evidence claim_ids where relevant. Return JSON only."
+      "Include discovery questions with 'why_it_matters' for each.",
+      "Use evidence claim_ids where relevant.",
+      'Return STRICT JSON for "sales_enablement".'
     ].join("\n");
   }
 
   return [
     personaPrefix + "You are a senior UK B2B strategist and sales enablement writer.",
     "Base everything on outline notes, evidence (use claim_ids), and CSV signals. No fabrication.",
-    `Generate STRICT JSON only for "${finalKey}".`
+    `Return STRICT JSON for "${finalKey}".`
   ].join("\n");
 }
 
 function targetsFor(finalKey) {
+  if (finalKey === "executive_summary") {
+    // Array of strings (first = paragraph; rest = bullets)
+    return `{
+  "executive_summary": [
+    "<paragraph: Strategy → Target prospects → Buyer problems → Campaign type>",
+    "<bullet 1: Moore value proposition (with claim_ids)>",
+    "<bullet 2: Addressable market (CSV row count or 'unknown')>",
+    "<bullet 3: Dependencies>",
+    "<bullet 4: Decision points>",
+    "<bullet 5: Sales enablement note>"
+  ]
+}`.trim();
+  }
+
+  if (finalKey === "positioning_and_differentiation") {
+    return `{
+  "positioning_and_differentiation": {
+    "moore_value_prop": "For <target> who <need>, <Supplier> is a <category> that <key benefit>. Unlike <competitor(s)>, our <service> <differentiator>.",
+    "competitor_contrast": [
+      {
+        "vendor": "<name>",
+        "what_they_do": "<one line>",
+        "our_differentiators": ["<short, concrete items>"],
+        "evidence_claim_ids": ["<claim_id>"]
+      }
+    ]
+  }
+}`.trim();
+  }
+
   if (finalKey === "sales_enablement") {
     return `{
   "sales_enablement": {
@@ -187,30 +240,6 @@ function targetsFor(finalKey) {
 }`.trim();
   }
 
-  if (finalKey === "positioning_and_differentiation") {
-    return `{
-  "positioning_and_differentiation": {
-    "moore_value_prop": "For <target> who <need>, <Supplier> is a <category> that <key benefit>. Unlike <competitor(s)>, our <service> <differentiator>.",
-    "competitor_contrast": [
-      {
-        "vendor": "<name>",
-        "what_they_do": "<one line>",
-        "our_differentiators": ["<short, concrete items>"],
-        "evidence_claim_ids": ["<claim_id>"]
-      }
-    ]
-  }
-}`.trim();
-  }
-
-  if (finalKey === "executive_summary") {
-    return `{
-  "executive_summary": {
-    "targets": ["<ordered bullets per instructions>"]
-  }
-}`.trim();
-  }
-
   return `{"${finalKey}": {}}`;
 }
 
@@ -224,6 +253,29 @@ function buildSectionUser(finalKey, { outline, evidenceBundle, csvCanon }) {
   const persona = safeForPrompt(outline?.meta?.persona || "");
   const addressable_market = Number.isFinite(Number(csvCanon?.meta?.rows)) ? Number(csvCanon.meta.rows) : null;
 
+  if (finalKey === "executive_summary") {
+    const supplier = (outline?.input_notes?.supplier_company || outline?.input_notes?.prospect_company || "").trim();
+    const outlineNotes = safeForPrompt(outline?.sections?.exec || {});
+    return `
+Context:
+- Supplier: ${supplier || "unknown"}
+- Evidence catalog ARRAY (use claim_ids): ${ev}
+- CSV signals: ${csv}
+- Addressable market (row count): ${addressable_market ?? "unknown"}
+- Campaign objective: ${objective}
+- Persona: ${persona}
+- Outline fragment: ${outlineNotes}
+
+Instructions:
+- First element: one compact paragraph in this order → Strategy, Target prospects, Buyer problems, Campaign type.
+- Next elements: 3–6 short bullets (Moore value prop, AM size, Dependencies, Decision points, Sales enablement note).
+- Cite claim_ids where you use external evidence. No fabrication.
+
+Emit STRICT JSON:
+${targetsFor("executive_summary")}
+Return JSON only.`.trim();
+  }
+
   if (finalKey === "sales_enablement") {
     const supplier = (outline?.input_notes?.supplier_company || outline?.input_notes?.prospect_company || "").trim();
     const outlineNotes = safeForPrompt(outline?.sections?.sales || {});
@@ -236,37 +288,15 @@ Context:
 - CSV signals: ${csv}
 - Product anchors: ${prod}
 - Campaign objective: ${objective}
+- Persona: ${persona}
 - Outline fragment: ${outlineNotes}
 
 Instructions:
-- Campaign summary (rationale, strategy & objective, target prospect overview, included services & why, competitor landscape).
-- Master sales pitch (opening, problem, value, example, call_to_action).
-- Discovery questions: include 'why_it_matters' for each.
+- Campaign summary for sales; Master sales pitch; Discovery questions (each with 'why_it_matters').
 - Cite claim_ids where you use external evidence. No fabrication.
 
-Emit STRICT JSON for "sales_enablement":
+Emit STRICT JSON:
 ${targetsFor("sales_enablement")}
-Return JSON only.`.trim();
-  }
-
-  if (finalKey === "executive_summary") {
-    const supplier = (outline?.input_notes?.supplier_company || outline?.input_notes?.prospect_company || "").trim();
-    const outlineNotes = safeForPrompt(outline?.sections?.exec || {});
-    return `
-Context:
-- Supplier: ${supplier || "unknown"}
-- Evidence catalog ARRAY (use claim_ids): ${ev}
-- CSV signals: ${csv}
-- Addressable market (row count): ${addressable_market ?? "unknown"}
-- Campaign objective: ${objective}
-- Outline fragment: ${outlineNotes}
-
-Instructions:
-- Follow system ordering. Explicitly state addressable market size using CSV row count if available.
-- Cite claim_ids for external evidence.
-
-Emit STRICT JSON for "executive_summary":
-${targetsFor("executive_summary")}
 Return JSON only.`.trim();
   }
 
@@ -277,13 +307,13 @@ Context:
 - CSV signals: ${csv}
 - Product anchors: ${prod}
 - Named competitors: ${competitors}
+- Persona: ${persona}
 - Outline fragment: ${outlineNotes}
 
 Instructions:
-- Produce concise, practical content aligned to "${finalKey}".
-- Cite claim_ids where you use external evidence. No fabrication.
+- Produce concise, practical content aligned to "${finalKey}". Cite claim_ids for external evidence. No fabrication.
 
-Emit STRICT JSON for "${finalKey}":
+Emit STRICT JSON:
 ${targetsFor(finalKey)}
 Return JSON only.`.trim();
 }
@@ -292,17 +322,19 @@ Return JSON only.`.trim();
 module.exports = async function (context, queueItem) {
   const svc = blobSvc();
   const container = svc.getContainerClient(CONTAINER);
+  await container.createIfNotExists();
 
   if (!queueItem) { context.log.error("[campaign-write] Empty queue message"); return; }
 
-  const op = String(queueItem.op || queueItem.type || "").toLowerCase();
+  const opRaw = queueItem.op || queueItem.type || "";
+  const op = String(opRaw).toLowerCase();
   const runId = queueItem.runId || queueItem?.data?.runId || queueItem?.id;
   if (!runId) { context.log.error("[campaign-write] Missing runId"); return; }
 
   let prefix = normalizePrefix(queueItem.prefix) || `runs/${runId}/`;
   if (!prefix) { context.log.error("[campaign-write] Unable to resolve prefix"); return; }
 
-  // Common inputs
+  // Common inputs (best-effort reads; tolerate missing artifacts)
   const [evidenceLog, csvCanon, productsObj, site, outline] = await Promise.all([
     getJson(container, `${prefix}evidence_log.json`),
     getJson(container, `${prefix}csv_normalized.json`),
@@ -319,7 +351,8 @@ module.exports = async function (context, queueItem) {
 
   // ---- Assemble whole campaign ----
   if (op === "assemble") {
-    await patchStatus(container, prefix, "Assemble", { runId, assembleStartedAt: new Date().toISOString() });
+    // Phase: Assemble (append to history)
+    const status = await patchStatus(container, prefix, "Assemble", { runId, assembleStartedAt: nowISO(), op: "assemble" });
 
     const selectedIndustry =
       (csvCanon && csvCanon.industry_mode === "specific" && csvCanon.selected_industry)
@@ -327,6 +360,8 @@ module.exports = async function (context, queueItem) {
         : (outline?.meta?.selected_industry || "general");
 
     const pdfExtracts = await getJson(container, `${prefix}pdf_extracts.json`);
+
+    // Stitch in the canonical order; warn on missing sections (no throw)
     const merged = {
       meta: {
         run_id: runId,
@@ -348,21 +383,38 @@ module.exports = async function (context, queueItem) {
     };
 
     for (const finalKey of FINAL_SECTION_KEYS) {
-      const obj = await getJson(container, `${prefix}sections/${finalKey}.json`);
-      if (obj && obj[finalKey] != null) merged[finalKey] = obj[finalKey];
-      else context.log.warn(`[campaign-write] missing section during assemble: ${finalKey}`);
+      const piece = await getJson(container, `${prefix}sections/${finalKey}.json`);
+      if (piece && piece[finalKey] != null) {
+        merged[finalKey] = piece[finalKey];
+      } else {
+        context.log.warn(`[campaign-write] missing section during assemble: ${finalKey}`);
+        // Ensure executive_summary is at least an empty array for UI
+        if (finalKey === "executive_summary" && !Array.isArray(merged.executive_summary)) {
+          merged.executive_summary = [];
+        }
+      }
     }
 
     await putJson(container, `${prefix}campaign.json`, merged);
-    await patchStatus(container, prefix, "Completed", { assembledAt: new Date().toISOString() });
+    await patchStatus(container, prefix, "Completed", { assembledAt: nowISO(), op: "assemble" });
 
-    // notify orchestrator
+    // ---- Notify orchestrator exactly once (anti-loop marker) ----
     try {
-      const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
-      const qc = qs.getQueueClient(CAMPAIGN_QUEUE);
-      await qc.createIfNotExists();
-      const page = (queueItem && (queueItem.page || queueItem?.data?.page)) || "campaign";
-      await qc.sendMessage(JSON.stringify({ op: "afterassemble", runId, page, prefix }));
+      // Check/flip marker to ensure single-shot dispatch
+      const postStatus = await getJson(container, `${prefix}status.json`);
+      const alreadySent = !!postStatus?.markers?.afterassembleSent;
+      if (!alreadySent) {
+        const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
+        const qc = qs.getQueueClient(MAIN_QUEUE);
+        await qc.createIfNotExists();
+        const page = (queueItem && (queueItem.page || queueItem?.data?.page)) || "campaign";
+        await qc.sendMessage(JSON.stringify({ op: "afterassemble", runId, page, prefix }));
+
+        // set marker
+        postStatus.markers = postStatus.markers || {};
+        postStatus.markers.afterassembleSent = true;
+        await putJson(container, `${prefix}status.json`, postStatus);
+      }
     } catch (notifyErr) {
       context.log.warn("[campaign-write] notify afterassemble failed", String(notifyErr?.message || notifyErr));
     }
@@ -372,19 +424,16 @@ module.exports = async function (context, queueItem) {
   // ---- Generate a single section ----
   if (op === "write_section" || op === "section") {
     let requested = String(queueItem.section || "").trim().toLowerCase();
-    // Accept final keys directly; fall back to short-code mapping
     const finalKey = FINAL_SECTION_KEYS.includes(requested)
       ? requested
       : SHORT_TO_FINAL[requested];
 
     if (!finalKey || !FINAL_SECTION_KEYS.includes(finalKey)) {
-      throw new Error(
-        `Unknown section "${queueItem.section}". Expected one of: ${FINAL_SECTION_KEYS.join(", ")}`
-      );
+      throw new Error(`Unknown section "${queueItem.section}". Expected one of: ${FINAL_SECTION_KEYS.join(", ")}`);
     }
 
     await patchStatus(container, prefix, "SectionWrites", {
-      runId, writing: finalKey, updatedAt: new Date().toISOString()
+      runId, writing: finalKey, updatedAt: nowISO(), op: "section"
     });
 
     const persona = outline?.meta?.persona || "";
@@ -392,15 +441,22 @@ module.exports = async function (context, queueItem) {
     const user = buildSectionUser(finalKey, { outline, evidenceBundle, csvCanon });
 
     const { callChatJsonObject } = await loadPromptHarness();
-    const obj = await callChatJsonObject({ system, user, timeoutMs: LLM_TIMEOUT_MS });
+    const raw = await callChatJsonObject({ system, user, timeoutMs: LLM_TIMEOUT_MS });
 
+    // normalise shape: expect the section key at root
     const out = {};
-    if (obj && typeof obj === "object" && obj[finalKey] != null) out[finalKey] = obj[finalKey];
-    else out[finalKey] = obj || {};
+    if (raw && typeof raw === "object" && raw[finalKey] != null) out[finalKey] = raw[finalKey];
+    else out[finalKey] = raw || (finalKey === "executive_summary" ? [] : {});
+
+    // Ensure executive_summary is array (UI contract)
+    if (finalKey === "executive_summary" && !Array.isArray(out.executive_summary)) {
+      if (typeof out.executive_summary === "string") out.executive_summary = [out.executive_summary];
+      else out.executive_summary = [];
+    }
 
     await putJson(container, `${prefix}sections/${finalKey}.json`, out);
     await patchStatus(container, prefix, "SectionWrites", {
-      runId, written: finalKey, updatedAt: new Date().toISOString()
+      runId, written: finalKey, updatedAt: nowISO(), op: "section"
     });
     return;
   }
