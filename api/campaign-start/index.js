@@ -1,6 +1,6 @@
-// /api/campaign-start/index.js 07-11-2025 v13
+// /api/campaign-start/index.js 07-11-2025 v14 (Orchestrated)
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
-// POST /api/campaign-start → enqueues job to campaign queue, writes initial status.json ("Queued"), returns 202 { runId }.
+// POST /api/campaign-start → writes status/input, enqueues kickoff to main queue + full job to evidence queue.
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { QueueServiceClient } = require("@azure/storage-queue");
@@ -10,128 +10,146 @@ const crypto = require("crypto");
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const QUEUE_NAME = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const EVIDENCE_QUEUE = process.env.Q_CAMPAIGN_EVIDENCE || "campaign-evidence-jobs";
-
-const MAX_BYTES_DEFAULT = 48 * 1024; // 49152
-const MAX_BYTES_ENV = Number.parseInt(process.env.CAMPAIGN_MAX_MSG_BYTES, 10);
-const MAX_BYTES = Number.isFinite(MAX_BYTES_ENV) && MAX_BYTES_ENV > 4096 ? MAX_BYTES_ENV : MAX_BYTES_DEFAULT;
-
 const STORAGE_CONN = process.env.AzureWebJobsStorage;
 
-// ---------- CORS ----------
+const MAX_BYTES_DEFAULT = 48 * 1024; // conservative headroom under Azure Queue 64KB text limit
+const MAX_BYTES_ENV = Number.parseInt(process.env.CAMPAIGN_MAX_MSG_BYTES, 10);
+const MAX_BYTES =
+  Number.isFinite(MAX_BYTES_ENV) && MAX_BYTES_ENV >= 4096 && MAX_BYTES_ENV <= 62 * 1024
+    ? MAX_BYTES_ENV
+    : MAX_BYTES_DEFAULT;
+
+// ---- Small utils ----
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Correlation-Id, Authorization, X-Idempotency-Key",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, X-Correlation-Id, X-Idempotency-Key, Authorization",
 };
 
-// ---------- utils ----------
 function readHeader(req, name) {
-  if (!req || !req.headers) return undefined;
-  const h = req.headers;
-  return h[name] ?? h[name.toLowerCase()] ?? h[name.toUpperCase()];
+  return req?.headers?.[name] || req?.headers?.[name.toLowerCase()] || null;
 }
 function getCorrelationId(req) {
-  return readHeader(req, "x-correlation-id") || `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
+  return (
+    readHeader(req, "x-correlation-id") ||
+    `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`
+  );
 }
-function sanitizePage(p) {
-  const s = String(p || "").trim().toLowerCase();
-  return s || "campaign";
+function sanitizePage(page) {
+  const s = String(page || "campaign").trim().toLowerCase();
+  return s.replace(/[^a-z0-9._-]/g, "-").replace(/-+/g, "-") || "campaign";
 }
 function normalizeWebsite(u) {
   if (!u) return null;
-  try {
-    const URLu = new URL(u.startsWith("http") ? u : `https://${u}`);
-    URLu.protocol = "https:";
-    URLu.hash = "";
-    return URLu.toString();
-  } catch { return null; }
-}
-function computePrefix({ page, runId, userId, now }) {
-  const yyyy = now.getUTCFullYear();
-  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(now.getUTCDate()).padStart(2, "0");
-  const bucket = `${yyyy}/${mm}/${dd}`;
-  const safeUser = (String(userId || "anon").replace(/[^a-z0-9._-]/gi, "-").slice(0, 80) || "anon");
-  return `runs/${runId}/${page}/${bucket}/${safeUser}/`;
-}
-function streamToBuffer(readable) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    readable.on("data", (d) => chunks.push(d));
-    readable.on("end", () => resolve(Buffer.concat(chunks)));
-    readable.on("error", (e) => reject(e));
-  });
-}
-function normalizeCompany(s) {
+  const s = String(u).trim();
   if (!s) return null;
-  const out = String(s).replace(/\s+/g, " ").trim();
-  return out || null;
-}
-function normalizeArray(v, splitter = /[,;\n]/) {
-  if (Array.isArray(v)) return v.map((s) => String(s ?? "").trim()).filter(Boolean);
-  if (typeof v === "string") return v.split(splitter).map((s) => s.trim()).filter(Boolean);
-  return [];
-}
-function sanitizeKey(s) {
-  if (!s) return "campaign";
-  return String(s).toLowerCase().replace(/[^a-z0-9._-]/g, "-").replace(/-+/g, "-");
-}
-async function enqueueMessage(queueClient, jsonString) {
-  // SDK base64-encodes for you; pass a plain string
-  return queueClient.sendMessage(jsonString);
-}
-
-// ---- Auth helpers (SWA) ----
-function decodeClientPrincipal(req) {
-  const b64 = readHeader(req, "x-ms-client-principal");
-  if (!b64) return null;
   try {
-    const json = Buffer.from(b64, "base64").toString("utf8");
-    return JSON.parse(json);
+    const url = new URL(s.startsWith("http") ? s : `https://${s}`);
+    url.protocol = "https:";
+    url.hash = "";
+    return url.toString();
   } catch {
     return null;
   }
 }
+function normalizeArray(v) {
+  if (Array.isArray(v)) return v.map(x => String(x ?? "").trim()).filter(Boolean);
+  if (typeof v === "string") return v.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+  return [];
+}
+function decodeClientPrincipal(req) {
+  const b64 = readHeader(req, "x-ms-client-principal");
+  if (!b64) return null;
+  try { return JSON.parse(Buffer.from(b64, "base64").toString("utf8")); } catch { return null; }
+}
 function getUserIdFromReq(req) {
   const cp = decodeClientPrincipal(req) || {};
-  const claims = cp?.claims || [];
+  const claims = cp.claims || [];
   const byType = Object.create(null);
-  for (const c of claims) byType[c.typ?.toLowerCase?.() || ""] = c.val;
-
-  const oid = byType["http://schemas.microsoft.com/identity/claims/objectidentifier"]
-    || byType["oid"] || null;
+  for (const c of claims) byType[(c.typ || "").toLowerCase()] = c.val;
+  const oid = byType["http://schemas.microsoft.com/identity/claims/objectidentifier"] || byType["oid"] || null;
   const sub = byType["sub"] || null;
-  const email = (byType["emails"] || byType["email"] || cp?.userDetails || "").toLowerCase();
-
+  const email = (byType["emails"] || byType["email"] || cp.userDetails || "").toLowerCase();
   const chosen = oid || sub || email || "anonymous";
-  return sanitizeKey(chosen);
+  return String(chosen).trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, "-").replace(/-+/g, "-");
 }
 
+// container-relative prefix (user-scoped, date-bucketed)
+function computePrefix({ page = "campaign", runId, userId, now = new Date() }) {
+  if (!runId || typeof runId !== "string") throw new Error("computePrefix: runId required");
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(now.getUTCDate()).padStart(2, "0");
+  const segPage = sanitizePage(page);
+  const segUser = String(userId || "anonymous").trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, "-").replace(/-+/g, "-");
+  return `runs/${segPage}/${segUser}/${y}/${m}/${d}/${runId}/`;
+}
+
+// Blob helpers
+async function streamToBuffer(readable) {
+  const chunks = [];
+  for await (const chunk of readable) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+async function writeJson(containerClient, relPath, obj) {
+  const data = Buffer.from(JSON.stringify(obj, null, 2));
+  await containerClient.getBlockBlobClient(relPath)
+    .uploadData(data, { blobHTTPHeaders: { blobContentType: "application/json; charset=utf-8" } });
+}
+async function writeInitialStatus(containerClient, relPrefix, status) {
+  await writeJson(containerClient, `${relPrefix}status.json`, status);
+}
+
+// Queue helpers
+async function enqueue(queueClient, msgObj) {
+  await queueClient.sendMessage(JSON.stringify(msgObj)); // SDK base64-encodes for you
+}
+function safeStringify(obj) { try { return JSON.stringify(obj); } catch { return "{}"; } }
+function byteLen(s) { return Buffer.byteLength(s, "utf8"); }
+
 module.exports = async function (context, req) {
-  if (req.method === "OPTIONS") {
+  const method = (req?.method || "GET").toUpperCase();
+  const correlationId = getCorrelationId(req);
+
+  if (method === "OPTIONS") {
     context.res = { status: 204, headers: CORS };
     return;
   }
 
+  if (method !== "POST") {
+    context.res = {
+      status: 405,
+      headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId, allow: "POST" },
+      body: { error: "method_not_allowed", message: "Only POST is supported" },
+    };
+    return;
+  }
+
   try {
-    if (req.method !== "POST") {
+    if (!STORAGE_CONN) {
       context.res = {
-        status: 405,
-        headers: CORS,
-        body: { error: "method_not_allowed", message: "Use POST" }
+        status: 500,
+        headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
+        body: { error: "config", message: "AzureWebJobsStorage app setting is missing" },
+      };
+      return;
+    }
+    if (!QUEUE_NAME) {
+      context.res = {
+        status: 500,
+        headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
+        body: { error: "config", message: "CAMPAIGN_QUEUE_NAME app setting is missing" },
       };
       return;
     }
 
-    // ---- Parse / normalise input (normalise BEFORE validation) ----
+    // ---- Parse / normalise input (normalize BEFORE validation) ----
     const body = (typeof req.body === "object" && req.body) || {};
     const page = sanitizePage(body.page || "campaign");
     const userId = getUserIdFromReq(req);
+    const now = new Date();
 
-    const csvText = (typeof body.csvText === "string" && body.csvText.trim()) || null;
-    const csvFilename = (typeof body.csvFilename === "string" && body.csvFilename.trim()) || null;
-
-    // Legacy → prospect_* (back-compat)
+    // Legacy → prospect_* mirrors (back-compat)
     if (body.company && !body.prospect_company) body.prospect_company = String(body.company).trim();
     if (body.company_name && !body.prospect_company) body.prospect_company = String(body.company_name).trim();
     if (body.website && !body.prospect_website) body.prospect_website = String(body.website).trim();
@@ -139,72 +157,95 @@ module.exports = async function (context, req) {
     if (body.linkedin && !body.prospect_linkedin) body.prospect_linkedin = String(body.linkedin).trim();
     if (body.company_linkedin && !body.prospect_linkedin) body.prospect_linkedin = String(body.company_linkedin).trim();
 
-    // USPs: allow comma-separated string or array
+    // USPs: accept array or delimited string
     if (!Array.isArray(body.supplier_usps)) {
-      if (typeof body.usps === "string") {
-        body.supplier_usps = body.usps.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
-      } else if (Array.isArray(body.usps)) {
-        body.supplier_usps = body.usps.map(s => String(s ?? "").trim()).filter(Boolean);
-      }
+      if (typeof body.usps === "string") body.supplier_usps = body.usps.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+      else if (Array.isArray(body.usps)) body.supplier_usps = body.usps.map(s => String(s ?? "").trim()).filter(Boolean);
     }
 
-    // Relevant competitors: array or delimited string; cap to 8 + dedupe
-    let relevant_competitors = [];
-    if (Array.isArray(body.relevant_competitors)) relevant_competitors = body.relevant_competitors;
-    else if (typeof body.relevant_competitors === "string") relevant_competitors = normalizeArray(body.relevant_competitors);
-    relevant_competitors = [...new Set(relevant_competitors.map(s => s.trim()).filter(Boolean))].slice(0, 8);
+    // Competitors (dedup, cap 8)
+    let relevant_competitors = normalizeArray(body.relevant_competitors);
+    if (relevant_competitors.length) {
+      const seen = new Set();
+      relevant_competitors = relevant_competitors
+        .map(s => s.trim())
+        .filter(s => s && !seen.has(s.toLowerCase()) && (seen.add(s.toLowerCase()) || true))
+        .slice(0, 8);
+    }
 
-    // campaign_requirement constraint
-    const rawReq = (body.campaign_requirement || body.campaignRequirement || "").toLowerCase();
-    const campaign_requirement_effective = ["upsell", "win-back", "growth"].includes(rawReq) ? rawReq : null;
+    // sales_model / call_type normalization (accept filters mirror)
+    const salesModelRaw = [
+      body.sales_model, body.salesModel,
+      body.filters?.sales_model, body.filters?.salesModel
+    ].map(v => (v == null ? "" : String(v).trim().toLowerCase()))
+     .find(v => v === "direct" || v === "partner");
+    const sales_model = salesModelRaw || "direct";
 
-    // Normalized input payload (canonical)
-    const inputPayload = {
-      page,
-      rowCount: Number.isFinite(Number(body.rowCount)) ? Number(body.rowCount) : undefined,
-      filters: (body.filters && typeof body.filters === "object" && !Array.isArray(body.filters)) ? body.filters : undefined,
-      notes: typeof body.notes === "string" ? body.notes : undefined,
+    const callTypeRaw = [
+      body.call_type, body.callType,
+      body.filters?.call_type, body.filters?.callType
+    ].map(v => (v == null ? "" : String(v).trim().toLowerCase()))
+     .find(v => v === "direct" || v === "partner");
+    const call_type = callTypeRaw || null;
 
-      sales_model: (typeof body.sales_model === "string" ? body.sales_model
-        : (typeof body.salesModel === "string" ? body.salesModel : undefined)),
+    // Canonical supplier inputs (prefer supplier_*, fallback to prospect_*)
+    const supplier_company = (body.supplier_company ?? body.prospect_company ?? "").toString().trim();
+    const supplier_website = normalizeWebsite(body.supplier_website ?? body.prospect_website);
+    const supplier_linkedin = normalizeWebsite(body.supplier_linkedin ?? body.prospect_linkedin ?? "");
 
-      call_type: (typeof body.call_type === "string" ? body.call_type
-        : (typeof body.callType === "string" ? body.callType : undefined)),
+    // Normalize USPs: cap to 12
+    const supplier_usps = Array.isArray(body.supplier_usps)
+      ? body.supplier_usps.map(s => String(s || "").trim()).filter(Boolean).slice(0, 12)
+      : [];
 
-      supplier_company: normalizeCompany(body.supplier_company || body.company_name || body.company),
-      supplier_website: normalizeWebsite(body.supplier_website || body.company_website || body.website),
-      supplier_linkedin: body.supplier_linkedin || body.company_linkedin || body.linkedin || undefined,
-      supplier_usps: Array.isArray(body.supplier_usps) ? body.supplier_usps.slice(0, 16) : undefined,
+    // Campaign context
+    const campaign_industry = (body.campaign_industry ?? body.companyIndustry ?? body.industry ?? "").toString().trim() || null;
 
-      campaign_industry: body.campaign_industry || body.company_industry || undefined,
-      selected_industry: body.selected_industry || undefined,
-      campaign_requirement: campaign_requirement_effective,
-      relevant_competitors,
+    // csv inputs
+    const csvText = (typeof body.csvText === "string" && body.csvText.trim()) || null;
+    const csvFilename = (typeof body.csvFilename === "string" && body.csvFilename.trim()) || null;
+    const csvSummary = (body.csvSummary && typeof body.csvSummary === "object") ? body.csvSummary : null;
 
-      prospect_company: body.prospect_company || undefined,
-      prospect_website: normalizeWebsite(body.prospect_website || undefined),
-      prospect_linkedin: body.prospect_linkedin || undefined,
+    // rowCount (optional); infer from csvText if not supplied
+    let rowCount = null;
+    if (body.rowCount != null) {
+      const n = Number(body.rowCount);
+      if (!Number.isFinite(n) || n < 0) {
+        context.res = {
+          status: 400,
+          headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
+          body: { error: "bad_request", message: "rowCount must be a non-negative number" },
+        };
+        return;
+      }
+      rowCount = Math.floor(n);
+    } else if (csvText) {
+      const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
+      rowCount = Math.max(0, lines.length - 1);
+    }
 
-      csvText,
-      csvFilename,
-      csvSummary: (body.csvSummary && typeof body.csvSummary === "object") ? body.csvSummary : undefined,
-    };
+    // campaign requirement (enum) with default
+    let campaign_requirement = null;
+    if (typeof body.campaign_requirement === "string") {
+      const v = body.campaign_requirement.trim().toLowerCase();
+      campaign_requirement = ["upsell", "win-back", "growth"].includes(v) ? v : null;
+    }
+    const campaign_requirement_effective = campaign_requirement ?? "unspecified";
 
-    // ---- Validation (lightweight) ----
+    // ---- Validate AFTER normalization ----
     const missing = [];
-    if (!inputPayload.page) missing.push("page");
-    if (!inputPayload.supplier_company && !inputPayload.prospect_company) missing.push("supplier_company|prospect_company");
-    if (!inputPayload.supplier_website && !inputPayload.prospect_website) missing.push("supplier_website|prospect_website");
+    if (!supplier_company) missing.push("supplier_company");
+    if (!supplier_website) missing.push("supplier_website");
     if (missing.length) {
       context.res = {
         status: 400,
-        headers: { ...CORS, "content-type": "application/json", "x-correlation-id": getCorrelationId(req) },
+        headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
         body: { error: "bad_request", message: `Missing required field(s): ${missing.join(", ")}` }
       };
       return;
     }
 
-    // ---- Storage + Queue clients ----
+    // ---- Storage + Queues ----
     const blobService = BlobServiceClient.fromConnectionString(STORAGE_CONN);
     const containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
     await containerClient.createIfNotExists();
@@ -215,111 +256,129 @@ module.exports = async function (context, req) {
     await qMain.createIfNotExists();
     await qEvidence.createIfNotExists();
 
-    // ---- IDs / prefix ----
+    // ---- runId / prefix / idempotency ----
     const clientRunKey = body.clientRunKey || readHeader(req, "x-idempotency-key") || null;
     const runId = clientRunKey
       ? crypto.createHash("sha1").update(String(clientRunKey)).digest("hex")
       : (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`);
-    const now = new Date();
-    const relPrefix = computePrefix({ page: sanitizePage(body.page || "campaign"), runId, userId, now });
+    const prefix = computePrefix({ page, runId, userId, now });
 
-    // ---- Initial status ----
+    // ---- initial status ----
     const enqueuedAt = now.toISOString();
     const initialStatus = {
       runId,
       state: "Queued",
       input: {
-        ...inputPayload,
-        csvText: undefined // avoid echoing raw CSV in status
+        page,
+        rowCount: rowCount ?? null,
+        filters: body.filters ?? null,
+        notes: body.notes ?? null,
+        sales_model,
+        call_type,
+        supplier_company,
+        supplier_website,
+        supplier_linkedin,
+        supplier_usps,
+        campaign_industry,
+        selected_industry: campaign_industry, // mirror for downstream
+        campaign_requirement: campaign_requirement_effective,
+        relevant_competitors,
+        // Legacy mirrors (kept for back-compat)
+        prospect_company: supplier_company,
+        prospect_website: supplier_website,
+        prospect_linkedin: supplier_linkedin,
+        user_usps: supplier_usps,
+        company_industry: campaign_industry
       },
       enqueuedAt,
-      links: {
-        prefix: relPrefix,
-        statusUrl: `${containerClient.url}/${relPrefix}status.json`,
-        inputUrl: `${containerClient.url}/${relPrefix}input.json`
-      }
+      correlationId,
     };
+    await writeInitialStatus(containerClient, prefix, initialStatus);
 
-    // persist status + input
-    const statusStr = JSON.stringify(initialStatus, null, 2);
-    await containerClient.getBlockBlobClient(`${relPrefix}status.json`)
-      .upload(statusStr, Buffer.byteLength(statusStr), { blobHTTPHeaders: { blobContentType: "application/json" } });
+    // ---- input.json (full) ----
+    const inputPayload = {
+      page,
+      rowCount: rowCount ?? null,
+      filters: body.filters ?? null,
+      notes: body.notes ?? null,
+      sales_model,
+      call_type,
+      supplier_company,
+      supplier_website,
+      supplier_linkedin,
+      supplier_usps,
+      campaign_industry,
+      selected_industry: campaign_industry,
+      campaign_requirement: campaign_requirement_effective,
+      relevant_competitors,
+      csvText,
+      csvFilename,
+      csvSummary,
+      // Legacy mirrors
+      prospect_company: supplier_company,
+      prospect_website: supplier_website,
+      prospect_linkedin: supplier_linkedin,
+      user_usps: supplier_usps,
+      company_industry: campaign_industry
+    };
+    await writeJson(containerClient, `${prefix}input.json`, inputPayload);
 
-    const inputStr = JSON.stringify({ ...inputPayload }, null, 2);
-    await containerClient.getBlockBlobClient(`${relPrefix}input.json`)
-      .upload(inputStr, Buffer.byteLength(inputStr), { blobHTTPHeaders: { blobContentType: "application/json" } });
-
-    // ---- Update per-user recent runs index: users/<userId>/recent.json ----
-    const userIdxPath = `users/${userId}/recent.json`;
-    const userIdxClient = containerClient.getBlockBlobClient(userIdxPath);
+    // ---- per-user recent index (bounded 50) ----
+    const userIdxClient = containerClient.getBlockBlobClient(`users/${userId}/recent.json`);
     let idx = { userId, items: [] };
     try {
       const dl = await userIdxClient.download();
-      const buf = await streamToBuffer(dl.readableStreamBody);
-      idx = JSON.parse(buf.toString("utf8"));
-    } catch { /* not found → create */ }
-
+      idx = JSON.parse((await streamToBuffer(dl.readableStreamBody)).toString("utf8"));
+      if (!idx || typeof idx !== "object") idx = { userId, items: [] };
+    } catch { /* create fresh */ }
     idx.items = [
-      {
-        runId,
-        page: sanitizePage(body.page || "campaign"),
-        when: now.toISOString(),
-        prefix: relPrefix,
-        summary: { supplier_company: inputPayload.supplier_company, campaign_industry: inputPayload.campaign_industry, rowCount: inputPayload.rowCount ?? null }
-      },
+      { runId, page, when: now.toISOString(), prefix, summary: { supplier_company, campaign_industry, rowCount: rowCount ?? null } },
       ...(Array.isArray(idx.items) ? idx.items : [])
     ].slice(0, 50);
+    await writeJson(containerClient, `users/${userId}/recent.json`, idx);
 
-    const idxStr = JSON.stringify(idx, null, 2);
-    await userIdxClient.upload(idxStr, Buffer.byteLength(idxStr), {
-      blobHTTPHeaders: { blobContentType: "application/json" }
-    });
-
-    // ---- Build queue payload (canonical + back-compat mirrors) ----
-    const input = inputPayload; // canonical
-    const correlationId = getCorrelationId(req);
-
-    let msg = {
+    // ---- Build queue payload (canonical + mirrors) ----
+    const msg = {
       op: "kickoff",
       runId,
       userId,
-      page: sanitizePage(body.page || "campaign"),
+      page,
       enqueuedAt,
-      prefix: relPrefix,                // container-relative
-      container: RESULTS_CONTAINER,     // convenience for workers
+      prefix,                    // container-relative
+      container: RESULTS_CONTAINER,
       correlationId,
       clientRunKey: clientRunKey ?? null,
       runConfig: {
         campaign_requirement: campaign_requirement_effective,
-        relevant_competitors: Array.isArray(relevant_competitors) ? relevant_competitors : []
+        relevant_competitors
       },
-      input,
-      // mirrors for older workers
-      page_mirror: input.page,
-      rowCount: input.rowCount,
-      filters: input.filters,
-      notes: input.notes,
-      sales_model: input.sales_model,
-      call_type: input.call_type,
-      supplier_company: input.supplier_company,
-      supplier_website: input.supplier_website,
-      supplier_linkedin: input.supplier_linkedin,
-      supplier_usps: input.supplier_usps,
-      campaign_industry: input.campaign_industry,
-      selected_industry: input.selected_industry,
-      campaign_requirement: input.campaign_requirement,
-      relevant_competitors: input.relevant_competitors,
-      csvText: input.csvText,
-      csvFilename: input.csvFilename,
-      csvSummary: input.csvSummary,
-      prospect_company: input.prospect_company,
-      prospect_website: input.prospect_website,
-      prospect_linkedin: input.prospect_linkedin,
-      user_usps: input.user_usps,
-      company_industry: input.company_industry
+      input: inputPayload,
+      // mirrors for legacy workers
+      page_mirror: inputPayload.page,
+      rowCount: inputPayload.rowCount,
+      filters: inputPayload.filters,
+      notes: inputPayload.notes,
+      sales_model: inputPayload.sales_model,
+      call_type: inputPayload.call_type,
+      supplier_company: inputPayload.supplier_company,
+      supplier_website: inputPayload.supplier_website,
+      supplier_linkedin: inputPayload.supplier_linkedin,
+      supplier_usps: inputPayload.supplier_usps,
+      campaign_industry: inputPayload.campaign_industry,
+      selected_industry: inputPayload.selected_industry,
+      campaign_requirement: inputPayload.campaign_requirement,
+      relevant_competitors: inputPayload.relevant_competitors,
+      csvText: inputPayload.csvText,
+      csvFilename: inputPayload.csvFilename,
+      csvSummary: inputPayload.csvSummary,
+      prospect_company: inputPayload.prospect_company,
+      prospect_website: inputPayload.prospect_website,
+      prospect_linkedin: inputPayload.prospect_linkedin,
+      user_usps: inputPayload.user_usps,
+      company_industry: inputPayload.company_industry
     };
 
-    // ---- Slim payload if needed (queue limit) ----
+    // ---- Payload slimming (preserve important fields) ----
     const PROTECT = new Set([
       "notes", "rowCount", "campaign_industry", "company_industry",
       "relevant_competitors", "sales_model", "salesModel",
@@ -328,63 +387,60 @@ module.exports = async function (context, req) {
       "prospect_linkedin", "csvFilename"
     ]);
 
-    function safeStringify(obj) { try { return JSON.stringify(obj); } catch { return "{}"; } }
-    function bytes(s) { return Buffer.byteLength(s, "utf8"); }
-
     let payload = safeStringify(msg);
-    if (bytes(payload) > MAX_BYTES) {
+    if (byteLen(payload) > MAX_BYTES) {
       const slim = { ...msg, input: { ...(msg.input || {}) } };
 
-      // drop biggest offenders in order
-      if (slim.input && typeof slim.input.csvText === "string") slim.input.csvText = null;
-      if (bytes(safeStringify(slim)) > MAX_BYTES && "csvSummary" in slim.input) slim.input.csvSummary = null;
-      if (bytes(safeStringify(slim)) > MAX_BYTES && "filters" in slim.input) slim.input.filters = null;
+      // drop biggest offenders first
+      if (typeof slim.input.csvText === "string") slim.input.csvText = null;
+      if (byteLen(safeStringify(slim)) > MAX_BYTES) slim.input.csvSummary = null;
+      if (byteLen(safeStringify(slim)) > MAX_BYTES) slim.input.filters = null;
 
-      if (bytes(safeStringify(slim)) > MAX_BYTES) {
-        for (const k of ["user_usps", "supplier_usps"]) {
-          if (bytes(safeStringify(slim)) <= MAX_BYTES) break;
-          if (!(k in slim.input)) continue;
-          if (!PROTECT.has(k)) slim.input[k] = null;
-        }
-      }
-      if (bytes(safeStringify(slim)) > MAX_BYTES && slim.input && typeof slim.input === "object") {
+      // optional trims: unprotected keys only
+      if (byteLen(safeStringify(slim)) > MAX_BYTES) {
         for (const k of Object.keys(slim.input)) {
-          if (bytes(safeStringify(slim)) <= MAX_BYTES) break;
+          if (byteLen(safeStringify(slim)) <= MAX_BYTES) break;
           if (!PROTECT.has(k) && slim.input[k] != null) slim.input[k] = null;
         }
       }
       payload = safeStringify(slim);
-      context.log.warn("campaign_start_payload_slimmed", { bytes: bytes(payload) });
+      context.log.warn("campaign_start_payload_slimmed", { bytes: byteLen(payload) });
     }
 
-    // ---- Enqueue to main + evidence queues (once each) ----
-    const r1 = await enqueueMessage(qMain, payload);
-    const r2 = await enqueueMessage(qEvidence, payload);
+    // ---- Enqueue once to main + evidence ----
+    const qsClient = QueueServiceClient.fromConnectionString(STORAGE_CONN);
+    const qMainClient = qsClient.getQueueClient(QUEUE_NAME);
+    const qEvidenceClient = qsClient.getQueueClient(EVIDENCE_QUEUE);
+
+    const r1 = await enqueue(qMainClient, JSON.parse(payload));
+    const r2 = await enqueue(qEvidenceClient, JSON.parse(payload));
+
     context.log({
       event: "campaign_start_enqueued",
       runId,
       mainQueue: QUEUE_NAME,
       evidenceQueue: EVIDENCE_QUEUE,
       mainMsgId: r1?.messageId,
-      evidenceMsgId: r2?.messageId
+      evidMsgId: r2?.messageId,
+      correlationId
     });
 
+    // ---- Response ----
     context.res = {
       status: 202,
-      headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
+      headers: { ...CORS, "content-type": "application/json; charset=utf-8", "x-correlation-id": correlationId },
       body: {
         runId,
-        container: RESULTS_CONTAINER,
-        prefix: relPrefix,
-        statusUrl: `${containerClient.url}/${relPrefix}status.json`,
-        inputUrl: `${containerClient.url}/${relPrefix}input.json`
+        prefix,
+        statusUrl: `${containerClient.url}/${prefix}status.json`,
+        inputUrl: `${containerClient.url}/${prefix}input.json`
       }
     };
   } catch (e) {
     context.log.error("campaign_start_failed", e);
     context.res = {
       status: 500,
-      headers: { ...CORS, "content-type": "application/json", "x-correlation-id": getCorrelationId(req) },
+      headers: { ...CORS, "content-type": "application/json; charset=utf-8", "x-correlation-id": correlationId },
       body: { error: "server_error", message: String(e?.message || e) },
     };
   }
