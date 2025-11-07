@@ -1,4 +1,4 @@
-// /api/campaign-start/index.js 05-11-2025 v12
+// /api/campaign-start/index.js 07-11-2025 v13
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign-start → enqueues job to campaign queue, writes initial status.json ("Queued"), returns 202 { runId }.
 
@@ -13,30 +13,68 @@ const EVIDENCE_QUEUE = process.env.Q_CAMPAIGN_EVIDENCE || "campaign-evidence-job
 
 const MAX_BYTES_DEFAULT = 48 * 1024; // 49152
 const MAX_BYTES_ENV = Number.parseInt(process.env.CAMPAIGN_MAX_MSG_BYTES, 10);
-const MAX_BYTES =
-  Number.isFinite(MAX_BYTES_ENV) && MAX_BYTES_ENV >= 1024 && MAX_BYTES_ENV <= 62 * 1024
-    ? MAX_BYTES_ENV
-    : MAX_BYTES_DEFAULT;
+const MAX_BYTES = Number.isFinite(MAX_BYTES_ENV) && MAX_BYTES_ENV > 4096 ? MAX_BYTES_ENV : MAX_BYTES_DEFAULT;
 
-// ---- Small utils ----
+const STORAGE_CONN = process.env.AzureWebJobsStorage;
+
+// ---------- CORS ----------
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Correlation-Id, Authorization",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, X-Correlation-Id, Authorization, X-Idempotency-Key",
 };
 
+// ---------- utils ----------
 function readHeader(req, name) {
-  return req?.headers?.[name] || req?.headers?.[name.toLowerCase()] || null;
+  if (!req || !req.headers) return undefined;
+  const h = req.headers;
+  return h[name] ?? h[name.toLowerCase()] ?? h[name.toUpperCase()];
 }
 function getCorrelationId(req) {
-  return (
-    readHeader(req, "x-correlation-id") ||
-    `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`
-  );
+  return readHeader(req, "x-correlation-id") || `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
 }
-function sanitizePage(page) {
-  const s = String(page || "campaign").trim().toLowerCase();
-  return s.replace(/[^a-z0-9._-]/g, "-").replace(/-+/g, "-") || "campaign";
+function sanitizePage(p) {
+  const s = String(p || "").trim().toLowerCase();
+  return s || "campaign";
+}
+function normalizeWebsite(u) {
+  if (!u) return null;
+  try {
+    const URLu = new URL(u.startsWith("http") ? u : `https://${u}`);
+    URLu.protocol = "https:";
+    URLu.hash = "";
+    return URLu.toString();
+  } catch { return null; }
+}
+function computePrefix({ page, runId, userId, now }) {
+  const yyyy = now.getUTCFullYear();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(now.getUTCDate()).padStart(2, "0");
+  const bucket = `${yyyy}/${mm}/${dd}`;
+  const safeUser = (String(userId || "anon").replace(/[^a-z0-9._-]/gi, "-").slice(0, 80) || "anon");
+  return `runs/${runId}/${page}/${bucket}/${safeUser}/`;
+}
+function streamToBuffer(readable) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    readable.on("data", (d) => chunks.push(d));
+    readable.on("end", () => resolve(Buffer.concat(chunks)));
+    readable.on("error", (e) => reject(e));
+  });
+}
+function normalizeCompany(s) {
+  if (!s) return null;
+  const out = String(s).replace(/\s+/g, " ").trim();
+  return out || null;
+}
+function normalizeArray(v, splitter = /[,;\n]/) {
+  if (Array.isArray(v)) return v.map((s) => String(s ?? "").trim()).filter(Boolean);
+  if (typeof v === "string") return v.split(splitter).map((s) => s.trim()).filter(Boolean);
+  return [];
+}
+function sanitizeKey(s) {
+  if (!s) return "campaign";
+  return String(s).toLowerCase().replace(/[^a-z0-9._-]/g, "-").replace(/-+/g, "-");
 }
 async function enqueueMessage(queueClient, jsonString) {
   // SDK base64-encodes for you; pass a plain string
@@ -66,79 +104,21 @@ function getUserIdFromReq(req) {
   const email = (byType["emails"] || byType["email"] || cp?.userDetails || "").toLowerCase();
 
   const chosen = oid || sub || email || "anonymous";
-  return String(chosen).trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, "-").replace(/-+/g, "-");
-}
-
-// IMPORTANT: container-relative prefix (user-scoped, date-bucketed)
-function computePrefix({ page = "campaign", runId, userId, now = new Date() }) {
-  if (!runId || typeof runId !== "string") {
-    throw new Error("computePrefix: runId is required and must be a string");
-  }
-  const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(now.getUTCDate()).padStart(2, "0");
-  const segPage = sanitizePage(page);
-  const segUser = String(userId || "anonymous").trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, "-").replace(/-+/g, "-");
-  return `runs/${segPage}/${segUser}/${y}/${m}/${d}/${runId}/`;
-}
-
-async function writeInitialStatus(containerClient, relPrefix, status) {
-  const client = containerClient.getBlockBlobClient(`${relPrefix}status.json`);
-  const payload = JSON.stringify(status);
-  await client.upload(payload, Buffer.byteLength(payload), {
-    blobHTTPHeaders: { blobContentType: "application/json" },
-  });
-}
-
-function toHttps(u) {
-  if (!u) return u;
-  const s = String(u).trim();
-  if (!s) return s;
-  if (/^https:\/\//i.test(s)) return s;
-  if (/^http:\/\//i.test(s)) return s.replace(/^http:\/\//i, "https://");
-  return `https://${s}`;
-}
-
-// small helper to read blob stream
-async function streamToBuffer(readable) {
-  const chunks = [];
-  for await (const chunk of readable) chunks.push(chunk);
-  return Buffer.concat(chunks);
+  return sanitizeKey(chosen);
 }
 
 module.exports = async function (context, req) {
-  const method = (req?.method || "GET").toUpperCase();
-  const correlationId = getCorrelationId(req);
-
-  if (method === "OPTIONS") {
+  if (req.method === "OPTIONS") {
     context.res = { status: 204, headers: CORS };
     return;
   }
 
-  if (method !== "POST") {
-    context.res = {
-      status: 405,
-      headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId, allow: "POST" },
-      body: { error: "method_not_allowed", message: "Only POST is supported" },
-    };
-    return;
-  }
-
   try {
-    const STORAGE_CONN = process.env.AzureWebJobsStorage;
-    if (!STORAGE_CONN) {
+    if (req.method !== "POST") {
       context.res = {
-        status: 500,
-        headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "config", message: "AzureWebJobsStorage app setting is missing" },
-      };
-      return;
-    }
-    if (!QUEUE_NAME) {
-      context.res = {
-        status: 500,
-        headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "config", message: "CAMPAIGN_QUEUE_NAME app setting is missing" },
+        status: 405,
+        headers: CORS,
+        body: { error: "method_not_allowed", message: "Use POST" }
       };
       return;
     }
@@ -170,102 +150,55 @@ module.exports = async function (context, req) {
 
     // Relevant competitors: array or delimited string; cap to 8 + dedupe
     let relevant_competitors = [];
-    if (Array.isArray(body.relevant_competitors)) {
-      relevant_competitors = body.relevant_competitors.map(s => (s == null ? "" : String(s))).filter(Boolean);
-    } else if (typeof body.relevant_competitors === "string") {
-      relevant_competitors = body.relevant_competitors.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
-    }
-    if (relevant_competitors.length) {
-      const seen = new Set();
-      relevant_competitors = relevant_competitors
-        .map(s => s.trim())
-        .filter(s => s && !seen.has(s.toLowerCase()) && (seen.add(s.toLowerCase()) || true))
-        .slice(0, 8);
-    }
+    if (Array.isArray(body.relevant_competitors)) relevant_competitors = body.relevant_competitors;
+    else if (typeof body.relevant_competitors === "string") relevant_competitors = normalizeArray(body.relevant_competitors);
+    relevant_competitors = [...new Set(relevant_competitors.map(s => s.trim()).filter(Boolean))].slice(0, 8);
 
-    // sales model / call type normalisation
-    if (!body.sales_model && body.salesModel) body.sales_model = String(body.salesModel).trim();
-    if (!body.call_type && body.callType) body.call_type = String(body.callType).trim();
+    // campaign_requirement constraint
+    const rawReq = (body.campaign_requirement || body.campaignRequirement || "").toLowerCase();
+    const campaign_requirement_effective = ["upsell", "win-back", "growth"].includes(rawReq) ? rawReq : null;
 
-    // Campaign context
-    const campaign_industry = (body.campaign_industry ?? body.companyIndustry ?? body.industry ?? "").trim();
+    // Normalized input payload (canonical)
+    const inputPayload = {
+      page,
+      rowCount: Number.isFinite(Number(body.rowCount)) ? Number(body.rowCount) : undefined,
+      filters: (body.filters && typeof body.filters === "object" && !Array.isArray(body.filters)) ? body.filters : undefined,
+      notes: typeof body.notes === "string" ? body.notes : undefined,
 
-    // Canonical supplier inputs (prefer supplier_*; fallback to legacy prospect_*)
-    const supplier_company_raw = (body.supplier_company ?? body.prospect_company ?? "").trim();
-    const supplier_website_raw = (body.supplier_website ?? body.prospect_website ?? "").trim();
-    const supplier_linkedin_raw = (body.supplier_linkedin ?? body.prospect_linkedin ?? body.companyLinkedIn ?? "").trim();
+      sales_model: (typeof body.sales_model === "string" ? body.sales_model
+        : (typeof body.salesModel === "string" ? body.salesModel : undefined)),
 
-    const supplier_company = supplier_company_raw;
-    const supplier_website_https = supplier_website_raw ? toHttps(supplier_website_raw) : "";
-    const supplier_linkedin_https = supplier_linkedin_raw ? toHttps(supplier_linkedin_raw) : "";
+      call_type: (typeof body.call_type === "string" ? body.call_type
+        : (typeof body.callType === "string" ? body.callType : undefined)),
 
-    // Supplier USPs: cap to 12
-    const supplier_usps = Array.isArray(body.supplier_usps)
-      ? body.supplier_usps.map(s => String(s || "").trim()).filter(Boolean).slice(0, 12)
-      : (typeof body.supplier_usps === "string"
-        ? body.supplier_usps.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 12)
-        : (typeof body.user_usps === "string"
-          ? body.user_usps.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 12)
-          : Array.isArray(body.user_usps)
-            ? body.user_usps.map(s => String(s || "").trim()).filter(Boolean).slice(0, 12)
-            : []));
+      supplier_company: normalizeCompany(body.supplier_company || body.company_name || body.company),
+      supplier_website: normalizeWebsite(body.supplier_website || body.company_website || body.website),
+      supplier_linkedin: body.supplier_linkedin || body.company_linkedin || body.linkedin || undefined,
+      supplier_usps: Array.isArray(body.supplier_usps) ? body.supplier_usps.slice(0, 16) : undefined,
 
-    // Page & totals
-    const pageRaw = body.page || "campaign";
-    const effectivePage = sanitizePage(pageRaw);
+      campaign_industry: body.campaign_industry || body.company_industry || undefined,
+      selected_industry: body.selected_industry || undefined,
+      campaign_requirement: campaign_requirement_effective,
+      relevant_competitors,
 
-    // salesModel / callType canonicalisation
-    const _salesCandidates = [
-      body.sales_model,
-      body.salesModel,
-      body.filters?.sales_model,
-      body.filters?.salesModel,
-      body.call_type, body.callType,
-      body.filters?.call_type, body.filters?.callType
-    ].map(v => (v == null ? "" : String(v).trim().toLowerCase()));
-    const salesModel = _salesCandidates.find(v => v === "direct" || v === "partner") || "direct";
-    body.sales_model = salesModel;
+      prospect_company: body.prospect_company || undefined,
+      prospect_website: normalizeWebsite(body.prospect_website || undefined),
+      prospect_linkedin: body.prospect_linkedin || undefined,
 
-    const callTypeRaw =
-      body.call_type ?? body.callType ?? body.filters?.call_type ?? body.filters?.callType ?? null;
-    const callType = (callTypeRaw == null) ? null : String(callTypeRaw).trim().toLowerCase();
+      csvText,
+      csvFilename,
+      csvSummary: (body.csvSummary && typeof body.csvSummary === "object") ? body.csvSummary : undefined,
+    };
 
-    // numeric rowCount (optional)
-    let rc = (body.rowCount !== undefined && body.rowCount !== null) ? body.rowCount : null;
-    if (rc != null) {
-      const n = Number(rc);
-      if (!Number.isFinite(n) || n < 0) {
-        context.res = {
-          status: 400,
-          headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
-          body: { error: "bad_request", message: "rowCount must be a non-negative number" },
-        };
-        return;
-      }
-      rc = Math.floor(n);
-    } else if (typeof csvText === "string" && csvText.trim()) {
-      const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
-      rc = Math.max(0, lines.length - 1);
-    } else {
-      rc = null;
-    }
-
-    // Campaign requirement
-    let campaign_requirement = null;
-    if (typeof body.campaign_requirement === "string") {
-      const v = body.campaign_requirement.trim().toLowerCase();
-      campaign_requirement = ["upsell", "win-back", "growth"].includes(v) ? v : null;
-    }
-    const campaign_requirement_effective = campaign_requirement ?? "unspecified";
-
-    // ---- Validate AFTER normalisation ----
+    // ---- Validation (lightweight) ----
     const missing = [];
-    if (!supplier_company) missing.push("supplier_company");
-    if (!supplier_website_https) missing.push("supplier_website");
+    if (!inputPayload.page) missing.push("page");
+    if (!inputPayload.supplier_company && !inputPayload.prospect_company) missing.push("supplier_company|prospect_company");
+    if (!inputPayload.supplier_website && !inputPayload.prospect_website) missing.push("supplier_website|prospect_website");
     if (missing.length) {
       context.res = {
         status: 400,
-        headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
+        headers: { ...CORS, "content-type": "application/json", "x-correlation-id": getCorrelationId(req) },
         body: { error: "bad_request", message: `Missing required field(s): ${missing.join(", ")}` }
       };
       return;
@@ -288,7 +221,7 @@ module.exports = async function (context, req) {
       ? crypto.createHash("sha1").update(String(clientRunKey)).digest("hex")
       : (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`);
     const now = new Date();
-    const relPrefix = computePrefix({ page: effectivePage, runId, userId, now });
+    const relPrefix = computePrefix({ page: sanitizePage(body.page || "campaign"), runId, userId, now });
 
     // ---- Initial status ----
     const enqueuedAt = now.toISOString();
@@ -296,58 +229,23 @@ module.exports = async function (context, req) {
       runId,
       state: "Queued",
       input: {
-        page: effectivePage,
-        rowCount: rc ?? null,
-        filters: body.filters ?? null,
-        notes: body.notes ?? null,
-        sales_model: salesModel ?? null,
-        call_type: callType ?? null,
-        supplier_company,
-        supplier_website: supplier_website_https,
-        supplier_linkedin: supplier_linkedin_https,
-        supplier_usps,
-        campaign_industry,
-        campaign_requirement: campaign_requirement_effective,
-        relevant_competitors,
-        // Legacy mirrors
-        prospect_company: supplier_company,
-        prospect_website: supplier_website_https,
-        prospect_linkedin: supplier_linkedin_https,
-        user_usps: supplier_usps,
-        company_industry: campaign_industry
+        ...inputPayload,
+        csvText: undefined // avoid echoing raw CSV in status
       },
       enqueuedAt,
-      correlationId,
+      links: {
+        prefix: relPrefix,
+        statusUrl: `${containerClient.url}/${relPrefix}status.json`,
+        inputUrl: `${containerClient.url}/${relPrefix}input.json`
+      }
     };
-    await writeInitialStatus(containerClient, relPrefix, initialStatus);
 
-    // ---- Write input.json ----
-    const inputPayload = {
-      page: effectivePage,
-      rowCount: rc ?? null,
-      filters: body.filters ?? null,
-      notes: body.notes ?? null,
-      sales_model: salesModel ?? null,
-      call_type: callType ?? null,
-      supplier_company,
-      supplier_website: supplier_website_https,
-      supplier_linkedin: supplier_linkedin_https,
-      supplier_usps,
-      campaign_industry,
-      selected_industry: campaign_industry || undefined,
-      campaign_requirement: campaign_requirement_effective,
-      relevant_competitors: Array.isArray(relevant_competitors) ? relevant_competitors : [],
-      csvText: csvText || null,
-      csvFilename: csvFilename || null,
-      csvSummary: body.csvSummary || null,
-      // Legacy
-      prospect_company: supplier_company,
-      prospect_website: supplier_website_https,
-      prospect_linkedin: supplier_linkedin_https,
-      user_usps: supplier_usps,
-      company_industry: campaign_industry
-    };
-    const inputStr = JSON.stringify(inputPayload, null, 2);
+    // persist status + input
+    const statusStr = JSON.stringify(initialStatus, null, 2);
+    await containerClient.getBlockBlobClient(`${relPrefix}status.json`)
+      .upload(statusStr, Buffer.byteLength(statusStr), { blobHTTPHeaders: { blobContentType: "application/json" } });
+
+    const inputStr = JSON.stringify({ ...inputPayload }, null, 2);
     await containerClient.getBlockBlobClient(`${relPrefix}input.json`)
       .upload(inputStr, Buffer.byteLength(inputStr), { blobHTTPHeaders: { blobContentType: "application/json" } });
 
@@ -364,10 +262,10 @@ module.exports = async function (context, req) {
     idx.items = [
       {
         runId,
-        page: effectivePage,
+        page: sanitizePage(body.page || "campaign"),
         when: now.toISOString(),
         prefix: relPrefix,
-        summary: { supplier_company, campaign_industry, rowCount: rc ?? null }
+        summary: { supplier_company: inputPayload.supplier_company, campaign_industry: inputPayload.campaign_industry, rowCount: inputPayload.rowCount ?? null }
       },
       ...(Array.isArray(idx.items) ? idx.items : [])
     ].slice(0, 50);
@@ -379,11 +277,13 @@ module.exports = async function (context, req) {
 
     // ---- Build queue payload (canonical + back-compat mirrors) ----
     const input = inputPayload; // canonical
-    const msg = {
+    const correlationId = getCorrelationId(req);
+
+    let msg = {
       op: "kickoff",
       runId,
       userId,
-      page: effectivePage,
+      page: sanitizePage(body.page || "campaign"),
       enqueuedAt,
       prefix: relPrefix,                // container-relative
       container: RESULTS_CONTAINER,     // convenience for workers
@@ -466,16 +366,15 @@ module.exports = async function (context, req) {
       mainQueue: QUEUE_NAME,
       evidenceQueue: EVIDENCE_QUEUE,
       mainMsgId: r1?.messageId,
-      evidMsgId: r2?.messageId,
-      correlationId
+      evidenceMsgId: r2?.messageId
     });
 
-    // ---- Response ----
     context.res = {
       status: 202,
       headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
       body: {
         runId,
+        container: RESULTS_CONTAINER,
         prefix: relPrefix,
         statusUrl: `${containerClient.url}/${relPrefix}status.json`,
         inputUrl: `${containerClient.url}/${relPrefix}input.json`
