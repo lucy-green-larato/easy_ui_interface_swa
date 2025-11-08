@@ -668,6 +668,62 @@ function classifySourceType(url) {
   return "Company site";
 }
 
+// -------- Markdown profile parsing (no dependencies) --------
+
+// Extract footnote link refs: [1]: https://...
+function extractMdRefs(md) {
+  const refs = {};
+  const rx = /^\s*\[(\d+)\]\s*:\s*(https?:\/\/\S+)\s*.*$/gim;
+  let m;
+  while ((m = rx.exec(md))) refs[m[1]] = m[2];
+  return refs;
+}
+
+// Pull a section's text by its H2 title (## ...)
+function mdSection(md, title) {
+  const rx = new RegExp("^\\s*##\\s+" + title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*$", "im");
+  const m = rx.exec(md);
+  if (!m) return "";
+  const start = m.index + m[0].length;
+  const rest = md.slice(start);
+  const nx = /^\s*##\s+/im.exec(rest);
+  return nx ? rest.slice(0, nx.index) : rest;
+}
+
+// Pull first bold **...** phrase from a line
+function firstBold(line) {
+  const m = /\*\*(.+?)\*\*/.exec(line);
+  return m ? m[1].trim() : "";
+}
+
+// Normalise a bullet line (strip "*", "-", "•")
+function cleanBullet(line) {
+  return String(line || "").replace(/^\s*[*\-•]\s*/, "").trim();
+}
+
+// Split section text into bullet lines
+function bullets(sectionText) {
+  return sectionText.split(/\r?\n/)
+    .map(s => s.trim())
+    .filter(s => /^(\*|\-|\u2022)\s+/.test(s))
+    .map(cleanBullet);
+}
+
+// Find first non-empty paragraph in a section (ignores headings and hr)
+function firstParagraph(sectionText) {
+  const blocks = sectionText.split(/\n{2,}/).map(s => s.trim());
+  for (const b of blocks) {
+    if (!b || /^(\*|\-|\u2022)\s/.test(b) || /^#{1,6}\s/.test(b) || /^---+$/.test(b)) continue;
+    return b;
+  }
+  return "";
+}
+
+// Kebab slug for packs/<slug>
+function toSlug(name) {
+  return String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
 function csvSummaryEvidence(csvCanonical, input, prefix, containerUrl, focusInsight, industry) {
   const rows = Number(csvCanonical?.meta?.rows || input?.rowCount || 0);
   const fileName = csvCanonical?.meta?.source || input?.csvFilename || "inline";
@@ -1174,8 +1230,101 @@ module.exports = async function (context, job) {
 
       // Merge projected industry sources too
       packEvidence = [...packEvidence, ...packIndustrySources];
+            // 5c.1) Customer profile Markdown → evidence (subscriber intelligence)
+      try {
+        const companyName = (input?.supplier_company || input?.company_name || "").trim();
+        const slug = toSlug(companyName);
+        if (slug) {
+          const profPath = `${prefix}packs/${slug}/profile.md`;
+          const mdText = await getText(container, profPath); // raw markdown (if present)
+          if (mdText && mdText.length) {
+            const refs = extractMdRefs(mdText);
 
-      // >>> NEW: prioritise industry/regulator sources when an industry is selected
+            const push = (title, summary, url, tagTitle) => {
+              const t = String(title || "").trim();
+              const s = String(summary || "").trim();
+              if (!t && !s) return;
+              const item = {
+                claim_id: nextClaimId(),
+                source_type: "Customer profile",
+                title: (tagTitle ? `${tagTitle}: ` : "") + (t || s).slice(0, 240),
+                summary: addCitation(s || t, "Customer profile")
+              };
+              if (url) item.url = toHttps(url);
+              packEvidence.push(item);
+            };
+
+            // One-paragraph summary
+            const sec1 = mdSection(mdText, "One-paragraph summary");
+            const para = firstParagraph(sec1);
+            if (para) push("Company analysis summary", para);
+
+            // What <Company> does (offer & delivery)
+            const sec2 = mdSection(mdText, "What Comms365 does (offer & delivery)");
+            for (const b of bullets(sec2)) {
+              const titleBold = firstBold(b); // **Bonded Internet**
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const url = refs[refNum] || undefined;
+              const title = titleBold || b.split(/[.–—:]/)[0].trim();
+              push(title, b, url, "Service");
+            }
+
+            // Where it plays (priority segments & use cases)
+            const sec3 = mdSection(mdText, "Where it plays (priority segments & use cases)");
+            for (const b of bullets(sec3)) {
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const url = refs[refNum] || undefined;
+              push("Segment/Use case", b, url);
+            }
+
+            // Where it wins (proof points)
+            const sec4 = mdSection(mdText, "Where it wins (proof points)");
+            for (const b of bullets(sec4)) {
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const url = refs[refNum] || undefined;
+              const titleBold = firstBold(b) || "Proof point";
+              push(titleBold, b, url, "Proof");
+            }
+
+            // Differentiators to note
+            const sec5 = mdSection(mdText, "Differentiators to note");
+            for (const b of bullets(sec5)) {
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const url = refs[refNum] || undefined;
+              const titleBold = firstBold(b) || "Differentiator";
+              push(titleBold, b, url, "Differentiator");
+            }
+
+            // Competitive position
+            const sec6 = mdSection(mdText, "Competitive position (UK B2B connectivity)");
+            for (const b of bullets(sec6)) {
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const url = refs[refNum] || undefined;
+              push("Competitive position", b, url);
+            }
+
+            // Practical takeaways
+            const sec7 = mdSection(mdText, "Practical takeaways for sales/partnership conversations");
+            for (const b of bullets(sec7)) {
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const url = refs[refNum] || undefined;
+              push("Practical takeaway", b, url);
+            }
+
+            // Questions to validate (discovery)
+            const sec8 = mdSection(mdText, "Questions to validate (discovery)");
+            for (const b of bullets(sec8)) {
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const url = refs[refNum] || undefined;
+              push("Discovery question", b, url);
+            }
+          }
+        }
+      } catch (e) {
+        context.log.warn("[campaign-evidence] profile.md parse failed", String(e?.message || e));
+      }
+
+      // Prioritise industry/regulator sources when an industry is selected
       const selInd = String(
         csvNormalizedCanonical?.selected_industry ||
         input?.selected_industry ||
@@ -1203,6 +1352,8 @@ module.exports = async function (context, job) {
       context.log.warn("[campaign-evidence] packs/buildEvidence failed", String(packErr?.message || packErr));
       packEvidence = [];
     }
+
+    
 
     // 6) evidence_log.json (CSV-first + supplier artefacts + PACKS merged)
     let evidenceLog = [];

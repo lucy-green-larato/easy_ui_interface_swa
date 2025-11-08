@@ -340,8 +340,8 @@ function deriveAmLine(csvCanon, outline) {
   const total = Number.isFinite(Number(csvCanon?.meta?.rows)) ? Number(csvCanon.meta.rows) : null;
   const focusLabel =
     (outline?.input_notes?.campaign_focus ||
-     outline?.input_notes?.selected_product ||
-     "").toString().trim();
+      outline?.input_notes?.selected_product ||
+      "").toString().trim();
   const focusCount = Number.isFinite(Number(csvCanon?.signals?.counts?.by_need?.[focusLabel]))
     ? Number(csvCanon.signals.counts.by_need[focusLabel])
     : null;
@@ -376,25 +376,25 @@ function buildExecAugments({ evidenceBundle, csvCanon, outline }) {
       if (isReg(t) || isReg(String(it.source_type || "").toLowerCase())) s += 8;
       return { it, s };
     })
-    .sort((a,b) => b.s - a.s)
+    .sort((a, b) => b.s - a.s)
     .slice(0, 8)
     .map(x => x.it);
 
   const ctxTerms = (() => {
     if (!ranked.length) return [];
-    const STOP = new Set(["the","and","for","with","from","that","this","are","is","of","to","in","on","as","by","at","an","or","a","into","across","more","most","over","under","within","their","your","our","it","they","be","was","were"]);
+    const STOP = new Set(["the", "and", "for", "with", "from", "that", "this", "are", "is", "of", "to", "in", "on", "as", "by", "at", "an", "or", "a", "into", "across", "more", "most", "over", "under", "within", "their", "your", "our", "it", "they", "be", "was", "were"]);
     const text = ranked.map(it => String(it.summary || it.quote || it.title || "")).join(" ").toLowerCase();
     const toks = text.split(/[^a-z0-9+]+/).filter(w => w && w.length > 2 && !STOP.has(w));
     const freq = new Map();
     for (const w of toks) freq.set(w, (freq.get(w) || 0) + 1);
     for (const w of (industry || "").toLowerCase().split(/[^a-z0-9]+/)) freq.delete(w);
     for (const w of (company || "").toLowerCase().split(/[^a-z0-9]+/)) freq.delete(w);
-    return [...freq.entries()].sort((a,b) => b[1]-a[1]).slice(0,4).map(([w]) => w);
+    return [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([w]) => w);
   })();
 
   const marketContext = (() => {
     const need = needs[0] || "";
-    const usp = usps.slice(0,3).join("; ");
+    const usp = usps.slice(0, 3).join("; ");
     const a = [];
     if (company && (need || usp)) {
       const needPart = need ? `meet buyers’ needs for ${need}` : "address priority buyer needs";
@@ -405,16 +405,16 @@ function buildExecAugments({ evidenceBundle, csvCanon, outline }) {
     return a.join(" ").trim();
   })();
 
-  const blockersLine = blockers.length ? `Key buyer blockers to investment: ${blockers.slice(0,3).join("; ")}.` : "";
+  const blockersLine = blockers.length ? `Key buyer blockers to investment: ${blockers.slice(0, 3).join("; ")}.` : "";
 
   // F→O→BV: align USPs to needs/blockers via token overlap (no keyword lists)
-  function tokens(s){return String(s||"").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);}
-  function jac(a,b){const A=new Set(a),B=new Set(b);if(!A.size||!B.size)return 0;let i=0;for(const x of A)if(B.has(x))i++;return i/(A.size+B.size-i);}
+  function tokens(s) { return String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean); }
+  function jac(a, b) { const A = new Set(a), B = new Set(b); if (!A.size || !B.size) return 0; let i = 0; for (const x of A) if (B.has(x)) i++; return i / (A.size + B.size - i); }
   const fov = [];
   for (const usp of usps) {
     const ut = tokens(usp); if (!ut.length) continue;
-    let bestN=null, nScore=0; for (const n of needs){const s=jac(ut,tokens(n)); if (s>nScore){nScore=s; bestN=n;}}
-    let bestB=null, bScore=0; for (const b of blockers){const s=jac(ut,tokens(b)); if (s>bScore){bScore=s; bestB=b;}}
+    let bestN = null, nScore = 0; for (const n of needs) { const s = jac(ut, tokens(n)); if (s > nScore) { nScore = s; bestN = n; } }
+    let bestB = null, bScore = 0; for (const b of blockers) { const s = jac(ut, tokens(b)); if (s > bScore) { bScore = s; bestB = b; } }
     if (!bestN && !bestB) continue;
     const parts = [String(usp).trim()];
     if (bestN) parts.push(`to advance ${bestN}`);
@@ -437,9 +437,12 @@ function buildSectionSystem(finalKey, persona) {
       personaPrefix + "You are a senior UK B2B strategist.",
       "Write a board-ready Executive Summary (≤250 words) for a go/no-go decision.",
       "Begin exactly in this order (one compact paragraph): Strategy → Target prospects → Buyer problems → Campaign type (upsell/win-back/growth + one-line rationale).",
-      "Then add 3–6 concise bullets covering: Moore value proposition; Addressable market (CSV row count if present); Dependencies; Decision points; Sales enablement note.",
-      "Ground claims in evidence only; cite claim_ids inline; use 'TBD' if unknown.",
-      'Return STRICT JSON: executive_summary as an array of strings (first = paragraph, rest = bullets).'
+      "Then add 3–6 concise bullets covering: Moore value proposition; Addressable market; Market context (with citations); Buyer blockers (from CSV); Sales enablement note.",
+      "Use ONLY these data sources: CSV canonical (cohort size + signals), industry packs, company profile pack, and explicit input notes.",
+      "If competitors are provided in the input, USE ONLY those; do not introduce others.",
+      "For Addressable market, DO NOT estimate; the writer will insert the cohort and focus subset from CSV.",
+      "Cite external facts inline with short tags (e.g., (Ofcom), (ONS)) or https URLs.",
+      "Return STRICT JSON: executive_summary as an array of strings (first = paragraph, rest = bullets)."
     ].join("\n");
   }
 
@@ -447,7 +450,8 @@ function buildSectionSystem(finalKey, persona) {
     return [
       personaPrefix + "You are a senior UK B2B strategist.",
       "Provide Geoffrey Moore’s value proposition and a competitor contrast table.",
-      "Ground claims in evidence only; include claim_ids inline.",
+      "Use ONLY competitors supplied in the input; if none supplied, write 'TBD' rather than introducing generic telcos.",
+      "Ground claims in CSV signals, industry packs, and the customer profile pack; include claim_ids or short citations inline.",
       'Return STRICT JSON for "positioning_and_differentiation".'
     ].join("\n");
   }
@@ -771,7 +775,7 @@ module.exports = async function (context, queueItem) {
     await patchStatus(container, prefix, "SectionWrites", {
       runId, writing: finalKey, updatedAt: nowISO(), op: "section"
     });
-        
+
     if (DETERMINISTIC_SECTIONS.has(finalKey)) {
       let out;
       if (finalKey === "positioning_and_differentiation") {
@@ -795,39 +799,83 @@ module.exports = async function (context, queueItem) {
 
     const { callChatJsonObject } = await loadPromptHarness();
     const raw = await callChatJsonObject({ system, user, timeoutMs: LLM_TIMEOUT_MS });
-
     // normalise shape: expect the section key at root
     const out = {};
-    if (raw && typeof raw === "object" && raw[finalKey] != null) out[finalKey] = raw[finalKey];
-    else out[finalKey] = raw || (finalKey === "executive_summary" ? [] : {});
+    const sect = (raw && typeof raw === "object" && raw[finalKey] != null) ? raw[finalKey] : raw;
 
-    // Ensure executive_summary is array (UI contract)
-    if (finalKey === "executive_summary" && !Array.isArray(out.executive_summary)) {
-      if (typeof out.executive_summary === "string") out.executive_summary = [out.executive_summary];
-      else out.executive_summary = [];
+    if (finalKey !== "executive_summary") {
+      out[finalKey] = sect || {};
+    } else {
+      // Exec summary must be array<string>. Coerce common shapes.
+      if (Array.isArray(sect)) {
+        out.executive_summary = sect.map(s => String(s || "").trim()).filter(Boolean);
+      } else if (typeof sect === "string") {
+        out.executive_summary = [sect.trim()];
+      } else if (sect && typeof sect === "object") {
+        // Common object payload (like your sample) → synthesise a paragraph + bullets
+        const headline = [sect.headline, sect.title].map(x => String(x || "").trim()).find(Boolean) || "";
+        const paraBits = [
+          headline,
+          (sect.industry ? `Industry: ${sect.industry}` : ""),
+          (sect.objective ? `Objective: ${sect.objective}` : "")
+        ].filter(Boolean);
+        const paragraph = paraBits.join(" — ");
+
+        const bulletsObj = [];
+        if (Array.isArray(sect.why_now) && sect.why_now.length) bulletsObj.push(...sect.why_now.map(String));
+        if (sect.addressable_market && Number.isFinite(Number(sect.addressable_market.cohort_size))) {
+          bulletsObj.push(`Addressable market (payload): ${Number(sect.addressable_market.cohort_size).toLocaleString()}.`);
+        }
+        if (Array.isArray(sect.buyer_needs)) bulletsObj.push(`Buyer needs: ${sect.buyer_needs.join("; ")}`);
+        if (Array.isArray(sect.buyer_blockers)) bulletsObj.push(`Buyer blockers: ${sect.buyer_blockers.join("; ")}`);
+
+        out.executive_summary = [paragraph, ...bulletsObj].map(s => String(s || "").trim()).filter(Boolean);
+      } else {
+        out.executive_summary = [];
+      }
     }
+    // ---- Exec Summary post-processor (tone + data-led bullets; enforce AM; filter weak LLM lines) ----
+    if (finalKey === "executive_summary") {
+      const current = Array.isArray(out.executive_summary) ? out.executive_summary.slice() : [];
+      const paragraph = current[0] || "";
+      const llmBullets = current.slice(1).map(s => String(s || "").trim()).filter(Boolean);
 
-    // ---- Exec Summary post-processor (tone + data-led bullets) ----
-if (finalKey === "executive_summary") {
-  const current = Array.isArray(out.executive_summary) ? out.executive_summary.slice() : [];
-  const paragraph = current[0] || "";
-  const bulletsIn = current.slice(1);
+      // Build deterministic augments from evidence + CSV signals + outline inputs
+      const aug = buildExecAugments({ evidenceBundle, csvCanon, outline }); // uses helpers we added earlier
 
-  // Build data-driven augments from evidence + CSV signals + outline inputs
-  const aug = buildExecAugments({ evidenceBundle, csvCanon, outline });
+      // 1) Remove any LLM AM lines (we always prefer CSV-derived amLine)
+      const notAmLine = (s) => !/^addressable market/i.test(s);
 
-  // Compose a new bullet list (no placeholders; only include what exists)
-  const newBullets = [
-    ...(aug.fov || []),                               // 0–3 Feature→Outcome→Business Value
-    ...(aug.amLine ? [aug.amLine] : []),             // AM insight
-    ...(aug.marketContext ? [aug.marketContext] : []),
-    ...(aug.blockersLine ? [aug.blockersLine] : []),
-    ...bulletsIn                                     // keep any remaining LLM bullets last
-  ].filter(Boolean);
+      // 2) Keep only “Why now” bullets that cite a source (simple check: brackets with a known tag or URL)
+      const looksCited = (s) => /\((Ofcom|ONS|GOV\.UK|DSIT|CITB|https?:\/\/)/i.test(s);
+      const notUncitedWhyNow = (s) => !/^why now/i.test(s) || looksCited(s);
 
-  const polished = polishExecSummaryLines([paragraph, ...newBullets]);
-  out.executive_summary = polished;
-}
+      // 3) Keep LLM bullets that don’t violate the competitor discipline (handled in prompt, but be safe)
+      // If the user has supplied competitors, drop bullets that introduce telco giants not on the list.
+      const providedComps = Array.isArray(outline?.input_notes?.competitors) ? outline.input_notes.competitors.map(x => String(x).toLowerCase()) : [];
+      const disallowedBigTelcos = /(\bvodafone\b|\bee\b|\bthree\b|\bo2\b|\bbt\b|\bvirgin media\b)/i;
+      const compDisciplined = (s) => {
+        if (!providedComps.length) return true; // nothing to enforce
+        // allow if bullet references one of the provided competitors
+        if (providedComps.some(c => s.toLowerCase().includes(c))) return true;
+        // otherwise, drop if it introduces generic big-telco names
+        return !disallowedBigTelcos.test(s);
+      };
+
+      const filteredLlmBullets = llmBullets.filter(notAmLine).filter(notUncitedWhyNow).filter(compDisciplined);
+
+      // Compose deterministic first, then LLM remainder
+      const newBullets = [
+        ...(aug.fov || []),                                 // 0–3 Feature→Outcome→Business Value
+        ...(aug.amLine ? [aug.amLine] : []),               // Enforced: AM from CSV cohort + focus subset
+        ...(aug.marketContext ? [aug.marketContext] : []), // evidence-led market context
+        ...(aug.blockersLine ? [aug.blockersLine] : []),   // CSV TopBlockers
+        ...filteredLlmBullets                              // any remaining LLM bullets (already filtered)
+      ].filter(Boolean);
+
+      const polished = polishExecSummaryLines([paragraph, ...newBullets]); // tone/wording guard (exec summary only)
+      out.executive_summary = polished;
+    }
 
     await putJson(container, `${prefix}sections/${finalKey}.json`, out);
     await patchStatus(container, prefix, "SectionWrites", {
