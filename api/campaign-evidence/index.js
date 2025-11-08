@@ -1230,13 +1230,17 @@ module.exports = async function (context, job) {
 
       // Merge projected industry sources too
       packEvidence = [...packEvidence, ...packIndustrySources];
-            // 5c.1) Customer profile Markdown → evidence (subscriber intelligence)
+      // 5c.1) Customer profile Markdown → evidence (subscriber intelligence)
       try {
         const companyName = (input?.supplier_company || input?.company_name || "").trim();
         const slug = toSlug(companyName);
         if (slug) {
-          const profPath = `${prefix}packs/${slug}/profile.md`;
-          const mdText = await getText(container, profPath); // raw markdown (if present)
+          // Try run-scoped profile first, then global packs/ as fallback
+          const runScopedPath = `${prefix}packs/${slug}/profile.md`;
+          const globalPath = `packs/${slug}/profile.md`;
+
+          let mdText = await getText(container, runScopedPath);
+          if (!mdText) mdText = await getText(container, globalPath);
           if (mdText && mdText.length) {
             const refs = extractMdRefs(mdText);
 
@@ -1263,7 +1267,7 @@ module.exports = async function (context, job) {
             const sec2 = mdSection(mdText, "What Comms365 does (offer & delivery)");
             for (const b of bullets(sec2)) {
               const titleBold = firstBold(b); // **Bonded Internet**
-              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [, ""])[1];
               const url = refs[refNum] || undefined;
               const title = titleBold || b.split(/[.–—:]/)[0].trim();
               push(title, b, url, "Service");
@@ -1272,7 +1276,7 @@ module.exports = async function (context, job) {
             // Where it plays (priority segments & use cases)
             const sec3 = mdSection(mdText, "Where it plays (priority segments & use cases)");
             for (const b of bullets(sec3)) {
-              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [, ""])[1];
               const url = refs[refNum] || undefined;
               push("Segment/Use case", b, url);
             }
@@ -1280,7 +1284,7 @@ module.exports = async function (context, job) {
             // Where it wins (proof points)
             const sec4 = mdSection(mdText, "Where it wins (proof points)");
             for (const b of bullets(sec4)) {
-              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [, ""])[1];
               const url = refs[refNum] || undefined;
               const titleBold = firstBold(b) || "Proof point";
               push(titleBold, b, url, "Proof");
@@ -1289,7 +1293,7 @@ module.exports = async function (context, job) {
             // Differentiators to note
             const sec5 = mdSection(mdText, "Differentiators to note");
             for (const b of bullets(sec5)) {
-              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [, ""])[1];
               const url = refs[refNum] || undefined;
               const titleBold = firstBold(b) || "Differentiator";
               push(titleBold, b, url, "Differentiator");
@@ -1298,7 +1302,7 @@ module.exports = async function (context, job) {
             // Competitive position
             const sec6 = mdSection(mdText, "Competitive position (UK B2B connectivity)");
             for (const b of bullets(sec6)) {
-              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [, ""])[1];
               const url = refs[refNum] || undefined;
               push("Competitive position", b, url);
             }
@@ -1306,7 +1310,7 @@ module.exports = async function (context, job) {
             // Practical takeaways
             const sec7 = mdSection(mdText, "Practical takeaways for sales/partnership conversations");
             for (const b of bullets(sec7)) {
-              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [, ""])[1];
               const url = refs[refNum] || undefined;
               push("Practical takeaway", b, url);
             }
@@ -1314,7 +1318,7 @@ module.exports = async function (context, job) {
             // Questions to validate (discovery)
             const sec8 = mdSection(mdText, "Questions to validate (discovery)");
             for (const b of bullets(sec8)) {
-              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [,""])[1];
+              const refNum = (/\[(\d+)\]\s*$/.exec(b) || [, ""])[1];
               const url = refs[refNum] || undefined;
               push("Discovery question", b, url);
             }
@@ -1353,7 +1357,7 @@ module.exports = async function (context, job) {
       packEvidence = [];
     }
 
-    
+
 
     // 6) evidence_log.json (CSV-first + supplier artefacts + PACKS merged)
     let evidenceLog = [];
