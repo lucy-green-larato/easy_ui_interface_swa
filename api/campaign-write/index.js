@@ -426,6 +426,31 @@ function buildExecAugments({ evidenceBundle, csvCanon, outline }) {
   const amLine = deriveAmLine(csvCanon, outline);
   return { amLine, marketContext, blockersLine, fov };
 }
+// ---- Exec Summary helpers: headline detection + paragraph synthesis ----
+function looksLikeHeadline(s) {
+  const t = String(s || "").trim();
+  if (!t) return true;
+  const words = t.split(/\s+/).length;
+  const hasPeriod = /[.!?]["']?$/.test(t);
+  const manyCaps = (t.match(/\b[A-Z][a-z]/g) || []).length >= Math.max(2, Math.floor(words * 0.4));
+  return (words <= 12 && !hasPeriod) || (!hasPeriod && manyCaps);
+}
+
+function synthesizeExecParagraph({ outline, csvCanon }) {
+  const company = String(outline?.input_notes?.supplier_company || outline?.meta?.company || "").trim();
+  const industry = String(csvCanon?.selected_industry || outline?.meta?.selected_industry || outline?.input_notes?.selected_industry || "").trim();
+  const campaignType = String(outline?.input_notes?.campaign_type || outline?.meta?.campaign_type || outline?.input_notes?.objective || "").trim();
+  const needs = (csvCanon?.signals?.top_needs_supplier || csvCanon?.global_signals?.top_needs_supplier || []).filter(Boolean).slice(0, 2);
+  const blockers = (csvCanon?.signals?.top_blockers || csvCanon?.global_signals?.top_blockers || []).filter(Boolean).slice(0, 2);
+
+  const who = industry ? `For ${industry} companies` : `For our target companies`;
+  const what = company ? `${company} will` : `This campaign will`;
+  const why = campaignType ? `${campaignType}` : `drive measurable growth`;
+  const needsPart = needs.length ? ` by addressing ${needs.join(" and ")}` : "";
+  const blockPart = blockers.length ? ` and reducing risk from ${blockers.join(" and ")}` : "";
+
+  return `${who}, ${what} ${why}${needsPart}${blockPart}.`;
+}
 
 // ==== Prompts ====
 // Executive Summary must be ARRAY OF STRINGS so the UI can render it fully.
@@ -829,14 +854,13 @@ module.exports = async function (context, queueItem) {
         out.executive_summary = [];
       }
     }
-    // ---- Exec Summary post-processor (tone + data-led bullets; enforce AM; generic filters) ----
+    // ---- Exec Summary post-processor (tone + data-led bullets; headline guard; no hard-wiring) ----
     if (finalKey === "executive_summary") {
       try {
         const current = Array.isArray(out.executive_summary) ? out.executive_summary.slice() : [];
-        const paragraph = current[0] || "";
+        let paragraph = current[0] || "";
         const llmBullets = current.slice(1).map(s => String(s || "").trim()).filter(Boolean);
 
-        // Safe objects
         const eb = evidenceBundle || {};
         const csvC = csvCanon || {};
         const ol = outline || {};
@@ -846,20 +870,13 @@ module.exports = async function (context, queueItem) {
           ? (buildExecAugments({ evidenceBundle: eb, csvCanon: csvC, outline: ol }) || {})
           : {};
 
-        // 1) Drop any LLM AM lines (writer enforces CSV AM)
+        // Filter LLM bullets (generic, no brand lists)
         const notAmLine = (s) => !/^addressable market\b/i.test(s);
-
-        // 2) Keep “why now”-style bullets only if they show ANY citation marker (generic)
-        //    (either a URL, or any parenthetical [...] or (...) at end or inline)
         const looksCited = (s) => /https?:\/\/\S+/.test(s) || /\([^)]{3,}\)/.test(s) || /\[[^\]]{3,}\]/.test(s);
         const notUncitedWhyNow = (s) => {
           const isWhy = /\bwhy now\b/i.test(s) || /\bcontext\b/i.test(s) || /\bmarket\b/i.test(s);
           return !isWhy || looksCited(s);
         };
-
-        // 3) Competitor discipline WITHOUT named brands:
-        //    If user supplied competitors, drop bullets that mention brand-like proper nouns
-        //    not in the allowed set (company + supplied competitors), when used in a vs/compare context.
         const company = String(ol?.input_notes?.supplier_company || "").toLowerCase();
         const allowed = new Set(
           [company]
@@ -867,42 +884,50 @@ module.exports = async function (context, queueItem) {
             .map(x => String(x).toLowerCase())
             .filter(Boolean)
         );
-
         const comparisonCue = /\b(vs|versus|against|compared|than|alternative|competitor|compare)\b/i;
-
         const mentionsDisallowedBrandInComparison = (s) => {
-          if (!allowed.size) return false; // nothing to enforce
+          if (!allowed.size) return false;
           if (!comparisonCue.test(s)) return false;
-
-          // Extract candidate "brand-like" tokens: Title Case words (not ALLCAPS/acronyms), length >= 3
           const tokens = s.match(/\b[A-Z][a-z][A-Za-z0-9&.-]+\b/g) || [];
-          // Whitelist acronyms / common nouns (no hard-coded brands)
           const whitelist = new Set(["UK", "EU", "RTO", "RPO", "SLA", "QoS", "WAN", "SD-WAN", "IoT", "AI", "CCTV", "POS", "VPN", "MPLS", "LTE", "FTTP", "SoGEA", "DSL", "IP"]);
           for (const t of tokens) {
             if (whitelist.has(t)) continue;
-            const low = t.toLowerCase();
-            if (!allowed.has(low)) return true; // a brand-like proper noun not in allowed set
+            if (!allowed.has(t.toLowerCase())) return true;
           }
           return false;
         };
-
         const filteredLlmBullets = llmBullets
           .filter(notAmLine)
           .filter(notUncitedWhyNow)
           .filter(s => !mentionsDisallowedBrandInComparison(s));
 
-        // Compose: deterministic first, then filtered LLM remainder
+        // Build the final bullets, always injecting deterministic lines first (if present)
         const newBullets = [
-          ...((aug.fov || []).filter(Boolean)),                // 0–3 Feature→Outcome→Value
-          ...(aug.amLine ? [aug.amLine] : []),                 // CSV cohort + focus subset (enforced here)
-          ...(aug.marketContext ? [aug.marketContext] : []),   // industry/profile evidence
+          ...((aug.fov || []).filter(Boolean)),                // Feature→Outcome→Value (0–3)
+          ...(aug.amLine ? [aug.amLine] : []),                 // AM from CSV (enforced here)
+          ...(aug.marketContext ? [aug.marketContext] : []),   // market context from evidence/profile
           ...(aug.blockersLine ? [aug.blockersLine] : []),     // CSV TopBlockers
           ...filteredLlmBullets
         ].filter(Boolean);
 
+        // Headline guard: if paragraph is empty or looks like a headline, synthesise one from data
+        if (!paragraph || looksLikeHeadline(paragraph)) {
+          const pSynth = synthesizeExecParagraph({ outline: ol, csvCanon: csvC });
+          if (pSynth && pSynth.trim()) paragraph = pSynth.trim();
+        }
+
+        // If we still have no bullets, ensure we at least output AM/context/blockers from aug
+        const ensuredBullets = newBullets.length
+          ? newBullets
+          : [
+            ...(aug.amLine ? [aug.amLine] : []),
+            ...(aug.marketContext ? [aug.marketContext] : []),
+            ...(aug.blockersLine ? [aug.blockersLine] : [])
+          ].filter(Boolean);
+
         const polished = (typeof polishExecSummaryLines === "function")
-          ? polishExecSummaryLines([paragraph, ...newBullets])
-          : [paragraph, ...newBullets];
+          ? polishExecSummaryLines([paragraph, ...ensuredBullets])
+          : [paragraph, ...ensuredBullets];
 
         out.executive_summary = polished.filter(Boolean);
       } catch (esErr) {
