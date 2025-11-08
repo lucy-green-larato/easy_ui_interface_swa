@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 07-11-2025 v15
+// /api/campaign-worker/index.js 07-11-2025 v16
 // Option B pipeline — worker fast path (draft campaign.json) with business-leader Executive Summary shaping
 // Preserves v14 structure: phased status, append-only event logger, robust loaders, and sanitizer.
 // Writes under results/<prefix> (container-relative, trailing slash). No renames of queues/ops/keys.
@@ -181,15 +181,54 @@ function buildMooreValueProp({ company, industry, usps, claimId }) {
   return claimId ? `${base} [${claimId}]` : base;
 }
 
-function buildLeadParagraph({ company, industry, requirement }) {
-  const a = company ? `${company} can capture` : "This campaign can capture";
-  const b = industry ? ` near-term ${industry} ` : " near-term ";
-  const c = requirement ? `${requirement} ` : "";
-  return `${a}${b}${c}opportunities with a focused, evidence-led campaign. This plan concentrates on one ICP, proves traction quickly, and scales once signal is validated.`;
+// Build an exec-summary intro grounded in CSV signals and needs coverage, plain business tone.
+function buildLeadParagraph({ company, industry, requirement, csvNormalized, needsMap }) {
+  const objective =
+    (String(requirement || "").toLowerCase() === "upsell")
+      ? "upsell services to existing customers"
+      : (String(requirement || "").toLowerCase() === "win-back")
+        ? "win back high-potential lapsed customers"
+        : "create near-term growth";
+
+  // ICP phrase
+  const icp =
+    industry
+      ? `one clear audience first: leaders on ${industry} projects`
+      : "one clear audience first";
+
+  // Buyer problems from CSV signals (prefer industry-specific, fall back to global)
+  const sig = csvNormalized?.signals;
+  const gs = csvNormalized?.global_signals;
+  const topProblems = (Array.isArray(sig?.top_blockers) && sig.top_blockers.length
+    ? sig.top_blockers
+    : (gs?.top_blockers || []))
+    .filter(Boolean)
+    .slice(0, 2);
+
+  const problemsText = topProblems.length
+    ? `They face ${topProblems.join("; ")}.`
+    : "";
+
+  // Fit/coverage from needs_map.json
+  const cov = needsMap?.coverage || { matched: 0, partial: 0, gap: 0 };
+  const gapNote = (cov.gap > 0)
+    ? "We will highlight any capability gaps and address them explicitly."
+    : "";
+
+  const supplier = company ? `${company} ` : "";
+  const sector = industry ? ` in ${industry}` : "";
+
+  // Keep it non-jargon, sign-off intent
+  return [
+    `This campaign’s objective is to ${objective}${sector}.`,
+    `We will start with ${icp} and prove results quickly on agreed measures.`,
+    problemsText,
+    gapNote
+  ].filter(Boolean).join(" ");
 }
 
-function shapeExecutiveSummary({ existing, input, csvMeta, evidence }) {
-  // Keep valid shape
+function shapeExecutiveSummary({ existing, input, csvMeta, csvNormalized, needsMap, evidence }) {
+  // Preserve existing if valid
   if (Array.isArray(existing) && existing.length >= 1 && existing.every(x => nonEmpty(x))) return existing;
 
   const company = firstNonEmpty(
@@ -210,7 +249,11 @@ function shapeExecutiveSummary({ existing, input, csvMeta, evidence }) {
   const csvClaim = Array.isArray(evidence) && evidence[0]?.claim_id ? evidence[0].claim_id : null;
   const usps = Array.isArray(input.supplier_usps) ? input.supplier_usps.filter(Boolean) : [];
 
-  const paragraph = buildLeadParagraph({ company, industry, requirement });
+  // NEW: build the lead paragraph using CSV signals + needs coverage
+  const paragraph = buildLeadParagraph({
+    company, industry, requirement, csvNormalized, needsMap
+  });
+
   const bullets = [
     buildMooreValueProp({ company, industry, usps, claimId: csvClaim }),
     amBullet,
@@ -227,7 +270,7 @@ function shapeExecutiveSummary({ existing, input, csvMeta, evidence }) {
     ].join("; ")}.`,
     `CTA: ${((input.sales_model || input.salesModel || "").toLowerCase() === "partner")
       ? "Approve partner-led campaign kickoff (content + joint outreach) and release MDF."
-      : "Approve direct campaign kickoff (content + SDR outreach) with 6-week runway."
+      : "Approve direct campaign kickoff (content + SDR outreach) with a 6-week runway."
     }`,
   ];
 
@@ -360,6 +403,10 @@ module.exports = async function (context, queueItem) {
     // CSV normalized (meta.rows => TAM)
     let csvNormalized = await readJsonIfExists(container, `${prefix}csv_normalized.json`);
     const csvMeta = pickCsvMeta(csvNormalized);
+    const needsMap = await readJsonIfExists(container, `${prefix}needs_map.json`) || {
+      coverage: { total: 0, matched: 0, partial: 0, gap: 0, coverage: 0 },
+      items: []
+    };
 
     // Phase 3 — Draft campaign (LLM)
     await setPhase(container, prefix, "DraftCampaign", { evidence_items: Array.isArray(evidence) ? evidence.length : 0 });
@@ -404,6 +451,8 @@ module.exports = async function (context, queueItem) {
         existing: draft.executive_summary,
         input: mergedInput,
         csvMeta,
+        csvNormalized,
+        needsMap,
         evidence
       });
 

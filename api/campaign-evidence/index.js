@@ -314,6 +314,65 @@ function topByFrequency(arr, limit = 8) {
     .slice(0, limit);
 }
 
+function collectProductNames(productsObj, siteJson, usps) {
+  const out = new Set();
+
+  // products.json (v7.1 stores { products: [...] })
+  if (Array.isArray(productsObj?.products)) {
+    for (const p of productsObj.products) {
+      const name = typeof p === "string" ? p : (p?.name || p?.title || "");
+      if (name && name.trim()) out.add(name.trim());
+    }
+  }
+
+  // site.json (array, legacy compatible) — harvest obvious headings/titles from page 0 snippet
+  const page0 = Array.isArray(siteJson) ? siteJson[0] : null;
+  const html = page0?.snippet || "";
+  if (html) {
+    const m = html.match(/<(h1|h2|h3|li)[^>]*>([^<]{3,120})</gi) || [];
+    for (const tag of m) {
+      const t = tag.replace(/<[^>]+>/g, "").trim();
+      if (t && !/^(home|about|contact|support|blog|learn|login|privacy|terms)$/i.test(t)) out.add(t);
+    }
+  }
+
+  // supplier_usps hint at capabilities
+  if (Array.isArray(usps)) {
+    for (const u of usps) if (u && u.trim()) out.add(u.trim());
+  }
+
+  return Array.from(out);
+}
+
+function matchNeedToCapabilities(need, productNames, usps) {
+  const tokens = String(need || "").toLowerCase().split(/\W+/).filter(Boolean);
+  const hits = [];
+
+  for (const name of productNames) {
+    const nlow = name.toLowerCase();
+    if (tokens.some(tok => nlow.includes(tok))) hits.push({ type: "product", name });
+  }
+  for (const u of (usps || [])) {
+    const ulow = String(u || "").toLowerCase();
+    if (tokens.some(tok => ulow.includes(tok))) hits.push({ type: "usp", name: u });
+  }
+
+  let status = "gap";
+  if (hits.length >= 2) status = "matched";
+  else if (hits.length === 1) status = "partial";
+
+  return { need, status, hits };
+}
+
+function summariseCoverage(map) {
+  const total = Array.isArray(map) ? map.length : 0;
+  const matched = map.filter(x => x.status === "matched").length;
+  const partial = map.filter(x => x.status === "partial").length;
+  const gap = map.filter(x => x.status === "gap").length;
+  const coverage = total ? Math.round(((matched + 0.5 * partial) / total) * 100) : 0;
+  return { total, matched, partial, gap, coverage };
+}
+
 function resolveIndustry({ userIndustry, csvIndustry, csvHasMultipleSectors }) {
   const u = (userIndustry || "").trim().toLowerCase();
   if (u) return u;
@@ -897,6 +956,31 @@ module.exports = async function (context, job) {
     }
 
     await putJson(container, `${prefix}csv_normalized.json`, csvNormalizedCanonical);
+    const siteObjForMap = await getJson(container, `${prefix}site.json`);
+    const productsObjForMap = await getJson(container, `${prefix}products.json`);
+    const uspsList = Array.isArray(input?.supplier_usps)
+      ? input.supplier_usps.map(s => String(s).trim()).filter(Boolean)
+      : [];
+
+    // Derive product/capability names
+    const productNames = collectProductNames(productsObjForMap, siteObjForMap, uspsList);
+
+    // Pull buyer needs from csv_normalized (specific signals preferred; fallback to global)
+    const needsList =
+      (csvNormalizedCanonical?.signals?.top_needs_supplier && csvNormalizedCanonical.signals.top_needs_supplier.length
+        ? csvNormalizedCanonical.signals.top_needs_supplier
+        : (csvNormalizedCanonical?.global_signals?.top_needs_supplier || []))
+        .map(s => String(s).trim()).filter(Boolean);
+
+    // Build needs map & persist as needs_map.json
+    const needsMap = needsList.map(n => matchNeedToCapabilities(n, productNames, uspsList));
+    const coverage = summariseCoverage(needsMap);
+    await putJson(container, `${prefix}needs_map.json`, {
+      supplier_company: (input.supplier_company || input.company_name || input.prospect_company || "").trim(),
+      selected_industry: csvNormalizedCanonical?.selected_industry || (input?.selected_industry || input?.campaign_industry || ""),
+      coverage,
+      items: needsMap
+    });
 
     // 5c) PACKS (added): load packs + run evidence.buildEvidence for industry sources & more
     let packEvidence = [];
@@ -974,8 +1058,8 @@ module.exports = async function (context, job) {
     }
 
     // 6.1 CSV summary first (if any)
-   const csvSummaryItem = csvSummaryEvidence(csvNormalizedCanonical, input, prefix, container.url);
-   if (csvSummaryItem) {
+    const csvSummaryItem = csvSummaryEvidence(csvNormalizedCanonical, input, prefix, container.url);
+    if (csvSummaryItem) {
       // Ensure the CSV summary sits at index 0 and survives any later trimming
       evidenceLog.unshift(csvSummaryItem);
     }
@@ -985,6 +1069,28 @@ module.exports = async function (context, job) {
       const _csvSignalsItem = csvSignalsEvidence(csvNormalizedCanonical, prefix, container.url);
       if (_csvSignalsItem) safePushIfRoom(evidenceLog, _csvSignalsItem, MAX_EVIDENCE_ITEMS);
     }
+    // 6.1c Capability coverage summary (from needs_map.json)
+    try {
+      const nm = await getJson(container, `${prefix}needs_map.json`);
+      if (nm && nm.coverage) {
+        const cov = nm.coverage;
+        const lines = Array.isArray(nm.items)
+          ? nm.items.slice(0, 12).map(m => `${m.need} → ${m.status}${m.hits?.length ? ` (${m.hits.map(h => h.name).join(", ")})` : ""}`)
+          : [];
+        safePushIfRoom(
+          evidenceLog,
+          {
+            claim_id: nextClaimId(),
+            source_type: "Directory",
+            title: "Supplier coverage of buyer needs",
+            url: `${container.url}/${prefix}needs_map.json`,
+            summary: addCitation(`Matched: ${cov.matched}, Partial: ${cov.partial}, Gaps: ${cov.gap} (coverage ${cov.coverage}%)`, "Directory"),
+            quote: lines.join("\n")
+          },
+          MAX_EVIDENCE_ITEMS
+        );
+      }
+    } catch { /* non-fatal */ }
 
     // 6.2 Supplier identity + user notes + competitors (core context)
     {
@@ -1212,7 +1318,7 @@ module.exports = async function (context, job) {
 
     // Final tidy: remove placeholders, de-dupe, renumber claim_ids (deterministic)
     evidenceLog = evidenceLog.filter(it => !isPlaceholderEvidence(it));
-   evidenceLog = dedupeEvidence(evidenceLog);
+    evidenceLog = dedupeEvidence(evidenceLog);
     // Capacity trim BUT keep CSV summary at [0]
     if (evidenceLog.length > MAX_EVIDENCE_ITEMS) {
       evidenceLog = [evidenceLog[0], ...evidenceLog.slice(1, MAX_EVIDENCE_ITEMS)];
