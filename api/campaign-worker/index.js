@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 07-11-2025 v16.1
+// /api/campaign-worker/index.js 08-11-2025 v18
 // Option B pipeline — worker fast path (draft campaign.json) with business-leader Executive Summary shaping
 // Preserves v14 structure: phased status, append-only event logger, robust loaders, and sanitizer.
 // Writes under results/<prefix> (container-relative, trailing slash). No renames of queues/ops/keys.
@@ -159,6 +159,129 @@ function sanitizeCaseStudyLibrary(draft, evidence, prospectWebsite, context) {
   return draft;
 }
 
+// -------- Helper — Market context from evidence + CSV signals (no hard-wiring) --------
+function deriveMarketContext({ evidence, csvSignals, usps, company, industry }) {
+  // Preconditions: need some industry pack evidence and at least one of {need, usp}
+  const ev = Array.isArray(evidence) ? evidence : [];
+  if (!ev.length) return "";
+
+  // 1) Choose the most relevant industry pack items (ranked earlier in evidence builder)
+  //    Prefer regulator/industry items; then anything mentioning the industry term.
+  const industryL = String(industry || "").toLowerCase();
+  const isReg = (t) => /(ofcom|gov\.uk|ons|citb|regulator|industry)/.test(t);
+  const score = (it) => {
+    const t = `${(it.title || "")} ${(it.summary || it.quote || "")}`.toLowerCase();
+    let s = 0;
+    if (industryL && t.includes(industryL)) s += 5;
+    if (isReg(t) || isReg(String(it.source_type || "").toLowerCase())) s += 8;
+    return s;
+  };
+  const top = ev
+    .map(it => ({ it, s: score(it) }))
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 8)
+    .map(x => x.it);
+
+  if (!top.length) return "";
+
+  // 2) Extract key terms and benefits from summaries only (no fixed keyword list)
+  const text = top.map(it => String(it.summary || it.quote || it.title || "")).join(" ").toLowerCase();
+
+  // Build a simple token frequency without stopwords; keep neutral nouns/adjectives
+  const STOP = new Set([
+    "the", "and", "for", "with", "from", "that", "this", "are", "is", "of", "to", "in", "on", "as", "by", "at", "an", "or", "a",
+    "into", "across", "more", "most", "over", "under", "within", "their", "your", "our", "it", "they", "be", "was", "were"
+  ]);
+  const tokens = text.split(/[^a-z0-9+]+/).filter(t => t && t.length > 2 && !STOP.has(t));
+  const freq = new Map();
+  for (const t of tokens) freq.set(t, (freq.get(t) || 0) + 1);
+
+  // Remove industry name and company name tokens to avoid tautology
+  const rm = (s) => String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  for (const k of rm(industry)) freq.delete(k);
+  for (const k of rm(company)) freq.delete(k);
+
+  // Pick top terms (neutral, evidence-derived)
+  const topTerms = [...freq.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([w]) => w)
+    .filter(Boolean);
+
+  if (!topTerms.length) return "";
+
+  // 3) Buyer need (CSV signals) and supplier capability (USPs)
+  const needs = Array.isArray(csvSignals?.top_needs) ? csvSignals.top_needs.filter(Boolean) : [];
+  const primaryNeed = needs[0] || "";
+
+  const uspArr = Array.isArray(usps) ? usps.filter(Boolean) : [];
+  const uspPhrase = uspArr.slice(0, 3).join("; ");
+
+  // Compose two short, factual sentences. If any element is missing, omit that clause.
+  const parts = [];
+
+  // Supplier fit sentence (only if we have either a need or USPs)
+  if (company && (primaryNeed || uspPhrase)) {
+    const needPart = primaryNeed ? `meet buyers’ needs for ${primaryNeed}` : "address priority buyer needs";
+    const uspPart = uspPhrase ? ` via ${uspPhrase}` : "";
+    parts.push(`${company} can ${needPart}${uspPart}.`);
+  }
+
+  // Peer practice sentence from evidence terms (no vendor words, purely evidence-derived)
+  // Join 3–4 highest-signal terms to keep it readable
+  const peerTerms = topTerms.slice(0, 4).join(", ");
+  if (peerTerms) {
+    parts.push(`Peers in the sector emphasise ${peerTerms} to secure specific operational benefits.`);
+  }
+
+  return parts.join(" ").trim();
+}
+
+// -------- Helper — extract top buyer blockers directly from CSV "TopBlockers" column --------
+function extractTopBlockersFromCsv(csvCanonical) {
+  // Accept any of: csvCanonical.records, csvCanonical.rows, or csvCanonical (AoA)
+  const rows =
+    Array.isArray(csvCanonical?.records) ? csvCanonical.records :
+      Array.isArray(csvCanonical?.rows) ? csvCanonical.rows :
+        (Array.isArray(csvCanonical) ? csvCanonical : []);
+
+  if (!Array.isArray(rows) || rows.length < 2) return [];
+
+  // Find column index for TopBlockers (case/spacing/underscore tolerant)
+  const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const header = rows[0].map((h) => String(h || ""));
+  const idx = header.findIndex((h) => {
+    const n = norm(h);
+    return n === "topblockers" || (n.includes("top") && n.includes("block"));
+  });
+  if (idx === -1) return [];
+
+  // Split cells by common delimiters, count frequency (keep original casing)
+  const counts = new Map();
+  const push = (txt) => {
+    const key = txt.trim();
+    if (!key) return;
+    const low = key.toLowerCase();
+    counts.set(low, { text: key, n: (counts.get(low)?.n || 0) + 1 });
+  };
+
+  for (let r = 1; r < rows.length; r++) {
+    const cell = rows[r]?.[idx];
+    if (!cell) continue;
+    String(cell)
+      .split(/[,;/|•]+/g)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .forEach(push);
+  }
+
+  // Return top 3 distinct blockers, preserving original text from the most common variant
+  return [...counts.values()]
+    .sort((a, b) => b.n - a.n)
+    .slice(0, 3)
+    .map(x => x.text);
+}
+
 // ---------------- Strategy synthesis ------------------------
 function pickClaim(evidence, predicate) {
   const it = (Array.isArray(evidence) ? evidence : []).find(predicate);
@@ -247,33 +370,164 @@ function buildStrategyObject({ input, csvNormalized, needsMap, evidence }) {
   };
 }
 
-// Render a plain-English lead paragraph from the strategy
-function leadParagraphFromStrategy({ strategy }) {
+function leadParagraphFromStrategy({ strategy, evidence, industryOverride, input }) {
+  // --- local helpers (no external deps) ---
+  const listInline = (arr) => {
+    const a = (Array.isArray(arr) ? arr : []).map(s => String(s || "").trim()).filter(Boolean);
+    if (!a.length) return "";
+    if (a.length === 1) return a[0];
+    if (a.length === 2) return `${a[0]} and ${a[1]}`;
+    return `${a.slice(0, -1).join(", ")}, and ${a[a.length - 1]}`;
+  };
+  const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
+
+  // --- inputs from strategy / input ---
+  const company = strategy?.meta?.company || "";
+  const industry = (industryOverride || strategy?.meta?.industry || "").trim();
   const requirement = (strategy?.meta?.requirement || "growth").toLowerCase();
-  const industry = strategy?.meta?.industry || "";
   const objective =
     requirement === "upsell" ? "upsell services to existing customers"
       : requirement === "win-back" ? "win back high-potential lapsed customers"
         : "create near-term growth";
 
-  const sector = industry ? ` in ${industry}` : "";
-  const icp = strategy?.prospect_base?.icp
-    ? `We will start with ${strategy.prospect_base.icp} and prove results quickly on agreed measures.`
-    : "We will start with one clear audience first and prove results quickly on agreed measures.";
+  // Sector-insight (from ranked evidence: Ofcom/ONS/GOV.UK/CITB etc.) — optional, no placeholders
+  let sectorLead = "";
+  if (industry && Array.isArray(evidence) && evidence.length) {
+    const picks = evidence.filter(ev => {
+      const t = `${(ev.title || "")} ${(ev.summary || "")}`.toLowerCase();
+      const src = String(ev.source_type || "").toLowerCase();
+      const isReg = /(ofcom|gov\.uk|ons|citb)/.test(t) || /(ofcom|gov\.uk|ons|citb)/.test(src);
+      return isReg || t.includes(industry.toLowerCase());
+    }).slice(0, 2);
 
-  const problems = topN(strategy?.buyer_problems, 2);
-  const problemsText = problems.length ? `They face ${problems.join("; ")}.` : "";
+    if (picks.length) {
+      const phrases = picks.map(ev => {
+        const s = String(ev.summary || ev.title || "").split(/[.?!]/)[0].trim();
+        const tag = (ev.source_type || "source").toString();
+        return s ? `${s} (${tag})` : "";
+      }).filter(Boolean);
+      if (phrases.length) sectorLead = phrases.join(" ");
+    }
+  }
 
-  const cov = strategy?.fit_analysis?.coverage || { gap: 0 };
-  const gapNote = (cov.gap > 0) ? "We will highlight any capability gaps and address them explicitly." : "";
+  // Buyer **motivations/needs** and **barriers** (no placeholders)
+  // Prefer strategy-derived fields (deterministic model), fall back to input if present.
+  const needsFromStrategy =
+    Array.isArray(strategy?.buyer_needs) ? strategy.buyer_needs.filter(Boolean) : [];
+  const needsFromInput =
+    Array.isArray(input?.top_needs_supplier) ? input.top_needs_supplier.filter(Boolean) :
+      Array.isArray(input?.top_needs) ? input.top_needs.filter(Boolean) : [];
+  const needs = (needsFromStrategy.length ? needsFromStrategy : needsFromInput).slice(0, 2);
 
-  return [
-    `This campaign’s objective is to ${objective}${sector}.`,
-    icp,
-    problemsText,
-    gapNote
+  const blockersFromStrategy =
+    Array.isArray(strategy?.buyer_problems) ? strategy.buyer_problems.filter(Boolean) : [];
+  const blockersFromInput =
+    Array.isArray(input?.top_blockers) ? input.top_blockers.filter(Boolean) : [];
+  const blockers = (blockersFromStrategy.length ? blockersFromStrategy : blockersFromInput).slice(0, 2);
+
+  // One-sentence **decision context** (only if we have real data)
+  let decisionLine = "";
+  if (needs.length || blockers.length) {
+    const actor = industry ? `${cap(industry)} leaders` : "Decision-makers";
+    const want = needs.length ? `want ${listInline(needs)}` : "";
+    const held = blockers.length ? `but are held back by ${listInline(blockers)}` : "";
+    const clause = [want, held].filter(Boolean).join(" ");
+    if (clause) decisionLine = `${actor} ${clause}.`;
+  }
+
+  // Buyer pains → sentence (optional, only if present)
+  const pains = Array.isArray(strategy?.buyer_problems) ? strategy.buyer_problems.filter(Boolean).slice(0, 2) : [];
+  const painsText = pains.length ? `Based on current evidence, they need ${listInline(pains)}.` : "";
+
+  // Supplier capabilities (USPs) — only real values
+  const usps = Array.isArray(strategy?.meta?.usps) ? strategy.meta.usps.filter(Boolean).slice(0, 3) : [];
+  const uspText = usps.length ? `${company || "The supplier"} provides ${listInline(usps)}.` : "";
+
+  // Expected business outcome (deterministic if provided)
+  const expected = strategy?.specific_outcome ? `Expected outcome: ${strategy.specific_outcome}.` : "";
+
+  // Core paragraph (kept from your model)
+  const core = [
+    `This campaign’s objective is to ${objective}${industry ? ` in ${industry}` : ""}.`,
+    strategy?.prospect_base?.icp
+      ? `We will start with ${strategy.prospect_base.icp} and report weekly against agreed measures.`
+      : "We will start with one clear audience and report weekly against agreed measures.",
+    painsText,
+    uspText,
+    expected
   ].filter(Boolean).join(" ");
+
+  // Order: sector insight (if present) → decision context (if present) → core
+  return [sectorLead, decisionLine, core].filter(Boolean).join(" ");
 }
+
+// -------- Helper — Data-driven Feature → Outcome → Business Value (no hard-wiring) --------
+function mapFeaturesToBenefits({ usps, evidence, csvSignals, strategy }) {
+  const toText = (v) => String(v || "").toLowerCase();
+  const split = (s) => toText(s).split(/[^a-z0-9]+/).filter(Boolean);
+  const jaccard = (a, b) => {
+    const A = new Set(a), B = new Set(b);
+    if (!A.size || !B.size) return 0;
+    let inter = 0;
+    for (const x of A) if (B.has(x)) inter++;
+    return inter / (A.size + B.size - inter);
+  };
+
+  const needs = Array.isArray(csvSignals?.top_needs) ? csvSignals.top_needs.filter(Boolean) : [];
+  const blockers = Array.isArray(csvSignals?.top_blockers) ? csvSignals.top_blockers.filter(Boolean) : [];
+  const uspsArr = Array.isArray(usps) ? usps.filter(Boolean) : [];
+
+  // Optional evidence gate: allow a USP if it appears in evidence text OR accept it from strategy meta
+  const evidenceText = (Array.isArray(evidence) ? evidence : [])
+    .map(ev => `${ev.title || ""} ${ev.summary || ev.quote || ""}`)
+    .join(" ")
+    .toLowerCase();
+
+  const lines = [];
+
+  for (const usp of uspsArr) {
+    // Only proceed if the USP is non-empty and either present in evidence text OR we trust strategy meta
+    const uspTokens = split(usp);
+    if (!uspTokens.length) continue;
+
+    // Find best matching need & blocker by token overlap (no fixed keywords)
+    let bestNeed = null, bestNeedScore = 0;
+    for (const n of needs) {
+      const s = jaccard(uspTokens, split(n));
+      if (s > bestNeedScore) { bestNeedScore = s; bestNeed = n; }
+    }
+
+    let bestBlocker = null, bestBlockerScore = 0;
+    for (const b of blockers) {
+      const s = jaccard(uspTokens, split(b));
+      if (s > bestBlockerScore) { bestBlockerScore = s; bestBlocker = b; }
+    }
+
+    // Build only if we have at least one alignment (need OR blocker)
+    if (!bestNeed && !bestBlocker) continue;
+
+    const parts = [];
+    // Feature
+    parts.push(String(usp).trim());
+    // Outcome (why it matters operationally)
+    if (bestNeed) parts.push(`to advance ${bestNeed}`);
+    // Business value (link to blocker risk reduction or the stated specific outcome)
+    const specific = strategy?.specific_outcome ? String(strategy.specific_outcome).trim() : "";
+    if (bestBlocker) {
+      parts.push(`→ Business value: reduces risk from ${bestBlocker}`);
+    } else if (specific) {
+      parts.push(`→ Business value: supports ${specific}`);
+    }
+
+    // Join: "<USP> to advance <need> → Business value: ..."
+    const line = parts.join(" ");
+    if (line) lines.push(line);
+  }
+
+  // Keep the ES tight
+  return lines.slice(0, 3);
+}
+
 // ---------------- Strategy synthesis (NEW in v16.1) ------------------------
 function pickClaim(evidence, predicate) {
   const it = (Array.isArray(evidence) ? evidence : []).find(predicate);
@@ -360,39 +614,6 @@ function buildStrategyObject({ input, csvNormalized, needsMap, evidence }) {
     evidence_links: [csvClaim, packClaim].filter(Boolean),
     meta: { company, industry, route, requirement, usps }
   };
-}
-
-function leadParagraphFromStrategy({ strategy }) {
-  const company = strategy?.meta?.company || "";
-  const industry = strategy?.meta?.industry || "";
-  const requirement = (strategy?.meta?.requirement || "growth").toLowerCase();
-  const objective =
-    requirement === "upsell" ? "upsell services to existing customers"
-      : requirement === "win-back" ? "win back high-potential lapsed customers"
-        : "create near-term growth";
-  const sector = industry ? ` in ${industry}` : "";
-  const icpText = strategy?.prospect_base?.icp
-    ? `We will start with ${strategy.prospect_base.icp} and report weekly against agreed measures.`
-    : "We will start with one clear audience and report weekly against agreed measures.";
-
-  // Buyer pains (evidence-led)
-  const pains = Array.isArray(strategy?.buyer_problems) ? strategy.buyer_problems.filter(Boolean).slice(0, 2) : [];
-  const painsText = pains.length ? `Based on current evidence, they need ${pains.join("; ")}.` : "";
-
-  // Supplier capabilities (USPs)
-  const usps = Array.isArray(strategy?.meta?.usps) ? strategy.meta.usps.filter(Boolean).slice(0, 3) : [];
-  const uspText = usps.length ? `${company || "The supplier"} provides ${usps.join("; ")}.` : "";
-
-  // Expected business outcome (deterministic)
-  const expected = strategy?.specific_outcome ? `Expected outcome: ${strategy.specific_outcome}.` : "";
-
-  return [
-    `This campaign’s objective is to ${objective}${sector}.`,
-    icpText,
-    painsText,
-    uspText,
-    expected
-  ].filter(Boolean).join(" ");
 }
 
 // ---------------- Executive Summary shaping + Title (v16) ------------------
@@ -508,13 +729,25 @@ function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence })
   const rowsRaw = Number.isFinite(Number(input?.addressable_market)) && Number(input.addressable_market) > 0
     ? Number(input.addressable_market)
     : (Number.isFinite(Number(csvMeta?.rows)) && Number(csvMeta.rows) > 0
-        ? Number(csvMeta.rows)
-        : (Number.isFinite(Number(strategy?.prospect_base?.tam)) ? Number(strategy.prospect_base.tam) : null));
+      ? Number(csvMeta.rows)
+      : (Number.isFinite(Number(strategy?.prospect_base?.tam)) ? Number(strategy.prospect_base.tam) : null));
 
   const amBullet = rowsRaw !== null
     ? `Addressable market in scope: **${rowsRaw.toLocaleString()}** organisations (from campaign source data).`
     : `Addressable market in scope: will be populated from the uploaded CSV.`;
-
+    // Buyer blockers (from CSV TopBlockers column)
+  const csvBlockers = extractTopBlockersFromCsv(csvMeta);
+  const blockersLine = csvBlockers.length
+    ? `Key buyer blockers to investment: ${csvBlockers.join("; ")}.`
+    : "";
+  // Market context (data-led, optional; prints only when we have evidence/signals)
+  const marketContextLine = deriveMarketContext({
+    evidence,
+    csvSignals: (csvMeta && csvMeta.signals) ? csvMeta.signals : undefined,
+    usps,
+    company,
+    industry
+  });
   // Optional evidence reference (use it or omit it entirely)
   const csvClaim = (Array.isArray(evidence) && evidence[0]?.claim_id)
     ? evidence[0].claim_id
@@ -523,7 +756,7 @@ function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence })
   const usps = Array.isArray(input.supplier_usps) ? input.supplier_usps.filter(Boolean) : (strategy?.meta?.usps || []);
 
   // Lead paragraph (deterministic)
-  const paragraph = leadParagraphFromStrategy({ strategy });
+  const paragraph = leadParagraphFromStrategy({ strategy, evidence, industry, input });
 
   // Dependencies: conditional and sign-off oriented (no SDR jargon)
   const depItems = [];
@@ -533,36 +766,75 @@ function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence })
     depItems.push("Confirm sufficient, enabled, salespeople for outbound first wave");
   }
   if (!hasReferences) depItems.push("Access 2–3 verified customer references with measurable outcomes");
-  if (!hasTracking)  depItems.push("Publish tracked landing path and lead capture (UTM, CRM)");
+  if (!hasTracking) depItems.push("Publish tracked landing path and lead capture (UTM, CRM)");
   const deps = depItems.join("; ");
 
-  // Route-aware CTA (clear approval)
-  const cta = route === "partner"
-    ? "Approve budget and joint first-wave launch with named partners; release co-marketing funds (MDF); agree success measures and reporting."
-    : "Approve budget and first-wave direct launch (content + outbound); agree success measures and reporting.";
-
-  // Buyer pains + differentiation (Moore-style)
+  // Buyer pains & competitive note (data-driven; no placeholders)
   const pains = Array.isArray(strategy?.buyer_problems) ? strategy.buyer_problems.filter(Boolean).slice(0, 2) : [];
-  const painsText = pains.length ? ` to resolve ${pains.join("; ")}` : "";
-  const who = industry ? `senior decision-makers in ${industry}` : "senior decision-makers";
-  const offer = company ? `${company} offers` : "This campaign offers";
-  const uspList = Array.isArray(usps) && usps.length ? usps.slice(0, 3).join("; ") : "a focused, evidence-led proposition";
-  const compAlt = Array.isArray(strategy?.how_win?.vs_competitors) && strategy.how_win.vs_competitors.length
-    ? strategy.how_win.vs_competitors[0]
-    : "generic telco options";
-  const evidenceTag = csvClaim ? ` [${csvClaim}]` : "";
+
+  // Audience: prefer ICP; else industry; else omit subject entirely
+  const icp = strategy?.prospect_base?.icp && String(strategy.prospect_base.icp).trim();
+  const audience =
+    icp ? icp
+      : (industry ? `${industry} decision-makers` : "");
+
+  // Offer: only if we have company and/or USPs; never print a placeholder
+  const uspArr = Array.isArray(usps) ? usps.filter(Boolean) : [];
+  const offerParts = [];
+  if (company) offerParts.push(company);
+  if (uspArr.length) offerParts.push(uspArr.slice(0, 3).join("; "));
+  const offerPhrase = offerParts.join(" — "); // e.g., "Comms365 — Bonded Internet; SD-One; Continuum"
+
+  // Competitive alternative: only if provided; otherwise omit the clause
+  const vsList = Array.isArray(strategy?.how_win?.vs_competitors) ? strategy.how_win.vs_competitors.filter(Boolean) : [];
+  const diffClause = vsList.length ? ` — unlike ${vsList[0]}` : "";
+
+  // Compose first bullet with only evidenced parts
+  const firstParts = [];
+  if (audience) {
+    // "For <audience>, <offer> ..."
+    const head = offerPhrase ? `For ${audience}, ${offerPhrase}` : `For ${audience}`;
+    firstParts.push(head);
+  } else if (offerPhrase) {
+    // No audience string; start with offer
+    firstParts.push(offerPhrase);
+  }
+  if (pains.length) firstParts.push(`to address ${pains.join("; ")}`);
+  const firstBullet = (firstParts.join(" ") + diffClause).trim();
+
+  // Evidence-checked Feature→Outcome→Business Value lines (no placeholders)
+  const fovLines = mapFeaturesToBenefits({
+    usps,
+    evidence,
+    csvSignals: (csvMeta && csvMeta.signals) ? csvMeta.signals : undefined,
+    strategy
+  }).slice(0, 3);
 
   const bullets = [
-    `For ${who}, ${offer} ${uspList}${painsText} — unlike ${compAlt}.${evidenceTag}`,
-    amBullet,
-    `Dependencies: ${deps}.`,
-    `Decision required: Approve the first-wave segment and the success metric with weekly reporting.`,
-    `CTA: ${cta}`
-  ];
+    // First bullet only if we have something substantive
+    ...(firstBullet ? [firstBullet] : []),
 
+    // Evidence-backed Feature → Outcome → Business Value lines (0–3, no placeholders)
+    ...fovLines,
+
+    // Addressable market (always present if CSV parsed)
+    amBullet,
+
+    // Market context line (only when derived from evidence + CSV signals + USPs)
+    ...(marketContextLine ? [marketContextLine] : []),
+    ...(blockersLine ? [blockersLine] : []),  
+
+    // Pre-conditions expressed for sign-off (deps already computed upstream)
+    `Pre-conditions: ${deps}.`,
+
+    // Decision phrased for a budget holder (no jargon)
+    `Decision: approve the target segment and success metric, with weekly reporting.`,
+
+    // Clear next step (CTA already route-aware and non-jargon)
+    `Next step: ${cta}`
+  ];
   return [paragraph, ...bullets];
 }
-
 
 // -------- Parse and validate the queue message --------
 function parseQueueMessage(queueItem) {

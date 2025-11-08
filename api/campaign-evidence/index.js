@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js — Split campaign build. 05-11-2025 — v7.1 (packs-aware)
+// /api/campaign-evidence/index.js — Split campaign build. 08-11-2025 — v8
 // Node 20, Azure Functions v4 (CommonJS)
 // Purpose: build the canonical evidence set for a run.
 // Artifacts written under: <prefix>/
@@ -80,6 +80,14 @@ function getContainerClient() {
   const svc = BlobServiceClient.fromConnectionString(conn);
   return svc.getContainerClient(RESULTS_CONTAINER);
 }
+
+// --- CSV holders for later evidence composition ---
+let csvRowsRaw = null;        // raw parsed rows (array-of-arrays)
+let csvFocusInsight = {       // computed later from rows + input focus
+  totalRows: 0,
+  focusLabel: "",
+  focusCount: null
+};
 
 async function streamToString(readable) {
   if (!readable) return "";
@@ -435,6 +443,40 @@ function isCaseStudyUrl(u) {
     /\b(success|story|customer|deployment|implementation|results|case)\b/.test(low)
   );
 }
+// Product URL heuristic (same host; obvious product/solution/service paths)
+function isProductUrl(u) {
+  const low = String(u || "").toLowerCase();
+  return /product|products|solution|solutions|service|services|continuum|constellation|sd-?one|bond(ed|ing)|starlink/.test(low);
+}
+
+// Parse product/solution claims (H1/H2/LI → short bullet texts)
+function parseProductClaims(html) {
+  if (!html || typeof html !== "string") return [];
+  const claims = [];
+
+  const h1 = (html.match(/<h1[^>]*>(.*?)<\/h1>/i) || [, ""])[1];
+  if (h1) claims.push(h1.replace(/<[^>]+>/g, "").trim());
+
+  const h2s = [...html.matchAll(/<h2[^>]*>(.*?)<\/h2>/gim)].map(m => (m[1] || "").replace(/<[^>]+>/g, "").trim());
+  for (const h of h2s) if (h) claims.push(h);
+
+  const lis = [...html.matchAll(/<li[^>]*>(.*?)<\/li>/gim)].map(m => (m[1] || "").replace(/<[^>]+>/g, "").trim());
+  for (const li of lis) if (li && li.length <= 200) claims.push(li);
+
+  // De-dupe + trim + cap
+  const seen = new Set();
+  const out = [];
+  for (const c of claims) {
+    const t = (c || "").replace(/\s+/g, " ").trim();
+    if (!t) continue;
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+    if (out.length >= 12) break; // safety cap per page
+  }
+  return out;
+}
 
 async function crawlSiteGraph(rootUrl, budget = MAX_SITE_PAGES, timeout = FETCH_TIMEOUT_MS) {
   if (!rootUrl) return { pages: [], links: [] };
@@ -626,7 +668,7 @@ function classifySourceType(url) {
   return "Company site";
 }
 
-function csvSummaryEvidence(csvCanonical, input, prefix, containerUrl) {
+function csvSummaryEvidence(csvCanonical, input, prefix, containerUrl, focusInsight, industry) {
   const rows = Number(csvCanonical?.meta?.rows || input?.rowCount || 0);
   const fileName = csvCanonical?.meta?.source || input?.csvFilename || "inline";
   const root = String(containerUrl).replace(/\/+$/, "");
@@ -636,19 +678,33 @@ function csvSummaryEvidence(csvCanonical, input, prefix, containerUrl) {
     ? `${root}/${pfx}${cleanName}`
     : `${root}/${pfx}csv_normalized.json`;
 
-  let focusNote = "";
-  if (rows >= 180 && rows <= 320) focusNote = "Good focus range for a single campaign (≈200–300).";
-  else if (rows > 320) focusNote = "Large set; consider segmenting into waves for focus.";
-  else if (rows > 0) focusNote = "Very narrow set; consider broadening if volume is required.";
+  // If we have a credible focus subset, print the full segment insight
+  const f = focusInsight || {};
+  const indPrefix = (industry && String(industry).trim()) ? `${industry} ` : "";
 
-  const base = `Addressable market: ${rows} companies in ${fileName}. ${focusNote}`.trim();
+  let summaryLine = "";
+  if (Number.isFinite(f.totalRows) && f.totalRows > 0 && f.focusLabel && Number.isFinite(f.focusCount)) {
+    summaryLine =
+      `Campaign addressable market: there are ${f.totalRows.toLocaleString()} ${indPrefix}companies in your campaign cohort. ` +
+      `${f.focusCount.toLocaleString()} of them plan to purchase ${f.focusLabel}.`;
+  } else if (rows > 0) {
+    // fallback: credible total only
+    let focusNote = "";
+    if (rows >= 180 && rows <= 320) focusNote = " Good focus range for a single campaign (≈200–300).";
+    else if (rows > 320) focusNote = " Large set; consider segmenting into waves for focus.";
+    else focusNote = " Very narrow set; consider broadening if volume is required.";
+    summaryLine = `Addressable market: ${rows} companies in ${fileName}.${focusNote}`;
+  } else {
+    summaryLine = "Addressable market: to be populated from the uploaded CSV.";
+  }
+
   return {
     claim_id: nextClaimId(),
     source_type: "CSV",
     title: "CSV population",
     url: csvUrl,
-    summary: addCitation(base, "CSV"),
-    quote: "CSV-derived population size and focus guidance."
+    summary: addCitation(summaryLine.trim(), "CSV"),
+    quote: "CSV-derived population and segment insight."
   };
 }
 
@@ -834,6 +890,42 @@ module.exports = async function (context, job) {
     } catch (e) {
       context.log.warn("[campaign-evidence] product extraction skipped", String(e?.message || e));
     }
+    // 1b) Product pages (claims from same-host product/solution URLs)
+    let productPageEvidence = [];
+    try {
+      if (siteGraph.pages.length) {
+        const root = siteGraph.pages[0]?.url || supplierWebsite;
+        const allLinks = Array.isArray(siteGraph.links) ? siteGraph.links : [];
+        const candidates = allLinks
+          .filter(u => sameHost(u, root))
+          .filter(isProductUrl)
+          .slice(0, 10); // crawl budget for product pages
+
+        for (const url of candidates) {
+          const res = await httpGet(url, FETCH_TIMEOUT_MS);
+          if (!res.ok) continue;
+          const html = (res.text || "").slice(0, 150_000);
+
+          // Build one evidence item per page using first claims as summary
+          const pageTitle = (html.match(/<title[^>]*>([^<]{3,200})<\/title>/i)?.[1] || "").trim();
+          const claims = parseProductClaims(html);
+          if (!claims.length) continue;
+
+          productPageEvidence.push({
+            claim_id: nextClaimId(),
+            source_type: "Company site",
+            title: pageTitle || "Product/solution page",
+            url: toHttps(url),
+            summary: addCitation(claims.slice(0, 3).join(" — "), "Company site"),
+            quote: claims.slice(3, 9).join("\n") // keep extra claims as quote lines
+          });
+
+          if (productPageEvidence.length >= 8) break; // cap items we store
+        }
+      }
+    } catch (e) {
+      context.log.warn("[campaign-evidence] product page claims step failed", String(e?.message || e));
+    }
 
     // 2) LINKEDIN (reference only)
     const li = supplierLinkedIn
@@ -898,6 +990,53 @@ module.exports = async function (context, job) {
 
     if (csvText && csvText.trim()) {
       const rows = parseCsvLoose(csvText);
+      // keep raw rows for focus insight
+      csvRowsRaw = rows;
+
+      // derive an optional focus label from input
+      const focusLabelRaw = String(
+        input?.selected_product ??
+        input?.campaign_focus ??
+        input?.offer ??
+        input?.sales_focus ??
+        ""
+      ).trim();
+
+      // compute total (header excluded) and focused subset count
+      (function computeCsvFocus() {
+        try {
+          // total rows = data rows (exclude header)
+          const totalRows = Array.isArray(rows) && rows.length > 1 ? (rows.length - 1) : 0;
+
+          let focusCount = null;
+          if (focusLabelRaw && totalRows > 0) {
+            const header = rows[0].map(h => String(h || "").trim().toLowerCase());
+            // columns likely to carry intent
+            const intentCols = header
+              .map((h, i) => (/\b(top|purchase|intent|plan|priority|buy|evaluate|mobile|connect)\b/.test(h) ? i : -1))
+              .filter(i => i >= 0);
+
+            const tokens = focusLabelRaw.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+            let count = 0;
+            for (let r = 1; r < rows.length; r++) {
+              const row = rows[r].map(v => String(v || "").toLowerCase());
+              const hay = intentCols.length
+                ? intentCols.map(i => row[i] || "").join(" ")
+                : row.join(" ");
+              if (tokens.some(t => hay.includes(t))) count++;
+            }
+            focusCount = count;
+          }
+
+          csvFocusInsight = {
+            totalRows,
+            focusLabel: focusLabelRaw,
+            focusCount
+          };
+        } catch {
+          csvFocusInsight = { totalRows: 0, focusLabel: "", focusCount: null };
+        }
+      })();
       const agg = normalizeCsv(rows);
 
       const industries = Array.isArray(agg.industries) ? agg.industries : [];
@@ -1028,13 +1167,37 @@ module.exports = async function (context, job) {
           return {
             url, title,
             summary,
-            source_type: classifySourceType(url)
+            source_type: classifySourceType(url) // uses your existing helper
           };
         }).filter(Boolean);
       })();
 
       // Merge projected industry sources too
       packEvidence = [...packEvidence, ...packIndustrySources];
+
+      // >>> NEW: prioritise industry/regulator sources when an industry is selected
+      const selInd = String(
+        csvNormalizedCanonical?.selected_industry ||
+        input?.selected_industry ||
+        input?.campaign_industry ||
+        ""
+      ).toLowerCase();
+
+      function industryScore(pe) {
+        const t = `${(pe.title || "")} ${(pe.summary || "")}`.toLowerCase();
+        const src = String(pe.source_type || "").toLowerCase();
+        let s = 0;
+        // Industry match (e.g., "construction")
+        if (selInd && (t.includes(selInd))) s += 10;
+        // Trusted UK regulators/statistics (push these up)
+        if (/(ofcom|gov\.uk|ons|citb)/.test(t) || /(ofcom|gov\.uk|ons|citb)/.test(src)) s += 8;
+        // Extra nudge for explicit "construction" mentions (common alias)
+        if (/construction/.test(t) || /construction/.test(src)) s += 5;
+        return s;
+      }
+
+      // Sort in-place so Construction/regulator facts lead the evidence log
+      packEvidence.sort((a, b) => industryScore(b) - industryScore(a));
 
     } catch (packErr) {
       context.log.warn("[campaign-evidence] packs/buildEvidence failed", String(packErr?.message || packErr));
@@ -1058,7 +1221,20 @@ module.exports = async function (context, job) {
     }
 
     // 6.1 CSV summary first (if any)
-    const csvSummaryItem = csvSummaryEvidence(csvNormalizedCanonical, input, prefix, container.url);
+    const industryName =
+      csvNormalizedCanonical?.selected_industry ||
+      input?.selected_industry ||
+      input?.campaign_industry ||
+      "";
+
+    const csvSummaryItem = csvSummaryEvidence(
+      csvNormalizedCanonical,
+      input,
+      prefix,
+      container.url,
+      csvFocusInsight,
+      industryName
+    );
     if (csvSummaryItem) {
       // Ensure the CSV summary sits at index 0 and survives any later trimming
       evidenceLog.unshift(csvSummaryItem);
@@ -1141,7 +1317,7 @@ module.exports = async function (context, job) {
       }
     }
 
-    // 6.3 Case studies / PDF extracts
+    // 6.3a Case studies / PDF extracts
     {
       let pdfs = [];
       try {
@@ -1174,6 +1350,13 @@ module.exports = async function (context, job) {
             MAX_EVIDENCE_ITEMS
           );
         }
+      }
+    }
+    // 6.3b Product pages (claims) — merge after case studies
+    if (Array.isArray(productPageEvidence) && productPageEvidence.length) {
+      for (const ev of productPageEvidence) {
+        safePushIfRoom(evidenceLog, ev, MAX_EVIDENCE_ITEMS);
+        if (evidenceLog.length >= MAX_EVIDENCE_ITEMS) break;
       }
     }
 
