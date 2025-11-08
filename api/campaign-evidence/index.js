@@ -1,5 +1,4 @@
-// /api/campaign-evidence/index.js — Split campaign build. 08-11-2025 — v8
-// Node 20, Azure Functions v4 (CommonJS)
+// /api/campaign-evidence/index.js — Split campaign build. 08-11-2025 — v9
 // Purpose: build the canonical evidence set for a run.
 // Artifacts written under: <prefix>/
 //   - site.json               (homepage snapshot + lightweight link graph — array, legacy compatible)
@@ -679,9 +678,10 @@ function extractMdRefs(md) {
   return refs;
 }
 
-// Pull a section's text by its H2 title (## ...)
-function mdSection(md, title) {
-  const rx = new RegExp("^\\s*##\\s+" + title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*$", "im");
+function mdSection(md, titlePattern) {
+  // Accept a literal string or a simple regex-like pattern
+  // We anchor to H2 lines that match: ^## <pattern>$
+  const rx = new RegExp("^\\s*##\\s+" + titlePattern + "\\s*$", "im");
   const m = rx.exec(md);
   if (!m) return "";
   const start = m.index + m[0].length;
@@ -1263,10 +1263,17 @@ module.exports = async function (context, job) {
             const para = firstParagraph(sec1);
             if (para) push("Company analysis summary", para);
 
-            // What <Company> does (offer & delivery)
-            const sec2 = mdSection(mdText, "What Comms365 does (offer & delivery)");
+            // --- What <Company> does (offer & delivery) ---
+            // Try several generic H2 variants; take the first that exists
+            const sec2 =
+              mdSection(mdText, "What .* does \\(offer & delivery\\)") || // regex-like title support
+              mdSection(mdText, "What .* does") ||
+              mdSection(mdText, "What we do") ||
+              mdSection(mdText, "Offer & delivery") ||
+              "";
+
             for (const b of bullets(sec2)) {
-              const titleBold = firstBold(b); // **Bonded Internet**
+              const titleBold = firstBold(b);
               const refNum = (/\[(\d+)\]\s*$/.exec(b) || [, ""])[1];
               const url = refs[refNum] || undefined;
               const title = titleBold || b.split(/[.–—:]/)[0].trim();
@@ -1339,13 +1346,18 @@ module.exports = async function (context, job) {
       function industryScore(pe) {
         const t = `${(pe.title || "")} ${(pe.summary || "")}`.toLowerCase();
         const src = String(pe.source_type || "").toLowerCase();
+        const ind = String(csvNormalizedCanonical?.selected_industry || "").toLowerCase();
+
         let s = 0;
-        // Industry match (e.g., "construction")
-        if (selInd && (t.includes(selInd))) s += 10;
-        // Trusted UK regulators/statistics (push these up)
-        if (/(ofcom|gov\.uk|ons|citb)/.test(t) || /(ofcom|gov\.uk|ons|citb)/.test(src)) s += 8;
-        // Extra nudge for explicit "construction" mentions (common alias)
-        if (/construction/.test(t) || /construction/.test(src)) s += 5;
+        if (ind && t.includes(ind)) s += 10;
+
+        // Prefer regulator/official/statistical sources generically
+        if (/\b(regulator|regulatory|official|statistics|statistical|government)\b/.test(src + " " + t)) s += 8;
+
+        // Prefer https URLs and longer summaries (signal of substance)
+        if (pe.url && /^https:\/\//.test(pe.url)) s += 2;
+        if ((pe.summary || "").length > 120) s += 1;
+
         return s;
       }
 

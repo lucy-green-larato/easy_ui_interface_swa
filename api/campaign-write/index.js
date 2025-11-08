@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js 08-11-2025 v11 (Writer/Assembler)
+// /api/campaign-write/index.js 08-11-2025 v12 (Writer/Assembler)
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> writes sections/<finalKey>.json
 // - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%
@@ -441,7 +441,7 @@ function buildSectionSystem(finalKey, persona) {
       "Use ONLY these data sources: CSV canonical (cohort size + signals), industry packs, company profile pack, and explicit input notes.",
       "If competitors are provided in the input, USE ONLY those; do not introduce others.",
       "For Addressable market, DO NOT estimate; the writer will insert the cohort and focus subset from CSV.",
-      "Cite external facts inline with short tags (e.g., (Ofcom), (ONS)) or https URLs.",
+      "Cite external facts inline using short tags or https URLs.",
       "Return STRICT JSON: executive_summary as an array of strings (first = paragraph, rest = bullets)."
     ].join("\n");
   }
@@ -479,7 +479,7 @@ function buildSectionSystem(finalKey, persona) {
       "Return JSON only, no markdown fences. Do NOT include keys for other sections.",
       "",
       "CITATION RULE (inline, end of sentences using external evidence):",
-      "Use short tags in parentheses: (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).",
+      "Use short tags in parentheses (e.g., (Company site), (CSV)) or https URLs.Use short tags in parentheses: (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).",
       "",
       "STYLE: UK English, concise, specific, evidence-led. Prefer concrete buyer outcomes with inline citations where used.",
       "VALIDATION: All URLs https. Arrays required by the schema must be present (empty if necessary). No invented numbers/sources; write 'no external citation available' if needed."
@@ -669,7 +669,7 @@ module.exports = async function (context, queueItem) {
   if (!prefix) { context.log.error("[campaign-write] Unable to resolve prefix"); return; }
 
   // Common inputs (best-effort reads; tolerate missing artifacts)
-  const [evidenceLog, csvCanon, productsObj, site, outline] = await Promise.all([
+  const [evidenceLog, csvCanon, productsObj, site, outline, strategy] = await Promise.all([
     getJson(container, `${prefix}evidence_log.json`),
     getJson(container, `${prefix}csv_normalized.json`),
     getJson(container, `${prefix}products.json`),
@@ -683,11 +683,6 @@ module.exports = async function (context, queueItem) {
     csvCanon: csvCanon || {},
     productNames: Array.isArray(productsObj?.products) ? productsObj.products : []
   });
-  const persona = outline?.meta?.persona || "";
-  const system = buildSectionSystem(finalKey, persona);
-  const user = buildSectionUser(finalKey, { outline, evidenceBundle, csvCanon });
-  const { callChatJsonObject } = await loadPromptHarness();
-  const raw = await callChatJsonObject({ system, user, timeoutMs: LLM_TIMEOUT_MS });
 
   // ---- Assemble whole campaign ----
   if (op === "assemble") {
@@ -834,49 +829,86 @@ module.exports = async function (context, queueItem) {
         out.executive_summary = [];
       }
     }
-    // ---- Exec Summary post-processor (tone + data-led bullets; enforce AM; filter weak LLM lines) ----
+    // ---- Exec Summary post-processor (tone + data-led bullets; enforce AM; generic filters) ----
     if (finalKey === "executive_summary") {
-      const current = Array.isArray(out.executive_summary) ? out.executive_summary.slice() : [];
-      const paragraph = current[0] || "";
-      const llmBullets = current.slice(1).map(s => String(s || "").trim()).filter(Boolean);
+      try {
+        const current = Array.isArray(out.executive_summary) ? out.executive_summary.slice() : [];
+        const paragraph = current[0] || "";
+        const llmBullets = current.slice(1).map(s => String(s || "").trim()).filter(Boolean);
 
-      // Build deterministic augments from evidence + CSV signals + outline inputs
-      const aug = buildExecAugments({ evidenceBundle, csvCanon, outline }); // uses helpers we added earlier
+        // Safe objects
+        const eb = evidenceBundle || {};
+        const csvC = csvCanon || {};
+        const ol = outline || {};
 
-      // 1) Remove any LLM AM lines (we always prefer CSV-derived amLine)
-      const notAmLine = (s) => !/^addressable market/i.test(s);
+        // Deterministic augments (if helper available)
+        const aug = (typeof buildExecAugments === "function")
+          ? (buildExecAugments({ evidenceBundle: eb, csvCanon: csvC, outline: ol }) || {})
+          : {};
 
-      // 2) Keep only “Why now” bullets that cite a source (simple check: brackets with a known tag or URL)
-      const looksCited = (s) => /\((Ofcom|ONS|GOV\.UK|DSIT|CITB|https?:\/\/)/i.test(s);
-      const notUncitedWhyNow = (s) => !/^why now/i.test(s) || looksCited(s);
+        // 1) Drop any LLM AM lines (writer enforces CSV AM)
+        const notAmLine = (s) => !/^addressable market\b/i.test(s);
 
-      // 3) Keep LLM bullets that don’t violate the competitor discipline (handled in prompt, but be safe)
-      // If the user has supplied competitors, drop bullets that introduce telco giants not on the list.
-      const providedComps = Array.isArray(outline?.input_notes?.competitors) ? outline.input_notes.competitors.map(x => String(x).toLowerCase()) : [];
-      const disallowedBigTelcos = /(\bvodafone\b|\bee\b|\bthree\b|\bo2\b|\bbt\b|\bvirgin media\b)/i;
-      const compDisciplined = (s) => {
-        if (!providedComps.length) return true; // nothing to enforce
-        // allow if bullet references one of the provided competitors
-        if (providedComps.some(c => s.toLowerCase().includes(c))) return true;
-        // otherwise, drop if it introduces generic big-telco names
-        return !disallowedBigTelcos.test(s);
-      };
+        // 2) Keep “why now”-style bullets only if they show ANY citation marker (generic)
+        //    (either a URL, or any parenthetical [...] or (...) at end or inline)
+        const looksCited = (s) => /https?:\/\/\S+/.test(s) || /\([^)]{3,}\)/.test(s) || /\[[^\]]{3,}\]/.test(s);
+        const notUncitedWhyNow = (s) => {
+          const isWhy = /\bwhy now\b/i.test(s) || /\bcontext\b/i.test(s) || /\bmarket\b/i.test(s);
+          return !isWhy || looksCited(s);
+        };
 
-      const filteredLlmBullets = llmBullets.filter(notAmLine).filter(notUncitedWhyNow).filter(compDisciplined);
+        // 3) Competitor discipline WITHOUT named brands:
+        //    If user supplied competitors, drop bullets that mention brand-like proper nouns
+        //    not in the allowed set (company + supplied competitors), when used in a vs/compare context.
+        const company = String(ol?.input_notes?.supplier_company || "").toLowerCase();
+        const allowed = new Set(
+          [company]
+            .concat(Array.isArray(ol?.input_notes?.competitors) ? ol.input_notes.competitors : [])
+            .map(x => String(x).toLowerCase())
+            .filter(Boolean)
+        );
 
-      // Compose deterministic first, then LLM remainder
-      const newBullets = [
-        ...(aug.fov || []),                                 // 0–3 Feature→Outcome→Business Value
-        ...(aug.amLine ? [aug.amLine] : []),               // Enforced: AM from CSV cohort + focus subset
-        ...(aug.marketContext ? [aug.marketContext] : []), // evidence-led market context
-        ...(aug.blockersLine ? [aug.blockersLine] : []),   // CSV TopBlockers
-        ...filteredLlmBullets                              // any remaining LLM bullets (already filtered)
-      ].filter(Boolean);
+        const comparisonCue = /\b(vs|versus|against|compared|than|alternative|competitor|compare)\b/i;
 
-      const polished = polishExecSummaryLines([paragraph, ...newBullets]); // tone/wording guard (exec summary only)
-      out.executive_summary = polished;
+        const mentionsDisallowedBrandInComparison = (s) => {
+          if (!allowed.size) return false; // nothing to enforce
+          if (!comparisonCue.test(s)) return false;
+
+          // Extract candidate "brand-like" tokens: Title Case words (not ALLCAPS/acronyms), length >= 3
+          const tokens = s.match(/\b[A-Z][a-z][A-Za-z0-9&.-]+\b/g) || [];
+          // Whitelist acronyms / common nouns (no hard-coded brands)
+          const whitelist = new Set(["UK", "EU", "RTO", "RPO", "SLA", "QoS", "WAN", "SD-WAN", "IoT", "AI", "CCTV", "POS", "VPN", "MPLS", "LTE", "FTTP", "SoGEA", "DSL", "IP"]);
+          for (const t of tokens) {
+            if (whitelist.has(t)) continue;
+            const low = t.toLowerCase();
+            if (!allowed.has(low)) return true; // a brand-like proper noun not in allowed set
+          }
+          return false;
+        };
+
+        const filteredLlmBullets = llmBullets
+          .filter(notAmLine)
+          .filter(notUncitedWhyNow)
+          .filter(s => !mentionsDisallowedBrandInComparison(s));
+
+        // Compose: deterministic first, then filtered LLM remainder
+        const newBullets = [
+          ...((aug.fov || []).filter(Boolean)),                // 0–3 Feature→Outcome→Value
+          ...(aug.amLine ? [aug.amLine] : []),                 // CSV cohort + focus subset (enforced here)
+          ...(aug.marketContext ? [aug.marketContext] : []),   // industry/profile evidence
+          ...(aug.blockersLine ? [aug.blockersLine] : []),     // CSV TopBlockers
+          ...filteredLlmBullets
+        ].filter(Boolean);
+
+        const polished = (typeof polishExecSummaryLines === "function")
+          ? polishExecSummaryLines([paragraph, ...newBullets])
+          : [paragraph, ...newBullets];
+
+        out.executive_summary = polished.filter(Boolean);
+      } catch (esErr) {
+        context.log.warn("[writer] exec-summary post-processor failed; using unprocessed ES", String(esErr?.message || esErr));
+      }
     }
-
     await putJson(container, `${prefix}sections/${finalKey}.json`, out);
     await patchStatus(container, prefix, "SectionWrites", {
       runId, written: finalKey, updatedAt: nowISO(), op: "section"
