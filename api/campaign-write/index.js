@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js 07-11-2025 v10 (Option B – Writer/Assembler)
+// /api/campaign-write/index.js 08-11-2025 v11 (Writer/Assembler)
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> writes sections/<finalKey>.json
 // - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%
@@ -13,6 +13,12 @@ const STORAGE_CONN = process.env.AzureWebJobsStorage;
 const CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const MAIN_QUEUE = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 60000);
+// Sections we render deterministically (strategy + CSV + evidence only)
+const DETERMINISTIC_SECTIONS = new Set([
+  "positioning_and_differentiation",
+  "messaging_matrix",
+  "sales_enablement"
+]);
 
 // Final section keys (exact, stable set)
 const FINAL_SECTION_KEYS = [
@@ -143,6 +149,169 @@ function makeEvidenceBundle({ evidenceLog, csvCanon, productNames }) {
   const signals = deriveSignalsFromCsv(csvCanon);
   const productNamesArr = Array.isArray(productNames) ? productNames : [];
   return { catalog, signals, productNames: productNamesArr };
+}
+function renderPositioningFromStrategy({ strategy, evidenceBundle, csvCanon }) {
+  const s = strategy || {};
+  const meta = s.meta || {};
+  const usps = Array.isArray(meta.usps) ? meta.usps.filter(v => typeof v === "string" && v.trim()) : [];
+
+  // Buyer pains directly from CSV signals
+  const sig = (csvCanon && csvCanon.signals) || {};
+  const pains = Array.isArray(sig.top_blockers) ? sig.top_blockers.filter(Boolean) : [];
+  const needs = Array.isArray(sig.top_needs) ? sig.top_needs.filter(Boolean) : [];
+
+  // Competitor set strictly from evidence (no placeholders)
+  const catalog = Array.isArray(evidenceBundle?.catalog) ? evidenceBundle.catalog : [];
+  const compSet = [];
+  const seen = new Set();
+  for (const it of catalog) {
+    const vendor = String(it.vendor || it.source_vendor || "").trim();
+    const url = String(it.url || "").trim();
+    if (!vendor || seen.has(vendor.toLowerCase())) continue;
+    if (url && url.startsWith("https")) {
+      compSet.push({
+        vendor,
+        reason_in_set: (it.title || "Relevant in consideration").toString(),
+        url
+      });
+      seen.add(vendor.toLowerCase());
+    }
+  }
+
+  return {
+    value_prop: meta.company
+      ? `${meta.company} aligns ${usps.join("; ")}`.trim()
+      : "", // no placeholder text
+    swot: {
+      strengths: usps,                                       // only real USPs
+      weaknesses: Array.isArray(s.gaps) ? s.gaps.filter(Boolean) : [],
+      opportunities: needs,                                   // from CSV needs
+      threats: []                                             // no placeholders; leave empty if not evidenced
+    },
+    differentiators: usps,                                    // only real USPs
+    competitor_set: compSet                                   // may be empty if no evidence
+  };
+}
+
+function renderMessagingFromStrategy({ strategy, evidenceBundle, csvCanon, outline }) {
+  const s = strategy || {};
+  const meta = s.meta || {};
+  const usps = Array.isArray(meta.usps) ? meta.usps.filter(Boolean) : [];
+
+  const sig = (csvCanon && csvCanon.signals) || {};
+  const pains = Array.isArray(sig.top_blockers) ? sig.top_blockers.filter(Boolean) : [];
+  const needs = Array.isArray(sig.top_needs) ? sig.top_needs.filter(Boolean) : [];
+
+  // Build matrix rows ONLY when we have both a pain (from CSV) and a proof (claim_id/URL) from evidence
+  const catalog = Array.isArray(evidenceBundle?.catalog) ? evidenceBundle.catalog : [];
+  const claimsByTopic = [];
+  for (const it of catalog) {
+    const topicCue = (it.title || it.note || "").toString().toLowerCase();
+    const claim = it.claim_id || it.url || "";
+    if (!claim) continue;
+    claimsByTopic.push({ topicCue, claim });
+  }
+
+  const personas = [
+    (outline && outline.meta && outline.meta.persona) || "Budget holder",
+    "IT lead",
+    "Site operations"
+  ];
+
+  const matrix = [];
+  let personaIdx = 0;
+  for (const pain of pains) {
+    // find a claim whose topic roughly matches the pain words
+    const cue = String(pain).toLowerCase();
+    const hit = claimsByTopic.find(c => c.topicCue.includes(cue.split(" ")[0] || ""));
+    if (!hit) continue; // skip rows without proof
+    matrix.push({
+      persona: personas[personaIdx % personas.length],
+      pain: pain,
+      value_statement: usps.length ? `Address ${pain} via ${usps.join("; ")}` : "", // only real USPs; else empty
+      proof: hit.claim, // claim_id or URL
+      cta: "Agree the first site review" // concise, non-generic next step; acceptable as call-to-action wording
+    });
+    personaIdx += 1;
+  }
+
+  // nonnegotiables: only USPs or CSV needs if USPs are absent; never placeholders
+  const nonnegotiables = usps.length ? usps : needs;
+
+  return {
+    nonnegotiables,
+    matrix // may be < 3 if we cannot justify more without placeholders
+  };
+}
+
+function renderSalesEnablementFromStrategy({ strategy, evidenceBundle, csvCanon }) {
+  const s = strategy || {};
+  const meta = s.meta || {};
+  const usps = Array.isArray(meta.usps) ? meta.usps.filter(Boolean) : [];
+
+  // Discovery questions: derive from CSV buyer data only
+  const sig = (csvCanon && csvCanon.signals) || {};
+  const blockers = Array.isArray(sig.top_blockers) ? sig.top_blockers.filter(Boolean) : [];
+  const needs = Array.isArray(sig.top_needs) ? sig.top_needs.filter(Boolean) : [];
+
+  // Turn blockers/needs into questions (no placeholders)
+  const toQuestion = (txt) => {
+    const t = String(txt).trim();
+    if (!t) return null;
+    // Make it interrogative without inventing content
+    if (/[\.\?]$/.test(t)) return t.replace(/\.$/, "?");
+    return `How are you addressing ${t.toLowerCase()}?`;
+  };
+
+  const dqSet = [];
+  for (const b of blockers) {
+    const q = toQuestion(b);
+    if (q) dqSet.push(q);
+  }
+  for (const n of needs) {
+    const q = toQuestion(n);
+    if (q) dqSet.push(q);
+  }
+
+  // Objection cards ONLY where we have evidence claim/URL
+  const catalog = Array.isArray(evidenceBundle?.catalog) ? evidenceBundle.catalog : [];
+  const objections = [];
+  for (let i = 0; i < catalog.length; i++) {
+    const e = catalog[i];
+    const claim = e.claim_id || e.url || "";
+    if (!claim) continue;
+    const title = (e.title || "").toString();
+    // Map a nearby blocker/need to the objection if possible; else skip (no placeholders)
+    const topic = (title || "").toLowerCase();
+    const match = blockers.find(b => topic.includes(String(b).toLowerCase().split(" ")[0] || "")) ||
+      needs.find(n => topic.includes(String(n).toLowerCase().split(" ")[0] || ""));
+    if (!match) continue;
+    objections.push({
+      blocker: match,
+      reframe_with_claimid: claim,
+      proof: claim,
+      risk_reversal: "" // if you do not have a concrete, evidenced risk reversal, leave empty (no placeholder)
+    });
+    if (objections.length >= 5) break;
+  }
+
+  // Proof pack outline: ONLY include items when relevant signals exist—no generic placeholders
+  const proof_pack_outline = [];
+  if (catalog.length) proof_pack_outline.push("Customer reference summaries");
+  if (usps.length) proof_pack_outline.push("Service/architecture overview aligned to USPs");
+  if (dqSet.length) proof_pack_outline.push("Discovery question set and notes");
+
+  // Handoff rules: emit only if we have a specific campaign outcome stated
+  const handoff_rules = s.specific_outcome
+    ? `Sales to run pilot scoping and confirm: ${s.specific_outcome}`
+    : "";
+
+  return {
+    discovery_questions: dqSet,
+    objection_cards: objections,
+    proof_pack_outline,
+    handoff_rules
+  };
 }
 
 // ==== Prompts ====
@@ -388,7 +557,8 @@ module.exports = async function (context, queueItem) {
     getJson(container, `${prefix}csv_normalized.json`),
     getJson(container, `${prefix}products.json`),
     getJson(container, `${prefix}site.json`),
-    getJson(container, `${prefix}outline.json`)
+    getJson(container, `${prefix}outline.json`),
+    getJson(container, `${prefix}campaign_strategy.json`)
   ]);
 
   const evidenceBundle = makeEvidenceBundle({
@@ -396,6 +566,11 @@ module.exports = async function (context, queueItem) {
     csvCanon: csvCanon || {},
     productNames: Array.isArray(productsObj?.products) ? productsObj.products : []
   });
+  const persona = outline?.meta?.persona || "";
+  const system = buildSectionSystem(finalKey, persona);
+  const user = buildSectionUser(finalKey, { outline, evidenceBundle, csvCanon });
+  const { callChatJsonObject } = await loadPromptHarness();
+  const raw = await callChatJsonObject({ system, user, timeoutMs: LLM_TIMEOUT_MS });
 
   // ---- Assemble whole campaign ----
   if (op === "assemble") {
@@ -483,6 +658,23 @@ module.exports = async function (context, queueItem) {
     await patchStatus(container, prefix, "SectionWrites", {
       runId, writing: finalKey, updatedAt: nowISO(), op: "section"
     });
+        
+    if (DETERMINISTIC_SECTIONS.has(finalKey)) {
+      let out;
+      if (finalKey === "positioning_and_differentiation") {
+        out = { positioning_and_differentiation: renderPositioningFromStrategy({ strategy, evidenceBundle, csvCanon }) };
+      } else if (finalKey === "messaging_matrix") {
+        out = { messaging_matrix: renderMessagingFromStrategy({ strategy, evidenceBundle, csvCanon, outline }) };
+      } else { // sales_enablement
+        out = { sales_enablement: renderSalesEnablementFromStrategy({ strategy, evidenceBundle, csvCanon }) };
+      }
+
+      await putJson(container, `${prefix}sections/${finalKey}.json`, out);
+      await patchStatus(container, prefix, "SectionWrites", {
+        runId, written: finalKey, updatedAt: nowISO(), op: "section"
+      });
+      return; // short-circuit: do NOT call the LLM for these sections
+    }
 
     const persona = outline?.meta?.persona || "";
     const system = buildSectionSystem(finalKey, persona);

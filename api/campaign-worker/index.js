@@ -362,31 +362,36 @@ function buildStrategyObject({ input, csvNormalized, needsMap, evidence }) {
   };
 }
 
-// Render a plain-English lead paragraph from the strategy
 function leadParagraphFromStrategy({ strategy }) {
-  const requirement = (strategy?.meta?.requirement || "growth").toLowerCase();
+  const company = strategy?.meta?.company || "";
   const industry = strategy?.meta?.industry || "";
+  const requirement = (strategy?.meta?.requirement || "growth").toLowerCase();
   const objective =
     requirement === "upsell" ? "upsell services to existing customers"
       : requirement === "win-back" ? "win back high-potential lapsed customers"
         : "create near-term growth";
-
   const sector = industry ? ` in ${industry}` : "";
-  const icp = strategy?.prospect_base?.icp
-    ? `We will start with ${strategy.prospect_base.icp} and prove results quickly on agreed measures.`
-    : "We will start with one clear audience first and prove results quickly on agreed measures.";
+  const icpText = strategy?.prospect_base?.icp
+    ? `We will start with ${strategy.prospect_base.icp} and report weekly against agreed measures.`
+    : "We will start with one clear audience and report weekly against agreed measures.";
 
-  const problems = topN(strategy?.buyer_problems, 2);
-  const problemsText = problems.length ? `They face ${problems.join("; ")}.` : "";
+  // Buyer pains (evidence-led)
+  const pains = Array.isArray(strategy?.buyer_problems) ? strategy.buyer_problems.filter(Boolean).slice(0, 2) : [];
+  const painsText = pains.length ? `Based on current evidence, they need ${pains.join("; ")}.` : "";
 
-  const cov = strategy?.fit_analysis?.coverage || { gap: 0 };
-  const gapNote = (cov.gap > 0) ? "We will highlight any capability gaps and address them explicitly." : "";
+  // Supplier capabilities (USPs)
+  const usps = Array.isArray(strategy?.meta?.usps) ? strategy.meta.usps.filter(Boolean).slice(0, 3) : [];
+  const uspText = usps.length ? `${company || "The supplier"} provides ${usps.join("; ")}.` : "";
+
+  // Expected business outcome (deterministic)
+  const expected = strategy?.specific_outcome ? `Expected outcome: ${strategy.specific_outcome}.` : "";
 
   return [
     `This campaign’s objective is to ${objective}${sector}.`,
-    icp,
-    problemsText,
-    gapNote
+    icpText,
+    painsText,
+    uspText,
+    expected
   ].filter(Boolean).join(" ");
 }
 
@@ -461,48 +466,103 @@ function buildLeadParagraph({ company, industry, requirement, csvNormalized, nee
 function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence }) {
   if (Array.isArray(existing) && existing.length >= 1 && existing.every(x => nonEmpty(x))) return existing;
 
+  // Resolve basics used in bullets
   const company = firstNonEmpty(input.supplier_company, input.company_name, strategy?.meta?.company);
-  const industry = firstNonEmpty(input.selected_industry, input.campaign_industry, csvMeta?.selected_industry, strategy?.meta?.industry);
-  const requirement = firstNonEmpty((input.campaign_requirement || "").toLowerCase(), (strategy?.meta?.requirement || "").toLowerCase());
+  const industry = firstNonEmpty(
+    input.selected_industry,
+    input.campaign_industry,
+    csvMeta?.selected_industry,
+    strategy?.meta?.industry
+  );
 
-  const rows = Number.isFinite(Number(csvMeta?.rows)) ? Number(csvMeta.rows) : (strategy?.prospect_base?.tam ?? null);
-  const amBullet = rows !== null
-    ? `Addressable market in scope: **${Number(rows).toLocaleString()}** organisations (from CSV scope).`
+  // Route (declare ONCE; used in both deps + CTA)
+  const route = (strategy?.go_to_market?.route || (input.sales_model || input.salesModel || "")).toLowerCase();
+
+  // Detection flags from evidence/input to make dependencies conditional
+  const evArr = Array.isArray(evidence) ? evidence : [];
+  const toText = (v) => String(v || "").toLowerCase();
+
+  const hasReferences =
+    evArr.some(e =>
+      /reference|case study|testimonial|customer/.test(toText(e?.title)) ||
+      /reference|case study|testimonial|customer/.test(toText(e?.source_type)) ||
+      /reference|case study|testimonial|customer/.test(toText(e?.tags))
+    );
+
+  const trackingText = [
+    input?.landing_url,
+    input?.utm,
+    input?.tracking_notes,
+    input?.crm,
+    input?.crm_system
+  ].map(toText).join(" ");
+
+  const hasTracking =
+    /utm|crm|salesforce|hubspot|tracked landing|landing page/.test(trackingText) ||
+    evArr.some(e =>
+      /utm|crm|tracked landing|landing page/.test(toText(e?.title)) ||
+      /utm|crm|tracked landing|landing page/.test(toText(e?.source_type))
+    );
+
+  // Addressable market: prefer input.addressable_market, then csvMeta.rows, then strategy TAM
+  const rowsRaw = Number.isFinite(Number(input?.addressable_market)) && Number(input.addressable_market) > 0
+    ? Number(input.addressable_market)
+    : (Number.isFinite(Number(csvMeta?.rows)) && Number(csvMeta.rows) > 0
+        ? Number(csvMeta.rows)
+        : (Number.isFinite(Number(strategy?.prospect_base?.tam)) ? Number(strategy.prospect_base.tam) : null));
+
+  const amBullet = rowsRaw !== null
+    ? `Addressable market in scope: **${rowsRaw.toLocaleString()}** organisations (from campaign source data).`
     : `Addressable market in scope: will be populated from the uploaded CSV.`;
 
-  const csvClaim = Array.isArray(evidence) && evidence[0]?.claim_id ? evidence[0].claim_id : (strategy?.evidence_links?.[0] || null);
+  // Optional evidence reference (use it or omit it entirely)
+  const csvClaim = (Array.isArray(evidence) && evidence[0]?.claim_id)
+    ? evidence[0].claim_id
+    : (strategy?.evidence_links?.[0] || null);
+
   const usps = Array.isArray(input.supplier_usps) ? input.supplier_usps.filter(Boolean) : (strategy?.meta?.usps || []);
 
+  // Lead paragraph (deterministic)
   const paragraph = leadParagraphFromStrategy({ strategy });
 
-  const deps = Array.isArray(strategy?.execution_checks) && strategy.execution_checks.length
-    ? strategy.execution_checks.slice(0, 3).join("; ")
-    : [
-      (input.sales_model || input.salesModel || "").toLowerCase() === "partner"
-        ? "Confirm partner route and co-marketing MDF availability"
-        : "Confirm direct route and SDR capacity",
-      "Access to verified customer references (2–3) with measurable outcomes",
-      "Web landing path and lead capture instrumented (UTM, CRM)"
-    ].join("; ");
+  // Dependencies: conditional and sign-off oriented (no SDR jargon)
+  const depItems = [];
+  if (route === "partner") {
+    depItems.push("Confirm partner route and co-marketing funds (MDF)");
+  } else {
+    depItems.push("Confirm sufficient, enabled, salespeople for outbound first wave");
+  }
+  if (!hasReferences) depItems.push("Access 2–3 verified customer references with measurable outcomes");
+  if (!hasTracking)  depItems.push("Publish tracked landing path and lead capture (UTM, CRM)");
+  const deps = depItems.join("; ");
 
-  const route = (strategy?.go_to_market?.route || (input.sales_model || input.salesModel || "")).toLowerCase();
+  // Route-aware CTA (clear approval)
   const cta = route === "partner"
-    ? "Approve partner-led campaign kickoff (content + joint outreach) and release MDF."
-    : "Approve direct campaign kickoff (content + SDR outreach) with a 6-week runway.";
+    ? "Approve budget and joint first-wave launch with named partners; release co-marketing funds (MDF); agree success measures and reporting."
+    : "Approve budget and first-wave direct launch (content + outbound); agree success measures and reporting.";
+
+  // Buyer pains + differentiation (Moore-style)
+  const pains = Array.isArray(strategy?.buyer_problems) ? strategy.buyer_problems.filter(Boolean).slice(0, 2) : [];
+  const painsText = pains.length ? ` to resolve ${pains.join("; ")}` : "";
+  const who = industry ? `senior decision-makers in ${industry}` : "senior decision-makers";
+  const offer = company ? `${company} offers` : "This campaign offers";
+  const uspList = Array.isArray(usps) && usps.length ? usps.slice(0, 3).join("; ") : "a focused, evidence-led proposition";
+  const compAlt = Array.isArray(strategy?.how_win?.vs_competitors) && strategy.how_win.vs_competitors.length
+    ? strategy.how_win.vs_competitors[0]
+    : "generic telco options";
+  const evidenceTag = csvClaim ? ` [${csvClaim}]` : "";
 
   const bullets = [
-    buildMooreValueProp({ company, industry, usps, claimId: csvClaim }),
+    `For ${who}, ${offer} ${uspList}${painsText} — unlike ${compAlt}.${evidenceTag}`,
     amBullet,
     `Dependencies: ${deps}.`,
-    `Decision points: ${[
-      "Select primary ICP sub-segment for first wave",
-      "Choose success metric & reporting cadence (weekly)"
-    ].join("; ")}.`,
+    `Decision required: Approve the first-wave segment and the success metric with weekly reporting.`,
     `CTA: ${cta}`
   ];
 
   return [paragraph, ...bullets];
 }
+
 
 // -------- Parse and validate the queue message --------
 function parseQueueMessage(queueItem) {
