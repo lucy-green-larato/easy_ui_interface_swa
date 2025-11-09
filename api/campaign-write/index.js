@@ -349,7 +349,7 @@ function deriveAmLine(csvCanon, outline) {
   if (total && focusLabel && focusCount != null) {
     const ind = (csvCanon?.selected_industry || outline?.meta?.selected_industry || "").toString().trim();
     const indPrefix = ind ? `${ind} ` : "";
-    return `Campaign addressable market: there are ${total.toLocaleString()} ${indPrefix}companies in your campaign cohort. ${focusCount.toLocaleString()} of them plan to purchase ${focusLabel}.`;
+    return `Campaign addressable market: there are ${total.toLocaleString()} companies in scope; ${focusCount.toLocaleString()} of them plan to purchase ${focusLabel}.`;
   }
   if (total) return `Addressable market in scope: **${total.toLocaleString()}** organisations (from campaign source data).`;
   return ""; // no placeholders
@@ -382,7 +382,7 @@ function buildExecAugments({ evidenceBundle, csvCanon, outline }) {
 
   const ctxTerms = (() => {
     if (!ranked.length) return [];
-    const STOP = new Set(["the", "and", "for", "with", "from", "that", "this", "are", "is", "of", "to", "in", "on", "as", "by", "at", "an", "or", "a", "into", "across", "more", "most", "over", "under", "within", "their", "your", "our", "it", "they", "be", "was", "were"]);
+    const STOP = new Set(["the", "and", "for", "with", "from", "this", "their", "your", "our", "it", "they", "be", "was", "were"]);
     const text = ranked.map(it => String(it.summary || it.quote || it.title || "")).join(" ").toLowerCase();
     const toks = text.split(/[^a-z0-9+]+/).filter(w => w && w.length > 2 && !STOP.has(w));
     const freq = new Map();
@@ -409,7 +409,12 @@ function buildExecAugments({ evidenceBundle, csvCanon, outline }) {
 
   // F→O→BV: align USPs to needs/blockers via token overlap (no keyword lists)
   function tokens(s) { return String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean); }
-  function jac(a, b) { const A = new Set(a), B = new Set(b); if (!A.size || !B.size) return 0; let i = 0; for (const x of A) if (B.has(x)) i++; return i / (A.size + B.size - i); }
+  function jac(a, b) {
+    const A = new Set(a), B = new Set(b);
+    let i = 0; for (const x of A) if (B.has(x)) i++;
+    const denom = A.size + B.size - i;
+    return denom ? i / denom : 0;
+  }
   const fov = [];
   for (const usp of usps) {
     const ut = tokens(usp); if (!ut.length) continue;
@@ -606,7 +611,8 @@ function buildSectionUser(finalKey, { outline, evidenceBundle, csvCanon }) {
   const ev = safeForPrompt(evidenceBundle?.catalog || []);
   const csv = safeForPrompt(csvCanon || {});
   const prod = safeForPrompt(evidenceBundle?.productNames || []);
-  const competitors = safeForPrompt((outline?.input_notes?.relevant_competitors || []).slice(0, 8));
+  const competitorsArr = (outline?.input_notes?.competitors || outline?.input_notes?.relevant_competitors || []);
+  const competitors = safeForPrompt(competitorsArr.slice(0, 8));
   const services = safeForPrompt(outline?.input_notes?.supplier_usps || []);
   const objective = safeForPrompt(outline?.input_notes?.campaign_requirement || "");
   const persona = safeForPrompt(outline?.meta?.persona || "");
@@ -880,7 +886,7 @@ module.exports = async function (context, queueItem) {
         const company = String(ol?.input_notes?.supplier_company || "").toLowerCase();
         const allowed = new Set(
           [company]
-            .concat(Array.isArray(ol?.input_notes?.competitors) ? ol.input_notes.competitors : [])
+            .concat(Array.isArray(ol?.input_notes?.competitors) ? ol.input_notes.competitors : (Array.isArray(ol?.input_notes?.relevant_competitors) ? ol.input_notes.relevant_competitors : []))
             .map(x => String(x).toLowerCase())
             .filter(Boolean)
         );
