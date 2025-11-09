@@ -930,6 +930,18 @@ module.exports = async function (context, queueItem) {
           : [paragraph, ...ensuredBullets];
 
         out.executive_summary = polished.filter(Boolean);
+        context.log("[writer] ES diag",
+          {
+            hasOutline: !!outline, hasCsv: !!csvCanon, hasEvidence: !!evidenceBundle,
+            aug: {
+              hasFOV: !!(aug && aug.fov && aug.fov.length),
+              hasAM: !!(aug && aug.amLine),
+              hasCtx: !!(aug && aug.marketContext),
+              hasBlockers: !!(aug && aug.blockersLine)
+            },
+            llmBullets: llmBullets.length
+          }
+        );
       } catch (esErr) {
         context.log.warn("[writer] exec-summary post-processor failed; using unprocessed ES", String(esErr?.message || esErr));
       }
