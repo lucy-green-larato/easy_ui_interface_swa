@@ -113,7 +113,98 @@ async function putJson(container, blobPath, obj) {
     blobHTTPHeaders: { blobContentType: "application/json" },
   });
 }
+// -------- VP Utils (deterministic; no model calls) ---------------------------
+function _vpTop(arr, n = 6) {
+  return (Array.isArray(arr) ? arr : [])
+    .map(s => String(s || "").trim())
+    .filter(Boolean)
+    .slice(0, n);
+}
+function _vpPick(list, fallback = "") {
+  return (Array.isArray(list) ? list.map(x => String(x || "").trim()).find(Boolean) : "") || fallback;
+}
+function _vpHost(u) { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } }
+function _vpUniq(list) { const s = new Set(); return (Array.isArray(list) ? list : []).filter(x => (x && !s.has(x) && s.add(x))); }
 
+function _vpProductNames(productsJson) {
+  const arr = Array.isArray(productsJson) ? productsJson : [];
+  return _vpUniq(arr.map(p => p?.name || p?.title || "").filter(Boolean)).slice(0, 6);
+}
+
+function _vpProofPoints(evidenceLog) {
+  const items = Array.isArray(evidenceLog) ? evidenceLog : [];
+  const score = (e) => {
+    const st = String(e?.source_type || "").toLowerCase();
+    let s = 0;
+    if (/^pack:\s*supplier/.test(st)) s += 40;
+    if (st.includes("company site")) s += 30;
+    if (st.includes("pdf") || /case/i.test(e?.title || "")) s += 12;
+    if (/ofcom|ons|dsit|gov\.uk/.test((e?.url || "").toLowerCase())) s += 8;
+    if (e?.quote && e.quote.length > 0) s += 2;
+    return s;
+  };
+  return items
+    .filter(e => e?.url && /^https:\/\//.test(e.url))
+    .sort((a, b) => score(b) - score(a))
+    .slice(0, 6)
+    .map(e => (e.title || _vpHost(e.url) || "Evidence"));
+}
+
+function buildMooreVP({ outline, csvNormalized, evidenceLog, productsJson }) {
+  // Supplier / industry
+  const supplier =
+    (outline?.input_notes?.supplier_name) ||
+    (outline?.input_notes?.supplier) ||
+    (outline?.input_notes?.company) || "";
+
+  const industry =
+    (csvNormalized?.selected_industry) ||
+    (csvNormalized?.meta?.selected_industry) ||
+    (outline?.input_notes?.industry) || "";
+
+  // Signals (needs & blockers) — accept either local or global summaries
+  const sig = csvNormalized?.signals || {};
+  const gsig = csvNormalized?.global_signals || {};
+  const buyerNeeds = _vpTop(sig.top_needs_supplier?.length ? sig.top_needs_supplier : gsig.top_needs_supplier, 3);
+  const blockers = _vpTop(sig.top_blockers?.length ? sig.top_blockers : gsig.top_blockers, 3);
+
+  // Products/capabilities
+  const productNames = _vpProductNames(productsJson);
+  const mainProduct = _vpPick(productNames, "the supplier’s service");
+
+  // Competitors — user input only; never inject defaults here
+  const userComps =
+    (Array.isArray(outline?.input_notes?.competitors) && outline.input_notes.competitors) ||
+    (Array.isArray(outline?.input_notes?.relevant_competitors) && outline.input_notes.relevant_competitors) || [];
+  const unlikeTarget = _vpPick(userComps, "generic alternatives");
+
+  // Proof points from evidence
+  const proofPoints = _vpProofPoints(evidenceLog);
+
+  const fields = {
+    for_who: industry ? `${industry} companies and contractors` : "target customers",
+    who_need: buyerNeeds.length ? buyerNeeds.join("; ").replace(/; ([^;]*)$/, " and $1")
+      : "to solve their priority operational needs",
+    the: `${supplier || "The supplier"} ${mainProduct}`,
+    is_a: productNames.length ? "managed offering" : "solution",
+    that: blockers.length ? `resolves ${blockers.join("; ").replace(/; ([^;]*)$/, " and $1")}`
+      : "delivers clear, measurable outcomes",
+    unlike: unlikeTarget,
+    provides: productNames.length ? productNames.join(", ") : "differentiated capabilities",
+    proof_points: proofPoints
+  };
+
+  const paragraph = [
+    `For ${fields.for_who}`,
+    `who need ${fields.who_need},`,
+    `the ${fields.the}`,
+    `is a ${fields.is_a}`,
+    `that ${fields.that}.`,
+    `Unlike ${fields.unlike}, ${supplier || "the supplier"} provides ${fields.provides}.`
+  ].join(" ");
+
+  return { paragraph, fields };
+}
 // ---- Case study sanitizer helpers (host-verified; safe) ----
 function buildAllowedSets(evidence, prospectWebsite) {
   const allowedUrls = new Set();
@@ -735,7 +826,7 @@ function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence })
   const amBullet = rowsRaw !== null
     ? `Addressable market in scope: **${rowsRaw.toLocaleString()}** organisations (from campaign source data).`
     : `Addressable market in scope: will be populated from the uploaded CSV.`;
-    // Buyer blockers (from CSV TopBlockers column)
+  // Buyer blockers (from CSV TopBlockers column)
   const csvBlockers = extractTopBlockersFromCsv(csvMeta);
   const blockersLine = csvBlockers.length
     ? `Key buyer blockers to investment: ${csvBlockers.join("; ")}.`
@@ -822,7 +913,7 @@ function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence })
 
     // Market context line (only when derived from evidence + CSV signals + USPs)
     ...(marketContextLine ? [marketContextLine] : []),
-    ...(blockersLine ? [blockersLine] : []),  
+    ...(blockersLine ? [blockersLine] : []),
 
     // Pre-conditions expressed for sign-off (deps already computed upstream)
     `Pre-conditions: ${deps}.`,
@@ -997,7 +1088,6 @@ module.exports = async function (context, queueItem) {
     // Safety: sanitize case studies (host-verified only)
     const prospectSite = mergedInput.supplier_website || mergedInput.company_website || "";
     draft = sanitizeCaseStudyLibrary(draft, evidence, prospectSite, context);
-    // NEW Phase — Strategy synthesis (deterministic, from artifacts)
     await setPhase(container, prefix, "StrategySynthesis");
     const strategy = buildStrategyObject({
       input: mergedInput,
@@ -1005,6 +1095,28 @@ module.exports = async function (context, queueItem) {
       needsMap,
       evidence
     });
+
+    // -------- Phase — Moore Value Proposition synthesis --------------------------
+    const _moore = buildMooreVP({
+      outline: (typeof outline === "object" && outline) || {},
+      csvNormalized: (typeof csvNormalized === "object" && csvNormalized) || {},
+      evidenceLog: (Array.isArray(evidenceLog) ? evidenceLog : []),
+      productsJson: (Array.isArray(productsJson) ? productsJson : [])
+    });
+
+    // Attach to strategy without changing existing schema
+    strategy.value_proposition_moore = {
+      paragraph: _moore.paragraph,
+      fields: _moore.fields
+    };
+
+    // Keep legacy one-liner populated for current UI if missing
+    strategy.positioning_and_differentiation = strategy.positioning_and_differentiation || {};
+    if (!strategy.positioning_and_differentiation.value_prop) {
+      strategy.positioning_and_differentiation.value_prop = _moore.paragraph;
+    }
+
+
     await putJson(container, `${prefix}campaign_strategy.json`, strategy);
 
     // v15 fix: Title + Executive Summary coercion with safe fallbacks

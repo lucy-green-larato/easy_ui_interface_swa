@@ -136,43 +136,75 @@ window.CampaignUI = window.CampaignUI || {};
 
   // ---------- Renderers (unchanged logic) ----------
   function renderExecutiveSummary() {
-    const listRaw = rowsOf(state.contract?.executive_summary);
-    if (!listRaw.length) {
-      setPanelContent(makePre("The executive summary will show here when your campaign has been created."));
-      return;
-    }
+    const es = state.contract?.executive_summary;
 
+    // Helper to coerce any value to readable text (keeps your style)
     const toText = (item) => {
       if (item == null) return "";
       if (typeof item === "string") return item;
       if (typeof item === "number") return String(item);
       if (typeof item === "object") {
-        const prefer = item.paragraph || item.text || item.value || item.content;
+        // Prefer common paragraph keys; then fall back to concatenating string fields
+        const prefer = item.lead_paragraph || item.paragraph || item.text || item.value || item.content || item.headline;
         if (typeof prefer === "string") return prefer;
         const vals = Object.values(item).filter(v => typeof v === "string");
-        return vals.join(" ").trim() || JSON.stringify(item);
+        return (vals.join(" ").trim()) || JSON.stringify(item);
       }
       return String(item);
     };
 
-    const list = listRaw.map(toText).filter(s => s && s.trim());
+    // Nothing to render?
+    if (!es || (Array.isArray(es) && es.length === 0) || (typeof es === "object" && !Object.keys(es).length)) {
+      setPanelContent(makePre("The executive summary will show here when your campaign has been created."));
+      return;
+    }
 
+    // Normalise into { para, bullets[] }
+    let para = "";
+    let bullets = [];
+
+    if (Array.isArray(es)) {
+      // Legacy/array shape: [paragraph, bullet, bullet...]
+      const list = es.map(toText).filter(s => s && s.trim());
+      para = list[0] || "";
+      bullets = (list.length > 1) ? list.slice(1) : [];
+    } else if (typeof es === "object") {
+      // Object shape: { headline?, lead_paragraph?, bullets?[] }
+      para = (
+        (typeof es.lead_paragraph === "string" && es.lead_paragraph) ||
+        (typeof es.paragraph === "string" && es.paragraph) ||
+        (typeof es.text === "string" && es.text) ||
+        (typeof es.content === "string" && es.content) ||
+        (typeof es.headline === "string" && es.headline) ||
+        ""
+      );
+      if (Array.isArray(es.bullets)) {
+        bullets = es.bullets.map(toText).filter(Boolean);
+      } else if (Array.isArray(es.points)) {
+        bullets = es.points.map(toText).filter(Boolean);
+      } else if (Array.isArray(es.items)) {
+        bullets = es.items.map(toText).filter(Boolean);
+      }
+    }
+
+    // Render
     const wrap = document.createElement("div");
-    const first = list[0];
-    const para = document.createElement("p");
-    para.textContent = String(first || "");
-    wrap.appendChild(para);
 
-    if (list.length > 1) {
+    const p = document.createElement("p");
+    p.textContent = String(para || "");
+    wrap.appendChild(p);
+
+    if (bullets && bullets.length) {
       const ul = document.createElement("ul");
       ul.className = "list";
-      for (let i = 1; i < list.length; i++) {
+      bullets.forEach(b => {
         const li = document.createElement("li");
-        li.textContent = String(list[i] || "");
+        li.textContent = String(b || "");
         ul.appendChild(li);
-      }
+      });
       wrap.appendChild(ul);
     }
+
     setPanelContent(wrap);
   }
 
@@ -181,8 +213,9 @@ window.CampaignUI = window.CampaignUI || {};
       ? state.evidence
       : rowsOf(state.contract?.evidence_log);
 
+    // --- helpers ---------------------------------------------------------------
     const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
-    const truncate = (s, n = 240) => (typeof s === "string" && s.length > n) ? (s.slice(0, n - 1) + "…") : (s || "");
+    const clip = (s, n = 180) => (typeof s === "string" && s.length > n) ? (s.slice(0, n - 1) + "…") : (s || "");
     const isSpecific = (e) => {
       if (!e || !e.url || !e.title) return false;
       const summary = String(e.summary || "").trim();
@@ -200,11 +233,26 @@ window.CampaignUI = window.CampaignUI || {};
       if (k.includes("directory")) return 7;
       return 9;
     };
+    const badge = (label) => {
+      const span = document.createElement("span");
+      span.textContent = String(label || "Source");
+      span.className = "badge";
+      // Subtle, inline-safe styles (no global CSS dependency)
+      span.style.display = "inline-block";
+      span.style.padding = "2px 6px";
+      span.style.borderRadius = "8px";
+      span.style.fontSize = "12px";
+      span.style.lineHeight = "16px";
+      span.style.background = "#eef1f5";
+      span.style.color = "#333";
+      return span;
+    };
 
+    // --- de-dup + filter + sort ------------------------------------------------
     const seen = new Set();
-    const deduped = entries.filter(e => {
+    const deduped = (entries || []).filter(e => {
       const key = e?.claim_id || `${e?.title || ""}|${e?.url || ""}`;
-      if (!key) return true;
+      if (!key) return false;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -221,6 +269,7 @@ window.CampaignUI = window.CampaignUI || {};
       return String(a.title || "").localeCompare(String(b.title || ""));
     });
 
+    // --- container + header note ----------------------------------------------
     const wrap = document.createElement("div");
     const note = document.createElement("div");
     note.className = "muted";
@@ -231,39 +280,132 @@ window.CampaignUI = window.CampaignUI || {};
     wrap.appendChild(note);
 
     if (!strong.length) {
-      wrap.appendChild(makePre("No specific evidence found. Try re-running with a wider evidence window or ensure product/regulator pages are reachable."));
+      wrap.appendChild(makePre("No specific evidence found. Try widening the evidence window or ensure product/regulator pages are reachable."));
       setPanelContent(wrap);
       return;
     }
 
-    const headers = ["ClaimID", "Summary", "Source type", "Title", "URL", "Quote"];
-    const rows = strong.map(e => [
-      e.claim_id ? { __link: true, href: `#${e.claim_id}`, text: e.claim_id } : "",
-      truncate(e.summary, 280),
-      e.source_type || "",
-      e.title || "",
-      e.url ? { __link: true, href: e.url, text: hostOf(e.url) || e.url } : "",
-      truncate(e.quote, 220)
-    ]);
+    // --- build nicer table -----------------------------------------------------
+    const table = document.createElement("table");
+    table.className = "table";
+    table.style.tableLayout = "fixed";
+    table.style.width = "100%";
 
-    const table = makeTable(headers, rows);
-
-    table.addEventListener("click", (ev) => {
-      const a = ev.target.closest('a[href^="#CLM-"]');
-      if (!a) return;
-      ev.preventDefault();
-      const claimId = a.getAttribute("href").slice(1);
-      const icpBtn = document.querySelector('[data-section="icp"]');
-      if (icpBtn) icpBtn.click();
-      setTimeout(() => {
-        const matches = Array.from(document.querySelectorAll('tr[data-claims]'))
-          .filter(tr => (tr.getAttribute('data-claims') || '').split(' ').includes(claimId));
-        matches.forEach(tr => tr.classList.add('hl'));
-        if (matches[0]) matches[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
-        setTimeout(() => matches.forEach(tr => tr.classList.remove('hl')), 2500);
-      }, 0);
+    const thead = document.createElement("thead");
+    const trh = document.createElement("tr");
+    const headers = [
+      { h: "Claim ID", w: "9ch" },
+      { h: "Source", w: "22ch" },
+      { h: "Title & Link", w: "38%" },
+      { h: "Summary / Quote", w: "auto" },
+    ];
+    headers.forEach(({ h, w }) => {
+      const th = document.createElement("th");
+      th.textContent = h;
+      if (w) th.style.width = w;
+      trh.appendChild(th);
     });
+    thead.appendChild(trh);
 
+    const tbody = document.createElement("tbody");
+
+    for (const e of strong) {
+      const tr = document.createElement("tr");
+
+      // Col 1: Claim ID (non-wrapping)
+      {
+        const td = document.createElement("td");
+        td.textContent = String(e.claim_id || "");
+        td.style.whiteSpace = "nowrap";
+        tr.appendChild(td);
+      }
+
+      // Col 2: Source (badge + host)
+      {
+        const td = document.createElement("td");
+        td.style.whiteSpace = "nowrap";
+        const b = badge(e.source_type || "Source");
+        const host = hostOf(e.url);
+        const small = document.createElement("small");
+        small.className = "muted";
+        small.style.marginLeft = "6px";
+        small.textContent = host || "";
+        td.appendChild(b);
+        if (host) td.appendChild(small);
+        tr.appendChild(td);
+      }
+
+      // Col 3: Title & Link (title is the clickable link)
+      {
+        const td = document.createElement("td");
+        td.style.overflow = "hidden";
+        td.style.textOverflow = "ellipsis";
+        td.style.whiteSpace = "nowrap";
+        if (e.url) {
+          const a = document.createElement("a");
+          a.href = e.url;
+          a.target = "_blank";
+          a.rel = "noopener";
+          a.textContent = String(e.title || e.url);
+          td.appendChild(a);
+
+          const ext = document.createElement("span");
+          ext.textContent = " ↗";
+          ext.className = "muted";
+          td.appendChild(ext);
+        } else {
+          td.textContent = String(e.title || "");
+        }
+        tr.appendChild(td);
+      }
+
+      // Col 4: Summary / Quote (expandable if long)
+      {
+        const td = document.createElement("td");
+        const summary = String(e.summary || "").trim();
+        const quote = String(e.quote || "").trim();
+        const combined = summary && quote ? `${summary}\n\n“${quote}”` : (summary || quote);
+
+        if (!combined) {
+          td.textContent = "";
+          tr.appendChild(td);
+        } else if (combined.length <= 220) {
+          // short: show as-is
+          const p = document.createElement("p");
+          p.textContent = combined;
+          td.appendChild(p);
+          tr.appendChild(td);
+        } else {
+          // long: collapsed details
+          const details = document.createElement("details");
+          const sm = document.createElement("summary");
+          sm.textContent = clip(combined, 220);
+          details.appendChild(sm);
+
+          const full = document.createElement("div");
+          full.style.marginTop = ".4rem";
+          if (quote && !summary) {
+            const q = document.createElement("blockquote");
+            q.textContent = quote;
+            full.appendChild(q);
+          } else {
+            const pre = document.createElement("pre");
+            pre.textContent = combined;
+            pre.style.whiteSpace = "pre-wrap";
+            pre.style.margin = 0;
+            full.appendChild(pre);
+          }
+          details.appendChild(full);
+          td.appendChild(details);
+          tr.appendChild(td);
+        }
+      }
+
+      tbody.appendChild(tr);
+    }
+
+    table.appendChild(thead);
+    table.appendChild(tbody);
     wrap.appendChild(table);
     setPanelContent(wrap);
   }
@@ -306,7 +448,33 @@ window.CampaignUI = window.CampaignUI || {};
     const wrap = document.createElement("div");
 
     const h1 = document.createElement("h3"); h1.textContent = "Value Proposition";
-    wrap.appendChild(h1); wrap.appendChild(makePre(pos.value_prop || ""));
+    wrap.appendChild(h1);
+
+    if (pos.value_prop_moore && (pos.value_prop_moore.paragraph || pos.value_prop_moore.fields)) {
+      // Paragraph
+      const pre = document.createElement("pre");
+      pre.textContent = String(pos.value_prop_moore.paragraph || pos.value_prop || "");
+      wrap.appendChild(pre);
+
+      // Structured Moore table (read-only, falls back cleanly)
+      const f = pos.value_prop_moore.fields || {};
+      wrap.appendChild(makeTable(
+        ["For", "Who need", "The", "Is a", "That", "Unlike", "Provides", "Proof points"],
+        [[
+          f.for_who || "",
+          f.who_need || "",
+          f.the || "",
+          f.is_a || "",
+          f.that || "",
+          f.unlike || "",
+          f.provides || "",
+          rowsOf(f.proof_points)
+        ]]
+      ));
+    } else {
+      // Legacy one-liner path
+      wrap.appendChild(makePre(pos.value_prop || ""));
+    }
 
     const sw = pos.swot || {};
     const hasSw = [sw.strengths, sw.weaknesses, sw.opportunities, sw.threats]

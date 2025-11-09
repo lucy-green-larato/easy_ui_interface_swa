@@ -142,6 +142,11 @@ async function downloadText(containerClient, blobPath) {
   return streamToString(resp.readableStreamBody);
 }
 
+async function getText(containerClient, blobPath) {
+  return downloadText(containerClient, blobPath);
+}
+
+
 // ---------- Generic utils ----------
 function nowIso() { return new Date().toISOString(); }
 function hostnameOf(u) { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return null; } }
@@ -1349,12 +1354,19 @@ module.exports = async function (context, job) {
         const ind = String(csvNormalizedCanonical?.selected_industry || "").toLowerCase();
 
         let s = 0;
-        if (ind && t.includes(ind)) s += 10;
 
-        // Prefer regulator/official/statistical sources generically
-        if (/\b(regulator|regulatory|official|statistics|statistical|government)\b/.test(src + " " + t)) s += 8;
+        // 1) Supplier / profile evidence always top-tier
+        if (/^pack:\s*supplier\b/.test(src)) s += 50;          // explicit supplier pack entries
+        if (src.includes("customer profile")) s += 40;         // profile.md derived items
+        if (src.includes("company site")) s += 30;             // supplier site
 
-        // Prefer https URLs and longer summaries (signal of substance)
+        // 2) Regulator / official stats strong preference
+        if (/(ofcom|ons|dsit|gov\.uk)/.test(t) || /(ofcom|ons|dsit)/.test(src)) s += 25;
+
+        // 3) Exact industry match in title/summary
+        if (ind && t.includes(ind)) s += 12;
+
+        // 4) Hygiene signals
         if (pe.url && /^https:\/\//.test(pe.url)) s += 2;
         if ((pe.summary || "").length > 120) s += 1;
 
@@ -1536,21 +1548,7 @@ module.exports = async function (context, job) {
         const generalItems = mdToSourceItems(general).slice(0, 2);
         const sectorItems = mdToSourceItems(sector).slice(0, 2);
 
-        for (const it of generalItems) {
-          const t = classifySourceType(it.url);
-          safePushIfRoom(
-            evidenceLog,
-            {
-              claim_id: nextClaimId(),
-              source_type: t,
-              title: it.title,
-              url: it.url,
-              summary: addCitation(`${it.title} — reputable general source for stats/trends.`, t),
-              quote: ""
-            },
-            MAX_EVIDENCE_ITEMS
-          );
-        }
+        // push SECTOR items first
         for (const it of sectorItems) {
           const t = classifySourceType(it.url);
           safePushIfRoom(
@@ -1561,6 +1559,23 @@ module.exports = async function (context, job) {
               title: it.title,
               url: it.url,
               summary: addCitation(`${it.title} — sector-relevant evidence.`, t),
+              quote: ""
+            },
+            MAX_EVIDENCE_ITEMS
+          );
+        }
+
+        // then GENERAL items
+        for (const it of generalItems) {
+          const t = classifySourceType(it.url);
+          safePushIfRoom(
+            evidenceLog,
+            {
+              claim_id: nextClaimId(),
+              source_type: t,
+              title: it.title,
+              url: it.url,
+              summary: addCitation(`${it.title} — reputable general source for stats/trends.`, t),
               quote: ""
             },
             MAX_EVIDENCE_ITEMS
