@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js 08-11-2025 v12 (Writer/Assembler)
+// /api/campaign-write/index.js 09-11-2025 v14 (Writer/Assembler)
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> writes sections/<finalKey>.json
 // - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%
@@ -509,7 +509,7 @@ function buildSectionSystem(finalKey, persona) {
       "Return JSON only, no markdown fences. Do NOT include keys for other sections.",
       "",
       "CITATION RULE (inline, end of sentences using external evidence):",
-      "Use short tags in parentheses (e.g., (Company site), (CSV)) or https URLs.Use short tags in parentheses: (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).",
+      "Use short tags in parentheses (e.g., (Company site), (CSV)) or https URLs: (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).",
       "",
       "STYLE: UK English, concise, specific, evidence-led. Prefer concrete buyer outcomes with inline citations where used.",
       "VALIDATION: All URLs https. Arrays required by the schema must be present (empty if necessary). No invented numbers/sources; write 'no external citation available' if needed."
@@ -717,8 +717,15 @@ module.exports = async function (context, queueItem) {
 
   // ---- Assemble whole campaign ----
   if (op === "assemble") {
-    // Phase: Assemble (append to history)
-    const status = await patchStatus(container, prefix, "Assemble", { runId, assembleStartedAt: nowISO(), op: "assemble" });
+    // Phase: writer working (append-only; terminal-guard)
+    {
+      const cur = (await getJson(container, `${prefix}status.json`)) || {};
+      const prev = String(cur.state || "");
+      const terminal = new Set(["assembled", "error", "Failed"]);
+      if (!terminal.has(prev)) {
+        await patchStatus(container, prefix, "writer_working", { runId, assembleStartedAt: nowISO(), op: "assemble" });
+      }
+    }
 
     const selectedIndustry =
       (csvCanon && csvCanon.industry_mode === "specific" && csvCanon.selected_industry)
@@ -750,24 +757,75 @@ module.exports = async function (context, queueItem) {
 
     for (const finalKey of FINAL_SECTION_KEYS) {
       const piece = await getJson(container, `${prefix}sections/${finalKey}.json`);
+
       if (piece && piece[finalKey] != null) {
+        // Copy the section through
         merged[finalKey] = piece[finalKey];
+
+        // Special handling for Executive Summary: ensure both shapes + carry AM
+        if (finalKey === "executive_summary") {
+          const es = merged.executive_summary;
+
+          // Normalise to object + legacy array, regardless of how the section was written
+          if (Array.isArray(es)) {
+            const lead = String(es[0] || "").trim();
+            const bullets = es.slice(1).map(s => String(s || "").trim()).filter(Boolean);
+            merged.executive_summary = { lead_paragraph: lead, bullets };
+            merged.executive_summary_legacy = [lead, ...bullets].filter(Boolean);
+          } else if (es && typeof es === "object") {
+            const lead = typeof es.lead_paragraph === "string" ? es.lead_paragraph : "";
+            const bullets = Array.isArray(es.bullets)
+              ? es.bullets.map(s => String(s || "").trim()).filter(Boolean)
+              : [];
+            merged.executive_summary = { lead_paragraph: lead, bullets };
+            if (Array.isArray(piece.executive_summary_legacy)) {
+              merged.executive_summary_legacy = piece.executive_summary_legacy.filter(Boolean);
+            } else {
+              merged.executive_summary_legacy = [lead, ...bullets].filter(Boolean);
+            }
+          } else {
+            merged.executive_summary = { lead_paragraph: "", bullets: [] };
+            merged.executive_summary_legacy = [];
+          }
+
+          // Carry Addressable Market when present in the ES section file
+          if (Object.prototype.hasOwnProperty.call(piece, "addressable_market") && piece.addressable_market != null) {
+            merged.addressable_market = piece.addressable_market;
+          }
+        }
       } else {
         context.log.warn(`[campaign-write] missing section during assemble: ${finalKey}`);
-        // Ensure executive_summary is at least an empty array for UI
-        if (finalKey === "executive_summary" && !Array.isArray(merged.executive_summary)) {
-          merged.executive_summary = [];
+
+        // Ensure Executive Summary never breaks the UI (both shapes exist)
+        if (finalKey === "executive_summary") {
+          if (
+            !merged.executive_summary ||
+            typeof merged.executive_summary !== "object" ||
+            (!Array.isArray(merged.executive_summary.bullets) && !merged.executive_summary.lead_paragraph)
+          ) {
+            merged.executive_summary = { lead_paragraph: "", bullets: [] };
+          }
+          if (!Array.isArray(merged.executive_summary_legacy)) {
+            merged.executive_summary_legacy = [];
+          }
         }
       }
     }
 
     await putJson(container, `${prefix}campaign.json`, merged);
-    await patchStatus(container, prefix, "Completed", { assembledAt: nowISO(), op: "assemble" });
+    {
+      const cur = (await getJson(container, `${prefix}status.json`)) || {};
+      const prev = String(cur.state || "");
+      const terminal = new Set(["assembled", "error", "Failed"]);
+      if (!terminal.has(prev)) {
+        await patchStatus(container, prefix, "assembled", { assembledAt: nowISO(), op: "assemble" });
+      }
+    }
 
     // ---- Notify orchestrator exactly once (anti-loop marker) ----
     try {
       // Check/flip marker to ensure single-shot dispatch
-      const postStatus = await getJson(container, `${prefix}status.json`);
+      const postStatus = (await getJson(container, `${prefix}status.json`)) || {};
       const alreadySent = !!postStatus?.markers?.afterassembleSent;
       if (!alreadySent) {
         const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
@@ -935,7 +993,30 @@ module.exports = async function (context, queueItem) {
           ? polishExecSummaryLines([paragraph, ...ensuredBullets])
           : [paragraph, ...ensuredBullets];
 
-        out.executive_summary = polished.filter(Boolean);
+        const polishedArr = polished.filter(Boolean);
+        const lead = polishedArr[0] || "";
+        const bullets = polishedArr.slice(1).filter(Boolean);
+
+        // New structured shape for modern UI
+        out.executive_summary = {
+          lead_paragraph: lead,
+          bullets
+        };
+
+        // Legacy array for older consumers
+        out.executive_summary_legacy = [lead, ...bullets].filter(Boolean);
+        // ---- Persist Addressable Market facts (cohort + focus subset) ----
+        const cohortSize = Number.isFinite(Number(csvCanon?.meta?.rows)) ? Number(csvCanon.meta.rows) : null;
+        const focusLabel = (outline?.input_notes?.campaign_focus || outline?.input_notes?.selected_product || "").toString().trim() || null;
+        const focusCount = (focusLabel && Number.isFinite(Number(csvCanon?.signals?.counts?.by_need?.[focusLabel])))
+          ? Number(csvCanon.signals.counts.by_need[focusLabel])
+          : null;
+
+        out.addressable_market = {
+          cohort_size: cohortSize,
+          focus_label: focusLabel,
+          focus_count: focusCount
+        };
         context.log("[writer] ES diag",
           {
             hasOutline: !!outline, hasCsv: !!csvCanon, hasEvidence: !!evidenceBundle,

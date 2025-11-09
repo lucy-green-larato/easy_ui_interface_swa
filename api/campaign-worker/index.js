@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 08-11-2025 v18
+// /api/campaign-worker/index.js 09-11-2025 v21.2
 // Option B pipeline — worker fast path (draft campaign.json) with business-leader Executive Summary shaping
 // Preserves v14 structure: phased status, append-only event logger, robust loaders, and sanitizer.
 // Writes under results/<prefix> (container-relative, trailing slash). No renames of queues/ops/keys.
@@ -104,6 +104,17 @@ async function readJsonIfExists(container, blobPath) {
   if (!(await bb.exists())) return undefined;
   const dl = await bb.download();
   try { return JSON.parse(await streamToString(dl.readableStreamBody)); } catch { return undefined; }
+}
+
+async function getJson(container, blobPath) {
+  const bb = container.getBlockBlobClient(blobPath);
+  if (!(await bb.exists())) return null;
+  const dl = await bb.download();
+  try {
+    return JSON.parse(await streamToString(dl.readableStreamBody));
+  } catch {
+    return null;
+  }
 }
 
 async function putJson(container, blobPath, obj) {
@@ -618,95 +629,6 @@ function mapFeaturesToBenefits({ usps, evidence, csvSignals, strategy }) {
   // Keep the ES tight
   return lines.slice(0, 3);
 }
-
-// ---------------- Strategy synthesis (NEW in v16.1) ------------------------
-function pickClaim(evidence, predicate) {
-  const it = (Array.isArray(evidence) ? evidence : []).find(predicate);
-  return it?.claim_id || null;
-}
-function topN(arr, n) { return (Array.isArray(arr) ? arr : []).filter(s => typeof s === "string" && s.trim()).slice(0, n); }
-
-function deriveOutcomeByTam(rows, salesModel) {
-  const r = Number.isFinite(Number(rows)) ? Number(rows) : 0;
-  if (r <= 50) return salesModel === "partner" ? "Create 4–6 partner-sourced qualified opportunities in 6 weeks" : "Create 4–6 qualified opportunities in 6 weeks";
-  if (r >= 400) return salesModel === "partner" ? "Create 10–15 partner-sourced qualified opportunities in 6 weeks" : "Create 10–15 qualified opportunities in 6 weeks";
-  return salesModel === "partner" ? "Create 6–10 partner-sourced qualified opportunities in 6 weeks" : "Create 6–10 qualified opportunities in 6 weeks";
-}
-
-function diffVsCompetitors({ evidence, competitors, usps }) {
-  const outs = [];
-  const compSet = new Set((Array.isArray(competitors) ? competitors : []).map(c => String(c || "").toLowerCase()));
-  const ev = Array.isArray(evidence) ? evidence : [];
-  for (const c of compSet) {
-    const hit = ev.find(e =>
-      (e.title && e.title.toLowerCase().includes(c)) ||
-      (e.url && e.url.toLowerCase().includes(c))
-    );
-    if (hit) outs.push(`Stronger proof vs ${c}: ${topN(usps, 2).join("; ") || "supplier differentiators"}`);
-  }
-  return topN(outs, 3);
-}
-
-function buildStrategyObject({ input, csvNormalized, needsMap, evidence }) {
-  const company = firstNonEmpty(input.supplier_company, input.company_name);
-  const industry = firstNonEmpty(input.selected_industry, input.campaign_industry, csvNormalized?.selected_industry);
-  const route = (firstNonEmpty(input.sales_model, input.salesModel, input.call_type, input.callType) || "direct").toLowerCase();
-  const requirement = (firstNonEmpty(input.campaign_requirement) || "growth").toLowerCase();
-  const usps = Array.isArray(input.supplier_usps) ? input.supplier_usps.filter(nonEmpty) : [];
-
-  const rows = Number(csvNormalized?.meta?.rows || 0);
-  const csvClaim = pickClaim(evidence, (x) => /csv/i.test(x?.source_type) && /csv population/i.test(x?.title || ""));
-  const packClaim = pickClaim(evidence, (x) => /Ofcom|ONS|DSIT|LinkedIn|PDF extract|Company site/.test(x?.source_type || ""));
-
-  const problems = topN(
-    (csvNormalized?.signals?.top_blockers?.length ? csvNormalized.signals.top_blockers : csvNormalized?.global_signals?.top_blockers) || [],
-    2
-  );
-
-  const cov = needsMap?.coverage || { matched: 0, partial: 0, gap: 0, coverage: 0 };
-  const gaps = topN((needsMap?.items || []).filter(i => i?.status === "gap").map(i => i.need), 4);
-
-  const competitors = Array.isArray(input.relevant_competitors) ? input.relevant_competitors.filter(nonEmpty) : [];
-  const vsCompetitors = diffVsCompetitors({ evidence, competitors, usps });
-
-  const whyPlayBase = rows
-    ? `There is a defined, addressable market of ${rows} organisations [${csvClaim || "CLM-001"}].`
-    : `There is a defined addressable market in the uploaded CSV [${csvClaim || "CLM-001"}].`;
-  const whyNow = packClaim ? " External sources indicate momentum and adoption drivers." : "";
-
-  const howWinPosition = industry
-    ? `Focus on ${industry} with quick proof of value and measurable results`
-    : "Focus on a tight ICP with quick proof of value and measurable results";
-
-  const specificOutcome = deriveOutcomeByTam(rows, route);
-
-  return {
-    why_play: (whyPlayBase + whyNow).trim(),
-    prospect_base: {
-      icp: industry ? `leaders in ${industry} projects` : "leaders in target projects",
-      subsegment: "first-wave sub-segment to be selected",
-      tam: rows
-    },
-    buyer_problems: problems,
-    fit_analysis: { coverage: cov, gaps },
-    how_win: {
-      position: howWinPosition,
-      differentiators: topN(usps, 3),
-      vs_competitors: vsCompetitors
-    },
-    go_to_market: { route, first_wave: route === "partner" ? "co-marketing with named partners" : "direct SDR + content" },
-    specific_outcome: specificOutcome,
-    execution_checks: [
-      route === "partner" ? "Confirm partner route and MDF availability" : "Confirm direct route and SDR capacity",
-      "Provide 2–3 customer references with measurable outcomes",
-      "Publish tracked landing page (UTM + CRM)",
-      gaps.length ? `Mitigate capability gaps: ${gaps.join(", ")}` : "Validate coverage against top needs"
-    ],
-    evidence_links: [csvClaim, packClaim].filter(Boolean),
-    meta: { company, industry, route, requirement, usps }
-  };
-}
-
 // ---------------- Executive Summary shaping + Title (v16) ------------------
 // Business-leader sign-off paragraph + bullets with safe fallbacks.
 // No fabrication: only input.json, csv_normalized.meta, and verified evidence.
@@ -816,6 +738,11 @@ function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence })
       /utm|crm|tracked landing|landing page/.test(toText(e?.source_type))
     );
 
+  // ---- Declare USPs BEFORE any usage ----
+  const usps = Array.isArray(input.supplier_usps)
+    ? input.supplier_usps.filter(Boolean)
+    : (Array.isArray(strategy?.meta?.usps) ? strategy.meta.usps.filter(Boolean) : []);
+
   // Addressable market: prefer input.addressable_market, then csvMeta.rows, then strategy TAM
   const rowsRaw = Number.isFinite(Number(input?.addressable_market)) && Number(input.addressable_market) > 0
     ? Number(input.addressable_market)
@@ -826,11 +753,13 @@ function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence })
   const amBullet = rowsRaw !== null
     ? `Addressable market in scope: **${rowsRaw.toLocaleString()}** organisations (from campaign source data).`
     : `Addressable market in scope: will be populated from the uploaded CSV.`;
+
   // Buyer blockers (from CSV TopBlockers column)
   const csvBlockers = extractTopBlockersFromCsv(csvMeta);
   const blockersLine = csvBlockers.length
     ? `Key buyer blockers to investment: ${csvBlockers.join("; ")}.`
     : "";
+
   // Market context (data-led, optional; prints only when we have evidence/signals)
   const marketContextLine = deriveMarketContext({
     evidence,
@@ -839,12 +768,11 @@ function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence })
     company,
     industry
   });
+
   // Optional evidence reference (use it or omit it entirely)
   const csvClaim = (Array.isArray(evidence) && evidence[0]?.claim_id)
     ? evidence[0].claim_id
     : (strategy?.evidence_links?.[0] || null);
-
-  const usps = Array.isArray(input.supplier_usps) ? input.supplier_usps.filter(Boolean) : (strategy?.meta?.usps || []);
 
   // Lead paragraph (deterministic)
   const paragraph = leadParagraphFromStrategy({ strategy, evidence, industry, input });
@@ -865,9 +793,9 @@ function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence })
 
   // Audience: prefer ICP; else industry; else omit subject entirely
   const icp = strategy?.prospect_base?.icp && String(strategy.prospect_base.icp).trim();
-  const audience =
-    icp ? icp
-      : (industry ? `${industry} decision-makers` : "");
+  const audience = icp
+    ? icp
+    : (industry ? `${industry} decision-makers` : "");
 
   // Offer: only if we have company and/or USPs; never print a placeholder
   const uspArr = Array.isArray(usps) ? usps.filter(Boolean) : [];
@@ -901,6 +829,14 @@ function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence })
     strategy
   }).slice(0, 3);
 
+  // ---- Define CTA deterministically (with safe overrides) ----
+  let cta =
+    (typeof input?.cta === "string" && input.cta.trim()) ||
+    (typeof strategy?.meta?.cta === "string" && strategy.meta.cta.trim()) ||
+    (route === "partner"
+      ? "Initiate the joint campaign with named partners and MDF plan"
+      : "Launch first-wave outreach to the named cohort with tracked landing and CRM capture");
+
   const bullets = [
     // First bullet only if we have something substantive
     ...(firstBullet ? [firstBullet] : []),
@@ -924,6 +860,7 @@ function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence })
     // Clear next step (CTA already route-aware and non-jargon)
     `Next step: ${cta}`
   ];
+
   return [paragraph, ...bullets];
 }
 
@@ -1095,13 +1032,39 @@ module.exports = async function (context, queueItem) {
       needsMap,
       evidence
     });
-
     // -------- Phase — Moore Value Proposition synthesis --------------------------
+    // -------- Phase — Moore Value Proposition synthesis --------------------------
+
+    // Safe loader (uses your existing getJson/putJson, container, prefix)
+    const safeGetJson = async (rel) => (await getJson(container, `${prefix}${rel}`)) || null;
+
+    // Normalise all inputs so buildMooreVP receives valid, in-scope values
+    const outlineFixed =
+      (await safeGetJson("outline.json")) || {};
+
+    const csvNormalizedFixed =
+      (csvNormalized && typeof csvNormalized === "object" ? csvNormalized : null) ||
+      (await safeGetJson("csv_normalized.json")) ||
+      {};
+
+    // evidence_log.json can be either ARRAY or { evidence_log: ARRAY }
+    const evAny = await safeGetJson("evidence_log.json");
+    const evidenceLogFixed = Array.isArray(evidence)
+      ? evidence
+      : (Array.isArray(evAny) ? evAny : (Array.isArray(evAny?.evidence_log) ? evAny.evidence_log : []));
+
+    // products.json may be { products: [] } or a raw array; normalise to array
+    const prodAny = await safeGetJson("products.json");
+    const productsJsonFixed = Array.isArray(prodAny?.products)
+      ? prodAny.products
+      : (Array.isArray(prodAny) ? prodAny : []);
+
+    // Build Moore VP with corrected inputs (no out-of-scope identifiers)
     const _moore = buildMooreVP({
-      outline: (typeof outline === "object" && outline) || {},
-      csvNormalized: (typeof csvNormalized === "object" && csvNormalized) || {},
-      evidenceLog: (Array.isArray(evidenceLog) ? evidenceLog : []),
-      productsJson: (Array.isArray(productsJson) ? productsJson : [])
+      outline: outlineFixed,
+      csvNormalized: csvNormalizedFixed,
+      evidenceLog: evidenceLogFixed,
+      productsJson: productsJsonFixed
     });
 
     // Attach to strategy without changing existing schema
@@ -1114,10 +1077,70 @@ module.exports = async function (context, queueItem) {
     strategy.positioning_and_differentiation = strategy.positioning_and_differentiation || {};
     if (!strategy.positioning_and_differentiation.value_prop) {
       strategy.positioning_and_differentiation.value_prop = _moore.paragraph;
+    } 
+
+    // -------- Strategy persist + status (scoped, fail-safe) --------
+    try {
+      // In-progress (idempotent, forward-only)
+      try {
+        const nowIso = new Date().toISOString();
+        const st0 = (await getJson(container, `${prefix}status.json`)) || {};
+        const prevState = String(st0.state || "");
+        const terminal = new Set(["assembled", "strategy_ready", "error", "Failed"]);
+        if (!terminal.has(prevState)) {
+          st0.state = "strategy_working";
+          st0.last_op = "worker";
+          st0.updated = nowIso;
+          st0.markers = (st0.markers && typeof st0.markers === "object") ? st0.markers : {};
+          st0.history = Array.isArray(st0.history) ? st0.history : [];
+          st0.history.push({ t: nowIso, op: "worker_start" });
+          if (st0.history.length > 100) st0.history = st0.history.slice(-100);
+          await putJson(container, `${prefix}status.json`, st0);
+        }
+      } catch { /* non-fatal */ }
+
+      // Persist the strategy
+      await putJson(container, `${prefix}campaign_strategy.json`, strategy);
+
+      // Success (strategy_ready, forward-only)
+      try {
+        const nowIso = new Date().toISOString();
+        const st = (await getJson(container, `${prefix}status.json`)) || {};
+        const prevState = String(st.state || "");
+        const terminal = new Set(["assembled", "error", "Failed"]);
+        if (!terminal.has(prevState)) {
+          st.state = "strategy_ready";     // frontend treats this as ready-to-write
+          st.last_op = "worker_done";
+          st.updated = nowIso;
+          st.markers = (st.markers && typeof st.markers === "object") ? st.markers : {};
+          st.markers.afterStrategy = true;
+          st.history = Array.isArray(st.history) ? st.history : [];
+          st.history.push({ t: nowIso, op: "worker_done" });
+          if (st.history.length > 100) st.history = st.history.slice(-100);
+          await putJson(container, `${prefix}status.json`, st);
+        }
+      } catch { /* non-fatal; do not block enqueue */ }
+
+    } catch (err) {
+      // Error (localized): mark terminal "Failed" to match your existing scheme
+      try {
+        const nowIso = new Date().toISOString();
+        const stE = (await getJson(container, `${prefix}status.json`)) || {};
+        const prevState = String(stE.state || "");
+        if (prevState !== "assembled") {
+          const msg = (err && (err.message || String(err))) || "worker_error";
+          stE.state = "Failed";
+          stE.last_op = "worker_error";
+          stE.error = { code: "worker_error", message: msg.length > 2000 ? (msg.slice(0, 1997) + "…") : msg };
+          stE.updated = nowIso;
+          stE.history = Array.isArray(stE.history) ? stE.history : [];
+          stE.history.push({ t: nowIso, op: "worker_error" });
+          if (stE.history.length > 100) stE.history = stE.history.slice(-100);
+          await putJson(container, `${prefix}status.json`, stE);
+        }
+      } catch { /* best-effort */ }
+      throw err; // rethrow so your outer handler behaves as before
     }
-
-
-    await putJson(container, `${prefix}campaign_strategy.json`, strategy);
 
     // v15 fix: Title + Executive Summary coercion with safe fallbacks
     try {

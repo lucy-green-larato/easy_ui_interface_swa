@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 05-11-2025 v6
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 09-11-2025 v7
    Changes vs v5:
    - Support resuming an existing run selected in #runSelect (no CSV required)
    - Poller: tolerate a single transient status fetch error before failing
@@ -134,9 +134,42 @@ window.CampaignUI = window.CampaignUI || {};
     };
   }
 
+  // -- PATCH F1 helper: normalise Executive Summary shapes --
+  function resolveExecutiveSummaryShapes(es, esLegacy) {
+    // Prefer new object shape
+    if (es && typeof es === "object" && !Array.isArray(es)) {
+      const lead =
+        (typeof es.lead_paragraph === "string" && es.lead_paragraph) ||
+        (typeof es.paragraph === "string" && es.paragraph) ||
+        (typeof es.text === "string" && es.text) ||
+        (typeof es.headline === "string" && es.headline) ||
+        "";
+      const bullets = Array.isArray(es.bullets) ? es.bullets.filter(Boolean) : [];
+      return { lead: lead.trim(), bullets };
+    }
+
+    // Fallback: legacy array in executive_summary
+    if (Array.isArray(es)) {
+      const lead = String(es[0] || "").trim();
+      const bullets = es.slice(1).map(s => String(s || "").trim()).filter(Boolean);
+      return { lead, bullets };
+    }
+
+    // Fallback: legacy array in executive_summary_legacy
+    if (Array.isArray(esLegacy)) {
+      const lead = String(esLegacy[0] || "").trim();
+      const bullets = esLegacy.slice(1).map(s => String(s || "").trim()).filter(Boolean);
+      return { lead, bullets };
+    }
+
+    // Empty default
+    return { lead: "", bullets: [] };
+  }
+
   // ---------- Renderers (unchanged logic) ----------
   function renderExecutiveSummary() {
     const es = state.contract?.executive_summary;
+    const esLegacy = state.contract?.executive_summary_legacy;
 
     // Helper to coerce any value to readable text (keeps your style)
     const toText = (item) => {
@@ -154,22 +187,21 @@ window.CampaignUI = window.CampaignUI || {};
     };
 
     // Nothing to render?
-    if (!es || (Array.isArray(es) && es.length === 0) || (typeof es === "object" && !Object.keys(es).length)) {
+    const esEmpty =
+      (!es || (Array.isArray(es) && es.length === 0) || (typeof es === "object" && !Array.isArray(es) && !Object.keys(es).length));
+    const esLegacyEmpty = (!Array.isArray(esLegacy) || esLegacy.length === 0);
+
+    if (esEmpty && esLegacyEmpty) {
       setPanelContent(makePre("The executive summary will show here when your campaign has been created."));
       return;
     }
 
-    // Normalise into { para, bullets[] }
+    // Normalise into { para, bullets[] } preferring object → array → legacy
     let para = "";
     let bullets = [];
 
-    if (Array.isArray(es)) {
-      // Legacy/array shape: [paragraph, bullet, bullet...]
-      const list = es.map(toText).filter(s => s && s.trim());
-      para = list[0] || "";
-      bullets = (list.length > 1) ? list.slice(1) : [];
-    } else if (typeof es === "object") {
-      // Object shape: { headline?, lead_paragraph?, bullets?[] }
+    if (es && !Array.isArray(es) && typeof es === "object") {
+      // Object shape: { lead_paragraph?, bullets?[] }
       para = (
         (typeof es.lead_paragraph === "string" && es.lead_paragraph) ||
         (typeof es.paragraph === "string" && es.paragraph) ||
@@ -177,7 +209,7 @@ window.CampaignUI = window.CampaignUI || {};
         (typeof es.content === "string" && es.content) ||
         (typeof es.headline === "string" && es.headline) ||
         ""
-      );
+      ).trim();
       if (Array.isArray(es.bullets)) {
         bullets = es.bullets.map(toText).filter(Boolean);
       } else if (Array.isArray(es.points)) {
@@ -185,14 +217,26 @@ window.CampaignUI = window.CampaignUI || {};
       } else if (Array.isArray(es.items)) {
         bullets = es.items.map(toText).filter(Boolean);
       }
+    } else if (Array.isArray(es)) {
+      // Legacy/array in executive_summary
+      const list = es.map(toText).filter(s => s && s.trim());
+      para = (list[0] || "").trim();
+      bullets = (list.length > 1) ? list.slice(1) : [];
+    } else if (Array.isArray(esLegacy)) {
+      // Legacy/array in executive_summary_legacy
+      const list = esLegacy.map(toText).filter(s => s && s.trim());
+      para = (list[0] || "").trim();
+      bullets = (list.length > 1) ? list.slice(1) : [];
     }
 
     // Render
     const wrap = document.createElement("div");
 
-    const p = document.createElement("p");
-    p.textContent = String(para || "");
-    wrap.appendChild(p);
+    if (para) {
+      const p = document.createElement("p");
+      p.textContent = String(para || "");
+      wrap.appendChild(p);
+    }
 
     if (bullets && bullets.length) {
       const ul = document.createElement("ul");
@@ -217,9 +261,20 @@ window.CampaignUI = window.CampaignUI || {};
     const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
     const clip = (s, n = 180) => (typeof s === "string" && s.length > n) ? (s.slice(0, n - 1) + "…") : (s || "");
     const isSpecific = (e) => {
-      if (!e || !e.url || !e.title) return false;
+      if (!e) return false;
+      const source = String(e.source_type || "").toLowerCase();
+      const title = String(e.title || "").trim();
+      const url = String(e.url || "").trim();
       const summary = String(e.summary || "").trim();
       const quote = String(e.quote || "").trim();
+
+      // Allow Customer profile items even when there is no external URL
+      if (source === "customer profile") {
+        return !!(title || summary || quote);
+      }
+
+      // All other sources must have https URL + a bit of body
+      if (!url || !title) return false;
       return (summary.length >= 8 || quote.length >= 8);
     };
     const srcRank = (t) => {
@@ -450,14 +505,15 @@ window.CampaignUI = window.CampaignUI || {};
     const h1 = document.createElement("h3"); h1.textContent = "Value Proposition";
     wrap.appendChild(h1);
 
-    if (pos.value_prop_moore && (pos.value_prop_moore.paragraph || pos.value_prop_moore.fields)) {
+    const vpm = pos.value_prop_moore || pos.value_proposition_moore;
+    if (vpm && (vpm.paragraph || vpm.fields)) {
       // Paragraph
       const pre = document.createElement("pre");
-      pre.textContent = String(pos.value_prop_moore.paragraph || pos.value_prop || "");
+      pre.textContent = String(vpm.paragraph || pos.value_prop || "");
       wrap.appendChild(pre);
 
       // Structured Moore table (read-only, falls back cleanly)
-      const f = pos.value_prop_moore.fields || {};
+      const f = vpm.fields || {};
       wrap.appendChild(makeTable(
         ["For", "Who need", "The", "Is a", "That", "Unlike", "Provides", "Proof points"],
         [[

@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js — Split campaign build. 08-11-2025 — v9
+// /api/campaign-evidence/index.js — Split campaign build. 09-11-2025 — v12
 // Purpose: build the canonical evidence set for a run.
 // Artifacts written under: <prefix>/
 //   - site.json               (homepage snapshot + lightweight link graph — array, legacy compatible)
@@ -619,20 +619,30 @@ function mdToSourceItems(md) {
 }
 
 // Reject invented placeholders and junk (stronger guard)
+// Reject invented placeholders and junk (stronger guard)
+// NOTE: Allow "Customer profile" items without URLs (internal doc, not external link).
 function isPlaceholderEvidence(it) {
   if (!it) return true;
+
+  const src = String(it.source_type || "").trim();
   const url = (it.url || "").trim();
   const title = (it.title || "").trim();
   const summary = (it.summary || "").trim();
 
-  // 1) No substance
-  if (!url && !title && !summary) return true;
+  // 1) No substance at all
+  if (!title && !summary && !url) return true;
+
+  // --- Special allowance: Customer profile items may omit URL ---
+  if (src.toLowerCase() === "customer profile") {
+    // Require at least some meaningful text
+    return !(title || summary);
+  }
 
   // 2) Weak scaffold titles
   if (/^(?:products|product|placeholder|lorem ipsum)$/i.test(title)) return true;
 
-  // 3) Non-https or junk hostnames
-  if (!/^https:\/\//i.test(url)) return true;            // enforce https only
+  // 3) URL hygiene for everything else: must be https and non-junk hostnames
+  if (!/^https:\/\//i.test(url)) return true;
   const u = url.toLowerCase();
   if (u.startsWith("about:")) return true;
   if (u.includes("example.com")) return true;
@@ -951,6 +961,41 @@ module.exports = async function (context, job) {
     } catch (e) {
       context.log.warn("[campaign-evidence] product extraction skipped", String(e?.message || e));
     }
+    // 1a-fallback) If empty, derive products from profile.md, then site snippet
+    try {
+      const current = await getJson(container, `${prefix}products.json`);
+      const hasProducts = Array.isArray(current?.products) && current.products.length > 0;
+
+      if (!hasProducts) {
+        const fallback = [];
+
+        // Try run-scoped profile: packs/<company-slug>/profile.md
+        const companyName = (input?.supplier_company || input?.company_name || "").trim();
+        const slug = toSlug(companyName);
+        if (slug) {
+          const md = await getText(container, `${prefix}packs/${slug}/profile.md`);
+          if (md) {
+            const sec = mdSection(md, "Products|Solutions");
+            if (sec) {
+              const blts = bullets(sec).slice(0, 12);
+              fallback.push(...blts.map(s => String(s).trim().replace(/\.$/, "")));
+            }
+          }
+        }
+
+        // If still thin, reuse homepage snippet parse
+        if (fallback.length < 3 && siteGraph?.pages?.[0]?.snippet) {
+          const names = await extractProductsFromSite(siteGraph.pages[0].snippet);
+          fallback.push(...names);
+        }
+
+        const uniq = Array.from(new Set(fallback.filter(Boolean))).slice(0, 12);
+        await putJson(container, `${prefix}products.json`, { products: uniq });
+      }
+    } catch (pfErr) {
+      context.log.warn("[campaign-evidence] products fallback skipped", String(pfErr?.message || pfErr));
+    }
+
     // 1b) Product pages (claims from same-host product/solution URLs)
     let productPageEvidence = [];
     try {
@@ -1355,20 +1400,21 @@ module.exports = async function (context, job) {
 
         let s = 0;
 
-        // 1) Supplier / profile evidence always top-tier
-        if (/^pack:\s*supplier\b/.test(src)) s += 50;          // explicit supplier pack entries
-        if (src.includes("customer profile")) s += 40;         // profile.md derived items
-        if (src.includes("company site")) s += 30;             // supplier site
+        // Supplier/profile top-tier
+        if (src.includes("customer profile")) s += 50;
+        if (src.includes("company site") || src.includes("website")) s += 35;
 
-        // 2) Regulator / official stats strong preference
-        if (/(ofcom|ons|dsit|gov\.uk)/.test(t) || /(ofcom|ons|dsit)/.test(src)) s += 25;
+        // Regulator / official statistics
+        if (/(ofcom|ons|dsit|gov\.uk)/.test(t) || /(ofcom|ons|dsit|gov\.uk)/.test(src)) s += 30;
 
-        // 3) Exact industry match in title/summary
-        if (ind && t.includes(ind)) s += 12;
+        // Exact industry match in title/summary
+        if (ind && t.includes(ind)) s += 20;
 
-        // 4) Hygiene signals
+        // HTTPS hygiene
         if (pe.url && /^https:\/\//.test(pe.url)) s += 2;
-        if ((pe.summary || "").length > 120) s += 1;
+
+        // Non-generic source_type preferred
+        if (src && src !== "source") s += 1;
 
         return s;
       }
@@ -1695,6 +1741,71 @@ module.exports = async function (context, job) {
       count: evidenceLog.length,
       titles: evidenceLog.map(x => x.title).slice(0, 12)
     });
+
+    // ---- Profile.md ingestion (Customer profile evidence) ----
+    try {
+      const companyName = (input?.supplier_company || input?.company_name || "").trim();
+      const slug = toSlug(companyName);
+      if (slug) {
+        const mdPath = `${prefix}packs/${slug}/profile.md`;
+        const md = await getText(container, mdPath);
+        if (md && md.length >= 20) {
+          const items = [];
+
+          // Try common sections; each push builds one evidence item
+          const sectionTitles = [
+            "(Company|Supplier) Overview",
+            "Products|Solutions",
+            "Proof|Customers|Case Studies"
+          ];
+
+          for (const title of sectionTitles) {
+            const sec = mdSection(md, title);              // <-- returns STRING
+            if (!sec) continue;
+
+            const blts = bullets(sec);                     // <-- pass STRING
+            const summary =
+              (blts.slice(0, 3).join(" · ")) ||
+              firstParagraph(sec) ||
+              sec.slice(0, 240);
+
+            items.push({
+              claim_id: nextClaimId(),
+              source_type: "Customer profile",
+              title: title.replace(/\|/g, " / ").slice(0, 240),  // no sec.heading (string)
+              url: null,                                         // internal profile; don't invent URLs
+              summary: addCitation(summary, "Customer profile"),
+              quote: ""
+            });
+
+            if (items.length >= 3) break;
+          }
+
+          // If no target sections detected, fall back to first paragraph
+          if (!items.length) {
+            const fp = firstParagraph(md);
+            if (fp) {
+              items.push({
+                claim_id: nextClaimId(),
+                source_type: "Customer profile",
+                title: "Customer profile",
+                url: null,
+                summary: addCitation(fp.slice(0, 240), "Customer profile"),
+                quote: ""
+              });
+            }
+          }
+
+          for (const it of items) {
+            if (evidenceLog.length >= MAX_EVIDENCE_ITEMS) break;
+            safePushIfRoom(evidenceLog, it, MAX_EVIDENCE_ITEMS);
+          }
+        }
+      }
+    } catch (profErr) {
+      context.log.warn("[campaign-evidence] profile.md ingestion skipped", String(profErr?.message || profErr));
+    }
+
     await putJson(container, `${prefix}evidence_log.json`, evidenceLog);
 
     // 7) Finalise phase
