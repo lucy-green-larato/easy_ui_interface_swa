@@ -1078,16 +1078,17 @@ module.exports = async function (context, job) {
       }
 
       let runInput = {};
-      try {
-        runInput = (typeof input !== 'undefined' && input)
-          ? input
-          : ((await getJson(container, `${prefix}input.json`)) || {});
-      } catch {
-        runInput = {};
+      if (!input || (typeof input === 'object' && Object.keys(input).length === 0)) {
+        try {
+          runInput = (await getJson(container, `${prefix}input.json`)) || {};
+        } catch { runInput = {}; }
       }
+      const effectiveInput = (input && (!(typeof input === 'object') || Object.keys(input).length === 0))
+        ? runInput
+        : (input || runInput);
 
       const problemSignals = buildProblemSignals({
-        input: runInput,
+        input: effectiveInput,
         packs: {
           industry: evidence?.packs?.industry,
           generic: evidence?.packs?.generic,
