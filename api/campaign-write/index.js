@@ -465,9 +465,9 @@ function buildSectionSystem(finalKey, persona) {
   if (finalKey === "executive_summary") {
     return [
       personaPrefix + "You are a senior UK B2B strategist.",
-      "Write a board-ready Executive Summary (≤250 words) for a go/no-go decision.",
-      "Begin exactly in this order (one compact paragraph): Strategy → Target prospects → Buyer problems → Campaign type (upsell/win-back/growth + one-line rationale).",
-      "Then add 3–6 concise bullets covering: Moore value proposition; Addressable market; Market context (with citations); Buyer blockers (from CSV); Sales enablement note.",
+      "Write a board-ready Executive Summary (≤350 words) for a go/no-go decision.",
+      "Begin exactly in this order: Strategy → Target prospects → Buyer problems → Campaign type (upsell/win-back/growth + one-line rationale).",
+      "Then add 3–6 bullets covering: Moore value proposition; Addressable market; Market context (with citations); Buyer blockers (from CSV); Sales enablement note.",
       "Use ONLY these data sources: CSV canonical (cohort size + signals), industry packs, company profile pack, and explicit input notes.",
       "If competitors are provided in the input, USE ONLY those; do not introduce others.",
       "For Addressable market, DO NOT estimate; the writer will insert the cohort and focus subset from CSV.",

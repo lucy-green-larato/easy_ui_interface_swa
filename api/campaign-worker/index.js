@@ -1033,7 +1033,6 @@ module.exports = async function (context, queueItem) {
       evidence
     });
     // -------- Phase — Moore Value Proposition synthesis --------------------------
-    // -------- Phase — Moore Value Proposition synthesis --------------------------
 
     // Safe loader (uses your existing getJson/putJson, container, prefix)
     const safeGetJson = async (rel) => (await getJson(container, `${prefix}${rel}`)) || null;
@@ -1053,18 +1052,28 @@ module.exports = async function (context, queueItem) {
       ? evidence
       : (Array.isArray(evAny) ? evAny : (Array.isArray(evAny?.evidence_log) ? evAny.evidence_log : []));
 
+    // products_meta.json (best-effort): prefer validated → chosen
+    const metaAny = await safeGetJson("products_meta.json");
+    const productsValidated = Array.isArray(metaAny?.validated) ? metaAny.validated : [];
+    const productsChosen = Array.isArray(metaAny?.chosen) ? metaAny.chosen : [];
+
     // products.json may be { products: [] } or a raw array; normalise to array
     const prodAny = await safeGetJson("products.json");
     const productsJsonFixed = Array.isArray(prodAny?.products)
       ? prodAny.products
       : (Array.isArray(prodAny) ? prodAny : []);
 
-    // Build Moore VP with corrected inputs (no out-of-scope identifiers)
+    // Final list used by worker: validated → chosen → products.json
+    const productsFinal = productsValidated.length
+      ? productsValidated
+      : (productsChosen.length ? productsChosen : productsJsonFixed);
+
+    // -------- Phase — Moore Value Proposition synthesis --------------------------
     const _moore = buildMooreVP({
       outline: outlineFixed,
       csvNormalized: csvNormalizedFixed,
       evidenceLog: evidenceLogFixed,
-      productsJson: productsJsonFixed
+      productsJson: productsFinal // <-- now passing the preferred list
     });
 
     // Attach to strategy without changing existing schema
@@ -1077,7 +1086,7 @@ module.exports = async function (context, queueItem) {
     strategy.positioning_and_differentiation = strategy.positioning_and_differentiation || {};
     if (!strategy.positioning_and_differentiation.value_prop) {
       strategy.positioning_and_differentiation.value_prop = _moore.paragraph;
-    } 
+    }
 
     // -------- Strategy persist + status (scoped, fail-safe) --------
     try {

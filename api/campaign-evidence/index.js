@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js — Split campaign build. 09-11-2025 — v12
+// /api/campaign-evidence/index.js — Split campaign build. 09-11-2025 — v13
 // Purpose: build the canonical evidence set for a run.
 // Artifacts written under: <prefix>/
 //   - site.json               (homepage snapshot + lightweight link graph — array, legacy compatible)
@@ -653,6 +653,7 @@ function isPlaceholderEvidence(it) {
   return false;
 }
 
+
 function dedupeEvidence(list) {
   const seen = new Set();
   const out = [];
@@ -953,84 +954,212 @@ module.exports = async function (context, job) {
     const siteJson = siteGraph.pages.length ? [siteGraph.pages[0]] : [];
     await putJson(container, `${prefix}site.json`, siteJson);
 
-    // 1a) Products (from homepage snippet)
+    // 1a-USER) Seed products from user input (string or array), if provided
     try {
-      const html = siteGraph.pages?.[0]?.snippet || "";
-      const products = await extractProductsFromSite(html);
-      await putJson(container, `${prefix}products.json`, { products });
-    } catch (e) {
-      context.log.warn("[campaign-evidence] product extraction skipped", String(e?.message || e));
-    }
-    // 1a-fallback) If empty, derive products from profile.md, then site snippet
+      const userProducts =
+        Array.isArray(input?.supplier_products)
+          ? input.supplier_products
+          : (typeof input?.supplier_products === "string"
+            ? input.supplier_products.split(/[;,\n]/).map(s => s.trim()).filter(Boolean)
+            : []);
+
+      if (userProducts.length) {
+        const uniq = Array.from(new Set(userProducts.map(s => String(s).trim()).filter(Boolean))).slice(0, 12);
+        if (uniq.length) {
+          await putJson(container, `${prefix}products.json`, { products: uniq });
+        }
+      }
+    } catch { /* best-effort; continue */ }
+
+    // ---- Products: Declared → Observed → Validated → Chosen (init) ----
+    const productsMeta = { declared: [], observed: [], validated: [], chosen: [], notes: {} };
+
+    // Declared products (user-specified): array OR a single string (split on ; , or newline)
     try {
-      const current = await getJson(container, `${prefix}products.json`);
-      const hasProducts = Array.isArray(current?.products) && current.products.length > 0;
+      const declared =
+        Array.isArray(input?.supplier_products)
+          ? input.supplier_products
+          : (typeof input?.supplier_products === "string"
+            ? input.supplier_products.split(/[;,\n]/).map(s => s.trim()).filter(Boolean)
+            : []);
 
-      if (!hasProducts) {
-        const fallback = [];
+      productsMeta.declared = Array.from(new Set(declared.map(s => String(s).trim()).filter(Boolean))).slice(0, 24);
+    } catch { /* best-effort */ }
 
-        // Try run-scoped profile: packs/<company-slug>/profile.md
+    // ---- 1a) Observed products (site & profile) ----
+    try {
+      // Gather candidates from: homepage snippet extractor, site graph titles/snippets/nav, and profile.md sections
+      const observed = new Set();
+
+      // A) Homepage snippet extractor (your existing util)
+      try {
+        const html = siteGraph?.pages?.[0]?.snippet || "";
+        if (html) {
+          const names = await extractProductsFromSite(html);
+          for (const n of (names || [])) if (n) observed.add(String(n).trim().replace(/\.$/, ""));
+        }
+      } catch (e) {
+        context.log.warn("[campaign-evidence] observed: homepage extractor skipped", String(e?.message || e));
+      }
+
+      // B) Site graph titles/snippets/nav (light heuristic: short name-like tokens)
+      try {
+        const bins = [];
+        const pages = Array.isArray(siteGraph?.pages) ? siteGraph.pages : [];
+        for (const p of pages) {
+          if (p?.title) bins.push(String(p.title));
+          if (p?.snippet) bins.push(String(p.snippet));
+        }
+        const nav = Array.isArray(siteGraph?.nav) ? siteGraph.nav : [];
+        for (const n of nav) if (n?.text) bins.push(String(n.text));
+
+        for (const bin of bins) {
+          const parts = String(bin).split(/[\|\u2013\u2014>\-•·\n\r\t]+/);
+          for (let t of parts) {
+            t = String(t || "").trim();
+            if (!t || t.length > 80) continue;
+            if (/contact|about|blog|privacy|terms|download|learn more|read more/i.test(t)) continue;
+            const candidates = t.match(/\b([A-Z][A-Za-z0-9]+(?:[ -][A-Za-z0-9][A-Za-z0-9\-]+){0,4})\b/g);
+            if (candidates) {
+              for (const c of candidates) {
+                if (/^(Home|Services?|Solutions?|Products?|Resources?)$/i.test(c)) continue;
+                observed.add(c.trim().replace(/\s{2,}/g, " ").replace(/\.$/, ""));
+              }
+            }
+          }
+        }
+      } catch (e) {
+        context.log.warn("[campaign-evidence] observed: site graph sweep skipped", String(e?.message || e));
+      }
+
+      // C) Profile.md sections: Products|Solutions|Services|Offerings
+      try {
         const companyName = (input?.supplier_company || input?.company_name || "").trim();
         const slug = toSlug(companyName);
         if (slug) {
           const md = await getText(container, `${prefix}packs/${slug}/profile.md`);
           if (md) {
-            const sec = mdSection(md, "Products|Solutions");
+            const sec = mdSection(md, "Products|Solutions|Services|Offerings");
             if (sec) {
-              const blts = bullets(sec).slice(0, 12);
-              fallback.push(...blts.map(s => String(s).trim().replace(/\.$/, "")));
+              const blts = bullets(sec).slice(0, 24);
+              for (const b of blts) {
+                const s = String(b || "").trim().replace(/\.$/, "");
+                if (s) observed.add(s);
+              }
             }
           }
         }
-
-        // If still thin, reuse homepage snippet parse
-        if (fallback.length < 3 && siteGraph?.pages?.[0]?.snippet) {
-          const names = await extractProductsFromSite(siteGraph.pages[0].snippet);
-          fallback.push(...names);
-        }
-
-        const uniq = Array.from(new Set(fallback.filter(Boolean))).slice(0, 12);
-        await putJson(container, `${prefix}products.json`, { products: uniq });
+      } catch (e) {
+        context.log.warn("[campaign-evidence] observed: profile.md sweep skipped", String(e?.message || e));
       }
-    } catch (pfErr) {
-      context.log.warn("[campaign-evidence] products fallback skipped", String(pfErr?.message || pfErr));
-    }
 
-    // 1b) Product pages (claims from same-host product/solution URLs)
-    let productPageEvidence = [];
-    try {
-      if (siteGraph.pages.length) {
-        const root = siteGraph.pages[0]?.url || supplierWebsite;
-        const allLinks = Array.isArray(siteGraph.links) ? siteGraph.links : [];
-        const candidates = allLinks
-          .filter(u => sameHost(u, root))
-          .filter(isProductUrl)
-          .slice(0, 10); // crawl budget for product pages
+      productsMeta.observed = Array.from(observed).slice(0, 24);
 
-        for (const url of candidates) {
-          const res = await httpGet(url, FETCH_TIMEOUT_MS);
-          if (!res.ok) continue;
-          const html = (res.text || "").slice(0, 150_000);
-
-          // Build one evidence item per page using first claims as summary
-          const pageTitle = (html.match(/<title[^>]*>([^<]{3,200})<\/title>/i)?.[1] || "").trim();
-          const claims = parseProductClaims(html);
-          if (!claims.length) continue;
-
-          productPageEvidence.push({
-            claim_id: nextClaimId(),
-            source_type: "Company site",
-            title: pageTitle || "Product/solution page",
-            url: toHttps(url),
-            summary: addCitation(claims.slice(0, 3).join(" — "), "Company site"),
-            quote: claims.slice(3, 9).join("\n") // keep extra claims as quote lines
-          });
-
-          if (productPageEvidence.length >= 8) break; // cap items we store
-        }
+      // If user already seeded products.json upstream, don't overwrite it.
+      const existing = await getJson(container, `${prefix}products.json`);
+      const hasSeed = Array.isArray(existing?.products) && existing.products.length > 0;
+      if (!hasSeed) {
+        await putJson(container, `${prefix}products.json`, { products: productsMeta.observed });
       }
     } catch (e) {
-      context.log.warn("[campaign-evidence] product page claims step failed", String(e?.message || e));
+      context.log.warn("[campaign-evidence] observed phase skipped", String(e?.message || e));
+    }
+
+    // ---- 1b) Validated products (Observed/Declared cross-checked with CSV signals) ----
+    try {
+      // Signals (buyer-led)
+      const sig = (csvNormalizedCanonical && csvNormalizedCanonical.signals) ? csvNormalizedCanonical.signals : {};
+      const topPurchases = Array.isArray(sig.top_purchases) ? sig.top_purchases : [];
+      const topNeeds = Array.isArray(sig.top_needs_supplier) ? sig.top_needs_supplier
+        : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
+      const universe = Array.from(new Set([...topPurchases, ...topNeeds].map(s => String(s || "").toLowerCase().trim()).filter(Boolean)));
+
+      // Token match (simple, deterministic)
+      const tok = s => String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      const matchScore = (name) => {
+        const t = tok(name);
+        if (!t.length || !universe.length) return 0;
+        let best = 0;
+        for (const u of universe) {
+          const ut = tok(u);
+          const A = new Set(t), B = new Set(ut);
+          let i = 0; for (const x of A) if (B.has(x)) i++;
+          const denom = A.size + B.size - i;
+          const j = denom ? (i / denom) : 0;
+          if (j > best) best = j;
+        }
+        return best;
+      };
+
+      const declared = productsMeta.declared || [];
+      const observed = productsMeta.observed || [];
+
+      const validatedDeclared = declared
+        .map(n => ({ n, s: matchScore(n) }))
+        .filter(x => x.s >= 0.25) // light threshold
+        .sort((a, b) => b.s - a.s)
+        .map(x => x.n);
+
+      const validatedObserved = observed
+        .map(n => ({ n, s: matchScore(n) }))
+        .filter(x => x.s >= 0.25)
+        .sort((a, b) => b.s - a.s)
+        .map(x => x.n);
+
+      productsMeta.validated = Array.from(new Set([...validatedDeclared, ...validatedObserved])).slice(0, 24);
+    } catch (e) {
+      context.log.warn("[campaign-evidence] validated phase skipped", String(e?.message || e));
+    }
+
+    // ---- 1c) Chosen products (deterministic, buyer-led) ----
+    try {
+      const declared = productsMeta.declared || [];
+      const observed = productsMeta.observed || [];
+      const validated = productsMeta.validated || [];
+
+      const dedupe = (arr) => Array.from(new Set(arr.map(s => String(s).trim()).filter(Boolean)));
+
+      let chosen = dedupe([
+        ...declared.filter(x => validated.includes(x)),
+        ...observed.filter(x => validated.includes(x))
+      ]).slice(0, 12);
+
+      if (chosen.length === 0 && declared.length > 0) {
+        chosen = dedupe(declared).slice(0, 12);
+        productsMeta.notes.reason = "no validation hit; using declared for continuity";
+      }
+
+      productsMeta.chosen = chosen;
+      productsMeta.notes.capability_map_used = false;
+      productsMeta.notes.csv_sources = ["top_purchases", "top_needs_supplier|top_needs"];
+      productsMeta.notes.counts = {
+        declared: (productsMeta.declared || []).length,
+        observed: (productsMeta.observed || []).length,
+        validated: (productsMeta.validated || []).length,
+        chosen: chosen.length
+      };
+
+      if (chosen.length === 0) {
+        // Hard fail (preferred), or switch to soft guard if you must keep running
+        const msg = "No products could be chosen (declared/observed present but none validated).";
+        try {
+          const st = (await getJson(container, `${prefix}status.json`)) || {};
+          st.state = "error";
+          st.last_op = "evidence";
+          st.error = { code: "no_products", message: msg };
+          st.updated = new Date().toISOString();
+          st.history = Array.isArray(st.history) ? st.history : [];
+          st.history.push({ t: st.updated, op: "evidence_error", detail: "no_products" });
+          await putJson(container, `${prefix}status.json`, st);
+        } catch { /* best-effort */ }
+        throw new Error(msg);
+      }
+
+      await putJson(container, `${prefix}products.json`, { products: chosen });
+      await putJson(container, `${prefix}products_meta.json`, productsMeta);
+    } catch (e) {
+      context.log.error("[campaign-evidence] choosing products failed", String(e?.message || e));
+      throw e; // stop here; downstream should not run without products
     }
 
     // 2) LINKEDIN (reference only)
@@ -1741,70 +1870,6 @@ module.exports = async function (context, job) {
       count: evidenceLog.length,
       titles: evidenceLog.map(x => x.title).slice(0, 12)
     });
-
-    // ---- Profile.md ingestion (Customer profile evidence) ----
-    try {
-      const companyName = (input?.supplier_company || input?.company_name || "").trim();
-      const slug = toSlug(companyName);
-      if (slug) {
-        const mdPath = `${prefix}packs/${slug}/profile.md`;
-        const md = await getText(container, mdPath);
-        if (md && md.length >= 20) {
-          const items = [];
-
-          // Try common sections; each push builds one evidence item
-          const sectionTitles = [
-            "(Company|Supplier) Overview",
-            "Products|Solutions",
-            "Proof|Customers|Case Studies"
-          ];
-
-          for (const title of sectionTitles) {
-            const sec = mdSection(md, title);              // <-- returns STRING
-            if (!sec) continue;
-
-            const blts = bullets(sec);                     // <-- pass STRING
-            const summary =
-              (blts.slice(0, 3).join(" · ")) ||
-              firstParagraph(sec) ||
-              sec.slice(0, 240);
-
-            items.push({
-              claim_id: nextClaimId(),
-              source_type: "Customer profile",
-              title: title.replace(/\|/g, " / ").slice(0, 240),  // no sec.heading (string)
-              url: null,                                         // internal profile; don't invent URLs
-              summary: addCitation(summary, "Customer profile"),
-              quote: ""
-            });
-
-            if (items.length >= 3) break;
-          }
-
-          // If no target sections detected, fall back to first paragraph
-          if (!items.length) {
-            const fp = firstParagraph(md);
-            if (fp) {
-              items.push({
-                claim_id: nextClaimId(),
-                source_type: "Customer profile",
-                title: "Customer profile",
-                url: null,
-                summary: addCitation(fp.slice(0, 240), "Customer profile"),
-                quote: ""
-              });
-            }
-          }
-
-          for (const it of items) {
-            if (evidenceLog.length >= MAX_EVIDENCE_ITEMS) break;
-            safePushIfRoom(evidenceLog, it, MAX_EVIDENCE_ITEMS);
-          }
-        }
-      }
-    } catch (profErr) {
-      context.log.warn("[campaign-evidence] profile.md ingestion skipped", String(profErr?.message || profErr));
-    }
 
     await putJson(container, `${prefix}evidence_log.json`, evidenceLog);
 
