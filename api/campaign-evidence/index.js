@@ -1076,8 +1076,18 @@ module.exports = async function (context, job) {
       } catch (e) {
         context.log.warn("[campaign-evidence] observed: homepage extractor skipped", String(e?.message || e));
       }
+
+      let runInput = {};
+      try {
+        runInput = (typeof input !== 'undefined' && input)
+          ? input
+          : ((await getJson(container, `${prefix}input.json`)) || {});
+      } catch {
+        runInput = {};
+      }
+
       const problemSignals = buildProblemSignals({
-        input,
+        input: runInput,
         packs: {
           industry: evidence?.packs?.industry,
           generic: evidence?.packs?.generic,
