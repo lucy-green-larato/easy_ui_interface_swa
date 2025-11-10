@@ -1066,50 +1066,50 @@ module.exports = async function (context, job) {
     }
 
     // ---- 1b) Validated products (Observed/Declared cross-checked with CSV signals) ----
-    try {
-      // Signals (buyer-led)
-      const sig = (csvNormalizedCanonical && csvNormalizedCanonical.signals) ? csvNormalizedCanonical.signals : {};
-      const topPurchases = Array.isArray(sig.top_purchases) ? sig.top_purchases : [];
-      const topNeeds = Array.isArray(sig.top_needs_supplier) ? sig.top_needs_supplier
-        : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
-      const universe = Array.from(new Set([...topPurchases, ...topNeeds].map(s => String(s || "").toLowerCase().trim()).filter(Boolean)));
+try {
+  const sig = (csvNormalizedCanonical && csvNormalizedCanonical.signals) ? csvNormalizedCanonical.signals : {};
+  const topPurchases = Array.isArray(sig.top_purchases) ? sig.top_purchases : [];
+  const topNeeds = Array.isArray(sig.top_needs_supplier) ? sig.top_needs_supplier
+                   : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
+  const universeRaw = [...topPurchases, ...topNeeds].map(s => String(s || "").toLowerCase().trim()).filter(Boolean);
+  const universe = Array.from(new Set(universeRaw));
 
-      // Token match (simple, deterministic)
-      const tok = s => String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-      const matchScore = (name) => {
-        const t = tok(name);
-        if (!t.length || !universe.length) return 0;
-        let best = 0;
-        for (const u of universe) {
-          const ut = tok(u);
-          const A = new Set(t), B = new Set(ut);
-          let i = 0; for (const x of A) if (B.has(x)) i++;
-          const denom = A.size + B.size - i;
-          const j = denom ? (i / denom) : 0;
-          if (j > best) best = j;
-        }
-        return best;
-      };
+  const tok = s => String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const jacc = (a, b) => {
+    const A = new Set(a), B = new Set(b);
+    let i = 0; for (const x of A) if (B.has(x)) i++;
+    const d = A.size + B.size - i;
+    return d ? (i / d) : 0;
+  };
 
-      const declared = productsMeta.declared || [];
-      const observed = productsMeta.observed || [];
+  const declared = productsMeta.declared || [];
+  const observed = productsMeta.observed || [];
 
-      const validatedDeclared = declared
-        .map(n => ({ n, s: matchScore(n) }))
-        .filter(x => x.s >= 0.25) // light threshold
-        .sort((a, b) => b.s - a.s)
-        .map(x => x.n);
+  // If there are no CSV signals at all, treat validation as a pass-through hint, not a blocker.
+  if (universe.length === 0) {
+    productsMeta.validated = Array.from(new Set([...declared, ...observed])).slice(0, 24);
+    productsMeta.notes.validation = "no_csv_signals";
+  } else {
+    // Light threshold; UK tech naming varies (reduce from 0.25 → 0.18)
+    const THRESH = 0.18;
+    const score = (name) => {
+      const t = tok(name);
+      let best = 0;
+      for (const u of universe) { const s = jacc(t, tok(u)); if (s > best) best = s; }
+      return best;
+    };
+    const vd = declared.map(n => ({ n, s: score(n) })).filter(x => x.s >= THRESH).sort((a,b) => b.s - a.s).map(x => x.n);
+    const vo = observed.map(n => ({ n, s: score(n) })).filter(x => x.s >= THRESH).sort((a,b) => b.s - a.s).map(x => x.n);
+    const validated = Array.from(new Set([...vd, ...vo])).slice(0, 24);
 
-      const validatedObserved = observed
-        .map(n => ({ n, s: matchScore(n) }))
-        .filter(x => x.s >= 0.25)
-        .sort((a, b) => b.s - a.s)
-        .map(x => x.n);
-
-      productsMeta.validated = Array.from(new Set([...validatedDeclared, ...validatedObserved])).slice(0, 24);
-    } catch (e) {
-      context.log.warn("[campaign-evidence] validated phase skipped", String(e?.message || e));
-    }
+    productsMeta.validated = validated;
+    productsMeta.notes.validation = validated.length ? "csv_signals_matched" : "csv_signals_present_but_no_match";
+  }
+} catch (e) {
+  context.log.warn("[campaign-evidence] validated phase skipped", String(e?.message || e));
+  productsMeta.validated = Array.from(new Set([...(productsMeta.declared||[]), ...(productsMeta.observed||[])])).slice(0, 24);
+  productsMeta.notes.validation = "fallback_on_error";
+}  
 
     // ---- 1c) Chosen products (deterministic, buyer-led) ----
     try {

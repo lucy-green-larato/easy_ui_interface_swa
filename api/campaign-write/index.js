@@ -335,24 +335,46 @@ function polishExecSummaryLines(lines) {
   }).filter(Boolean);
 }
 
-// B) Derive AM line + focused subset from CSV signals (no re-scan of rows)
+// B) Derive AM line + focused subset from CSV/outline (robust fallbacks; no guesses)
 function deriveAmLine(csvCanon, outline) {
-  const total = Number.isFinite(Number(csvCanon?.meta?.rows)) ? Number(csvCanon.meta.rows) : null;
-  const focusLabel =
-    (outline?.input_notes?.campaign_focus ||
-      outline?.input_notes?.selected_product ||
-      "").toString().trim();
-  const focusCount = Number.isFinite(Number(csvCanon?.signals?.counts?.by_need?.[focusLabel]))
-    ? Number(csvCanon.signals.counts.by_need[focusLabel])
-    : null;
+  // Resolve total rows from several plausible homes
+  const n = (v) => Number.isFinite(Number(v)) ? Number(v) : null;
+  const total =
+    n(csvCanon?.meta?.rows) ??
+    n(csvCanon?.row_count) ??
+    n(csvCanon?.rows) ??
+    n(outline?.meta?.rowCount) ??
+    n(outline?.input_notes?.rowCount) ??
+    n(outline?.input_notes?.row_count);
 
-  if (total && focusLabel && focusCount != null) {
-    const ind = (csvCanon?.selected_industry || outline?.meta?.selected_industry || "").toString().trim();
-    const indPrefix = ind ? `${ind} ` : "";
-    return `Campaign addressable market: there are ${total.toLocaleString()} companies in scope; ${focusCount.toLocaleString()} of them plan to purchase ${focusLabel}.`;
+  // Resolve focus label from user notes first, then outline meta
+  const focusLabel = String(
+    outline?.input_notes?.campaign_focus ||
+    outline?.input_notes?.selected_product ||
+    outline?.meta?.campaign_focus ||
+    ""
+  ).trim();
+
+  // Resolve focus count (prefer explicit counts; else approximate via top_purchases match)
+  let focusCount = null;
+  const countsByNeed = csvCanon?.signals?.counts?.by_need || null;
+  if (countsByNeed && focusLabel && Number.isFinite(Number(countsByNeed[focusLabel]))) {
+    focusCount = Number(countsByNeed[focusLabel]);
+  } else if (focusLabel) {
+    // soft match against top_purchases (no numbers, so just state label)
+    const tps = Array.isArray(csvCanon?.signals?.top_purchases) ? csvCanon.signals.top_purchases : [];
+    const hit = tps.find(tp => String(tp).toLowerCase().includes(focusLabel.toLowerCase()));
+    if (hit) focusCount = null; // we have evidence of focus label, but no numeric subset
   }
-  if (total) return `Addressable market in scope: **${total.toLocaleString()}** organisations (from campaign source data).`;
-  return ""; // no placeholders
+
+  if (total != null && total > 0) {
+    if (focusLabel && focusCount != null) {
+      return `Campaign addressable market: there are ${total.toLocaleString()} companies in scope; ${focusCount.toLocaleString()} of them plan to purchase ${focusLabel}.`;
+    }
+    return `Addressable market in scope: **${total.toLocaleString()}** organisations (from campaign source data).`;
+  }
+  // No reliable total → no AM line (we’ll let bullets carry evidence instead of printing "0")
+  return "";
 }
 
 // C) Market context + blockers + F→O→BV from evidence + signals + USPs (data-driven, no hard-wiring)
@@ -441,14 +463,37 @@ function looksLikeHeadline(s) {
   return (words <= 12 && !hasPeriod) || (!hasPeriod && manyCaps);
 }
 
-function synthesizeExecParagraph({ outline, csvCanon }) {
+// ---- Exec Summary helpers: headline detection + paragraph synthesis ----
+function synthesizeExecParagraph({ outline, csvCanon, strategy }) {
+  // Preferred: derive from strategy (Moore VP + problems + outcome)
+  const moore = strategy?.value_proposition_moore || {};
+  const f = moore.fields || {};
+  const moorePara = (typeof moore.paragraph === "string" && moore.paragraph.trim()) ? moore.paragraph.trim() : "";
+
+  const buyerProblems = Array.isArray(strategy?.buyer_problems) ? strategy.buyer_problems.filter(Boolean).slice(0, 2) : [];
+  const outcome = (strategy?.specific_outcome && String(strategy.specific_outcome).trim()) || "";
+
+  if (moorePara || (f.for_who && f.the && f.is_a && f.that)) {
+    // Build a reasoned, benefit-led sentence (not just inputs)
+    const parts = [];
+    if (f.for_who) parts.push(`For ${String(f.for_who).trim()}`);
+    if (f.the && f.is_a) parts.push(`${String(f.the).trim()} is a ${String(f.is_a).trim()}`);
+    if (f.that) parts.push(`that ${String(f.that).trim()}`);
+    if (buyerProblems.length) parts.push(`to address ${buyerProblems.join(" and ")}`);
+    if (outcome) parts.push(`with a specific objective: ${outcome}`);
+
+    const paragraph = parts.join(", ").replace(/\s{2,}/g, " ").replace(/,\s*$/, "") + ".";
+    return paragraph;
+  }
+
+  // Fallback: light-touch input-echo (polished)
   const company = String(outline?.input_notes?.supplier_company || outline?.meta?.company || "").trim();
   const industry = String(csvCanon?.selected_industry || outline?.meta?.selected_industry || outline?.input_notes?.selected_industry || "").trim();
   const campaignType = String(outline?.input_notes?.campaign_type || outline?.meta?.campaign_type || outline?.input_notes?.objective || "").trim();
-  const needs = (csvCanon?.signals?.top_needs_supplier || csvCanon?.global_signals?.top_needs_supplier || []).filter(Boolean).slice(0, 2);
-  const blockers = (csvCanon?.signals?.top_blockers || csvCanon?.global_signals?.top_blockers || []).filter(Boolean).slice(0, 2);
+  const needs = (csvCanon?.signals?.top_needs_supplier || csvCanon?.signals?.top_needs || []).filter(Boolean).slice(0, 2);
+  const blockers = (csvCanon?.signals?.top_blockers || []).filter(Boolean).slice(0, 2);
 
-  const who = industry ? `For ${industry} companies` : `For our target companies`;
+  const who = industry ? `For ${industry} companies` : `For target companies`;
   const what = company ? `${company} will` : `This campaign will`;
   const why = campaignType ? `${campaignType}` : `drive measurable growth`;
   const needsPart = needs.length ? ` by addressing ${needs.join(" and ")}` : "";
@@ -467,7 +512,7 @@ function buildSectionSystem(finalKey, persona) {
       personaPrefix + "You are a senior UK B2B strategist.",
       "Write a board-ready Executive Summary (≤350 words) for a go/no-go decision.",
       "Begin exactly in this order: Strategy → Target prospects → Buyer problems → Campaign type (upsell/win-back/growth + one-line rationale).",
-      "Then add 3–6 bullets covering: Moore value proposition; Addressable market; Market context (with citations); Buyer blockers (from CSV); Sales enablement note.",
+      "Then add bullets covering each of: Moore value proposition; Addressable market; Market context (with citations); Buyer blockers (from CSV); Sales enablement note.",
       "Use ONLY these data sources: CSV canonical (cohort size + signals), industry packs, company profile pack, and explicit input notes.",
       "If competitors are provided in the input, USE ONLY those; do not introduce others.",
       "For Addressable market, DO NOT estimate; the writer will insert the cohort and focus subset from CSV.",
@@ -976,7 +1021,7 @@ module.exports = async function (context, queueItem) {
 
         // Headline guard: if paragraph is empty or looks like a headline, synthesise one from data
         if (!paragraph || looksLikeHeadline(paragraph)) {
-          const pSynth = synthesizeExecParagraph({ outline: ol, csvCanon: csvC });
+          const pSynth = synthesizeExecParagraph({ outline: ol, csvCanon: csvC, strategy });
           if (pSynth && pSynth.trim()) paragraph = pSynth.trim();
         }
 
