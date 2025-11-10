@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 09-11-2025 v7
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 11-11-2025 v10.0
    Changes vs v5:
    - Support resuming an existing run selected in #runSelect (no CSV required)
    - Poller: tolerate a single transient status fetch error before failing
@@ -168,84 +168,40 @@ window.CampaignUI = window.CampaignUI || {};
 
   // ---------- Renderers (unchanged logic) ----------
   function renderExecutiveSummary() {
-    const es = state.contract?.executive_summary;
-    const esLegacy = state.contract?.executive_summary_legacy;
+    const esObj = state.contract?.sections?.executive_summary || state.contract?.executive_summary_object || null;
+    const esLegacy = Array.isArray(state.contract?.executive_summary_legacy)
+      ? state.contract.executive_summary_legacy
+      : (Array.isArray(state.contract?.executive_summary) ? state.contract.executive_summary : null);
 
-    // Helper to coerce any value to readable text (keeps your style)
-    const toText = (item) => {
-      if (item == null) return "";
-      if (typeof item === "string") return item;
-      if (typeof item === "number") return String(item);
-      if (typeof item === "object") {
-        // Prefer common paragraph keys; then fall back to concatenating string fields
-        const prefer = item.lead_paragraph || item.paragraph || item.text || item.value || item.content || item.headline;
-        if (typeof prefer === "string") return prefer;
-        const vals = Object.values(item).filter(v => typeof v === "string");
-        return (vals.join(" ").trim()) || JSON.stringify(item);
-      }
-      return String(item);
-    };
+    const emptyObj = (v) => !v || (typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length);
+    const isEmpty = (v) => v == null || (Array.isArray(v) && v.length === 0) || emptyObj(v);
 
-    // Nothing to render?
-    const esEmpty =
-      (!es || (Array.isArray(es) && es.length === 0) || (typeof es === "object" && !Array.isArray(es) && !Object.keys(es).length));
-    const esLegacyEmpty = (!Array.isArray(esLegacy) || esLegacy.length === 0);
-
-    if (esEmpty && esLegacyEmpty) {
+    if (isEmpty(esObj) && isEmpty(esLegacy)) {
       setPanelContent(makePre("The executive summary will show here when your campaign has been created."));
       return;
     }
 
-    // Normalise into { para, bullets[] } preferring object → array → legacy
-    let para = "";
-    let bullets = [];
+    // Normalise to { lead, bullets[] } using the existing helper
+    const norm = resolveExecutiveSummaryShapes(esObj, esLegacy);
+    const para = typeof norm?.lead === "string" ? norm.lead.trim() : "";
+    const bullets = Array.isArray(norm?.bullets) ? norm.bullets.filter(Boolean) : [];
 
-    if (es && !Array.isArray(es) && typeof es === "object") {
-      // Object shape: { lead_paragraph?, bullets?[] }
-      para = (
-        (typeof es.lead_paragraph === "string" && es.lead_paragraph) ||
-        (typeof es.paragraph === "string" && es.paragraph) ||
-        (typeof es.text === "string" && es.text) ||
-        (typeof es.content === "string" && es.content) ||
-        (typeof es.headline === "string" && es.headline) ||
-        ""
-      ).trim();
-      if (Array.isArray(es.bullets)) {
-        bullets = es.bullets.map(toText).filter(Boolean);
-      } else if (Array.isArray(es.points)) {
-        bullets = es.points.map(toText).filter(Boolean);
-      } else if (Array.isArray(es.items)) {
-        bullets = es.items.map(toText).filter(Boolean);
-      }
-    } else if (Array.isArray(es)) {
-      // Legacy/array in executive_summary
-      const list = es.map(toText).filter(s => s && s.trim());
-      para = (list[0] || "").trim();
-      bullets = (list.length > 1) ? list.slice(1) : [];
-    } else if (Array.isArray(esLegacy)) {
-      // Legacy/array in executive_summary_legacy
-      const list = esLegacy.map(toText).filter(s => s && s.trim());
-      para = (list[0] || "").trim();
-      bullets = (list.length > 1) ? list.slice(1) : [];
-    }
-
-    // Render
     const wrap = document.createElement("div");
 
     if (para) {
       const p = document.createElement("p");
-      p.textContent = String(para || "");
+      p.textContent = para;
       wrap.appendChild(p);
     }
 
-    if (bullets && bullets.length) {
+    if (bullets.length) {
       const ul = document.createElement("ul");
       ul.className = "list";
-      bullets.forEach(b => {
+      for (const b of bullets) {
         const li = document.createElement("li");
         li.textContent = String(b || "");
         ul.appendChild(li);
-      });
+      }
       wrap.appendChild(ul);
     }
 
@@ -840,6 +796,7 @@ window.CampaignUI = window.CampaignUI || {};
     start: () => `/api/campaign-start`,
     status: (runId) => `/api/campaign-status?runId=${encodeURIComponent(runId)}`,
     fetchContract: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign`,
+    fetchEvidence: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence`,
     fetchEvidenceLog: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence_log`,
   };
 
@@ -933,11 +890,20 @@ window.CampaignUI = window.CampaignUI || {};
   async function fetchCompleteRun(runId, allowPoll) {
     const contract = await pollToCompletion(runId, allowPoll);
     UI.log("Contract fetched; keys=" + Object.keys(contract || {}).join(","));
-    // Evidence (non-fatal)
+    // Evidence (prefer canonical; fall back to legacy array)
     let evidenceItems = [];
     try {
-      const ev = await http("GET", API.fetchEvidenceLog(runId), { timeoutMs: 20000 });
-      if (Array.isArray(ev)) evidenceItems = ev;
+      const evCanon = await http("GET", API.fetchEvidence(runId), { timeoutMs: 20000 });
+      if (evCanon && typeof evCanon === "object" && Array.isArray(evCanon.claims)) {
+        evidenceItems = evCanon.claims;
+      } else if (Array.isArray(evCanon)) {
+        // Some environments still return a bare array at /evidence
+        evidenceItems = evCanon;
+      } else {
+        // Fallback to legacy file
+        const evLegacy = await http("GET", API.fetchEvidenceLog(runId), { timeoutMs: 20000 });
+        if (Array.isArray(evLegacy)) evidenceItems = evLegacy;
+      }
     } catch (e) {
       UI.log("Evidence fetch skipped: " + (e?.message || e));
     }

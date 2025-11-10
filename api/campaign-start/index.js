@@ -1,4 +1,4 @@
-// /api/campaign-start/index.js 07-11-2025 v14 (Option B – orchestrated)
+// /api/campaign-start/index.js 01-11-2025 v16
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign-start → writes status/input, enqueues kickoff to main queue + full job to evidence queue.
 
@@ -100,6 +100,33 @@ async function writeInitialStatus(containerClient, relPrefix, status) {
   await writeJson(containerClient, `${relPrefix}status.json`, status);
 }
 
+// PATCH ST-CSV: canonical seed for csv_normalized.json (non-breaking; Evidence will overwrite later)
+async function normalizeCsvAndPersist(containerClient, prefix, input) {
+  const csv = input?.csvSummary || {};
+  const rows = Number.isFinite(Number(input?.rowCount)) ? Number(input.rowCount) : Number(csv.rowCountScoped || 0);
+  const selected_industry =
+    (input?.selected_industry ?? input?.campaign_industry ?? input?.buyer_industry ?? null) || null;
+
+  const normalized = {
+    selected_industry,
+    industry_mode: selected_industry ? "specific" : "agnostic",
+    signals: { spend_band: null, top_blockers: [], top_needs_supplier: [], top_purchases: [] },
+    global_signals: { spend_band: null, top_blockers: [], top_needs_supplier: [], top_purchases: [] },
+    meta: {
+      rows: Math.max(0, rows || 0),
+      source: csv?.source || (input?.csvFilename || null),
+      csv_has_multiple_sectors: Boolean(csv?.csvHasMultipleSectors || csv?.hasMultipleSectors)
+    },
+    // optional preview for UI only; ignored by downstream logic
+    preview: {
+      cohort: Array.isArray(csv.sampleRows) ? csv.sampleRows.slice(0, 5) : []
+    }
+  };
+
+  await writeJson(containerClient, `${prefix}csv_normalized.json`, normalized);
+  return normalized;
+}
+
 // Queue helpers
 async function enqueue(queueClient, msgObj) {
   await queueClient.sendMessage(JSON.stringify(msgObj)); // SDK base64-encodes for you
@@ -177,14 +204,14 @@ module.exports = async function (context, req) {
       body.sales_model, body.salesModel,
       body.filters?.sales_model, body.filters?.salesModel
     ].map(v => (v == null ? "" : String(v).trim().toLowerCase()))
-     .find(v => v === "direct" || v === "partner");
+      .find(v => v === "direct" || v === "partner");
     const sales_model = salesModelRaw || "direct";
 
     const callTypeRaw = [
       body.call_type, body.callType,
       body.filters?.call_type, body.filters?.callType
     ].map(v => (v == null ? "" : String(v).trim().toLowerCase()))
-     .find(v => v === "direct" || v === "partner");
+      .find(v => v === "direct" || v === "partner");
     const call_type = callTypeRaw || null;
 
     // Canonical supplier inputs (prefer supplier_*; fallback to prospect_*)
@@ -196,7 +223,15 @@ module.exports = async function (context, req) {
     const supplier_usps = Array.isArray(body.supplier_usps)
       ? body.supplier_usps.map(s => String(s || "").trim()).filter(Boolean).slice(0, 12)
       : [];
-
+    let supplier_products = [];
+    if (Array.isArray(body.supplier_products)) {
+      supplier_products = body.supplier_products.map(s => String(s || "").trim()).filter(Boolean).slice(0, 24);
+    } else if (typeof body.supplier_products === "string") {
+      supplier_products = body.supplier_products.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 24);
+    } else if (typeof body.products === "string" || Array.isArray(body.products)) {
+      const arr = Array.isArray(body.products) ? body.products : body.products.split(/[,;\n]/);
+      supplier_products = arr.map(s => String(s || "").trim()).filter(Boolean).slice(0, 24);
+    }
     // Campaign context
     const campaign_industry = (body.campaign_industry ?? body.companyIndustry ?? body.industry ?? "").toString().trim() || null;
 
@@ -278,6 +313,7 @@ module.exports = async function (context, req) {
         supplier_website,
         supplier_linkedin,
         supplier_usps,
+        supplier_products,
         campaign_industry,
         selected_industry: campaign_industry, // mirror for downstream
         campaign_requirement: campaign_requirement_effective,
@@ -306,6 +342,7 @@ module.exports = async function (context, req) {
       supplier_website,
       supplier_linkedin,
       supplier_usps,
+      supplier_products,
       campaign_industry,
       selected_industry: campaign_industry,
       campaign_requirement: campaign_requirement_effective,
@@ -321,6 +358,7 @@ module.exports = async function (context, req) {
       company_industry: campaign_industry
     };
     await writeJson(containerClient, `${prefix}input.json`, inputPayload);
+    await normalizeCsvAndPersist(containerClient, prefix, inputPayload);
 
     // ---- per-user recent index (bounded 50) ----
     const userIdxClient = containerClient.getBlockBlobClient(`users/${userId}/recent.json`);

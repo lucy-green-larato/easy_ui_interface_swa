@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js — Split campaign build. 10-11-2025 — v14
+// /api/campaign-evidence/index.js — Split campaign build. 11-11-2025 — v18
 // Artifacts written under: <prefix>/
 //   - site.json               (homepage snapshot + lightweight link graph — array, legacy compatible)
 //   - products.json           (product analysis for ability to solve buyers' problems)
@@ -556,41 +556,40 @@ function parseProductClaims(html) {
   return out;
 }
 
-async function crawlSiteGraph(rootUrl, budget = MAX_SITE_PAGES, timeout = FETCH_TIMEOUT_MS) {
-  if (!rootUrl) return { pages: [], links: [] };
-  const start = toHttps(rootUrl);
-  const visited = new Set();
-  const queue = [start];
-  const pages = [];
-  const links = new Set();
+while (queue.length && pages.length < budget) {
+  const url = queue.shift();
+  if (!url || visited.has(url)) continue;
+  visited.add(url);
 
-  while (queue.length && pages.length < budget) {
-    const url = queue.shift();
-    if (!url || visited.has(url)) continue;
-    visited.add(url);
+  const res = await httpGet(url, timeout);
+  if (!res.ok) continue;
+  const html = (res.text || "").slice(0, 150_000);
 
-    const res = await httpGet(url, timeout);
-    if (!res.ok) continue;
-    const html = (res.text || "").slice(0, 150_000);
-    pages.push({
-      url,
-      host: hostnameOf(url),
-      fetchedAt: nowIso(),
-      type: "html",
-      bytes: Buffer.byteLength(html, "utf8"),
-      sha1: sha1(html),
-      snippet: html.slice(0, 6000)
-    });
+  // NEW: extract <title> for downstream heuristics
+  let title = "";
+  try {
+    const m = html.match(/<title[^>]*>([^<]{1,200})<\/title>/i);
+    title = m ? (m[1] || "").replace(/\s+/g, " ").trim() : "";
+  } catch { /* noop */ }
 
-    const hrefs = extractLinks(html, url);
-    for (const h of hrefs) {
-      links.add(h);
-      if (sameHost(h, start) && !visited.has(h) && queue.length + pages.length < budget) {
-        queue.push(h);
-      }
+  pages.push({
+    url,
+    host: hostnameOf(url),
+    fetchedAt: nowIso(),
+    type: "html",
+    bytes: Buffer.byteLength(html, "utf8"),
+    sha1: sha1(html),
+    title,                                // <-- added
+    snippet: html.slice(0, 6000)
+  });
+
+  const hrefs = extractLinks(html, url);
+  for (const h of hrefs) {
+    links.add(h);
+    if (sameHost(h, start) && !visited.has(h) && queue.length + pages.length < budget) {
+      queue.push(h);
     }
   }
-  return { pages, links: Array.from(links) };
 }
 
 async function collectCaseStudyLinks(pages, allLinks, rootHost) {
@@ -960,6 +959,28 @@ function linkedinSearchEvidence({ url, title }) {
     quote: ""
   };
 }
+// PATCH EV-HELP-1: summarizeClaims — tiny counter for evidence.json
+function summarizeClaims(all = []) {
+  const counts = {
+    website: 0,
+    linkedin: 0,
+    pdf: 0,
+    directories: 0,
+    ixbrl: 0,
+    csv: 0
+  };
+  for (const it of all) {
+    const t = String(it?.source_type || "").toLowerCase();
+    if (t.includes("site") || t.includes("website") || t.includes("company site")) counts.website++;
+    else if (t.includes("linkedin")) counts.linkedin++;
+    else if (t.includes("pdf")) counts.pdf++;
+    else if (t.includes("directory")) counts.directories++;
+    else if (t.includes("ixbrl")) counts.ixbrl++;
+    else if (t.includes("csv")) counts.csv++;
+  }
+  return counts;
+}
+
 
 module.exports = async function (context, job) {
   const container = getContainerClient();
@@ -1027,6 +1048,27 @@ module.exports = async function (context, job) {
     // Store homepage snapshot array-shaped (prev format compatibility)
     const siteJson = siteGraph.pages.length ? [siteGraph.pages[0]] : [];
     await putJson(container, `${prefix}site.json`, siteJson);
+    // PATCH EV-PAGES-1: derive product-page claims from crawled HTML
+    let productPageEvidence = [];
+    try {
+      const pages = Array.isArray(siteGraph?.pages) ? siteGraph.pages : [];
+      for (const p of pages) {
+        const html = String(p?.snippet || "");
+        const claims = parseProductClaims(html); // uses your helper
+        for (const c of claims.slice(0, 12)) {
+          productPageEvidence.push({
+            claim_id: nextClaimId(),
+            source_type: "Company site",
+            title: c.length > 120 ? `${c.slice(0, 117)}…` : c,
+            url: toHttps(p?.url || (input?.supplier_website || "")),
+            summary: addCitation(c, "Company site"),
+            quote: ""
+          });
+        }
+      }
+    } catch (e) {
+      context.log.warn("[campaign-evidence] productPageEvidence build skipped", String(e?.message || e));
+    }
 
     // 1a-USER) Seed products from user input (string or array), if provided
     try {
@@ -1046,7 +1088,7 @@ module.exports = async function (context, job) {
     } catch { /* best-effort; continue */ }
 
     // ---- Products: Declared → Observed → Validated → Chosen (init) ----
-    const productsMeta = { declared: [], observed: [], validated: [], chosen: [], notes: {} };
+    const productsMeta = { declared: [], observed: [], validated: [], chosen: [], notes: Object.create(null) };
 
     // Declared products (user-specified): array OR a single string (split on ; , or newline)
     try {
@@ -1197,148 +1239,15 @@ module.exports = async function (context, job) {
       context.log.warn("[campaign-evidence] observed phase skipped", String(e?.message || e));
     }
 
-    // ---- 1b) Validated products (Observed/Declared cross-checked with CSV signals) ----
-    try {
-      const sig = (csvNormalizedCanonical && csvNormalizedCanonical.signals) ? csvNormalizedCanonical.signals : {};
-      const topPurchases = Array.isArray(sig.top_purchases) ? sig.top_purchases : [];
-      const topNeeds = Array.isArray(sig.top_needs_supplier) ? sig.top_needs_supplier
-        : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
-      const universeRaw = [...topPurchases, ...topNeeds].map(s => String(s || "").toLowerCase().trim()).filter(Boolean);
-      const universe = Array.from(new Set(universeRaw));
-
-      const tok = s => String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-      const jacc = (a, b) => {
-        const A = new Set(a), B = new Set(b);
-        let i = 0; for (const x of A) if (B.has(x)) i++;
-        const d = A.size + B.size - i;
-        return d ? (i / d) : 0;
-      };
-
-      const declared = productsMeta.declared || [];
-      const observed = productsMeta.observed || [];
-
-      // If there are no CSV signals at all, treat validation as a pass-through hint, not a blocker.
-      if (universe.length === 0) {
-        productsMeta.validated = Array.from(new Set([...declared, ...observed])).slice(0, 24);
-        productsMeta.notes.validation = "no_csv_signals";
-      } else {
-        // Light threshold; UK tech naming varies (reduce from 0.25 → 0.18)
-        const THRESH = 0.18;
-        const score = (name) => {
-          const t = tok(name);
-          let best = 0;
-          for (const u of universe) { const s = jacc(t, tok(u)); if (s > best) best = s; }
-          return best;
-        };
-        const vd = declared.map(n => ({ n, s: score(n) })).filter(x => x.s >= THRESH).sort((a, b) => b.s - a.s).map(x => x.n);
-        const vo = observed.map(n => ({ n, s: score(n) })).filter(x => x.s >= THRESH).sort((a, b) => b.s - a.s).map(x => x.n);
-        const validated = Array.from(new Set([...vd, ...vo])).slice(0, 24);
-
-        productsMeta.validated = validated;
-        productsMeta.notes.validation = validated.length ? "csv_signals_matched" : "csv_signals_present_but_no_match";
-      }
-    } catch (e) {
-      context.log.warn("[campaign-evidence] validated phase skipped", String(e?.message || e));
-      productsMeta.validated = Array.from(new Set([...(productsMeta.declared || []), ...(productsMeta.observed || [])])).slice(0, 24);
-      productsMeta.notes.validation = "fallback_on_error";
-    }
-
-    // ---- 1c) Chosen products (deterministic, buyer-led) ----
-    try {
-      const declared = productsMeta.declared || [];
-      const observed = productsMeta.observed || [];
-      const validated = productsMeta.validated || [];
-
-      const dedupe = (arr) => Array.from(new Set(arr.map(s => String(s).trim()).filter(Boolean)));
-
-      let chosen = dedupe([
-        ...declared.filter(x => validated.includes(x)),
-        ...observed.filter(x => validated.includes(x))
-      ]).slice(0, 12);
-
-      if (chosen.length === 0 && declared.length > 0) {
-        chosen = dedupe(declared).slice(0, 12);
-        productsMeta.notes.reason = "no validation hit; using declared for continuity";
-      }
-      productsMeta.notes = productsMeta.notes || {};
-
-      // Normalise chosen
-      if (!Array.isArray(chosen)) chosen = [];
-
-      // If nothing validated/was chosen, fall back to Declared (continuity)
-      if (chosen.length === 0) {
-        const declaredArr = Array.isArray(productsMeta.declared)
-          ? productsMeta.declared.map(s => String(s).trim()).filter(Boolean)
-          : [];
-
-        if (declaredArr.length) {
-          chosen = [...new Set(declaredArr)].slice(0, 6);
-          productsMeta.notes.validation = 'fallback_declared_no_validated';
-        } else {
-          // Truly nothing to use; proceed without error, but record the condition.
-          chosen = [];
-          productsMeta.notes.validation = 'no_candidates';
-        }
-      }
-
-      // Persist final choice + diagnostics
-      productsMeta.chosen = chosen;
-      productsMeta.notes.capability_map_used = false;
-      productsMeta.notes.csv_sources = ["top_purchases", "top_needs_supplier|top_needs"];
-      productsMeta.notes.counts = {
-        declared: (productsMeta.declared || []).length,
-        observed: (productsMeta.observed || []).length,
-        validated: (productsMeta.validated || []).length,
-        chosen: chosen.length
-      };
-
-      // Write artefacts (even if chosen is empty) so downstream can degrade gracefully
-      await putJson(container, `${prefix}products.json`, { products: chosen });
-      await putJson(container, `${prefix}products_meta.json`, productsMeta);
-    } catch (e) {
-      context.log.error("[campaign-evidence] choosing products failed", String(e?.message || e));
-      throw e; // stop here; downstream should not run without products
-    }
-
-    // 2) LINKEDIN (reference only)
-    const li = supplierLinkedIn
-      ? [{
-        url: supplierLinkedIn,
-        host: hostnameOf(supplierLinkedIn),
-        fetchedAt: nowIso(),
-        type: "link",
-        note: "LinkedIn metadata not scraped; stored as reference only."
-      }]
-      : [];
-    await putJson(container, `${prefix}linkedin.json`, li);
-
-    // 3) Case study discovery (HTML & PDF on same host)
-    let pdfExtracts = [];
-    if (siteGraph.pages.length) {
-      try {
-        const host = siteGraph.pages[0].host || hostnameOf(supplierWebsite);
-        const candidateLinks = await collectCaseStudyLinks(siteGraph.pages, siteGraph.links, host);
-        pdfExtracts = await fetchCaseStudySummaries(candidateLinks);
-      } catch (e) {
-        context.log.warn("[campaign-evidence] case study discovery failed", String(e?.message || e));
-      }
-    }
-    await putJson(container, `${prefix}pdf_extracts.json`, pdfExtracts);
-
-    // 4) Directories placeholder
-    await putJson(container, `${prefix}directories.json`, []);
-
-    // 5) CSV → csv_normalized.json (canonical)
+    // CSV → csv_normalized.json (canonical)
     let csvText = null;
     let chosenCsvName = null;
 
-    // 5a) Inline CSV (highest priority)
     if (typeof input.csvText === "string" && input.csvText.trim()) {
       csvText = input.csvText;
       chosenCsvName = (typeof input.csvFilename === "string" && input.csvFilename.trim()) ? input.csvFilename.trim() : "inline";
     }
 
-    // 5b) Blob CSV (fallback)
     if (!csvText) {
       const csvNames = await listCsvUnderPrefix(container, prefix);
       if (csvNames.length) {
@@ -1363,10 +1272,8 @@ module.exports = async function (context, job) {
 
     if (csvText && csvText.trim()) {
       const rows = parseCsvLoose(csvText);
-      // keep raw rows for focus insight
       csvRowsRaw = rows;
 
-      // derive an optional focus label from input
       const focusLabelRaw = String(
         input?.selected_product ??
         input?.campaign_focus ??
@@ -1375,16 +1282,13 @@ module.exports = async function (context, job) {
         ""
       ).trim();
 
-      // compute total (header excluded) and focused subset count
       (function computeCsvFocus() {
         try {
-          // total rows = data rows (exclude header)
           const totalRows = Array.isArray(rows) && rows.length > 1 ? (rows.length - 1) : 0;
 
           let focusCount = null;
           if (focusLabelRaw && totalRows > 0) {
             const header = rows[0].map(h => String(h || "").trim().toLowerCase());
-            // columns likely to carry intent
             const intentCols = header
               .map((h, i) => (/\b(top|purchase|intent|plan|priority|buy|evaluate|mobile|connect)\b/.test(h) ? i : -1))
               .filter(i => i >= 0);
@@ -1402,14 +1306,15 @@ module.exports = async function (context, job) {
           }
 
           csvFocusInsight = {
-            totalRows,
+            totalRows: Number.isFinite(totalRows) ? totalRows : 0,
             focusLabel: focusLabelRaw,
-            focusCount
+            focusCount: Number.isFinite(focusCount) ? focusCount : null
           };
         } catch {
           csvFocusInsight = { totalRows: 0, focusLabel: "", focusCount: null };
         }
       })();
+
       const agg = normalizeCsv(rows);
 
       const industries = Array.isArray(agg.industries) ? agg.industries : [];
@@ -1468,13 +1373,140 @@ module.exports = async function (context, job) {
     }
 
     await putJson(container, `${prefix}csv_normalized.json`, csvNormalizedCanonical);
+
+    // Validated products (Observed/Declared cross-checked with CSV signals)
+    try {
+      productsMeta.notes = productsMeta.notes || Object.create(null);
+
+      const sig = (csvNormalizedCanonical && csvNormalizedCanonical.signals) ? csvNormalizedCanonical.signals : {};
+      const topPurchases = Array.isArray(sig.top_purchases) ? sig.top_purchases : [];
+      const topNeeds = Array.isArray(sig.top_needs_supplier) ? sig.top_needs_supplier
+        : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
+      const universeRaw = [...topPurchases, ...topNeeds].map(s => String(s || "").toLowerCase().trim()).filter(Boolean);
+      const universe = Array.from(new Set(universeRaw));
+
+      const tok = s => String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      const jacc = (a, b) => {
+        const A = new Set(a), B = new Set(b);
+        let i = 0; for (const x of A) if (B.has(x)) i++;
+        const d = A.size + B.size - i;
+        return d ? (i / d) : 0;
+      };
+
+      const declared = productsMeta.declared || [];
+      const observed = productsMeta.observed || [];
+
+      if (universe.length === 0) {
+        productsMeta.validated = Array.from(new Set([...declared, ...observed])).slice(0, 24);
+        productsMeta.notes.validation = "no_csv_signals";
+      } else {
+        const THRESH = 0.18;
+        const score = (name) => {
+          const t = tok(name);
+          let best = 0;
+          for (const u of universe) { const s = jacc(t, tok(u)); if (s > best) best = s; }
+          return best;
+        };
+        const vd = declared.map(n => ({ n, s: score(n) })).filter(x => x.s >= THRESH).sort((a, b) => b.s - a.s).map(x => x.n);
+        const vo = observed.map(n => ({ n, s: score(n) })).filter(x => x.s >= THRESH).sort((a, b) => b.s - a.s).map(x => x.n);
+        const validated = Array.from(new Set([...vd, ...vo])).slice(0, 24);
+
+        productsMeta.validated = validated;
+        productsMeta.notes.validation = validated.length ? "csv_signals_matched" : "csv_signals_present_but_no_match";
+      }
+    } catch (e) {
+      context.log.warn("[campaign-evidence] validated phase skipped", String(e?.message || e));
+      productsMeta.validated = Array.from(new Set([...(productsMeta.declared || []), ...(productsMeta.observed || [])])).slice(0, 24);
+      productsMeta.notes = productsMeta.notes || {};
+      productsMeta.notes.validation = "fallback_on_error";
+    }
+
+    // Chosen products (deterministic, buyer-led)
+    try {
+      const declared = productsMeta.declared || [];
+      const observed = productsMeta.observed || [];
+      const validated = productsMeta.validated || [];
+
+      const dedupe = (arr) => Array.from(new Set(arr.map(s => String(s).trim()).filter(Boolean)));
+
+      let chosen = dedupe([
+        ...declared.filter(x => validated.includes(x)),
+        ...observed.filter(x => validated.includes(x))
+      ]).slice(0, 12);
+
+      if (chosen.length === 0 && declared.length > 0) {
+        chosen = dedupe(declared).slice(0, 12);
+        productsMeta.notes.reason = "no_validation_hit; using declared for continuity";
+      }
+      productsMeta.notes = productsMeta.notes || {};
+
+      if (!Array.isArray(chosen)) chosen = [];
+
+      if (chosen.length === 0) {
+        const declaredArr = Array.isArray(productsMeta.declared)
+          ? productsMeta.declared.map(s => String(s).trim()).filter(Boolean)
+          : [];
+
+        if (declaredArr.length) {
+          chosen = [...new Set(declaredArr)].slice(0, 6);
+          productsMeta.notes.validation = "fallback_declared_no_validated";
+        } else {
+          chosen = [];
+          productsMeta.notes.validation = "no_candidates";
+        }
+      }
+
+      productsMeta.chosen = chosen;
+      productsMeta.notes.capability_map_used = false;
+      productsMeta.notes.csv_sources = ["top_purchases", "top_needs_supplier|top_needs"];
+      productsMeta.notes.counts = {
+        declared: (productsMeta.declared || []).length,
+        observed: (productsMeta.observed || []).length,
+        validated: (productsMeta.validated || []).length,
+        chosen: chosen.length
+      };
+
+      await putJson(container, `${prefix}products.json`, { products: chosen });
+      await putJson(container, `${prefix}products_meta.json`, productsMeta);
+    } catch (e) {
+      context.log.error("[campaign-evidence] choosing products failed", String(e?.message || e));
+      throw e;
+    }
+
+    // LINKEDIN (reference only)
+    const li = supplierLinkedIn
+      ? [{
+        url: supplierLinkedIn,
+        host: hostnameOf(supplierLinkedIn),
+        fetchedAt: nowIso(),
+        type: "link",
+        note: "LinkedIn metadata not scraped; stored as reference only."
+      }]
+      : [];
+    await putJson(container, `${prefix}linkedin.json`, li);
+
+    // Case study discovery (HTML & PDF on same host)
+    let pdfExtracts = [];
+    if (siteGraph.pages.length) {
+      try {
+        const host = siteGraph.pages[0].host || hostnameOf(supplierWebsite);
+        const candidateLinks = await collectCaseStudyLinks(siteGraph.pages, siteGraph.links, host);
+        pdfExtracts = await fetchCaseStudySummaries(candidateLinks);
+      } catch (e) {
+        context.log.warn("[campaign-evidence] case study discovery failed", String(e?.message || e));
+      }
+    }
+    await putJson(container, `${prefix}pdf_extracts.json`, pdfExtracts);
+
+    // Directories placeholder
+    await putJson(container, `${prefix}directories.json`, []);
+
+    // Site/products map inputs for downstream
     const siteObjForMap = await getJson(container, `${prefix}site.json`);
     const productsObjForMap = await getJson(container, `${prefix}products.json`);
     const uspsList = Array.isArray(input?.supplier_usps)
       ? input.supplier_usps.map(s => String(s).trim()).filter(Boolean)
       : [];
-
-    // Derive product/capability names
     const productNames = collectProductNames(productsObjForMap, siteObjForMap, uspsList);
 
     // Pull buyer needs from csv_normalized (specific signals preferred; fallback to global)
@@ -2009,7 +2041,14 @@ module.exports = async function (context, job) {
       titles: evidenceLog.map(x => x.title).slice(0, 12)
     });
 
+    // PATCH EV-WRITE-1: write both legacy array (evidence_log.json) and canonical bundle (evidence.json)
     await putJson(container, `${prefix}evidence_log.json`, evidenceLog);
+
+    const evidenceBundle = {
+      claims: evidenceLog,
+      counts: summarizeClaims(evidenceLog)
+    };
+    await putJson(container, `${prefix}evidence.json`, evidenceBundle);
 
     // 7) Finalise phase
     await updateStatus(

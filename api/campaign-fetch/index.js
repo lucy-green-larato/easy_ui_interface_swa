@@ -1,4 +1,4 @@
-// /api/campaign-fetch/index.js 07-11-2025 v12 (Option B – prefix-aware, robust JSON)
+// /api/campaign-fetch/index.js 11-11-2025 v14
 // GET /api/campaign-fetch?runId=<id>&file=<campaign|evidence_log|csv|status|outline|sections|section>&name=<sectionName?>
 // Optional: &prefix=<container-relative override>
 
@@ -39,10 +39,12 @@ const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 // ---------- valid keys ----------
 const VALID_MAP = Object.freeze({
   campaign: "campaign.json",
+  evidence: "evidence.json",
   evidence_log: "evidence_log.json",
   csv: "csv_normalized.json",
   status: "status.json",
   outline: "outline.json",
+  products_meta: "products_meta.json"
 });
 
 const SECTION_KEYS = [
@@ -181,13 +183,70 @@ module.exports = async function (context, req) {
   if (fileKey !== "sections" && fileKey !== "section") {
     const relName = VALID_MAP[fileKey];
     const blob = container.getBlockBlobClient(`${base}${relName}`);
+    if (fileKey === "evidence") {
+      // 1) Try canonical evidence.json
+      if (await existsWithTinyRetry(blob, true)) {
+        const dl = await blob.download();
+        const text = await streamToString(dl.readableStreamBody);
+        let parsed = null;
+        try { parsed = text ? JSON.parse(text) : null; } catch { parsed = null; }
+        context.res = { status: 200, headers: { ...H, "content-type": "application/json; charset=utf-8" }, body: parsed || { claims: [], counts: {} } };
+        return;
+      }
+
+      // 2) Fallback: evidence_log.json (legacy array)
+      const logBlob = container.getBlockBlobClient(`${base}evidence_log.json`);
+      if (await existsWithTinyRetry(logBlob, true)) {
+        const dlLog = await logBlob.download();
+        const textLog = await streamToString(dlLog.readableStreamBody);
+        let arr = null;
+        try { const tmp = textLog ? JSON.parse(textLog) : null; arr = Array.isArray(tmp) ? tmp : (Array.isArray(tmp?.evidence_log) ? tmp.evidence_log : null); } catch { arr = null; }
+        const claims = Array.isArray(arr) ? arr : [];
+        const counts = summarizeClaims(claims);
+        context.res = { status: 200, headers: { ...H, "content-type": "application/json; charset=utf-8" }, body: { claims, counts } };
+        return;
+      }
+
+      // 3) Fallback: campaign.json.evidence_log
+      const campaignBlob = container.getBlockBlobClient(`${base}campaign.json`);
+      if (await existsWithTinyRetry(campaignBlob, true)) {
+        const dl2 = await campaignBlob.download();
+        const t2 = await streamToString(dl2.readableStreamBody);
+        let cObj = null;
+        try { cObj = t2 ? JSON.parse(t2) : null; } catch { cObj = null; }
+        const claims = Array.isArray(cObj?.evidence_log) ? cObj.evidence_log : [];
+        const counts = summarizeClaims(claims);
+        context.res = { status: 200, headers: { ...H, "content-type": "application/json; charset=utf-8" }, body: { claims, counts } };
+        return;
+      }
+
+      // 4) Nothing found
+      context.res = { status: 404, headers: { ...H, "content-type": "application/json" }, body: { error: "not_found", message: "Evidence not found" } };
+      return;
+    }
+
+    function summarizeClaims(all = []) {
+      const counts = { website: 0, linkedin: 0, pdf: 0, directories: 0, ixbrl: 0, csv: 0 };
+      for (const c of all) {
+        const t = String(c?.source_type || "").toLowerCase();
+        if (t.includes("site")) counts.website++;
+        else if (t.includes("linkedin")) counts.linkedin++;
+        else if (t.includes("pdf")) counts.pdf++;
+        else if (t.includes("directory")) counts.directories++;
+        else if (t.includes("ixbrl")) counts.ixbrl++;
+        else if (t.includes("csv")) counts.csv++;
+      }
+      return counts;
+    }
 
     // campaign/evidence/outline may appear moments after status flips → tiny retry
     const shouldRetry = fileKey === "campaign" || fileKey === "evidence_log" || fileKey === "outline";
     const ok = await existsWithTinyRetry(blob, shouldRetry);
     if (!ok) {
-      context.res = { status: 404, headers: { ...H, "content-type": "application/json" },
-        body: { error: "not_found", message: "File not found" } };
+      context.res = {
+        status: 404, headers: { ...H, "content-type": "application/json" },
+        body: { error: "not_found", message: "File not found" }
+      };
       return;
     }
 

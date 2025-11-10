@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 09-11-2025 v21.2
+// /api/campaign-worker/index.js 11-11-2025 v24
 // Option B pipeline — worker fast path (draft campaign.json) with business-leader Executive Summary shaping
 // Preserves v14 structure: phased status, append-only event logger, robust loaders, and sanitizer.
 // Writes under results/<prefix> (container-relative, trailing slash). No renames of queues/ops/keys.
@@ -136,12 +136,14 @@ function _vpPick(list, fallback = "") {
 }
 function _vpHost(u) { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } }
 function _vpUniq(list) { const s = new Set(); return (Array.isArray(list) ? list : []).filter(x => (x && !s.has(x) && s.add(x))); }
-
 function _vpProductNames(productsJson) {
   const arr = Array.isArray(productsJson) ? productsJson : [];
-  return _vpUniq(arr.map(p => p?.name || p?.title || "").filter(Boolean)).slice(0, 6);
+  return _vpUniq(
+    arr
+      .map(p => (typeof p === "string" ? p : (p?.name || p?.title || "")))
+      .filter(Boolean)
+  ).slice(0, 6);
 }
-
 function _vpProofPoints(evidenceLog) {
   const items = Array.isArray(evidenceLog) ? evidenceLog : [];
   const score = (e) => {
@@ -172,6 +174,7 @@ function buildMooreVP({ outline, csvNormalized, evidenceLog, productsJson }) {
     (csvNormalized?.selected_industry) ||
     (csvNormalized?.meta?.selected_industry) ||
     (outline?.input_notes?.industry) || "";
+  const forWhoHint = industry ? `leaders in ${industry}` : "";
 
   // Signals (needs & blockers) — accept either local or global summaries
   const sig = csvNormalized?.signals || {};
@@ -193,7 +196,7 @@ function buildMooreVP({ outline, csvNormalized, evidenceLog, productsJson }) {
   const proofPoints = _vpProofPoints(evidenceLog);
 
   const fields = {
-    for_who: industry ? `${industry} companies and contractors` : "target customers",
+    for_who: forWhoHint || (outline?.input_notes?.for_who || ""),
     who_need: buyerNeeds.length ? buyerNeeds.join("; ").replace(/; ([^;]*)$/, " and $1")
       : "to solve their priority operational needs",
     the: `${supplier || "The supplier"} ${mainProduct}`,
@@ -216,6 +219,7 @@ function buildMooreVP({ outline, csvNormalized, evidenceLog, productsJson }) {
 
   return { paragraph, fields };
 }
+
 // ---- Case study sanitizer helpers (host-verified; safe) ----
 function buildAllowedSets(evidence, prospectWebsite) {
   const allowedUrls = new Set();
@@ -313,7 +317,9 @@ function deriveMarketContext({ evidence, csvSignals, usps, company, industry }) 
   if (!topTerms.length) return "";
 
   // 3) Buyer need (CSV signals) and supplier capability (USPs)
-  const needs = Array.isArray(csvSignals?.top_needs) ? csvSignals.top_needs.filter(Boolean) : [];
+  const needs = Array.isArray(csvSignals?.top_needs_supplier) && csvSignals.top_needs_supplier.length
+    ? csvSignals.top_needs_supplier.filter(Boolean)
+    : (Array.isArray(csvSignals?.top_needs) ? csvSignals.top_needs.filter(Boolean) : []);
   const primaryNeed = needs[0] || "";
 
   const uspArr = Array.isArray(usps) ? usps.filter(Boolean) : [];
@@ -382,6 +388,69 @@ function extractTopBlockersFromCsv(csvCanonical) {
     .sort((a, b) => b.n - a.n)
     .slice(0, 3)
     .map(x => x.text);
+}
+// PATCH W-PROD-H: products_meta helpers (no external deps)
+function _pm_cleanStrArr(arr) {
+  return Array.isArray(arr)
+    ? arr.map(v => (typeof v === "string" ? v.trim() : "")).filter(Boolean)
+    : [];
+}
+function _pm_uniqPreserve(arr) {
+  const seen = new Set(); const out = [];
+  for (const s of (arr || [])) { const k = String(s).toLowerCase(); if (k && !seen.has(k)) { seen.add(k); out.push(String(s)); } }
+  return out;
+}
+function _pm_inferObservedFromEvidence(claims = []) {
+  // Heuristic from topic/title — extend keywords as needed
+  const out = new Set();
+  for (const c of (Array.isArray(claims) ? claims : [])) {
+    const txt = `${c?.topic || ""} ${c?.title || ""}`.toLowerCase();
+    if (!txt) continue;
+    if (txt.includes("4g") || txt.includes("lte") || txt.includes("failover") || txt.includes("backup")) out.add("4G backup");
+    if (txt.includes("apn")) out.add("Private APN");
+    if (txt.includes("sim pool") || txt.includes("pooling")) out.add("SIM pooling");
+    if (txt.includes("sd-wan")) out.add("SD-WAN");
+    if (txt.includes("private 5g")) out.add("Private 5G");
+  }
+  return [...out];
+}
+function _pm_validateProducts({ declared, observed, csvNeeds, evidenceClaims }) {
+  const candidates = _pm_uniqPreserve([...(declared || []), ...(observed || [])]);
+  const vals = [];
+  for (const name of candidates) {
+    const k = name.toLowerCase();
+    let score = 0;
+    if ((observed || []).some(x => String(x).toLowerCase() === k)) score += 0.4;               // Observed
+    if ((declared || []).some(x => String(x).toLowerCase() === k)) score += 0.2;               // Declared
+    if ((csvNeeds || []).some(n => String(n).toLowerCase().includes(k) || k.includes(String(n).toLowerCase()))) score += 0.2; // CSV needs
+    if ((evidenceClaims || []).some(c => `${c?.topic || ""} ${c?.title || ""}`.toLowerCase().includes(k))) score += 0.2;       // Evidence match
+    if (score > 0) vals.push({ name, score: Math.round(score * 100) / 100, proof: [] });
+  }
+  return vals.filter(v => v.score >= 0.5).sort((a, b) => b.score - a.score);
+}
+function _pm_chooseProducts({ validated, input }) {
+  const preferred = new Set(_pm_cleanStrArr(input?.campaign_products));
+  const names = (validated || []).map(v => v.name);
+  if (preferred.size) {
+    const picked = names.filter(n => preferred.has(n));
+    if (picked.length) return picked;
+  }
+  return names.slice(0, Math.min(2, names.length));
+}
+async function buildProductsMeta(container, prefix, { input, csvNormalized, evidence }) {
+  const declared = _pm_cleanStrArr(input?.supplier_products);
+  const evidenceClaims = Array.isArray(evidence) ? evidence : [];
+  const observed = _pm_uniqPreserve(_pm_inferObservedFromEvidence(evidenceClaims));
+  const csvNeeds = _pm_cleanStrArr(
+    Array.isArray(csvNormalized?.signals?.top_needs_supplier) && csvNormalized.signals.top_needs_supplier.length
+      ? csvNormalized.signals.top_needs_supplier
+      : csvNormalized?.signals?.top_needs
+  );
+  const validated = _pm_validateProducts({ declared, observed, csvNeeds, evidenceClaims });
+  const chosen = _pm_chooseProducts({ validated, input });
+  const meta = { declared, observed, validated, chosen };
+  await putJson(container, `${prefix}products_meta.json`, meta);
+  return meta;
 }
 
 // ---------------- Strategy synthesis ------------------------
@@ -575,7 +644,10 @@ function mapFeaturesToBenefits({ usps, evidence, csvSignals, strategy }) {
     return inter / (A.size + B.size - inter);
   };
 
-  const needs = Array.isArray(csvSignals?.top_needs) ? csvSignals.top_needs.filter(Boolean) : [];
+  const needs =
+    Array.isArray(csvSignals?.top_needs_supplier) && csvSignals.top_needs_supplier.length
+      ? csvSignals.top_needs_supplier.filter(Boolean)
+      : (Array.isArray(csvSignals?.top_needs) ? csvSignals.top_needs.filter(Boolean) : []);
   const blockers = Array.isArray(csvSignals?.top_blockers) ? csvSignals.top_blockers.filter(Boolean) : [];
   const uspsArr = Array.isArray(usps) ? usps.filter(Boolean) : [];
 
@@ -697,15 +769,13 @@ function buildLeadParagraph({ company, industry, requirement, csvNormalized, nee
   ].filter(Boolean).join(" ");
 }
 
-function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence }) {
+function shapeExecutiveSummary({ existing, input, csvNormalized, strategy, evidence }) {
   if (Array.isArray(existing) && existing.length >= 1 && existing.every(x => nonEmpty(x))) return existing;
-
-  // Resolve basics used in bullets
   const company = firstNonEmpty(input.supplier_company, input.company_name, strategy?.meta?.company);
   const industry = firstNonEmpty(
     input.selected_industry,
     input.campaign_industry,
-    csvMeta?.selected_industry,
+    csvNormalized?.selected_industry,
     strategy?.meta?.industry
   );
 
@@ -746,29 +816,31 @@ function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence })
   // Addressable market: prefer input.addressable_market, then csvMeta.rows, then strategy TAM
   const rowsRaw = Number.isFinite(Number(input?.addressable_market)) && Number(input.addressable_market) > 0
     ? Number(input.addressable_market)
-    : (Number.isFinite(Number(csvMeta?.rows)) && Number(csvMeta.rows) > 0
-      ? Number(csvMeta.rows)
+    : (Number.isFinite(Number(csvNormalized?.meta?.rows)) && Number(csvNormalized.meta.rows) > 0
+      ? Number(csvNormalized.meta.rows)
       : (Number.isFinite(Number(strategy?.prospect_base?.tam)) ? Number(strategy.prospect_base.tam) : null));
 
   const amBullet = rowsRaw !== null
     ? `Addressable market in scope: **${rowsRaw.toLocaleString()}** organisations (from campaign source data).`
     : `Addressable market in scope: will be populated from the uploaded CSV.`;
 
-  // Buyer blockers (from CSV TopBlockers column)
-  const csvBlockers = extractTopBlockersFromCsv(csvMeta);
+  // Buyer blockers (prefer industry-specific, then global signals; no CSV rows dependency here)
+  const sig = csvNormalized?.signals || {};
+  const gsig = csvNormalized?.global_signals || {};
+  const csvBlockers = (Array.isArray(sig.top_blockers) && sig.top_blockers.length)
+    ? sig.top_blockers
+    : (Array.isArray(gsig.top_blockers) ? gsig.top_blockers : []);
   const blockersLine = csvBlockers.length
-    ? `Key buyer blockers to investment: ${csvBlockers.join("; ")}.`
+    ? `Key buyer blockers to investment: ${csvBlockers.slice(0, 3).join("; ")}.`
     : "";
-
   // Market context (data-led, optional; prints only when we have evidence/signals)
   const marketContextLine = deriveMarketContext({
     evidence,
-    csvSignals: (csvMeta && csvMeta.signals) ? csvMeta.signals : undefined,
+    csvSignals: (csvNormalized && csvNormalized.signals) ? csvNormalized.signals : undefined,
     usps,
     company,
     industry
   });
-
   // Optional evidence reference (use it or omit it entirely)
   const csvClaim = (Array.isArray(evidence) && evidence[0]?.claim_id)
     ? evidence[0].claim_id
@@ -825,7 +897,7 @@ function shapeExecutiveSummary({ existing, input, csvMeta, strategy, evidence })
   const fovLines = mapFeaturesToBenefits({
     usps,
     evidence,
-    csvSignals: (csvMeta && csvMeta.signals) ? csvMeta.signals : undefined,
+    csvSignals: (csvNormalized && csvNormalized.signals) ? csvNormalized.signals : undefined,
     strategy
   }).slice(0, 3);
 
@@ -994,6 +1066,13 @@ module.exports = async function (context, queueItem) {
       coverage: { total: 0, matched: 0, partial: 0, gap: 0, coverage: 0 },
       items: []
     };
+    // PATCH W-PROD-CALL: build products_meta.json (Declared → Observed → Validated → Chosen)
+    await buildProductsMeta(container, prefix, {
+      input: mergedInput,
+      csvNormalized: csvNormalized || {},
+      evidence: Array.isArray(evidence) ? evidence : []
+    });
+
 
     // Phase 3 — Draft campaign (LLM)
     await setPhase(container, prefix, "DraftCampaign", { evidence_items: Array.isArray(evidence) ? evidence.length : 0 });
@@ -1068,6 +1147,63 @@ module.exports = async function (context, queueItem) {
       ? productsValidated
       : (productsChosen.length ? productsChosen : productsJsonFixed);
 
+    // PATCH INS-1: enrich Strategy with validated products + coverage + evidence
+    (function attachInsight() {
+      // 1) Prospect-base products (names only for validated; keep chosen as provided)
+      const validatedNames = Array.isArray(productsValidated) ? productsValidated.map(v => v?.name).filter(Boolean) : [];
+      strategy.prospect_base = strategy.prospect_base || {};
+      strategy.prospect_base.products = {
+        declared: Array.isArray(metaAny?.declared) ? metaAny.declared : [],
+        observed: Array.isArray(metaAny?.observed) ? metaAny.observed : [],
+        validated: validatedNames,
+        chosen: Array.isArray(productsChosen) ? productsChosen : []
+      };
+
+      // 2) Coverage (from needs_map.json you already loaded)
+      strategy.insight = strategy.insight || {};
+      strategy.insight.coverage = (needsMap && needsMap.coverage) ? needsMap.coverage : { total: 0, matched: 0, partial: 0, gap: 0, coverage: 0 };
+
+      // 3) Evidence counters (lightweight, from evidenceLogFixed in this scope)
+      const counts = { website: 0, linkedin: 0, pdf: 0, directories: 0, ixbrl: 0, csv: 0 };
+      const ev = Array.isArray(evidenceLogFixed) ? evidenceLogFixed : [];
+      for (const c of ev) {
+        const t = String(c?.source_type || "").toLowerCase();
+        if (t.includes("site") || t.includes("website") || t.includes("company site")) counts.website++;
+        else if (t.includes("linkedin")) counts.linkedin++;
+        else if (t.includes("pdf")) counts.pdf++;
+        else if (t.includes("directory")) counts.directories++;
+        else if (t.includes("ixbrl")) counts.ixbrl++;
+        else if (t.includes("csv")) counts.csv++;
+      }
+      strategy.insight.evidence = { total: ev.length, counts };
+
+      // 4) Product-fit credibility score (avg of validated scores, 0–1 rounded 2dp)
+      let credibility = 0;
+      if (Array.isArray(productsValidated) && productsValidated.length) {
+        let sum = 0;
+        for (const v of productsValidated) sum += Number(v?.score || 0);
+        credibility = Math.round((sum / productsValidated.length) * 100) / 100;
+      }
+
+      // 5) Reasoned rationale (short, audit-friendly)
+      const tam = Number(csvNormalizedFixed?.meta?.rows || 0);
+      const whyPlay = tam
+        ? `Defined in-scope market of ${tam} organisations from CSV.`
+        : `Defined in-scope market present in uploaded CSV.`;
+      const whyCredible = credibility
+        ? `Validated product fit (avg score ${credibility}).`
+        : `Product fit inferred from declared/observed signals; validation pending.`;
+      const chosenLine = (strategy.prospect_base.products.chosen || []).length
+        ? `Chosen focus: ${strategy.prospect_base.products.chosen.join(", ")}.`
+        : ``;
+
+      strategy.insight.product_fit = {
+        credibility_score: credibility,
+        top_validated: validatedNames.slice(0, 2),
+        rationale: [whyPlay, whyCredible, chosenLine].filter(Boolean)
+      };
+    })();
+
     // -------- Phase — Moore Value Proposition synthesis --------------------------
     const _moore = buildMooreVP({
       outline: outlineFixed,
@@ -1079,7 +1215,8 @@ module.exports = async function (context, queueItem) {
     // Attach to strategy without changing existing schema
     strategy.value_proposition_moore = {
       paragraph: _moore.paragraph,
-      fields: _moore.fields
+      fields: _moore.fields,
+      chosen_products: Array.isArray(productsChosen) ? productsChosen.slice(0, 4) : []
     };
 
     // Keep legacy one-liner populated for current UI if missing
@@ -1155,18 +1292,17 @@ module.exports = async function (context, queueItem) {
     try {
       draft.campaign_title = draft.campaign_title || deriveCampaignTitle({
         company: firstNonEmpty(mergedInput.supplier_company, draft.supplier_company, draft.company_name),
-        industry: firstNonEmpty(mergedInput.selected_industry, mergedInput.campaign_industry, csvMeta?.selected_industry, csvMeta?.industry_mode),
+        industry: firstNonEmpty(mergedInput.selected_industry, mergedInput.campaign_industry, csvNormalized?.selected_industry, csvNormalized?.meta?.selected_industry),
         requirement: firstNonEmpty(mergedInput.campaign_requirement, draft.campaign_requirement)
       });
 
       draft.executive_summary = shapeExecutiveSummary({
         existing: draft.executive_summary,
         input: mergedInput,
-        csvMeta,
+        csvNormalized,   // pass full canonical CSV (signals + meta)
         strategy,
         evidence
       });
-
       draft.markers = Object.assign({}, draft.markers, { workerDraft: true, strategyV: "v16.1" });
     } catch (shapeErr) {
       context.log.warn("executive_summary_shape_coercion_failed", String(shapeErr?.message || shapeErr));

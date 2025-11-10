@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js 09-11-2025 v14 (Writer/Assembler)
+// /api/campaign-write/index.js 11-11-2025 v17 (Writer/Assembler)
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> writes sections/<finalKey>.json
 // - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%
@@ -138,9 +138,12 @@ async function loadPromptHarness() {
 function deriveSignalsFromCsv(csvCanon) {
   if (!csvCanon || typeof csvCanon !== "object") return { top_blockers: [], top_needs: [], top_purchases: [] };
   const sig = csvCanon.signals || {};
+  const needs = Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length
+    ? sig.top_needs_supplier
+    : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
   return {
     top_blockers: Array.isArray(sig.top_blockers) ? sig.top_blockers : [],
-    top_needs: Array.isArray(sig.top_needs) ? sig.top_needs : (Array.isArray(sig.top_needs_supplier) ? sig.top_needs_supplier : []),
+    top_needs: needs,
     top_purchases: Array.isArray(sig.top_purchases) ? sig.top_purchases : []
   };
 }
@@ -150,6 +153,7 @@ function makeEvidenceBundle({ evidenceLog, csvCanon, productNames }) {
   const productNamesArr = Array.isArray(productNames) ? productNames : [];
   return { catalog, signals, productNames: productNamesArr };
 }
+// PATCH WR-COMP: prefer user competitors; merge with evidence; keep shape
 function renderPositioningFromStrategy({ strategy, evidenceBundle, csvCanon }) {
   const s = strategy || {};
   const meta = s.meta || {};
@@ -158,41 +162,80 @@ function renderPositioningFromStrategy({ strategy, evidenceBundle, csvCanon }) {
   // Buyer pains directly from CSV signals
   const sig = (csvCanon && csvCanon.signals) || {};
   const pains = Array.isArray(sig.top_blockers) ? sig.top_blockers.filter(Boolean) : [];
-  const needs = Array.isArray(sig.top_needs) ? sig.top_needs.filter(Boolean) : [];
+    const needs = (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length
+    ? sig.top_needs_supplier
+    : (Array.isArray(sig.top_needs) ? sig.top_needs : [])
+  ).filter(Boolean);
 
-  // Competitor set strictly from evidence (no placeholders)
+  // ---- Build a quick lookup from evidence catalog (by vendor -> { url, title })
   const catalog = Array.isArray(evidenceBundle?.catalog) ? evidenceBundle.catalog : [];
-  const compSet = [];
-  const seen = new Set();
+  const byVendor = new Map();
   for (const it of catalog) {
     const vendor = String(it.vendor || it.source_vendor || "").trim();
+    if (!vendor) continue;
     const url = String(it.url || "").trim();
-    if (!vendor || seen.has(vendor.toLowerCase())) continue;
+    const title = String(it.title || "Relevant in consideration");
+    const key = vendor.toLowerCase();
+    // prefer first seen (stable)
+    if (!byVendor.has(key)) byVendor.set(key, { vendor, url: url && url.startsWith("https") ? url : "", title });
+  }
+
+  // ---- Gather user-supplied competitors (two possible locations)
+  const userListA = Array.isArray(s?.meta?.relevant_competitors) ? s.meta.relevant_competitors : [];
+  const userListB = Array.isArray(s?.input_notes?.relevant_competitors) ? s.input_notes.relevant_competitors : [];
+  const userCandidates = [...userListA, ...userListB]
+    .map(v => (typeof v === "string" ? v.trim() : ""))
+    .filter(Boolean);
+
+  // ---- Compose the final competitor set
+  const seen = new Set();
+  const compSet = [];
+
+  // 1) User-supplied first (normalised to object shape)
+  for (const name of userCandidates) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    const fromEvidence = byVendor.get(key);
+    compSet.push({
+      vendor: fromEvidence?.vendor || name,
+      reason_in_set: "Provided by supplier",
+      url: fromEvidence?.url || ""
+    });
+    seen.add(key);
+  }
+
+  // 2) Evidence-derived vendors next (only those with a usable https URL)
+  for (const { vendor, url, title } of byVendor.values()) {
+    const key = vendor.toLowerCase();
+    if (seen.has(key)) continue;
     if (url && url.startsWith("https")) {
       compSet.push({
         vendor,
-        reason_in_set: (it.title || "Relevant in consideration").toString(),
+        reason_in_set: title || "Relevant in consideration",
         url
       });
-      seen.add(vendor.toLowerCase());
+      seen.add(key);
     }
   }
 
+  // ---- Value prop: no placeholders; only emit if we have a company & at least one USP
+  const valueProp =
+    meta.company && usps.length
+      ? `${meta.company} aligns ${usps.join("; ")}`
+      : "";
+
   return {
-    value_prop: meta.company
-      ? `${meta.company} aligns ${usps.join("; ")}`.trim()
-      : "", // no placeholder text
+    value_prop: valueProp,                              // empty string if not defensible
     swot: {
-      strengths: usps,                                       // only real USPs
+      strengths: usps,                                  // only real USPs
       weaknesses: Array.isArray(s.gaps) ? s.gaps.filter(Boolean) : [],
-      opportunities: needs,                                   // from CSV needs
-      threats: []                                             // no placeholders; leave empty if not evidenced
+      opportunities: needs,                              // from CSV needs
+      threats: []                                        // leave empty if not evidenced
     },
-    differentiators: usps,                                    // only real USPs
-    competitor_set: compSet                                   // may be empty if no evidence
+    differentiators: usps,                               // only real USPs
+    competitor_set: compSet                              // user-first, then evidence; normalised objects
   };
 }
-
 function renderMessagingFromStrategy({ strategy, evidenceBundle, csvCanon, outline }) {
   const s = strategy || {};
   const meta = s.meta || {};
@@ -200,7 +243,10 @@ function renderMessagingFromStrategy({ strategy, evidenceBundle, csvCanon, outli
 
   const sig = (csvCanon && csvCanon.signals) || {};
   const pains = Array.isArray(sig.top_blockers) ? sig.top_blockers.filter(Boolean) : [];
-  const needs = Array.isArray(sig.top_needs) ? sig.top_needs.filter(Boolean) : [];
+    const needs = (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length
+    ? sig.top_needs_supplier
+    : (Array.isArray(sig.top_needs) ? sig.top_needs : [])
+  ).filter(Boolean);
 
   // Build matrix rows ONLY when we have both a pain (from CSV) and a proof (claim_id/URL) from evidence
   const catalog = Array.isArray(evidenceBundle?.catalog) ? evidenceBundle.catalog : [];
@@ -252,7 +298,10 @@ function renderSalesEnablementFromStrategy({ strategy, evidenceBundle, csvCanon 
   // Discovery questions: derive from CSV buyer data only
   const sig = (csvCanon && csvCanon.signals) || {};
   const blockers = Array.isArray(sig.top_blockers) ? sig.top_blockers.filter(Boolean) : [];
-  const needs = Array.isArray(sig.top_needs) ? sig.top_needs.filter(Boolean) : [];
+    const needs = (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length
+    ? sig.top_needs_supplier
+    : (Array.isArray(sig.top_needs) ? sig.top_needs : [])
+  ).filter(Boolean);
 
   // Turn blockers/needs into questions (no placeholders)
   const toQuestion = (txt) => {
@@ -754,10 +803,45 @@ module.exports = async function (context, queueItem) {
     getJson(container, `${prefix}campaign_strategy.json`)
   ]);
 
+  // PATCH COM-EVID-1: prefer canonical evidence.json; fallback to legacy array
+  let evidenceClaims = [];
+  try {
+    const eb = await getJson(container, `${prefix}evidence.json`);
+    if (Array.isArray(eb?.claims) && eb.claims.length) evidenceClaims = eb.claims;
+  } catch { /* tolerate absence or parse issues */ }
+
+  // PATCH COM-PROD-1: ground productNames (Strategy → products_meta → products.json)
+  let productNames = [];
+  // 1) Strategy-chosen (authoritative for Communication)
+  const chosenFromStrategy =
+    (Array.isArray(strategy?.value_proposition_moore?.chosen_products) && strategy.value_proposition_moore.chosen_products.length
+      ? strategy.value_proposition_moore.chosen_products
+      : (Array.isArray(strategy?.prospect_base?.products?.chosen) ? strategy.prospect_base.products.chosen : []));
+
+  if (chosenFromStrategy.length) {
+    productNames = chosenFromStrategy;
+  } else {
+    // 2) products_meta.json (chosen → validated) if present
+    try {
+      const pm = await getJson(container, `${prefix}products_meta.json`);
+      const pmChosen = Array.isArray(pm?.chosen) ? pm.chosen : [];
+      const pmValidated = Array.isArray(pm?.validated)
+        ? pm.validated.map(v => (typeof v === "string" ? v : (v?.name || ""))).filter(Boolean)
+        : [];
+      productNames = pmChosen.length ? pmChosen : pmValidated;
+    } catch { /* optional */ }
+
+    // 3) fallback to products.json
+    if (!productNames.length) {
+      productNames = Array.isArray(productsObj?.products) ? productsObj.products : [];
+    }
+  }
+
+  // Final evidence bundle for downstream composition
   const evidenceBundle = makeEvidenceBundle({
-    evidenceLog: Array.isArray(evidenceLog) ? evidenceLog : [],
+    evidenceLog: evidenceClaims.length ? evidenceClaims : (Array.isArray(evidenceLog) ? evidenceLog : []),
     csvCanon: csvCanon || {},
-    productNames: Array.isArray(productsObj?.products) ? productsObj.products : []
+    productNames
   });
 
   // ---- Assemble whole campaign ----
@@ -976,8 +1060,19 @@ module.exports = async function (context, queueItem) {
 
         // Deterministic augments (if helper available)
         const aug = (typeof buildExecAugments === "function")
-          ? (buildExecAugments({ evidenceBundle: eb, csvCanon: csvC, outline: ol }) || {})
+          ? (buildExecAugments({ evidenceBundle: eb, csvCanon: csvC, outline: ol, strategy }) || {})
           : {};
+
+        // COM–AM–GUARD: avoid “0” by falling back to Strategy coverage
+        if (!aug.amLine || /0\s*(companies|orgs|organisations)/i.test(String(aug.amLine))) {
+          const stratTotal =
+            Number(strategy?.insight?.coverage?.total ?? 0) ||
+            Number(strategy?.prospect_base?.tam ?? 0);
+
+          if (stratTotal > 0) {
+            aug.amLine = `Target market of ${stratTotal.toLocaleString()} organisations identified in CSV.`;
+          }
+        }
 
         // Filter LLM bullets (generic, no brand lists)
         const notAmLine = (s) => !/^addressable market\b/i.test(s);
