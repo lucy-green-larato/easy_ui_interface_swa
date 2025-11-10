@@ -973,6 +973,18 @@ module.exports = async function (context, job) {
   // Canonical fields
   const runId = (msg.runId && String(msg.runId)) || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
   const input = msg.input || msg.inputs || msg || {};
+  const problemSignals = buildProblemSignals({
+    input,  // <-- now guaranteed to exist here
+    packs: {
+      industry: evidence?.packs?.industry,
+      generic: evidence?.packs?.generic,
+      company: evidence?.packs?.company,
+    },
+    site: {
+      home_text: site?.home_text,
+      titles: site?.titles || [],
+    },
+  });
 
   // Prefix: trust message.prefix if present (from /campaign-start), otherwise fallback
   let prefix = (msg.prefix && String(msg.prefix).trim()) || `runs/${runId}/`;
@@ -1077,28 +1089,6 @@ module.exports = async function (context, job) {
         context.log.warn("[campaign-evidence] observed: homepage extractor skipped", String(e?.message || e));
       }
 
-      let runInput = {};
-      if (!input || (typeof input === 'object' && Object.keys(input).length === 0)) {
-        try {
-          runInput = (await getJson(container, `${prefix}input.json`)) || {};
-        } catch { runInput = {}; }
-      }
-      const effectiveInput = (input && (!(typeof input === 'object') || Object.keys(input).length === 0))
-        ? runInput
-        : (input || runInput);
-
-      const problemSignals = buildProblemSignals({
-        input: effectiveInput,
-        packs: {
-          industry: evidence?.packs?.industry,
-          generic: evidence?.packs?.generic,
-          company: evidence?.packs?.company,
-        },
-        site: {
-          home_text: site?.home_text,
-          titles: site?.titles || [],
-        },
-      });
       // ==== BEGIN fused validation (replace the old CSV-only validator) ====
       // Build the product candidate list from Declared ∪ Observed
       const PRODUCT_CANDIDATES = [...new Set([
@@ -1111,15 +1101,11 @@ module.exports = async function (context, job) {
 
       for (const name of PRODUCT_CANDIDATES) {
         const { score, matches } = scoreProductAgainstSignals(name, problemSignals);
-        // Light threshold for UK naming variance; declared items always pass
         const pass = score >= 0.18 || (Array.isArray(declared) ? declared.includes(name) : false);
-
         diag.push({ name, score: Number(score.toFixed(3)), pass, matches });
-
         if (pass) validated.push({ name, score, matches });
       }
 
-      // Choose top-scoring validated products; fall back to declared for continuity
       let chosen = validated
         .sort((a, b) => b.score - a.score)
         .map(v => v.name)
@@ -1130,7 +1116,6 @@ module.exports = async function (context, job) {
         evidence.notes = [...(evidence.notes || []), 'validation:fallback_declared'];
       }
 
-      // Persist transparent diagnostics
       await writeJson(runPath('products_meta.json'), {
         declared: Array.isArray(declared) ? declared : (declared ? [declared] : []),
         observed: Array.isArray(observed) ? observed : [],
