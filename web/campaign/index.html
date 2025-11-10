@@ -83,11 +83,16 @@
         <label for="companyLinkedIn" style="margin-top:8px">LinkedIn</label>
         <input id="companyLinkedIn" type="url" placeholder="https://www.linkedin.com/company/..." />
         <label for="buyerIndustry">Industry (optional)</label>
-        <input id="buyerIndustry" name="buyerIndustry" type="text" placeholder="e.g., Construction" list="industryOptions" />
+        <input id="buyerIndustry" name="buyerIndustry" type="text" placeholder="e.g., Construction"
+          list="industryOptions" />
         <datalist id="industryOptions"></datalist>
+        <label for="supplier_products" class="block text-sm font-medium mb-1">Products / services to include (comma,
+          semicolon, or newline separated)</label>
+        <textarea id="supplier_products" class="w-full border rounded p-2" rows="3"
+          placeholder="e.g. List your products here. (Comma, semicolon, or newline separated)."></textarea>
         <label for="companyUsps" style="margin-top:8px">USPs / differentiators</label>
         <textarea id="companyUsps" class="textarea" rows="3"
-          placeholder="List your differentiators here. (Comma, semicolon, or newline separated)"></textarea>
+          placeholder="List your differentiators here. (Comma, semicolon, or newline separated)."></textarea>
       </div>
 
       <div class="group">
@@ -99,7 +104,8 @@
           <option value="partner">Partner</option>
         </select>
 
-        <label for="relevantCompetitors" style="margin-top:8px">Relevant competitors (comma, semicolon, or newline separated)</label>
+        <label for="relevantCompetitors" style="margin-top:8px">Relevant competitors (comma, semicolon, or newline
+          separated)</label>
         <textarea id="relevantCompetitors" class="textarea" rows="2" placeholder="Gamma; Colt; Kerv"></textarea>
 
         <label for="campaignRequirement" style="margin-top:8px">Campaign goal</label>
@@ -111,7 +117,8 @@
         </select>
 
         <label for="notes" style="margin-top:8px">Notes (optional)</label>
-        <textarea id="notes" class="textarea" rows="2" placeholder="Any extra guidance for this campaign run"></textarea>
+        <textarea id="notes" class="textarea" rows="2"
+          placeholder="Any extra guidance for this campaign run"></textarea>
       </div>
 
       <div class="group">

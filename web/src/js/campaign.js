@@ -854,6 +854,7 @@ window.CampaignUI = window.CampaignUI || {};
     const supplier_company = ($("#companyName")?.value || "").trim();
     const supplier_website = ($("#companyWebsite")?.value || "").trim();
     const supplier_linkedin = ($("#companyLinkedIn")?.value || "").trim();
+    input.supplier_products = (document.getElementById('supplier_products')?.value || '').trim();
 
     const uspsText = ($("#companyUsps")?.value || "").trim();
     const supplier_usps = uspsText ? uspsText.split(/\r?\n|;|,/).map(s => s.trim()).filter(Boolean) : [];

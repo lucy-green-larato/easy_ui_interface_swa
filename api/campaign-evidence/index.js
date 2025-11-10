@@ -173,6 +173,81 @@ async function updateStatus(containerClient, prefix, patch, historyNode) {
   await putJson(containerClient, statusPath, next);
 }
 
+// ==== BEGIN: product validation helpers ====
+function tokenize(s) {
+  return (s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s\-\+\/]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function jaccard(aTokens, bTokens) {
+  const a = new Set(aTokens), b = new Set(bTokens);
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter++;
+  const union = a.size + b.size - inter;
+  return union ? inter / union : 0;
+}
+
+/**
+ * Build problem/need signals from:
+ *  - CSV (top_needs_supplier, top_needs, top_purchases)
+ *  - Packs: industry/generic/company (fields: problems, pains, needs if present)
+ *  - Supplier site: headings/nav snippets that look like problem statements
+ */
+function buildProblemSignals({ input, packs, site }) {
+  const sigs = [];
+
+  // CSV
+  const csv = input?.signals || {};
+  for (const k of ['top_needs_supplier', 'top_needs', 'top_purchases']) {
+    const v = csv[k];
+    if (Array.isArray(v)) v.forEach(x => sigs.push(String(x)));
+    else if (typeof v === 'string') v.split(/[;,\n]/).forEach(x => sigs.push(x.trim()));
+  }
+
+  // Packs
+  const packSets = [
+    packs?.industry, packs?.generic, packs?.company
+  ].filter(Boolean);
+
+  for (const p of packSets) {
+    for (const k of ['problems', 'pains', 'needs']) {
+      const v = p[k];
+      if (Array.isArray(v)) v.forEach(x => sigs.push(String(x)));
+      else if (typeof v === 'string') v.split(/[;,\n]/).forEach(x => sigs.push(x.trim()));
+    }
+  }
+
+  // Site (very light heuristic: sentences with “latency”, “outage”, “security”, etc.)
+  const siteText = (site?.home_text || '') + ' ' + (site?.titles?.join(' ') || '');
+  siteText.split(/[.\n]/).forEach(s => {
+    const t = s.trim();
+    if (!t) return;
+    if (/\b(latency|outage|resilien|failover|security|compliance|sla|uptime|coverage|support|integration|cost|efficien|visibility|monitor|redundan)/i.test(t)) {
+      sigs.push(t);
+    }
+  });
+
+  // dedupe and normalise
+  return [...new Set(sigs.map(s => s.trim()).filter(Boolean))].slice(0, 200);
+}
+
+/**
+ * Score a product candidate against problem signals. Returns {score, matches[]}
+ */
+function scoreProductAgainstSignals(name, signals) {
+  const nt = tokenize(name);
+  let best = { score: 0, match: '' };
+  for (const s of signals) {
+    const st = tokenize(s);
+    const sc = jaccard(nt, st);
+    if (sc > best.score) best = { score: sc, match: s };
+  }
+  return { score: best.score, matches: best.score ? [best.match] : [] };
+}
+
 // ---------- Network helper (resilient) ----------
 async function httpGet(url, timeoutMs = FETCH_TIMEOUT_MS) {
   const ctrl = new AbortController();
@@ -1001,6 +1076,57 @@ module.exports = async function (context, job) {
       } catch (e) {
         context.log.warn("[campaign-evidence] observed: homepage extractor skipped", String(e?.message || e));
       }
+      const problemSignals = buildProblemSignals({
+        input,
+        packs: {
+          industry: evidence?.packs?.industry,
+          generic: evidence?.packs?.generic,
+          company: evidence?.packs?.company,
+        },
+        site: {
+          home_text: site?.home_text,
+          titles: site?.titles || [],
+        },
+      });
+      // ==== BEGIN fused validation (replace the old CSV-only validator) ====
+      // Build the product candidate list from Declared ∪ Observed
+      const PRODUCT_CANDIDATES = [...new Set([
+        ...(Array.isArray(declared) ? declared : (declared ? [declared] : [])),
+        ...(Array.isArray(observed) ? observed : []),
+      ].map(x => String(x).trim()).filter(Boolean))];
+
+      const validated = [];
+      const diag = [];
+
+      for (const name of PRODUCT_CANDIDATES) {
+        const { score, matches } = scoreProductAgainstSignals(name, problemSignals);
+        // Light threshold for UK naming variance; declared items always pass
+        const pass = score >= 0.18 || (Array.isArray(declared) ? declared.includes(name) : false);
+
+        diag.push({ name, score: Number(score.toFixed(3)), pass, matches });
+
+        if (pass) validated.push({ name, score, matches });
+      }
+
+      // Choose top-scoring validated products; fall back to declared for continuity
+      let chosen = validated
+        .sort((a, b) => b.score - a.score)
+        .map(v => v.name)
+        .slice(0, 12);
+
+      if (chosen.length === 0 && Array.isArray(declared) && declared.length) {
+        chosen = [...new Set(declared.map(s => String(s).trim()).filter(Boolean))].slice(0, 6);
+        evidence.notes = [...(evidence.notes || []), 'validation:fallback_declared'];
+      }
+
+      // Persist transparent diagnostics
+      await writeJson(runPath('products_meta.json'), {
+        declared: Array.isArray(declared) ? declared : (declared ? [declared] : []),
+        observed: Array.isArray(observed) ? observed : [],
+        validated: validated.map(v => ({ name: v.name, score: Number(v.score.toFixed(3)), matches: v.matches })),
+        chosen,
+        problem_signals_sample: problemSignals.slice(0, 25)
+      });
 
       // B) Site graph titles/snippets/nav (light heuristic: short name-like tokens)
       try {
@@ -1066,50 +1192,50 @@ module.exports = async function (context, job) {
     }
 
     // ---- 1b) Validated products (Observed/Declared cross-checked with CSV signals) ----
-try {
-  const sig = (csvNormalizedCanonical && csvNormalizedCanonical.signals) ? csvNormalizedCanonical.signals : {};
-  const topPurchases = Array.isArray(sig.top_purchases) ? sig.top_purchases : [];
-  const topNeeds = Array.isArray(sig.top_needs_supplier) ? sig.top_needs_supplier
-                   : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
-  const universeRaw = [...topPurchases, ...topNeeds].map(s => String(s || "").toLowerCase().trim()).filter(Boolean);
-  const universe = Array.from(new Set(universeRaw));
+    try {
+      const sig = (csvNormalizedCanonical && csvNormalizedCanonical.signals) ? csvNormalizedCanonical.signals : {};
+      const topPurchases = Array.isArray(sig.top_purchases) ? sig.top_purchases : [];
+      const topNeeds = Array.isArray(sig.top_needs_supplier) ? sig.top_needs_supplier
+        : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
+      const universeRaw = [...topPurchases, ...topNeeds].map(s => String(s || "").toLowerCase().trim()).filter(Boolean);
+      const universe = Array.from(new Set(universeRaw));
 
-  const tok = s => String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-  const jacc = (a, b) => {
-    const A = new Set(a), B = new Set(b);
-    let i = 0; for (const x of A) if (B.has(x)) i++;
-    const d = A.size + B.size - i;
-    return d ? (i / d) : 0;
-  };
+      const tok = s => String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      const jacc = (a, b) => {
+        const A = new Set(a), B = new Set(b);
+        let i = 0; for (const x of A) if (B.has(x)) i++;
+        const d = A.size + B.size - i;
+        return d ? (i / d) : 0;
+      };
 
-  const declared = productsMeta.declared || [];
-  const observed = productsMeta.observed || [];
+      const declared = productsMeta.declared || [];
+      const observed = productsMeta.observed || [];
 
-  // If there are no CSV signals at all, treat validation as a pass-through hint, not a blocker.
-  if (universe.length === 0) {
-    productsMeta.validated = Array.from(new Set([...declared, ...observed])).slice(0, 24);
-    productsMeta.notes.validation = "no_csv_signals";
-  } else {
-    // Light threshold; UK tech naming varies (reduce from 0.25 → 0.18)
-    const THRESH = 0.18;
-    const score = (name) => {
-      const t = tok(name);
-      let best = 0;
-      for (const u of universe) { const s = jacc(t, tok(u)); if (s > best) best = s; }
-      return best;
-    };
-    const vd = declared.map(n => ({ n, s: score(n) })).filter(x => x.s >= THRESH).sort((a,b) => b.s - a.s).map(x => x.n);
-    const vo = observed.map(n => ({ n, s: score(n) })).filter(x => x.s >= THRESH).sort((a,b) => b.s - a.s).map(x => x.n);
-    const validated = Array.from(new Set([...vd, ...vo])).slice(0, 24);
+      // If there are no CSV signals at all, treat validation as a pass-through hint, not a blocker.
+      if (universe.length === 0) {
+        productsMeta.validated = Array.from(new Set([...declared, ...observed])).slice(0, 24);
+        productsMeta.notes.validation = "no_csv_signals";
+      } else {
+        // Light threshold; UK tech naming varies (reduce from 0.25 → 0.18)
+        const THRESH = 0.18;
+        const score = (name) => {
+          const t = tok(name);
+          let best = 0;
+          for (const u of universe) { const s = jacc(t, tok(u)); if (s > best) best = s; }
+          return best;
+        };
+        const vd = declared.map(n => ({ n, s: score(n) })).filter(x => x.s >= THRESH).sort((a, b) => b.s - a.s).map(x => x.n);
+        const vo = observed.map(n => ({ n, s: score(n) })).filter(x => x.s >= THRESH).sort((a, b) => b.s - a.s).map(x => x.n);
+        const validated = Array.from(new Set([...vd, ...vo])).slice(0, 24);
 
-    productsMeta.validated = validated;
-    productsMeta.notes.validation = validated.length ? "csv_signals_matched" : "csv_signals_present_but_no_match";
-  }
-} catch (e) {
-  context.log.warn("[campaign-evidence] validated phase skipped", String(e?.message || e));
-  productsMeta.validated = Array.from(new Set([...(productsMeta.declared||[]), ...(productsMeta.observed||[])])).slice(0, 24);
-  productsMeta.notes.validation = "fallback_on_error";
-}  
+        productsMeta.validated = validated;
+        productsMeta.notes.validation = validated.length ? "csv_signals_matched" : "csv_signals_present_but_no_match";
+      }
+    } catch (e) {
+      context.log.warn("[campaign-evidence] validated phase skipped", String(e?.message || e));
+      productsMeta.validated = Array.from(new Set([...(productsMeta.declared || []), ...(productsMeta.observed || [])])).slice(0, 24);
+      productsMeta.notes.validation = "fallback_on_error";
+    }
 
     // ---- 1c) Chosen products (deterministic, buyer-led) ----
     try {
@@ -1128,7 +1254,28 @@ try {
         chosen = dedupe(declared).slice(0, 12);
         productsMeta.notes.reason = "no validation hit; using declared for continuity";
       }
+      productsMeta.notes = productsMeta.notes || {};
 
+      // Normalise chosen
+      if (!Array.isArray(chosen)) chosen = [];
+
+      // If nothing validated/was chosen, fall back to Declared (continuity)
+      if (chosen.length === 0) {
+        const declaredArr = Array.isArray(productsMeta.declared)
+          ? productsMeta.declared.map(s => String(s).trim()).filter(Boolean)
+          : [];
+
+        if (declaredArr.length) {
+          chosen = [...new Set(declaredArr)].slice(0, 6);
+          productsMeta.notes.validation = 'fallback_declared_no_validated';
+        } else {
+          // Truly nothing to use; proceed without error, but record the condition.
+          chosen = [];
+          productsMeta.notes.validation = 'no_candidates';
+        }
+      }
+
+      // Persist final choice + diagnostics
       productsMeta.chosen = chosen;
       productsMeta.notes.capability_map_used = false;
       productsMeta.notes.csv_sources = ["top_purchases", "top_needs_supplier|top_needs"];
@@ -1139,22 +1286,7 @@ try {
         chosen: chosen.length
       };
 
-      if (chosen.length === 0) {
-        // Hard fail (preferred), or switch to soft guard if you must keep running
-        const msg = "No products could be chosen (declared/observed present but none validated).";
-        try {
-          const st = (await getJson(container, `${prefix}status.json`)) || {};
-          st.state = "error";
-          st.last_op = "evidence";
-          st.error = { code: "no_products", message: msg };
-          st.updated = new Date().toISOString();
-          st.history = Array.isArray(st.history) ? st.history : [];
-          st.history.push({ t: st.updated, op: "evidence_error", detail: "no_products" });
-          await putJson(container, `${prefix}status.json`, st);
-        } catch { /* best-effort */ }
-        throw new Error(msg);
-      }
-
+      // Write artefacts (even if chosen is empty) so downstream can degrade gracefully
       await putJson(container, `${prefix}products.json`, { products: chosen });
       await putJson(container, `${prefix}products_meta.json`, productsMeta);
     } catch (e) {
