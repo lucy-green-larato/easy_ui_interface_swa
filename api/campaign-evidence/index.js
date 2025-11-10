@@ -1,8 +1,7 @@
-// /api/campaign-evidence/index.js — Split campaign build. 09-11-2025 — v13
-// Purpose: build the canonical evidence set for a run.
+// /api/campaign-evidence/index.js — Split campaign build. 10-11-2025 — v14
 // Artifacts written under: <prefix>/
 //   - site.json               (homepage snapshot + lightweight link graph — array, legacy compatible)
-//   - products.json           (very light product/solution names from homepage)
+//   - products.json           (product analysis for ability to solve buyers' problems)
 //   - linkedin.json           (reference link only; no scraping)
 //   - pdf_extracts.json       (links discovered incl. PDFs/case studies; shallow metadata)
 //   - directories.json        (placeholder; empty array)
@@ -973,18 +972,6 @@ module.exports = async function (context, job) {
   // Canonical fields
   const runId = (msg.runId && String(msg.runId)) || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
   const input = msg.input || msg.inputs || msg || {};
-  const problemSignals = buildProblemSignals({
-    input,  // <-- now guaranteed to exist here
-    packs: {
-      industry: evidence?.packs?.industry,
-      generic: evidence?.packs?.generic,
-      company: evidence?.packs?.company,
-    },
-    site: {
-      home_text: site?.home_text,
-      titles: site?.titles || [],
-    },
-  });
 
   // Prefix: trust message.prefix if present (from /campaign-start), otherwise fallback
   let prefix = (msg.prefix && String(msg.prefix).trim()) || `runs/${runId}/`;
@@ -1079,6 +1066,22 @@ module.exports = async function (context, job) {
       const observed = new Set();
 
       // A) Homepage snippet extractor (your existing util)
+      // ==== Build fused problem signals (safe timing: after site crawl) ====
+      const declared = Array.isArray(productsMeta.declared) ? productsMeta.declared : [];
+      const site_home_text =
+        (siteGraph && Array.isArray(siteGraph.pages) && siteGraph.pages[0] && siteGraph.pages[0].snippet)
+          ? siteGraph.pages[0].snippet
+          : "";
+      const site_titles =
+        (siteGraph && Array.isArray(siteGraph.pages))
+          ? siteGraph.pages.map(p => (p && p.title) ? String(p.title) : "").filter(Boolean)
+          : [];
+
+      const problemSignals = buildProblemSignals({
+        input,
+        packs: {}, // packs are integrated later; not needed for initial validation
+        site: { home_text: site_home_text, titles: site_titles }
+      });
       try {
         const html = siteGraph?.pages?.[0]?.snippet || "";
         if (html) {
@@ -1089,40 +1092,47 @@ module.exports = async function (context, job) {
         context.log.warn("[campaign-evidence] observed: homepage extractor skipped", String(e?.message || e));
       }
 
-      // ==== BEGIN fused validation (replace the old CSV-only validator) ====
-      // Build the product candidate list from Declared ∪ Observed
-      const PRODUCT_CANDIDATES = [...new Set([
-        ...(Array.isArray(declared) ? declared : (declared ? [declared] : [])),
-        ...(Array.isArray(observed) ? observed : []),
-      ].map(x => String(x).trim()).filter(Boolean))];
+      // ==== BEGIN fused validation (Declared ∪ Observed against problem signals) ====
+      // Use the productsMeta.declared (always in-scope) and the local observed Set
+      const declaredList = Array.isArray(productsMeta.declared) ? productsMeta.declared : [];
+      const observedList = Array.isArray(observed) ? observed : Array.from(observed);
+
+      // Build candidate list
+      const PRODUCT_CANDIDATES = [...new Set(
+        [...declaredList, ...observedList].map(x => String(x).trim()).filter(Boolean)
+      )];
 
       const validated = [];
       const diag = [];
 
       for (const name of PRODUCT_CANDIDATES) {
         const { score, matches } = scoreProductAgainstSignals(name, problemSignals);
-        const pass = score >= 0.18 || (Array.isArray(declared) ? declared.includes(name) : false);
+        // Light threshold to allow UK naming variance; declared items always pass
+        const pass = score >= 0.18 || declaredList.includes(name);
         diag.push({ name, score: Number(score.toFixed(3)), pass, matches });
         if (pass) validated.push({ name, score, matches });
       }
 
+      // Choose top-scoring validated products; fall back to declared for continuity
       let chosen = validated
         .sort((a, b) => b.score - a.score)
         .map(v => v.name)
         .slice(0, 12);
 
-      if (chosen.length === 0 && Array.isArray(declared) && declared.length) {
-        chosen = [...new Set(declared.map(s => String(s).trim()).filter(Boolean))].slice(0, 6);
-        evidence.notes = [...(evidence.notes || []), 'validation:fallback_declared'];
+      if (chosen.length === 0 && declaredList.length) {
+        chosen = [...new Set(declaredList.map(s => String(s).trim()).filter(Boolean))].slice(0, 6);
+        // note: don't touch 'evidence' (not defined); stamp later in productsMeta.notes
       }
 
-      await writeJson(runPath('products_meta.json'), {
-        declared: Array.isArray(declared) ? declared : (declared ? [declared] : []),
-        observed: Array.isArray(observed) ? observed : [],
+      // Persist diagnostics now (use putJson; writeJson/runPath don't exist here)
+      await putJson(container, `${prefix}products_meta.json`, {
+        declared: declaredList,
+        observed: observedList,
         validated: validated.map(v => ({ name: v.name, score: Number(v.score.toFixed(3)), matches: v.matches })),
         chosen,
-        problem_signals_sample: problemSignals.slice(0, 25)
+        problem_signals_sample: Array.isArray(problemSignals) ? problemSignals.slice(0, 25) : []
       });
+      // ==== END fused validation ====
 
       // B) Site graph titles/snippets/nav (light heuristic: short name-like tokens)
       try {
