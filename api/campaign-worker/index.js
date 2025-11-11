@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 12-11-2025 v25
+// /api/campaign-worker/index.js 11-11-2025 v25
 // Option B pipeline — worker fast path (draft campaign.json) with business-leader Executive Summary shaping
 // Preserves v14 structure: phased status, append-only event logger, robust loaders, and sanitizer.
 // Writes under results/<prefix> (container-relative, trailing slash). No renames of queues/ops/keys.
@@ -442,6 +442,7 @@ function _pm_chooseProducts({ validated, input }) {
   }
   return names.slice(0, Math.min(2, names.length));
 }
+
 async function buildProductsMeta(container, prefix, { input, csvNormalized, evidence }) {
   const declared = _pm_cleanStrArr(input?.supplier_products);
   const evidenceClaims = Array.isArray(evidence) ? evidence : [];
@@ -451,13 +452,24 @@ async function buildProductsMeta(container, prefix, { input, csvNormalized, evid
       ? csvNormalized.signals.top_needs_supplier
       : csvNormalized?.signals?.top_needs
   );
-  const validated = _pm_validateProducts({ declared, observed, csvNeeds, evidenceClaims });
-  const chosen = _pm_chooseProducts({ validated, input });
-  const meta = { declared, observed, validated, chosen };
+
+  let validated = _pm_validateProducts({ declared, observed, csvNeeds, evidenceClaims });
+  let chosen = _pm_chooseProducts({ validated, input });
+
+  // PATCH W-PROD-FALLBACK-1: deterministic pass-through on thin runs
+  if ((!validated || validated.length === 0) && declared.length) {
+    validated = declared.slice(0, 4).map(name => ({ name, score: 0.5, proof: [] }));
+    chosen = declared.slice(0, 1);
+  }
+
+  const meta = { declared, observed, validated, chosen, notes: {} };
+  if ((!csvNeeds || csvNeeds.length === 0) && (!evidenceClaims || evidenceClaims.length === 0)) {
+    meta.notes.validation = "no_csv_signals"; // audit hint; harmless to downstream
+  }
+
   await putJson(container, `${prefix}products_meta.json`, meta);
   return meta;
 }
-
 // ---------------- Strategy synthesis ------------------------
 function pickClaim(evidence, predicate) {
   const it = (Array.isArray(evidence) ? evidence : []).find(predicate);
@@ -1052,6 +1064,15 @@ module.exports = async function (context, queueItem) {
     // Phase 2 — Evidence
     await setPhase(container, prefix, "EvidenceBuilder", { phase: "ingest" });
     let evidence = await readJsonIfExists(container, `${prefix}evidence_log.json`);
+    try {
+      const canonical = await readJsonIfExists(container, `${prefix}evidence.json`);
+      if (canonical && Array.isArray(canonical.claims)) {
+        const curLen = Array.isArray(evidence) ? evidence.length : 0;
+        if (canonical.claims.length > curLen) {
+          evidence = canonical.claims;
+        }
+      }
+    } catch { /* non-fatal; keep evidence as-is */ }
     if (!Array.isArray(evidence) || !evidence.length) {
       context.log.warn("worker: prebuilt evidence_log.json missing/empty; invoking fallback builder");
       try {
@@ -1066,6 +1087,30 @@ module.exports = async function (context, queueItem) {
 
     // CSV normalized (meta.rows => TAM)
     let csvNormalized = await readJsonIfExists(container, `${prefix}csv_normalized.json`);
+    // PATCH W-CSV-ENRICH-1: if csv_normalized has no signals, derive minimal blockers + selected_industry
+    try {
+      if (!csvNormalized || typeof csvNormalized !== "object") csvNormalized = {};
+      const sig = csvNormalized.signals || {};
+      const hasAny =
+        (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length) ||
+        (Array.isArray(sig.top_blockers) && sig.top_blockers.length) ||
+        (Array.isArray(sig.top_purchases) && sig.top_purchases.length);
+
+      // Derive blockers from raw CSV rows when signals are empty
+      if (!hasAny) {
+        const blockers = extractTopBlockersFromCsv(csvNormalized);
+        if (Array.isArray(blockers) && blockers.length) {
+          csvNormalized.signals = Object.assign({}, csvNormalized.signals, { top_blockers: blockers.slice(0, 3) });
+          csvNormalized.global_signals = Object.assign({}, csvNormalized.global_signals, { top_blockers: blockers.slice(0, 3) });
+        }
+      }
+
+      // Backfill selected_industry from input if not set in csv_normalized
+      if (!csvNormalized.selected_industry && !csvNormalized?.meta?.selected_industry) {
+        const sel = String(mergedInput?.selected_industry || mergedInput?.campaign_industry || "").trim();
+        if (sel) csvNormalized.selected_industry = sel;
+      }
+    } catch { /* best-effort enrichment only */ }
     const csvMeta = pickCsvMeta(csvNormalized);
     const needsMap = await readJsonIfExists(container, `${prefix}needs_map.json`) || {
       coverage: { total: 0, matched: 0, partial: 0, gap: 0, coverage: 0 },

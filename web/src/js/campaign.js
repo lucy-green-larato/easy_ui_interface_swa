@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 11-11-2025 v10.0
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 11-11-2025 v11
    Changes vs v5:
    - Support resuming an existing run selected in #runSelect (no CSV required)
    - Poller: tolerate a single transient status fetch error before failing

@@ -271,6 +271,25 @@ async function httpGet(url, timeoutMs = FETCH_TIMEOUT_MS) {
 }
 
 // ---------- CSV normaliser (no external deps) ----------
+function headerIndexByPatterns(headerRow, patterns) {
+  const norm = (s) => String(s || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^a-z0-9 ]+/g, "")
+    .trim();
+
+  const head = headerRow.map(norm);
+  for (let i = 0; i < head.length; i++) {
+    const h = head[i];
+    for (const p of patterns) {
+      if (typeof p === "function") { if (p(h)) return i; continue; }
+      const needle = norm(p);
+      if (h === needle) return i;
+      if (h.includes(needle)) return i;
+    }
+  }
+  return -1;
+}
 function parseCsvLoose(csvText) {
   const rows = [];
   if (!csvText || !csvText.trim()) return rows;
@@ -304,28 +323,31 @@ function normalizeCsv(rows) {
   if (!rows.length) {
     return { industries: [], dominant_industry: null, by_industry: {} };
   }
-  const header = rows[0].map(h => h.trim());
-  const idx = (name) => header.findIndex(h => h.toLowerCase() === name.toLowerCase());
+  const header = rows[0].map(h => String(h || "").trim());
 
-  // Flexible header keys
-  const iIndustry = (() => {
-    const keys = ["SimplifiedIndustry", "Industry", "industry", "buyer_industry", "vertical", "sector"];
-    for (const k of keys) {
-      const i = header.findIndex(h => h.toLowerCase() === k.toLowerCase());
-      if (i >= 0) return i;
-    }
-    return -1;
-  })();
-  const iBlockers = idx("TopBlockers");
-  const iPurchases = idx("TopPurchases");
-  const iNeeds = idx("TopNeedsSupplier");
-  const iSpend = idx("SpendDistribution");
+  // More tolerant header detection
+  const iIndustry = headerIndexByPatterns(header, [
+    "SimplifiedIndustry", "Industry", "buyer industry", "vertical", "sector", "industry sector"
+  ]);
+
+  const iBlockers = headerIndexByPatterns(header, [
+    "TopBlockers", "Top Blockers", "blockers", "top obstacles", "barriers"
+  ]);
+  const iPurchases = headerIndexByPatterns(header, [
+    "TopPurchases", "Top Purchases", "intended purchases", "purchase intent", "plan to purchase", "purchases"
+  ]);
+  const iNeeds = headerIndexByPatterns(header, [
+    "TopNeedsSupplier", "Top Needs Supplier", "supplier needs", "top needs", "needs (supplier)", "needs"
+  ]);
+  const iSpend = headerIndexByPatterns(header, [
+    "SpendDistribution", "Spend Distribution", "it spend", "spend band", "spend"
+  ]);
 
   const agg = new Map(); // industry -> { TopBlockers:Set, TopPurchases:Set, TopNeedsSupplier:Set, SpendDistribution:Object, SampleSize:Number }
 
   for (let r = 1; r < rows.length; r++) {
     const row = rows[r];
-    const industry = (iIndustry >= 0 ? (row[iIndustry] || "") : "").trim() || "Unknown";
+    const industry = (iIndustry >= 0 ? (row[iIndustry] || "") : "").toString().trim() || "Unknown";
     if (!agg.has(industry)) {
       agg.set(industry, {
         TopBlockers: new Set(),
@@ -336,20 +358,22 @@ function normalizeCsv(rows) {
       });
     }
     const bucket = agg.get(industry);
+
     const addList = (val, set) => {
-      const items = (val || "")
+      const items = String(val || "")
         .split(/\r?\n|;|,|\|/)
         .map(s => s.trim())
         .filter(Boolean);
       items.forEach(x => set.add(x));
     };
+
     if (iBlockers >= 0) addList(row[iBlockers], bucket.TopBlockers);
     if (iPurchases >= 0) addList(row[iPurchases], bucket.TopPurchases);
     if (iNeeds >= 0) addList(row[iNeeds], bucket.TopNeedsSupplier);
 
     if (iSpend >= 0 && row[iSpend]) {
       let obj = {};
-      const raw = row[iSpend].trim();
+      const raw = String(row[iSpend]).trim();
       try { obj = JSON.parse(raw); }
       catch {
         raw.split("|").forEach(kv => {
@@ -368,11 +392,10 @@ function normalizeCsv(rows) {
   const by_industry = {};
   let dominant = null, bestN = -1;
   for (const [ind, b] of agg.entries()) {
-    const toArr = (set) => Array.from(set);
     const pack = {
-      TopBlockers: toArr(b.TopBlockers),
-      TopPurchases: toArr(b.TopPurchases),
-      TopNeedsSupplier: toArr(b.TopNeedsSupplier),
+      TopBlockers: Array.from(b.TopBlockers),
+      TopPurchases: Array.from(b.TopPurchases),
+      TopNeedsSupplier: Array.from(b.TopNeedsSupplier),
       SpendDistribution: b.SpendDistribution,
       SampleSize: b.SampleSize
     };
@@ -2029,9 +2052,38 @@ module.exports = async function (context, job) {
     // Final tidy: remove placeholders, de-dupe, renumber claim_ids (deterministic)
     evidenceLog = evidenceLog.filter(it => !isPlaceholderEvidence(it));
     evidenceLog = dedupeEvidence(evidenceLog);
-    // Capacity trim BUT keep CSV summary at [0]
-    if (evidenceLog.length > MAX_EVIDENCE_ITEMS) {
-      evidenceLog = [evidenceLog[0], ...evidenceLog.slice(1, MAX_EVIDENCE_ITEMS)];
+    // Capacity trim with priority: CSV summary → CSV insights → supplier/site → LinkedIn → everything else (original order)
+    const EFFECTIVE_CAP = Math.max(12, MAX_EVIDENCE_ITEMS);
+    if (evidenceLog.length > EFFECTIVE_CAP) {
+      const keep = [];
+      const seen = new Set();
+
+      const pushIf = (pred) => {
+        for (let i = 0; i < evidenceLog.length && keep.length < EFFECTIVE_CAP; i++) {
+          const it = evidenceLog[i];
+          if (!seen.has(it) && pred(it, i)) { keep.push(it); seen.add(it); }
+        }
+      };
+
+      // 0) CSV summary at index 0 if present
+      pushIf((it, i) => i === 0);
+
+      // 1) CSV buyer signals
+      pushIf((it) => /csv/i.test(String(it?.source_type || "")) && /signals|population|csv/i.test(String(it?.title || "")));
+
+      // 2) Supplier/site items
+      pushIf((it) => /company site|website/i.test(String(it?.source_type || "")));
+
+      // 3) LinkedIn
+      pushIf((it) => /linkedin/i.test(String(it?.source_type || "")));
+
+      // 4) Fill rest
+      for (const it of evidenceLog) {
+        if (keep.length >= EFFECTIVE_CAP) break;
+        if (!seen.has(it)) { keep.push(it); seen.add(it); }
+      }
+
+      evidenceLog = keep;
     }
     // Deterministic renumbering after final order is set
     evidenceLog.forEach((it, i) => { it.claim_id = `CLM-${String(i + 1).padStart(3, "0")}`; });

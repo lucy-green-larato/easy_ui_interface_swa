@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js 11-11-2025 v19 (Writer/Assembler)
+// /api/campaign-write/index.js 11-11-2025 v20 (Writer/Assembler)
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> writes sections/<finalKey>.json
 // - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%
@@ -507,6 +507,29 @@ function buildExecAugments({ evidenceBundle, csvCanon, outline, strategy }) {
   const amLine = deriveAmLine(csvCanon, outline);
 
   return { amLine, marketContext, blockersLine, fov };
+}
+
+// ---- Exec Summary helper: produce a single Moore bullet from strategy ----
+function mooreBulletFromStrategy(strategy) {
+  const vpm = strategy?.value_proposition_moore || {};
+  if (typeof vpm?.paragraph === "string" && vpm.paragraph.trim()) {
+    return vpm.paragraph.trim();
+  }
+  const f = vpm?.fields || {};
+  const haveCore = f.for_who && f.the && f.is_a && f.that;
+  if (!haveCore) return ""; // not grounded enough → no bullet
+
+  // Compose exactly: For … who need … the … is a … that … Unlike … provides …
+  const parts = [];
+  if (f.for_who) parts.push(`For ${String(f.for_who).trim()}`);
+  if (f.who_need) parts.push(`who need ${String(f.who_need).trim()}`);
+  if (f.the && f.is_a) parts.push(`the ${String(f.the).trim()} is a ${String(f.is_a).trim()}`);
+  if (f.that) parts.push(`that ${String(f.that).trim()}`);
+  if (f.unlike) parts.push(`Unlike ${String(f.unlike).trim()}`);
+  if (f.provides) parts.push(`provides ${String(f.provides).trim()}`);
+
+  // Join with proper punctuation; end with a period
+  return parts.join(", ").replace(/\s{2,}/g, " ").replace(/,\s*$/, "") + ".";
 }
 
 // ---- Exec Summary helpers: headline detection + paragraph synthesis ----
@@ -1062,6 +1085,29 @@ module.exports = async function (context, queueItem) {
       }
     }
     // ---- Exec Summary post-processor (tone + data-led bullets; headline guard; no hard-wiring) ----
+    const mooreLine = mooreBulletFromStrategy(strategy) || "";
+
+    // Competitors: prefer user inputs; then strategy section; then evidence
+    let competitorNames = [];
+    try {
+      const fromOutline = Array.isArray(outline?.input_notes?.competitors)
+        ? outline.input_notes.competitors
+        : (Array.isArray(outline?.input_notes?.relevant_competitors) ? outline.input_notes.relevant_competitors : []);
+
+      const fromStrategySet = Array.isArray(strategy?.positioning_and_differentiation?.competitor_set)
+        ? strategy.positioning_and_differentiation.competitor_set.map(c => String(c?.vendor || "").trim()).filter(Boolean)
+        : [];
+
+      // user first, then strategy; dedupe while preserving order
+      const seenComp = new Set();
+      for (const name of [...fromOutline, ...fromStrategySet]) {
+        const key = String(name || "").toLowerCase();
+        if (!key || seenComp.has(key)) continue;
+        seenComp.add(key);
+        competitorNames.push(name);
+      }
+      competitorNames = competitorNames.slice(0, 4);
+    } catch { /* non-fatal */ }
     if (finalKey === "executive_summary") {
       try {
         const current = Array.isArray(out.executive_summary) ? out.executive_summary.slice() : [];
@@ -1144,12 +1190,17 @@ module.exports = async function (context, queueItem) {
 
         // Build the final bullets, always injecting deterministic lines first (if present)
         const newBullets = [
-          ...((aug.fov || []).filter(Boolean)),                // Feature→Outcome→Value (0–3)
-          ...(aug.amLine ? [aug.amLine] : []),                 // AM from CSV (enforced here)
-          ...(aug.marketContext ? [aug.marketContext] : []),   // market context from evidence/profile
-          ...(competitorLine ? [competitorLine] : []),         // concise competitor context (user-first)
-          ...(aug.blockersLine ? [aug.blockersLine] : []),     // CSV TopBlockers
-          ...filteredLlmBullets
+          ...(mooreLine ? [mooreLine] : []),               // 1) Moore (grounded in Strategy)
+          ...((aug.fov || []).filter(Boolean)),            // 2) Feature→Outcome→Value bullets (0–3)
+          ...(aug.amLine ? [aug.amLine] : []),             // 3) Addressable market (CSV/Strategy-safe)
+          ...(aug.marketContext ? [aug.marketContext] : []), // 4) Market context (with citations)
+          ...(
+            competitorNames.length
+              ? [`Competitive context: prioritise wins against ${competitorNames.join(", ")} with clear, evidenced differentiators.`]
+              : []
+          ),
+          ...(aug.blockersLine ? [aug.blockersLine] : []), // 6) Buyer blockers from CSV
+          ...filteredLlmBullets                             // 7) Any surviving LLM bullets (after filters)
         ].filter(Boolean);
 
         // Headline guard: if paragraph is empty or looks like a headline, synthesise one from data
