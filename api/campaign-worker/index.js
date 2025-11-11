@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 11-11-2025 v25
+// /api/campaign-worker/index.js 11-11-2025 v32
 // Option B pipeline — worker fast path (draft campaign.json) with business-leader Executive Summary shaping
 // Preserves v14 structure: phased status, append-only event logger, robust loaders, and sanitizer.
 // Writes under results/<prefix> (container-relative, trailing slash). No renames of queues/ops/keys.
@@ -504,10 +504,20 @@ function buildStrategyObject({ input, csvNormalized, needsMap, evidence }) {
   const route = (firstNonEmpty(input.sales_model, input.salesModel, input.call_type, input.callType) || "direct").toLowerCase();
   const requirement = (firstNonEmpty(input.campaign_requirement) || "growth").toLowerCase();
   const usps = Array.isArray(input.supplier_usps) ? input.supplier_usps.filter(nonEmpty) : [];
-
   const rows = Number(csvNormalized?.meta?.rows || 0);
   const csvClaim = pickClaim(evidence, (x) => /csv/i.test(String(x?.source_type || "")));
-  const packClaim = pickClaim(evidence, (x) => /Ofcom|ONS|DSIT|LinkedIn|PDF extract|Company site/.test(x?.source_type || ""));
+  const packClaim = pickClaim(evidence, (x) => {
+    const st = String(x?.source_type || "").toLowerCase();
+    const t = String(x?.title || "").toLowerCase();
+    const s = String(x?.summary || "").toLowerCase();
+    const u = String(x?.url || "").toLowerCase();
+    // Regulators/industry sources + LinkedIn/PDF/company site heuristics
+    const isReg = /ofcom|gov\.uk|ons|dsit|citb/.test(st) || /ofcom|gov\.uk|ons|dsit|citb/.test(t) || /ofcom|gov\.uk|ons|dsit|citb/.test(s) || /ofcom|gov\.uk|ons|dsit|citb/.test(u);
+    const isLinkedIn = /linkedin\.com/.test(u) || /linkedin/.test(st);
+    const isPdf = /\.pdf(\?|$)/.test(u) || /pdf/.test(st);
+    const isCompanySite = /company site|website|site/.test(st);
+    return isReg || isLinkedIn || isPdf || isCompanySite;
+  });
 
   const problems = topN(
     (csvNormalized?.signals?.top_blockers?.length ? csvNormalized.signals.top_blockers : csvNormalized?.global_signals?.top_blockers) || [],
@@ -553,7 +563,10 @@ function buildStrategyObject({ input, csvNormalized, needsMap, evidence }) {
       "Publish tracked landing page (UTM + CRM)",
       gaps.length ? `Mitigate capability gaps: ${gaps.join(", ")}` : "Validate coverage against top needs"
     ],
-    evidence_links: [csvClaim, packClaim].filter(Boolean),
+    evidence_links: (() => {
+      const base = [csvClaim, packClaim].filter(Boolean);
+      return base;
+    })(),
     meta: { company, industry, route, requirement, usps }
   };
 }
@@ -1087,7 +1100,7 @@ module.exports = async function (context, queueItem) {
 
     // CSV normalized (meta.rows => TAM)
     let csvNormalized = await readJsonIfExists(container, `${prefix}csv_normalized.json`);
-    // PATCH W-CSV-ENRICH-1: if csv_normalized has no signals, derive minimal blockers + selected_industry
+    // PATCH W-CSV-ENRICH-1: enrich thin signals from CSV and backfill selected_industry
     try {
       if (!csvNormalized || typeof csvNormalized !== "object") csvNormalized = {};
       const sig = csvNormalized.signals || {};
@@ -1096,18 +1109,26 @@ module.exports = async function (context, queueItem) {
         (Array.isArray(sig.top_blockers) && sig.top_blockers.length) ||
         (Array.isArray(sig.top_purchases) && sig.top_purchases.length);
 
-      // Derive blockers from raw CSV rows when signals are empty
+      // derive minimal blockers from preview/sample rows if signals are empty
       if (!hasAny) {
-        const blockers = extractTopBlockersFromCsv(csvNormalized);
-        if (Array.isArray(blockers) && blockers.length) {
-          csvNormalized.signals = Object.assign({}, csvNormalized.signals, { top_blockers: blockers.slice(0, 3) });
-          csvNormalized.global_signals = Object.assign({}, csvNormalized.global_signals, { top_blockers: blockers.slice(0, 3) });
+        const sample = csvNormalized?.preview?.cohort || [];
+        const fromCells = [];
+        for (const row of sample) {
+          for (const cell of Object.values(row || {})) {
+            const s = String(cell || "");
+            if (/blocker|barrier|challenge|issue/i.test(s)) fromCells.push(s);
+          }
+        }
+        const blockers = Array.from(new Set(fromCells)).slice(0, 3);
+        if (blockers.length) {
+          csvNormalized.signals = Object.assign({}, csvNormalized.signals, { top_blockers: blockers });
+          csvNormalized.global_signals = Object.assign({}, csvNormalized.global_signals, { top_blockers: blockers });
         }
       }
 
-      // Backfill selected_industry from input if not set in csv_normalized
+      // backfill selected_industry from input if absent
       if (!csvNormalized.selected_industry && !csvNormalized?.meta?.selected_industry) {
-        const sel = String(mergedInput?.selected_industry || mergedInput?.campaign_industry || "").trim();
+        const sel = String(mergedInput?.selected_industry || mergedInput?.campaign_industry || mergedInput?.buyer_industry || "").trim();
         if (sel) csvNormalized.selected_industry = sel;
       }
     } catch { /* best-effort enrichment only */ }
@@ -1198,6 +1219,98 @@ module.exports = async function (context, queueItem) {
       : (productsChosen.length ? productsChosen : productsJsonFixed);
 
     // PATCH INS-1: enrich Strategy with validated products + coverage + evidence
+    // PATCH INS-2: why_now cues (ranked, citable)
+    try {
+      const ev = Array.isArray(evidenceLogFixed) ? evidenceLogFixed : [];
+
+      const precedence = (c) => {
+        const st = String(c?.source_type || "").toLowerCase();
+        let s = 0;
+        if (st === "profile") s += 100;
+        else if (st === "profile_competitor") s += 90;
+        else if (st === "industry") s += 80;
+        else if (st.includes("site") || st.includes("website")) s += 60;
+        else if (st.includes("csv")) s += 40;
+        else if (st.includes("linkedin")) s += 30;
+        else if (st.includes("pdf")) s += 25;
+        if (c?.weight) s += (Number(c.weight) || 0);
+        return s;
+      };
+
+      const withUrl = ev.filter(
+        (c) => c && typeof c.url === "string" && c.url.startsWith("https://")
+      );
+
+      // De-dup exact URLs and cap per host to 2 items
+      const seenUrl = new Set();
+      const perHost = new Map();
+      const deduped = [];
+      // Guard: if no evidence items, skip ranking/why_now to prevent empty-array ops
+      if (!withUrl.length) return;
+      for (const c of withUrl) {
+        try {
+          if (!c.url || seenUrl.has(c.url)) continue;
+          const host = new URL(c.url).hostname.replace(/^www\./, "");
+          const n = perHost.get(host) || 0;
+          if (n >= 2) continue;
+          perHost.set(host, n + 1);
+          seenUrl.add(c.url);
+          deduped.push(c);
+        } catch {
+          /* skip malformed */
+        }
+      }
+
+      // Rank with stable tie-break to avoid flicker
+      deduped.sort((a, b) => {
+        const d = precedence(b) - precedence(a);
+        if (d) return d;
+        const at = (a.title || "").toLowerCase();
+        const bt = (b.title || "").toLowerCase();
+        if (at < bt) return -1;
+        if (at > bt) return 1;
+        const au = a.url || "";
+        const bu = b.url || "";
+        return au < bu ? -1 : au > bu ? 1 : 0;
+      });
+
+      const pick = deduped.slice(0, Math.min(6, deduped.length)).map((c) => {
+        // Title fallback: if missing, derive from URL host
+        let ttl = (c.title || "").trim();
+        if (!ttl) {
+          try {
+            ttl = new URL(c.url).hostname.replace(/^www\./, "");
+          } catch {
+            ttl = "Evidence";
+          }
+        }
+        return {
+          title: ttl,
+          url: c.url,
+          topic: c.topic || null,
+          source_type: c.source_type || null,
+          claim_id: c.claim_id || null,
+        };
+      });
+
+      // Assign why_now first
+      strategy.insight = strategy.insight || {};
+      strategy.insight.why_now = { cues: pick };
+
+      // Then enrich evidence_links using the fresh cues
+      try {
+        const base = Array.isArray(strategy?.evidence_links)
+          ? strategy.evidence_links
+          : [];
+        const cueIds = pick.map((c) => c.claim_id).filter(Boolean).slice(0, 2);
+        strategy.evidence_links = [...base, ...cueIds].slice(0, 4);
+      } catch {
+        /* non-fatal */
+      }
+    } catch {
+      /* non-fatal */
+    }
+
     (function attachInsight() {
       // 1) Prospect-base products (names only for validated; keep chosen as provided)
       const validatedNames = Array.isArray(productsValidated) ? productsValidated.map(v => v?.name).filter(Boolean) : [];
@@ -1209,9 +1322,25 @@ module.exports = async function (context, queueItem) {
         chosen: Array.isArray(productsChosen) ? productsChosen : []
       };
 
+      // Ensure needsMap has a minimal shape
+      if (!needsMap || typeof needsMap !== "object") needsMap = {};
+      if (!Array.isArray(needsMap.items)) needsMap.items = [];
+      if (!needsMap.coverage) needsMap.coverage = { total: 0, matched: 0, partial: 0, gap: 0, coverage: 0 };
+
       // 2) Coverage (from needs_map.json you already loaded)
       strategy.insight = strategy.insight || {};
-      strategy.insight.coverage = (needsMap && needsMap.coverage) ? needsMap.coverage : { total: 0, matched: 0, partial: 0, gap: 0, coverage: 0 };
+      strategy.insight.coverage = (needsMap && needsMap.coverage)
+        ? needsMap.coverage
+        : { total: 0, matched: 0, partial: 0, gap: 0, coverage: 0 };
+
+      // If computed total is 0 but we have profile claims, lift to 1 to avoid "AM 0" artefacts
+      try {
+        const hasProfile = (Array.isArray(evidenceLogFixed) ? evidenceLogFixed : [])
+          .some(c => String(c?.source_type || "").toLowerCase() === "profile");
+        if (Number(strategy.insight.coverage.total || 0) === 0 && hasProfile) {
+          strategy.insight.coverage.total = 1;
+        }
+      } catch { /* non-fatal */ }
 
       // 3) Evidence counters (lightweight, from evidenceLogFixed in this scope)
       const counts = { website: 0, linkedin: 0, pdf: 0, directories: 0, ixbrl: 0, csv: 0 };
@@ -1262,7 +1391,17 @@ module.exports = async function (context, queueItem) {
       productsJson: productsFinal // <-- now passing the preferred list
     });
 
-    // Attach to strategy without changing existing schema
+    // PATCH W-PROD-MIRROR-1: mirror products meta into strategy for Writer/ES consumption
+    try {
+      strategy.prospect_base = strategy.prospect_base || {};
+      strategy.prospect_base.products = {
+        declared: Array.isArray(metaAny?.declared) ? metaAny.declared : [],
+        observed: Array.isArray(metaAny?.observed) ? metaAny.observed : [],
+        validated: Array.isArray(metaAny?.validated) ? metaAny.validated.map(v => v?.name).filter(Boolean) : [],
+        chosen: Array.isArray(metaAny?.chosen) ? metaAny.chosen : []
+      };
+    } catch { /* non-fatal */ }
+
     strategy.value_proposition_moore = {
       paragraph: _moore.paragraph,
       fields: _moore.fields,
@@ -1313,6 +1452,69 @@ module.exports = async function (context, queueItem) {
           if (st0.history.length > 100) st0.history = st0.history.slice(-100);
           await putJson(container, `${prefix}status.json`, st0);
         }
+      } catch { /* non-fatal */ }
+
+      // PATCH W-MOORE-CLEAN-1: tidy Moore value proposition wording (idempotent)
+      try {
+        if (strategy && strategy.value_proposition_moore) {
+          const vp = strategy.value_proposition_moore;
+
+          const normalise = (s) => {
+            if (!s) return s;
+            let out = String(s);
+            out = out.replace(/\bthe\s+the\b/gi, "the")
+              .replace(/\bThe\s+The\b/g, "The")
+              .replace(/\bThe\s+the\b/g, "The")
+              .replace(/\bthe\s+The\b/g, "the")
+              .replace(/\s+,/g, ",")
+              .replace(/\s+\./g, ".")
+              .replace(/\(\s+/g, "(")
+              .replace(/\s+\)/g, ")")
+              .replace(/:\s*,/g, ":")
+              .replace(/;\s*,/g, ";")
+              .replace(/\s{2,}/g, " ");
+            out = out.trim();
+            if (out && /^[a-z]/.test(out[0])) out = out[0].toUpperCase() + out.slice(1);
+            return out;
+          };
+
+          if (typeof vp.paragraph === "string") vp.paragraph = normalise(vp.paragraph);
+          if (vp.fields && typeof vp.fields === "object") {
+            for (const k of ["for_who", "who_need", "the", "is_a", "that", "unlike", "provides"]) {
+              if (typeof vp.fields[k] === "string") vp.fields[k] = normalise(vp.fields[k]);
+            }
+          }
+        }
+      } catch { /* non-fatal: style polish only */ }
+
+      // PATCH W-MOORE-GUARD: ensure paragraph never empty
+      try {
+        if (
+          !strategy.value_proposition_moore?.paragraph ||
+          !strategy.value_proposition_moore.paragraph.trim()
+        ) {
+          strategy.value_proposition_moore.paragraph =
+            "No validated differentiation detected yet — verify product positioning or evidence coverage.";
+        }
+      } catch { /* non-fatal */ }
+
+      // PATCH STRATEGY-FINAL-CHECKS: normalise key structures before write
+      try {
+        if (!Array.isArray(strategy.competitors)) strategy.competitors = [];
+        if (!Array.isArray(strategy.evidence_links)) strategy.evidence_links = [];
+        if (
+          !Array.isArray(strategy.prospect_base?.products?.validated)
+        ) {
+          strategy.prospect_base.products.validated = [];
+        }
+        if (
+          !Array.isArray(strategy.prospect_base?.products?.chosen)
+        ) {
+          strategy.prospect_base.products.chosen = [];
+        }
+        if (!strategy.insight) strategy.insight = {};
+        if (!strategy.insight.coverage)
+          strategy.insight.coverage = { total: 0, matched: 0, partial: 0, gap: 0, coverage: 0 };
       } catch { /* non-fatal */ }
 
       // Persist the strategy

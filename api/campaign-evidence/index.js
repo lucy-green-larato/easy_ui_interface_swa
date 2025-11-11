@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js — Split campaign build. 11-11-2025 — v19
+// /api/campaign-evidence/index.js — Split campaign build. 11-11-2025 — v21.0
 // Artifacts written under: <prefix>/
 //   - site.json               (homepage snapshot + lightweight link graph — array, legacy compatible)
 //   - products.json           (product analysis for ability to solve buyers' problems)
@@ -21,7 +21,9 @@ const START_QUEUE_NAME = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const FETCH_TIMEOUT_MS = Number(process.env.HTTP_FETCH_TIMEOUT_MS || 8000);
 const MAX_SITE_PAGES = 8;                  // crawl budget (homepage + up to 7 pages)
 const MAX_CASESTUDIES = 8;                 // cap case study items stored
-const MAX_EVIDENCE_ITEMS = parseInt(process.env.MAX_EVIDENCE_ITEMS || "24", 10);
+let MAX_EVIDENCE_ITEMS = parseInt(process.env.MAX_EVIDENCE_ITEMS || "24", 10);
+if (!Number.isFinite(MAX_EVIDENCE_ITEMS) || MAX_EVIDENCE_ITEMS <= 0) MAX_EVIDENCE_ITEMS = 24;
+if (MAX_EVIDENCE_ITEMS > 128) MAX_EVIDENCE_ITEMS = 128;
 
 // ---------- Guarded, lazy loaders (added) ----------
 let _packLoaderFn;
@@ -491,6 +493,31 @@ function resolveIndustry({ userIndustry, csvIndustry, csvHasMultipleSectors }) {
 }
 
 // --- Product extraction (lightweight heuristic, homepage) ---
+try {
+  const ldMatches = Array.from(String(html || "").matchAll(
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+  ));
+  for (const m of ldMatches) {
+    try {
+      const node = JSON.parse(m[1]);
+      const nodes = Array.isArray(node) ? node : [node];
+      for (const n of nodes) {
+        if (n && (n['@type'] === 'Product' || (Array.isArray(n['@type']) && n['@type'].includes('Product')))) {
+          const title = String(n.name || n.alternateName || '').trim();
+          const summary = String(n.description || '').trim();
+          if (title || summary) {
+            products.add(JSON.stringify({
+              topic: 'product_detail',
+              title: title || 'Product',
+              summary: summary || 'Product (JSON-LD)',
+              weight: 2
+            }));
+          }
+        }
+      }
+    } catch { /* ignore bad JSON */ }
+  }
+} catch { /* no-op */ }
 async function extractProductsFromSite(html) {
   if (!html || typeof html !== "string") return [];
   const lines = html.split(/\r?\n/).slice(0, 2000); // safety cap
@@ -545,6 +572,18 @@ function isCaseStudyUrl(u) {
   );
 }
 // Product URL heuristic (same host; obvious product/solution/service paths)
+// PATCH PRD-URL-1: include deeper product/solution paths
+// Matches: /products/, /product/, /solutions/, and deep SKUs: /solutions/<category>/<sku>
+const DEEP_PRODUCT_RE = /\/(products?|solutions?)\/[^\/]+\/[^\/]+/i;
+
+// Wrap original helper to include deep patterns (idempotent)
+const _isProductUrl = typeof isProductUrl === "function" ? isProductUrl : (u) => false;
+function isProductUrl(u) {
+  try {
+    if (DEEP_PRODUCT_RE.test(u)) return true;
+    return _isProductUrl(u);
+  } catch { return _isProductUrl(u); }
+}
 function isProductUrl(u) {
   const low = String(u || "").toLowerCase();
   return /product|products|solution|solutions|service|services|continuum|constellation|sd-?one|bond(ed|ing)|starlink/.test(low);
@@ -577,42 +616,6 @@ function parseProductClaims(html) {
     if (out.length >= 12) break; // safety cap per page
   }
   return out;
-}
-
-while (queue.length && pages.length < budget) {
-  const url = queue.shift();
-  if (!url || visited.has(url)) continue;
-  visited.add(url);
-
-  const res = await httpGet(url, timeout);
-  if (!res.ok) continue;
-  const html = (res.text || "").slice(0, 150_000);
-
-  // NEW: extract <title> for downstream heuristics
-  let title = "";
-  try {
-    const m = html.match(/<title[^>]*>([^<]{1,200})<\/title>/i);
-    title = m ? (m[1] || "").replace(/\s+/g, " ").trim() : "";
-  } catch { /* noop */ }
-
-  pages.push({
-    url,
-    host: hostnameOf(url),
-    fetchedAt: nowIso(),
-    type: "html",
-    bytes: Buffer.byteLength(html, "utf8"),
-    sha1: sha1(html),
-    title,                                // <-- added
-    snippet: html.slice(0, 6000)
-  });
-
-  const hrefs = extractLinks(html, url);
-  for (const h of hrefs) {
-    links.add(h);
-    if (sameHost(h, start) && !visited.has(h) && queue.length + pages.length < budget) {
-      queue.push(h);
-    }
-  }
 }
 
 async function collectCaseStudyLinks(pages, allLinks, rootHost) {
@@ -982,7 +985,7 @@ function linkedinSearchEvidence({ url, title }) {
     quote: ""
   };
 }
-// PATCH EV-HELP-1: summarizeClaims — tiny counter for evidence.json
+
 function summarizeClaims(all = []) {
   const counts = {
     website: 0,
@@ -1016,8 +1019,22 @@ module.exports = async function (context, job) {
   // Canonical fields
   const runId = (msg.runId && String(msg.runId)) || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
   const input = msg.input || msg.inputs || msg || {};
-
   // Prefix: trust message.prefix if present (from /campaign-start), otherwise fallback
+  try {
+    const persisted = await getJson(container, `${prefix}input.json`);
+    if (persisted && typeof persisted === "object") {
+      // Only backfill if the earlier attempt failed or fields are empty
+      const keys = ["csvSummary", "csvText", "selected_industry", "buyer_industry", "campaign_industry", "relevant_competitors", "competitors", "supplier_website", "company_website", "prospect_website"];
+      for (const k of keys) {
+        if (input[k] == null || (typeof input[k] === "string" && input[k].trim() === "")) {
+          input[k] = persisted[k] ?? input[k];
+        }
+      }
+      // Prefer persisted csvSummary/csvText if queue message was slimmed
+      if (!input.csvSummary && persisted.csvSummary) input.csvSummary = persisted.csvSummary;
+      if (!input.csvText && persisted.csvText) input.csvText = persisted.csvText;
+    }
+  } catch { /* non-fatal; continue */ }
   let prefix = (msg.prefix && String(msg.prefix).trim()) || `runs/${runId}/`;
   // Normalise to container-relative (strip container name, strip leading slash, ensure trailing slash)
   if (prefix.startsWith(`${RESULTS_CONTAINER}/`)) prefix = prefix.slice(`${RESULTS_CONTAINER}/`.length);
@@ -1025,6 +1042,75 @@ module.exports = async function (context, job) {
   if (!prefix.endsWith("/")) prefix = `${prefix}/`;
 
   // ---- Enter EvidenceDigest  ----
+  // PATCH EV-PROFILE-1: robust profile loader (supplier + competitors), produces structured, high-value claims
+  async function downloadTextIfExists(relPath) {
+    try {
+      const blob = container.getBlockBlobClient(relPath);
+      if (!(await blob.exists())) return null;
+      const buf = await blob.downloadToBuffer();
+      return buf.toString("utf8");
+    } catch { return null; }
+  }
+
+  function parseProfileMarkdown(md) {
+    // Tiny, deterministic parser: map top-level headings into topics; produce compact claims
+    const lines = String(md || "").split(/\r?\n/);
+    const claims = [];
+    let section = "profile";
+    const push = (title, summary, topic) => claims.push({
+      source_type: "profile",
+      title, summary, topic, weight: 3
+    });
+    for (const raw of lines) {
+      const s = raw.trim();
+      if (/^#{1,3}\s+/.test(s)) {
+        const h = s.replace(/^#{1,3}\s+/, "").trim().toLowerCase();
+        if (/(proposition|value|positioning)/i.test(h)) section = "proposition";
+        else if (/(offers|products|solutions)/i.test(h)) section = "offers";
+        else if (/(segments|verticals|industr(y|ies)|use cases?)/i.test(h)) section = "verticals";
+        else if (/(proof|evidence|case studies|outcomes)/i.test(h)) section = "proof_points";
+        else if (/(routes|go to market|sales|partners?)/i.test(h)) section = "routes_to_market";
+        else section = "profile";
+      } else if (s) {
+        push("Profile insight", s, section);
+      }
+    }
+    return claims;
+  }
+
+  async function loadSupplierProfileClaims() {
+    const md = await downloadTextIfExists(`${prefix}profile.md`);
+    return md ? parseProfileMarkdown(md) : [];
+  }
+
+  async function loadCompetitorProfileClaims(names = []) {
+    const out = [];
+    for (const n of (Array.isArray(names) ? names : [])) {
+      const slug = String(n).trim().toLowerCase().replace(/\s+/g, "-");
+      // Common locations; only push if found
+      const rel = `${prefix}profiles/${slug}/profile.md`;
+      const md = await downloadTextIfExists(rel);
+      if (md) {
+        const claims = parseProfileMarkdown(md).map(c => ({ ...c, vendor: n, source_type: "profile_competitor" }));
+        out.push(...claims);
+      }
+    }
+    return out;
+  }
+
+  // Supplier profile (high priority)
+  try {
+    const profClaims = await loadSupplierProfileClaims();
+    for (const c of profClaims) safePushIfRoom(evidenceLog, c, MAX_EVIDENCE_ITEMS);
+  } catch { /* non-fatal */ }
+
+  // Competitor profiles (if user named competitors)
+  const userComps = Array.isArray(input?.relevant_competitors) ? input.relevant_competitors
+    : (Array.isArray(input?.competitors) ? input.competitors : []);
+  try {
+    const compClaims = await loadCompetitorProfileClaims(userComps);
+    for (const c of compClaims) safePushIfRoom(evidenceLog, c, MAX_EVIDENCE_ITEMS);
+  } catch { /* non-fatal */ }
   await updateStatus(
     container,
     prefix,
@@ -1749,10 +1835,37 @@ module.exports = async function (context, job) {
       packEvidence = [];
     }
 
-
-
     // 6) evidence_log.json (CSV-first + supplier artefacts + PACKS merged)
     let evidenceLog = [];
+
+    // PATCH EV-SITE-SEEDS-1: deterministic supplier-site claims (idempotent)
+    (function seedSupplierSiteClaims() {
+      try {
+        const siteUrl =
+          String(input?.supplier_website || input?.company_website || input?.prospect_website || "").trim();
+        if (siteUrl) {
+          const homepageClaim = {
+            source_type: "website",
+            url: siteUrl,
+            title: "Supplier homepage",
+            summary: "Primary company site used for proposition, offers, and trust signals.",
+            topic: "site_overview",
+            weight: 1
+          };
+          safePushIfRoom(evidenceLog, homepageClaim, MAX_EVIDENCE_ITEMS);
+
+          const salesModelClaim = {
+            source_type: "website",
+            url: siteUrl,
+            title: "Sales model context",
+            summary: "Route-to-market signals (direct/partner/reseller pages, contact/sales pages).",
+            topic: "sales_model",
+            weight: 1
+          };
+          safePushIfRoom(evidenceLog, salesModelClaim, MAX_EVIDENCE_ITEMS);
+        }
+      } catch { /* no-op */ }
+    })();
 
     // 6.0 PACK evidence (added first so CSV summary appears near the top but we still include industry sources)
     for (const pe of packEvidence) {
@@ -2093,6 +2206,69 @@ module.exports = async function (context, job) {
       titles: evidenceLog.map(x => x.title).slice(0, 12)
     });
 
+    // PATCH EV-RANK-1: competitor relevance (product overlap) + industry precedence + source scoring
+    try {
+      // 1) Load supplier products for overlap check
+      const pm = (await getJson(container, `${prefix}products_meta.json`)) || {};
+      const declared = Array.isArray(pm?.declared) ? pm.declared : [];
+      const validated = Array.isArray(pm?.validated) ? pm.validated.map(x => x?.name).filter(Boolean) : [];
+      const chosen = Array.isArray(pm?.chosen) ? pm.chosen : [];
+      const productBasis = (validated.length ? validated : (chosen.length ? chosen : declared))
+        .map(x => String(x || "").toLowerCase());
+
+      // 2) Get industry key (for precedence & matching)
+      const industry = String(
+        input?.selected_industry ?? input?.campaign_industry ?? input?.buyer_industry ?? ""
+      ).toLowerCase();
+
+      // 3) Filter competitor claims by product overlap (keep only relevant competitors)
+      const hasOverlap = (txt) => {
+        const s = String(txt || "").toLowerCase();
+        return productBasis.some(p => p && s.includes(p));
+      };
+      const filtered = [];
+      for (const it of evidenceLog) {
+        if (it?.source_type === "profile_competitor" || it?.source_type === "competitor") {
+          const basis = `${it.title || ""} ${it.summary || ""}`;
+          if (!hasOverlap(basis)) continue; // drop irrelevant competitor claim
+        }
+        filtered.push(it);
+      }
+
+      // 4) Score claims for stable precedence
+      function score(it) {
+        const st = String(it?.source_type || "").toLowerCase();
+        const text = `${it.title || ""} ${it.summary || ""}`.toLowerCase();
+        let sc = 0;
+        if (st === "profile") sc += 100;
+        if (st === "profile_competitor") sc += 90;
+        if (industry && text.includes(industry)) sc += 80;            // industry boost
+        if (st.includes("website")) sc += 40;
+        if (st.includes("csv")) sc += 30;
+        if (st.includes("linkedin")) sc += 20;
+        if (st.includes("pdf")) sc += 15;
+        if (it.weight) sc += (Number(it.weight) || 0);                // respect explicit weights
+        return sc;
+      }
+
+      filtered.sort((a, b) => score(b) - score(a)); // high → low
+      const cap =
+        Number.isFinite(MAX_EVIDENCE_ITEMS) && MAX_EVIDENCE_ITEMS > 0
+          ? MAX_EVIDENCE_ITEMS
+          : 24; // sane fallback
+      const finalLog = filtered.length > cap ? filtered.slice(0, cap) : filtered;
+      // Replace in-place for downstream write
+      evidenceLog = finalLog;
+    } catch {
+      if (Array.isArray(evidenceLog)) {
+        const cap =
+          Number.isFinite(MAX_EVIDENCE_ITEMS) && MAX_EVIDENCE_ITEMS > 0
+            ? MAX_EVIDENCE_ITEMS
+            : 24;
+        if (evidenceLog.length > cap) evidenceLog = evidenceLog.slice(0, cap);
+      }/* non-fatal; keep original order */
+    }
+
     // PATCH EV-WRITE-1: write both legacy array (evidence_log.json) and canonical bundle (evidence.json)
     await putJson(container, `${prefix}evidence_log.json`, evidenceLog);
 
@@ -2105,7 +2281,7 @@ module.exports = async function (context, job) {
     // 7) Finalise phase
     try {
       const statusPath = `${prefix}status.json`;
-      const cur = (await getJson(container, statusPath)) || { runId, history: [] , markers: {} };
+      const cur = (await getJson(container, statusPath)) || { runId, history: [], markers: {} };
       cur.markers = cur.markers || {};
       cur.markers.evidenceDigestCompleted = true;
       await putJson(container, statusPath, cur);

@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js 11-11-2025 v21 (Writer/Assembler)
+// /api/campaign-write/index.js 11-11-2025 v25 (Writer/Assembler)
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> writes sections/<finalKey>.json
 // - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%
@@ -519,17 +519,19 @@ function mooreBulletFromStrategy(strategy) {
   const haveCore = f.for_who && f.the && f.is_a && f.that;
   if (!haveCore) return ""; // not grounded enough → no bullet
 
-  // Compose exactly: For … who need … the … is a … that … Unlike … provides …
-  const parts = [];
-  if (f.for_who) parts.push(`For ${String(f.for_who).trim()}`);
-  if (f.who_need) parts.push(`who need ${String(f.who_need).trim()}`);
-  if (f.the && f.is_a) parts.push(`the ${String(f.the).trim()} is a ${String(f.is_a).trim()}`);
-  if (f.that) parts.push(`that ${String(f.that).trim()}`);
-  if (f.unlike) parts.push(`Unlike ${String(f.unlike).trim()}`);
-  if (f.provides) parts.push(`provides ${String(f.provides).trim()}`);
+  const norm = (s) => String(s || "").trim().replace(/[.\s]+$/g, "");
+  const theRaw = norm(f.the);
+  const thePart = /^the\s/i.test(theRaw) ? theRaw : `the ${theRaw}`;
 
-  // Join with proper punctuation; end with a period
-  return parts.join(", ").replace(/\s{2,}/g, " ").replace(/,\s*$/, "") + ".";
+  const parts = [];
+  if (f.for_who) parts.push(`For ${norm(f.for_who)}`);
+  if (f.who_need) parts.push(`who need ${norm(f.who_need)}`);
+  if (f.the && f.is_a) parts.push(`${thePart} is a ${norm(f.is_a)}`);
+  if (f.that) parts.push(`that ${norm(f.that)}`);
+  if (f.unlike) parts.push(`Unlike ${norm(f.unlike)}`);
+  if (f.provides) parts.push(`provides ${norm(f.provides)}`);
+
+  return parts.join(", ").replace(/,\s*$/, "") + ".";
 }
 
 // ---- Exec Summary helpers: headline detection + paragraph synthesis ----
@@ -961,6 +963,10 @@ module.exports = async function (context, queueItem) {
         }
       } else {
         context.log.warn(`[campaign-write] missing section during assemble: ${finalKey}`);
+        // PATCH COM-EMPTY-NOTE: advisory filler for empty sections
+        if (!merged[finalKey]) {
+          merged[finalKey] = { note: "Section missing — verify earlier pipeline phases." };
+        }
 
         // Ensure Executive Summary never breaks the UI (both shapes exist)
         if (finalKey === "executive_summary") {
@@ -977,14 +983,35 @@ module.exports = async function (context, queueItem) {
         }
       }
     }
+    // PATCH COM-ORDER-LOCK: guarantee deterministic section ordering
+    const ordered = {};
+    for (const k of FINAL_SECTION_KEYS) {
+      if (k in merged) ordered[k] = merged[k];
+    }
+    // Append any non-section keys afterwards (preserve them but after sections)
+    for (const [k, v] of Object.entries(merged)) {
+      if (!(k in ordered)) ordered[k] = v;
+    }
 
-    await putJson(container, `${prefix}campaign.json`, merged);
+    // PATCH COM-NORMALISE: ensure safe arrays (operate on the ordered object)
+    try {
+      if (!Array.isArray(ordered.executive_summary_legacy)) ordered.executive_summary_legacy = [];
+      if (!Array.isArray(ordered.evidence_log)) ordered.evidence_log = [];
+      for (const k of ["bullets", "matrix", "competitor_set"]) {
+        if (ordered[k] && !Array.isArray(ordered[k])) ordered[k] = [ordered[k]];
+      }
+    } catch { /* non-fatal */ }
+
+    // Write in deterministic order
+    await putJson(container, `${prefix}campaign.json`, ordered);
+
+    // Status patch (use your existing timestamp helper name)
     {
       const cur = (await getJson(container, `${prefix}status.json`)) || {};
       const prev = String(cur.state || "");
       const terminal = new Set(["assembled", "error", "Failed"]);
       if (!terminal.has(prev)) {
-        await patchStatus(container, prefix, "assembled", { assembledAt: nowISO(), op: "assemble" });
+         await patchStatus(container, prefix, "assembled", { assembledAt: nowISO(), op: "assemble" });
       }
     }
 
@@ -1035,6 +1062,52 @@ module.exports = async function (context, queueItem) {
       } else { // sales_enablement
         out = { sales_enablement: renderSalesEnablementFromStrategy({ strategy, evidenceBundle, csvCanon }) };
       }
+
+      // PATCH COM-ES-CHOSEN: add chosen products bullet if missing
+      try {
+        if (finalKey === "executive_summary") {
+          const chosen = Array.isArray(strategy?.prospect_base?.products?.chosen)
+            ? strategy.prospect_base.products.chosen.filter(Boolean)
+            : [];
+          if (chosen.length) {
+            out.executive_summary.bullets = Array.isArray(out.executive_summary.bullets)
+              ? out.executive_summary.bullets
+              : [];
+            const line = `Focus products: ${chosen.join(", ")}`;
+            const exists = out.executive_summary.bullets.some(b => String(b || "").toLowerCase() === line.toLowerCase());
+            if (!exists) out.executive_summary.bullets.push(line);
+          }
+        }
+      } catch { /* non-fatal */ }
+
+      // PATCH COM-ES-WHYNOW: cite top cues
+      try {
+        if (finalKey === "executive_summary") {
+          const cues = Array.isArray(strategy?.insight?.why_now?.cues) ? strategy.insight.why_now.cues : [];
+          if (cues.length) {
+            const top = cues.slice(0, 2).map(c => c.url).filter(Boolean);
+            const line = top.length === 1
+              ? `Why now: see ${top[0]}`
+              : `Why now: see ${top[0]} and ${top[1]}`;
+            out.executive_summary.bullets = Array.isArray(out.executive_summary.bullets)
+              ? out.executive_summary.bullets
+              : [];
+            const exists = out.executive_summary.bullets.some(b => String(b || "").toLowerCase().startsWith("why now:"));
+            if (!exists) out.executive_summary.bullets.push(line);
+          }
+        }
+      } catch { /* non-fatal */ }
+      // PATCH COM-ES-DEDUPE: remove duplicates and cap to 6 bullets
+      try {
+        if (finalKey === "executive_summary" && Array.isArray(out.executive_summary?.bullets)) {
+          const seen = new Set();
+          out.executive_summary.bullets = out.executive_summary.bullets
+            .map(b => (typeof b === "string" ? b.trim() : ""))
+            .filter(b => b.length)
+            .filter(b => (seen.has(b.toLowerCase()) ? false : (seen.add(b.toLowerCase()), true)))
+            .slice(0, 6);
+        }
+      } catch { /* non-fatal */ }
 
       await putJson(container, `${prefix}sections/${finalKey}.json`, out);
       await patchStatus(container, prefix, "SectionWrites", {
@@ -1187,6 +1260,59 @@ module.exports = async function (context, queueItem) {
             }
           }
         } catch { /* non-fatal */ }
+        try {
+          if (!aug.marketContext) {
+            let claims = [];
+
+            // Prefer canonical evidence.json
+            try {
+              const evCanon = await getJson(container, `${prefix}evidence.json`);
+              if (evCanon && Array.isArray(evCanon.claims)) claims = evCanon.claims;
+            } catch { /* non-fatal */ }
+
+            // Fallback to legacy evidence_log.json
+            if (!Array.isArray(claims) || !claims.length) {
+              try {
+                const evLegacy = await getJson(container, `${prefix}evidence_log.json`);
+                if (Array.isArray(evLegacy)) {
+                  claims = evLegacy;
+                } else if (evLegacy && Array.isArray(evLegacy.evidence_log)) {
+                  claims = evLegacy.evidence_log;
+                }
+              } catch { /* non-fatal */ }
+            }
+
+            if (Array.isArray(claims) && claims.length) {
+              const safe = (v) => (v == null ? "" : String(v));
+
+              // Pick a concise, high-signal claim
+              const pick =
+                claims.find(c =>
+                  /market|growth|adoption|demand|breach|compliance/i.test(
+                    `${safe(c.title)} ${safe(c.summary)}`
+                  )
+                ) || claims[0];
+
+              // Build a readable source
+              let host = "";
+              try {
+                const u = safe(pick.url || pick.source_url);
+                if (u) host = new URL(u).hostname.replace(/^www\./, "");
+              } catch { /* ignore bad URL */ }
+              const src = safe(pick.source || pick.source_name || host).trim();
+
+              // Compose message
+              const msg = `Why now: ${safe(pick.title) || safe(pick.summary) || safe(pick.quote)}`
+                .replace(/\s+/g, " ")
+                .trim();
+
+              aug.marketContext = src ? `${msg} [${src}]` : msg;
+            }
+          }
+        } catch { /* keep going */ }
+
+        // Build Moore line from strategy (paragraph → fields)
+        const mooreLine = mooreBulletFromStrategy(strategy) || "";
 
         // Build the final bullets, always injecting deterministic lines first (if present)
         const newBullets = [
