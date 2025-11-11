@@ -1,4 +1,4 @@
-// /api/campaign-router/index.js 07-11-2025 v1 (Option B tiny router)
+// /api/campaign-router/index.js 11-11-2025 v12
 // Trigger: queue %CAMPAIGN_QUEUE_NAME%
 // Routes:
 //   - { op:"afterevidence", runId, page, prefix }  → enqueue to %Q_CAMPAIGN_OUTLINE%
@@ -114,11 +114,22 @@ module.exports = async function (context, queueItem) {
         return;
       }
 
-      // Optional sanity: ensure evidence phase is complete
-      const evidenceOK = status0.state === "EvidenceDigest" || status0.markers.evidenceDigestCompleted === true;
-      if (!evidenceOK) {
-        context.log.warn("[router] evidence not marked complete; routing anyway (permissive)", { runId, state: status0.state });
+      // Strong guard: require evidence.json or evidence_log.json to exist
+      const evBlob = container.getBlockBlobClient(`${prefix}evidence.json`);
+      const evLogBlob = container.getBlockBlobClient(`${prefix}evidence_log.json`);
+      const evOk = (await evBlob.exists()) || (await evLogBlob.exists());
+
+      if (!evOk) {
+        // Persist a forward-only marker that we are waiting on Evidence
+        status0.history.push({ at: nowISO(), phase: "Router", op: "afterevidence", note: "evidence_missing" });
+        status0.markers.waitingForEvidence = true;
+        await saveStatus();
+        context.log.warn("[router] evidence missing; not enqueuing outline", { runId, prefix });
+        return;
       }
+
+      // Optional sanity marker if evidence finished
+      status0.markers.evidenceDigestCompleted = status0.markers.evidenceDigestCompleted === true || status0.state === "EvidenceDigest";
 
       await outlineQ.sendMessage(JSON.stringify({ runId, page, prefix }));
       status0.history.push({ at: nowISO(), phase: "Router", op: "afterevidence→outline", page });

@@ -329,9 +329,28 @@ module.exports = async function (context, queueItem) {
 
     // ---- Load artifacts ----
     const evidenceRaw = await getJson(container, `${prefix}evidence_log.json`);
-    let evidenceLog = Array.isArray(evidenceRaw) ? evidenceRaw
-      : (Array.isArray(evidenceRaw?.evidence_log) ? evidenceRaw.evidence_log : []);
-    evidenceLog = (evidenceLog || []).filter(it => it && it.claim_id && it.title && it.summary && it.url);
+        let evidenceArr = [];
+    try {
+      const evCanon = await getJson(container, `${prefix}evidence.json`);
+      if (evCanon && Array.isArray(evCanon.claims)) evidenceArr = evCanon.claims;
+    } catch { /* non-fatal */ }
+
+    if (!Array.isArray(evidenceArr) || !evidenceArr.length) {
+      const evidenceRaw = await getJson(container, `${prefix}evidence_log.json`);
+      if (Array.isArray(evidenceRaw)) {
+        evidenceArr = evidenceRaw;
+      } else if (evidenceRaw && Array.isArray(evidenceRaw.evidence_log)) {
+        evidenceArr = evidenceRaw.evidence_log;
+      } else {
+        evidenceArr = [];
+      }
+    }
+
+    // Keep only items that have a claim id, some text, and a URL
+    let evidenceLog = (evidenceArr || []).filter(it =>
+      it && it.claim_id && (it.title || it.summary || it.quote) && (it.url || it.source_url)
+    );
+
     const evidenceForPrompt = evidenceLog.slice(0, 24);
 
     const csvNorm = await getJson(container, `${prefix}csv_normalized.json`);
@@ -406,9 +425,22 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
     };
 
     // competitor-steering
+        const userCompetitors = Array.isArray(input?.relevant_competitors)
+      ? input.relevant_competitors
+      : (Array.isArray(input?.competitors) ? input.competitors : []);
+
+    const cfgCompetitors = Array.isArray(runConfig?.relevant_competitors)
+      ? runConfig.relevant_competitors
+      : [];
+
+    const preferUserThenCfg = [...userCompetitors, ...cfgCompetitors]
+      .map(s => (typeof s === "string" ? s.trim() : ""))
+      .filter(Boolean)
+      .slice(0, 12);
+
     const competitorClaimIds = claimIdsForCompetitors(
       evidenceLog,
-      Array.isArray(runConfig?.relevant_competitors) ? runConfig.relevant_competitors : [],
+      preferUserThenCfg,
       8
     );
 

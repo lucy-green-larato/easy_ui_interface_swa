@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js — Split campaign build. 11-11-2025 — v18
+// /api/campaign-evidence/index.js — Split campaign build. 11-11-2025 — v19
 // Artifacts written under: <prefix>/
 //   - site.json               (homepage snapshot + lightweight link graph — array, legacy compatible)
 //   - products.json           (product analysis for ability to solve buyers' problems)
@@ -2103,6 +2103,13 @@ module.exports = async function (context, job) {
     await putJson(container, `${prefix}evidence.json`, evidenceBundle);
 
     // 7) Finalise phase
+    try {
+      const statusPath = `${prefix}status.json`;
+      const cur = (await getJson(container, statusPath)) || { runId, history: [] , markers: {} };
+      cur.markers = cur.markers || {};
+      cur.markers.evidenceDigestCompleted = true;
+      await putJson(container, statusPath, cur);
+    } catch { /* non-fatal */ }
     await updateStatus(
       container,
       prefix,
