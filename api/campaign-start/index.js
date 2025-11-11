@@ -122,7 +122,30 @@ async function normalizeCsvAndPersist(containerClient, prefix, input) {
       cohort: Array.isArray(csv.sampleRows) ? csv.sampleRows.slice(0, 5) : []
     }
   };
-
+  try {
+    const sum = csvSummary && typeof csvSummary === "object" ? csvSummary : null;
+    if (sum) {
+      const takeTop = (arr, key = "value", n = 8) =>
+        Array.isArray(arr) ? arr.map(x => String(x?.[key] || "").trim()).filter(Boolean).slice(0, n) : [];
+      const needs = takeTop(sum.needs);
+      const blockers = takeTop(sum.blockers);
+      const purchases = takeTop(sum.purchases);
+      if (needs.length || blockers.length || purchases.length) {
+        normalized.signals = {
+          spend_band: null,
+          top_blockers: blockers,
+          top_needs_supplier: needs,
+          top_purchases: purchases
+        };
+        normalized.global_signals = {
+          spend_band: null,
+          top_blockers: blockers,
+          top_needs_supplier: needs,
+          top_purchases: purchases
+        };
+      }
+    }
+  } catch { /* safe best-effort */ }
   await writeJson(containerClient, `${prefix}csv_normalized.json`, normalized);
   return normalized;
 }

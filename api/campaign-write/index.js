@@ -857,6 +857,13 @@ module.exports = async function (context, queueItem) {
       const prev = String(cur.state || "");
       const terminal = new Set(["assembled", "error", "Failed"]);
       if (!terminal.has(prev)) {
+        const STATE_ORDER = ["ingest", "Outline", "EvidenceDigest", "StrategySynthesis", "strategy_working", "strategy_ready", "SectionWrites", "writer_working", "assembled", "Failed", "error"];
+        async function safeSetState(next) {
+          const st = (await getJson(container, `${prefix}status.json`)) || {};
+          const cur = String(st.state || "ingest");
+          if (STATE_ORDER.indexOf(next) <= STATE_ORDER.indexOf(cur)) return; // refuse backward
+          await patchStatus(container, prefix, next, { runId, updatedAt: nowISO(), op: "assemble" });
+        }
         await patchStatus(container, prefix, "writer_working", { runId, assembleStartedAt: nowISO(), op: "assemble" });
       }
     }

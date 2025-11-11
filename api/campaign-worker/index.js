@@ -211,7 +211,7 @@ function buildMooreVP({ outline, csvNormalized, evidenceLog, productsJson }) {
   const paragraph = [
     `For ${fields.for_who}`,
     `who need ${fields.who_need},`,
-    `the ${fields.the}`,
+    `${thePart}`,
     `is a ${fields.is_a}`,
     `that ${fields.that}.`,
     `Unlike ${fields.unlike}, ${supplier || "the supplier"} provides ${fields.provides}.`
@@ -489,7 +489,7 @@ function buildStrategyObject({ input, csvNormalized, needsMap, evidence }) {
   const usps = Array.isArray(input.supplier_usps) ? input.supplier_usps.filter(nonEmpty) : [];
 
   const rows = Number(csvNormalized?.meta?.rows || 0);
-  const csvClaim = pickClaim(evidence, (x) => /csv/i.test(x?.source_type) && /csv population/i.test(x?.title || ""));
+  const csvClaim = pickClaim(evidence, (x) => /csv/i.test(String(x?.source_type || "")));
   const packClaim = pickClaim(evidence, (x) => /Ofcom|ONS|DSIT|LinkedIn|PDF extract|Company site/.test(x?.source_type || ""));
 
   const problems = topN(
@@ -1221,6 +1221,26 @@ module.exports = async function (context, queueItem) {
 
     // Keep legacy one-liner populated for current UI if missing
     strategy.positioning_and_differentiation = strategy.positioning_and_differentiation || {};
+    try {
+      if (outlineFixed && outlineFixed.input_notes && typeof outlineFixed.input_notes === "object") {
+        // mirror full input_notes (bounded, safe)
+        strategy.input_notes = strategy.input_notes || {};
+        for (const [k, v] of Object.entries(outlineFixed.input_notes)) {
+          if (v == null) continue;
+          if (Array.isArray(v)) strategy.input_notes[k] = v.slice(0, 16);
+          else if (typeof v === "string") strategy.input_notes[k] = v;
+          else strategy.input_notes[k] = v; // keep simple scalars
+        }
+        // also mirror into meta.relevant_competitors for Writer's competitor set
+        if (Array.isArray(outlineFixed.input_notes.relevant_competitors)) {
+          strategy.meta = strategy.meta || {};
+          strategy.meta.relevant_competitors = outlineFixed.input_notes.relevant_competitors
+            .map(s => String(s || "").trim())
+            .filter(Boolean)
+            .slice(0, 8);
+        }
+      }
+    } catch { /* no-op mirror */ }
     if (!strategy.positioning_and_differentiation.value_prop) {
       strategy.positioning_and_differentiation.value_prop = _moore.paragraph;
     }
@@ -1255,6 +1275,10 @@ module.exports = async function (context, queueItem) {
         const prevState = String(st.state || "");
         const terminal = new Set(["assembled", "error", "Failed"]);
         if (!terminal.has(prevState)) {
+          const ORDER = ["ingest", "Outline", "EvidenceDigest", "StrategySynthesis", "strategy_working", "strategy_ready", "SectionWrites", "writer_working", "assembled", "Failed", "error"];
+          const prevIdx = ORDER.indexOf(prevState || "ingest");
+          const nextIdx = ORDER.indexOf("strategy_ready");
+          if (nextIdx <= prevIdx) { /* refuse backward */ return; }
           st.state = "strategy_ready";     // frontend treats this as ready-to-write
           st.last_op = "worker_done";
           st.updated = nowIso;
