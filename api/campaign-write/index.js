@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js 11-11-2025 v17 (Writer/Assembler)
+// /api/campaign-write/index.js 12-11-2025 v18 (Writer/Assembler)
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> writes sections/<finalKey>.json
 // - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%
@@ -162,7 +162,7 @@ function renderPositioningFromStrategy({ strategy, evidenceBundle, csvCanon }) {
   // Buyer pains directly from CSV signals
   const sig = (csvCanon && csvCanon.signals) || {};
   const pains = Array.isArray(sig.top_blockers) ? sig.top_blockers.filter(Boolean) : [];
-    const needs = (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length
+  const needs = (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length
     ? sig.top_needs_supplier
     : (Array.isArray(sig.top_needs) ? sig.top_needs : [])
   ).filter(Boolean);
@@ -243,7 +243,7 @@ function renderMessagingFromStrategy({ strategy, evidenceBundle, csvCanon, outli
 
   const sig = (csvCanon && csvCanon.signals) || {};
   const pains = Array.isArray(sig.top_blockers) ? sig.top_blockers.filter(Boolean) : [];
-    const needs = (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length
+  const needs = (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length
     ? sig.top_needs_supplier
     : (Array.isArray(sig.top_needs) ? sig.top_needs : [])
   ).filter(Boolean);
@@ -298,7 +298,7 @@ function renderSalesEnablementFromStrategy({ strategy, evidenceBundle, csvCanon 
   // Discovery questions: derive from CSV buyer data only
   const sig = (csvCanon && csvCanon.signals) || {};
   const blockers = Array.isArray(sig.top_blockers) ? sig.top_blockers.filter(Boolean) : [];
-    const needs = (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length
+  const needs = (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length
     ? sig.top_needs_supplier
     : (Array.isArray(sig.top_needs) ? sig.top_needs : [])
   ).filter(Boolean);
@@ -426,82 +426,87 @@ function deriveAmLine(csvCanon, outline) {
   return "";
 }
 
-// C) Market context + blockers + F→O→BV from evidence + signals + USPs (data-driven, no hard-wiring)
-function buildExecAugments({ evidenceBundle, csvCanon, outline }) {
+// C) Market context + blockers + F→O→BV from evidence + signals + chosen products (with citations)
+function buildExecAugments({ evidenceBundle, csvCanon, outline, strategy }) {
   const catalog = Array.isArray(evidenceBundle?.catalog) ? evidenceBundle.catalog : [];
   const sig = csvCanon?.signals || {};
-  const needs = Array.isArray(sig.top_needs) ? sig.top_needs.filter(Boolean) : [];
+  const needs = Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length
+    ? sig.top_needs_supplier.filter(Boolean)
+    : (Array.isArray(sig.top_needs) ? sig.top_needs.filter(Boolean) : []);
   const blockers = Array.isArray(sig.top_blockers) ? sig.top_blockers.filter(Boolean) : [];
-  const usps = Array.isArray(outline?.input_notes?.supplier_usps) ? outline.input_notes.supplier_usps.filter(Boolean) : [];
-  const company = (outline?.input_notes?.supplier_company || outline?.input_notes?.prospect_company || "").trim();
-  const industry = (csvCanon?.selected_industry || outline?.meta?.selected_industry || "").toString().trim();
 
-  // Market context (evidence-first)
-  const textOf = (it) => `${it.title || ""} ${it.summary || it.quote || ""}`.toLowerCase();
-  const isReg = (s) => /(ofcom|gov\.uk|ons|citb|regulator|industry)/.test(s);
-  const ranked = catalog
-    .map(it => {
-      const t = textOf(it);
-      let s = 0;
-      if (industry && t.includes(industry.toLowerCase())) s += 5;
-      if (isReg(t) || isReg(String(it.source_type || "").toLowerCase())) s += 8;
-      return { it, s };
-    })
-    .sort((a, b) => b.s - a.s)
-    .slice(0, 8)
-    .map(x => x.it);
+  // Chosen/validated products (reasoned anchor → ES bullets)
+  const chosen =
+    (Array.isArray(strategy?.prospect_base?.products?.chosen) && strategy.prospect_base.products.chosen.length
+      ? strategy.prospect_base.products.chosen
+      : (Array.isArray(evidenceBundle?.productNames) ? evidenceBundle.productNames : []))
+      .map(s => String(s || "").trim()).filter(Boolean);
 
-  const ctxTerms = (() => {
-    if (!ranked.length) return [];
-    const STOP = new Set(["the", "and", "for", "with", "from", "this", "their", "your", "our", "it", "they", "be", "was", "were"]);
-    const text = ranked.map(it => String(it.summary || it.quote || it.title || "")).join(" ").toLowerCase();
-    const toks = text.split(/[^a-z0-9+]+/).filter(w => w && w.length > 2 && !STOP.has(w));
-    const freq = new Map();
-    for (const w of toks) freq.set(w, (freq.get(w) || 0) + 1);
-    for (const w of (industry || "").toLowerCase().split(/[^a-z0-9]+/)) freq.delete(w);
-    for (const w of (company || "").toLowerCase().split(/[^a-z0-9]+/)) freq.delete(w);
-    return [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([w]) => w);
-  })();
+  // ---- CITE: prefer https URLs; else short tag from source_type/title
+  const citeOf = (it) => {
+    const url = String(it.url || "").trim();
+    if (url && /^https:\/\//i.test(url)) return url;
+    const src = String(it.source_type || it.source || "").trim();
+    if (/ons|ofcom|dsit|gov\.uk/i.test(src)) return `(${src})`;
+    const t = String(it.title || "").trim();
+    if (t) return `(${t.slice(0, 40)}…)`;
+    return "(evidence)";
+  };
 
+  // ---- Rank evidence for market context (industry/regulator weight)
+  const industry = String(csvCanon?.selected_industry || outline?.meta?.selected_industry || "").toLowerCase();
+  const rank = (it) => {
+    const text = `${it.title || ""} ${it.summary || it.quote || ""}`.toLowerCase();
+    let s = 0;
+    if (industry && text.includes(industry)) s += 5;
+    if (/(ofcom|ons|dsit|gov\.uk|citb|regulator)/.test(text) || /(ofcom|ons|dsit|gov\.uk|citb|regulator)/.test(String(it.source_type || "").toLowerCase())) s += 8;
+    if (/case|reference|customer|site/i.test(text)) s += 2;
+    return s;
+  };
+  const topEv = catalog.slice().sort((a, b) => rank(b) - rank(a)).slice(0, 4);
+
+  // ---- Market context line WITH citations so it passes your filter
   const marketContext = (() => {
-    const need = needs[0] || "";
-    const usp = usps.slice(0, 3).join("; ");
-    const a = [];
-    if (company && (need || usp)) {
-      const needPart = need ? `meet buyers’ needs for ${need}` : "address priority buyer needs";
-      const uspPart = usp ? ` via ${usp}` : "";
-      a.push(`${company} can ${needPart}${uspPart}.`);
+    if (!topEv.length) return "";
+    const phrases = [];
+    for (const it of topEv.slice(0, 2)) {
+      const t = String(it.summary || it.quote || it.title || "").trim();
+      if (!t) continue;
+      phrases.push(`${t} ${citeOf(it)}`.trim());
     }
-    if (ctxTerms.length) a.push(`Peers in the sector emphasise ${ctxTerms.join(", ")} to secure specific operational benefits.`);
-    return a.join(" ").trim();
+    return phrases.length ? phrases.join(" ") : "";
   })();
 
+  // ---- Blockers line (CSV-led; no placeholders)
   const blockersLine = blockers.length ? `Key buyer blockers to investment: ${blockers.slice(0, 3).join("; ")}.` : "";
 
-  // F→O→BV: align USPs to needs/blockers via token overlap (no keyword lists)
-  function tokens(s) { return String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean); }
-  function jac(a, b) {
-    const A = new Set(a), B = new Set(b);
-    let i = 0; for (const x of A) if (B.has(x)) i++;
-    const denom = A.size + B.size - i;
-    return denom ? i / denom : 0;
-  }
+  // ---- F→O→BV: map chosen products to nearest need/blocker (token overlap; no guesses)
+  const tok = (s) => String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const jac = (A, B) => {
+    const a = new Set(A), b = new Set(B);
+    let i = 0; for (const x of a) if (b.has(x)) i++;
+    const d = a.size + b.size - i;
+    return d ? i / d : 0;
+  };
   const fov = [];
-  for (const usp of usps) {
-    const ut = tokens(usp); if (!ut.length) continue;
-    let bestN = null, nScore = 0; for (const n of needs) { const s = jac(ut, tokens(n)); if (s > nScore) { nScore = s; bestN = n; } }
-    let bestB = null, bScore = 0; for (const b of blockers) { const s = jac(ut, tokens(b)); if (s > bScore) { bScore = s; bestB = b; } }
+  for (const prod of chosen) {
+    const pt = tok(prod); if (!pt.length) continue;
+    let bestN = null, nScore = 0; for (const n of needs) { const s = jac(pt, tok(n)); if (s > nScore) { nScore = s; bestN = n; } }
+    let bestB = null, bScore = 0; for (const b of blockers) { const s = jac(pt, tok(b)); if (s > bScore) { bScore = s; bestB = b; } }
     if (!bestN && !bestB) continue;
-    const parts = [String(usp).trim()];
-    if (bestN) parts.push(`to advance ${bestN}`);
-    if (bestB) parts.push(`→ Business value: reduces risk from ${bestB}`);
+    const parts = [prod];
+    if (bestN) parts.push(`→ outcome: advances ${bestN}`);
+    if (bestB) parts.push(`→ business value: reduces risk from ${bestB}`);
     fov.push(parts.join(" "));
     if (fov.length >= 3) break;
   }
 
+  // ---- AM line (use your existing deterministic resolver)
   const amLine = deriveAmLine(csvCanon, outline);
+
   return { amLine, marketContext, blockersLine, fov };
 }
+
 // ---- Exec Summary helpers: headline detection + paragraph synthesis ----
 function looksLikeHeadline(s) {
   const t = String(s || "").trim();

@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 11-11-2025 v24
+// /api/campaign-worker/index.js 12-11-2025 v25
 // Option B pipeline — worker fast path (draft campaign.json) with business-leader Executive Summary shaping
 // Preserves v14 structure: phased status, append-only event logger, robust loaders, and sanitizer.
 // Writes under results/<prefix> (container-relative, trailing slash). No renames of queues/ops/keys.
@@ -1299,9 +1299,9 @@ module.exports = async function (context, queueItem) {
       draft.executive_summary = shapeExecutiveSummary({
         existing: draft.executive_summary,
         input: mergedInput,
-        csvNormalized,   // pass full canonical CSV (signals + meta)
+        csvNormalized,
         strategy,
-        evidence
+        evidence,
       });
       draft.markers = Object.assign({}, draft.markers, { workerDraft: true, strategyV: "v16.1" });
     } catch (shapeErr) {
