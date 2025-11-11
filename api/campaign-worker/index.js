@@ -208,13 +208,18 @@ function buildMooreVP({ outline, csvNormalized, evidenceLog, productsJson }) {
     proof_points: proofPoints
   };
 
+  // Compose the Moore paragraph with guard to avoid "the The ..." duplication
+  const norm = (s) => String(s || "").trim().replace(/[.\s]+$/g, ""); // trim trailing punctuation/spaces
+  const theRaw = norm(fields.the);
+  const thePart = /^the\s/i.test(theRaw) ? theRaw : `the ${theRaw}`;
+
   const paragraph = [
-    `For ${fields.for_who}`,
-    `who need ${fields.who_need},`,
+    `For ${norm(fields.for_who)}`,
+    `who need ${norm(fields.who_need)},`,
     `${thePart}`,
-    `is a ${fields.is_a}`,
-    `that ${fields.that}.`,
-    `Unlike ${fields.unlike}, ${supplier || "the supplier"} provides ${fields.provides}.`
+    `is a ${norm(fields.is_a)}`,
+    `that ${norm(fields.that)}.`,
+    `Unlike ${norm(fields.unlike)}, ${supplier || "the supplier"} provides ${norm(fields.provides)}.`
   ].join(" ");
 
   return { paragraph, fields };

@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js 12-11-2025 v18 (Writer/Assembler)
+// /api/campaign-write/index.js 11-11-2025 v19 (Writer/Assembler)
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> writes sections/<finalKey>.json
 // - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%
@@ -225,12 +225,14 @@ function renderPositioningFromStrategy({ strategy, evidenceBundle, csvCanon }) {
       : "";
 
   return {
-    value_prop: valueProp,                              // empty string if not defensible
+    value_prop: (valueProp && valueProp.trim())
+      ? valueProp
+      : "Advisory: current evidence is insufficient to assert a differentiated value proposition for this campaign. Strengthen CSV signals (needs, blockers, purchases), add validated outcomes, and sharpen competitor contrast before launch.",
     swot: {
       strengths: usps,                                  // only real USPs
       weaknesses: Array.isArray(s.gaps) ? s.gaps.filter(Boolean) : [],
       opportunities: needs,                              // from CSV needs
-      threats: []                                        // leave empty if not evidenced
+      threats: pains                                        // leave empty if not evidenced
     },
     differentiators: usps,                               // only real USPs
     competitor_set: compSet                              // user-first, then evidence; normalised objects
@@ -564,8 +566,8 @@ function buildSectionSystem(finalKey, persona) {
   if (finalKey === "executive_summary") {
     return [
       personaPrefix + "You are a senior UK B2B strategist.",
-      "Write a board-ready Executive Summary (≤350 words) for a go/no-go decision.",
-      "Begin exactly in this order: Strategy → Target prospects → Buyer problems → Campaign type (upsell/win-back/growth + one-line rationale).",
+      "Write a board-ready Executive Summary for a go/no-go decision.",
+      "Begin exactly in this order (short paragraph on each): Strategy → Target prospects → Buyer problems → Campaign type (upsell/win-back/growth + one-line rationale).",
       "Then add bullets covering each of: Moore value proposition; Addressable market; Market context (with citations); Buyer blockers (from CSV); Sales enablement note.",
       "Use ONLY these data sources: CSV canonical (cohort size + signals), industry packs, company profile pack, and explicit input notes.",
       "If competitors are provided in the input, USE ONLY those; do not introduce others.",
@@ -592,7 +594,7 @@ function buildSectionSystem(finalKey, persona) {
       "Base your reasoning strictly on the supplied evidence and inputs.",
       "Deliver a coherent, practical plan that positions the supplier to win within the chosen prospect base.",
       "",
-      "Cover these items explicitly, as concise bullets (≤ 220 words total):",
+      "Cover these items explicitly (short paragaraph on each one):",
       "• Strategic rationale — why the supplier should play in this market.",
       "• Advantage — how the supplier can be better than competitors (specific differentiators).",
       "• Coherent choices — the concrete actions and constraints that define the campaign (segments, offer, channels, messaging, sequencing).",
@@ -602,7 +604,7 @@ function buildSectionSystem(finalKey, persona) {
       "Rules:",
       "• No fabrication. Cite only what is supported by inputs/evidence.",
       "• Prefer specifics over generalities; avoid marketing fluff.",
-      "• Keep to bullets; do not repeat headings in prose.",
+      "• Strategy must be compelling for senior business leader sign off.",
       "",
       `Generate STRICT JSON only for the requested section "${finalKey}".`,
       "Return JSON only, no markdown fences. Do NOT include keys for other sections.",
@@ -1094,9 +1096,19 @@ module.exports = async function (context, queueItem) {
           return !isWhy || looksCited(s);
         };
         const company = String(ol?.input_notes?.supplier_company || "").toLowerCase();
+        const fromOutline = Array.isArray(ol?.input_notes?.competitors)
+          ? ol.input_notes.competitors
+          : (Array.isArray(ol?.input_notes?.relevant_competitors) ? ol.input_notes.relevant_competitors : []);
+        const fromStrategy = Array.isArray(strategy?.meta?.relevant_competitors)
+          ? strategy.meta.relevant_competitors
+          : [];
+        const fromEvidenceSet = Array.isArray(strategy?.positioning_and_differentiation?.competitor_set)
+          ? strategy.positioning_and_differentiation.competitor_set.map(x => String(x?.vendor || "").trim()).filter(Boolean)
+          : [];
+
         const allowed = new Set(
           [company]
-            .concat(Array.isArray(ol?.input_notes?.competitors) ? ol.input_notes.competitors : (Array.isArray(ol?.input_notes?.relevant_competitors) ? ol.input_notes.relevant_competitors : []))
+            .concat(fromOutline, fromStrategy, fromEvidenceSet)
             .map(x => String(x).toLowerCase())
             .filter(Boolean)
         );
@@ -1117,11 +1129,25 @@ module.exports = async function (context, queueItem) {
           .filter(notUncitedWhyNow)
           .filter(s => !mentionsDisallowedBrandInComparison(s));
 
+        let competitorLine = "";
+        try {
+          const compSet = Array.isArray(strategy?.positioning_and_differentiation?.competitor_set)
+            ? strategy.positioning_and_differentiation.competitor_set
+            : [];
+          if (compSet.length) {
+            const names = compSet.slice(0, 3).map(c => String(c.vendor || "").trim()).filter(Boolean);
+            if (names.length) {
+              competitorLine = `Competitive context: prioritise wins against ${names.join(", ")} with clear, evidenced differentiators.`;
+            }
+          }
+        } catch { /* non-fatal */ }
+
         // Build the final bullets, always injecting deterministic lines first (if present)
         const newBullets = [
           ...((aug.fov || []).filter(Boolean)),                // Feature→Outcome→Value (0–3)
           ...(aug.amLine ? [aug.amLine] : []),                 // AM from CSV (enforced here)
           ...(aug.marketContext ? [aug.marketContext] : []),   // market context from evidence/profile
+          ...(competitorLine ? [competitorLine] : []),         // concise competitor context (user-first)
           ...(aug.blockersLine ? [aug.blockersLine] : []),     // CSV TopBlockers
           ...filteredLlmBullets
         ].filter(Boolean);

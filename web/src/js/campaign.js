@@ -946,15 +946,18 @@ window.CampaignUI = window.CampaignUI || {};
     let attempt = 0;
     let consecutiveErrors = 0;
 
-    const okDuring = new Set([
-      "Queued",
-      "DraftCampaign",
-      "EvidenceDigest",
-      "Outline",
-      "SectionWrites",
-      "Assemble",
+     const okDuring = new Set([
+      // queue / early
+      "Queued", "ValidatingInput", "PacksLoad", "ingest", "DraftCampaign",
+      // evidence & outline
+      "EvidenceDigest", "Outline",
+      // strategy & handoff
+      "StrategySynthesis", "strategy_working", "strategy_ready",
+      // writer & assembly
+      "SectionWrites", "writer_working", "Assemble", "assembled",
+      // terminal
       "Completed"
-    ]);
+    ]);;
 
     while (true) {
       if (Date.now() - started > MAX_MS) throw new Error("Timed out waiting for completion");
