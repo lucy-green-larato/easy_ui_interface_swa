@@ -731,6 +731,145 @@ function mapFeaturesToBenefits({ usps, evidence, csvSignals, strategy }) {
   // Keep the ES tight
   return lines.slice(0, 3);
 }
+
+// -------- Narrative builders (deterministic; no model calls) -----------------
+function synthesizeExecutiveSummaryNarrative({ input, csvNormalized, strategy, evidence }) {
+  const trim = (v) => (v == null ? "" : String(v)).replace(/\s+/g, " ").trim();
+  const company = trim(strategy?.meta?.company || input?.supplier_company || input?.company_name || "");
+  const industry = trim(strategy?.meta?.industry || csvNormalized?.selected_industry || csvNormalized?.meta?.selected_industry || input?.selected_industry || input?.campaign_industry || "");
+  const rows = Number(csvNormalized?.meta?.rows || 0) || Number(strategy?.prospect_base?.tam || 0) || null;
+
+  // Buyer landscape (signals)
+  const sig = csvNormalized?.signals || {};
+  const gs = csvNormalized?.global_signals || {};
+  const needs = Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length ? sig.top_needs_supplier
+    : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
+  const blockers = Array.isArray(sig.top_blockers) && sig.top_blockers.length ? sig.top_blockers
+    : (Array.isArray(gs.top_blockers) ? gs.top_blockers : []);
+  const spendCues = Array.isArray(sig.top_purchases) ? sig.top_purchases : [];
+
+  // Evidence-led market context (short, cited-like phrasing)
+  const marketContext = deriveMarketContext({
+    evidence,
+    csvSignals: (csvNormalized && csvNormalized.signals) ? csvNormalized.signals : undefined,
+    usps: strategy?.meta?.usps || input?.supplier_usps || [],
+    company,
+    industry
+  });
+
+  // (1) Environment
+  const cohortTxt = rows ? `${rows.toLocaleString()} organisations` : "a defined set of organisations";
+  const needTxt = needs.length ? `buyers need ${needs.slice(0, 3).join(", ")}` : "";
+  const blockTxt = blockers.length ? `but face ${blockers.slice(0, 3).join(", ")}` : "";
+  const spendTxt = spendCues.length ? `spend signals include ${spendCues.slice(0, 3).join(", ")}.` : "";
+  const envParts = [
+    industry ? `In ${industry},` : "",
+    `the addressable cohort contains ${cohortTxt}.`,
+    marketContext,
+    (needTxt || blockTxt) ? `Buyer landscape: ${[needTxt, blockTxt].filter(Boolean).join(" ")}.` : "",
+    spendTxt
+  ].filter(Boolean);
+  const environment_paragraph = trim(envParts.join(" "));
+
+  // (2) Strategic rationale
+  const rationaleHints = Array.isArray(strategy?.insight?.product_fit?.rationale)
+    ? strategy.insight.product_fit.rationale.filter(Boolean)
+    : [];
+  const rationale_paragraph = trim([
+    `Why now: ${rationaleHints.join(" ")}`
+  ].filter(Boolean).join(" "));
+
+  // (3) How to win (Moore + SWOT + competitors)
+  const moore = trim(strategy?.value_proposition_moore?.paragraph || "");
+  const sw = strategy?.swot || {}; // optional; may be absent here
+  const compAllowed = Array.isArray(strategy?.meta?.relevant_competitors)
+    ? strategy.meta.relevant_competitors.map(s => String(s || "").trim()).filter(Boolean)
+    : [];
+  const compTxt = compAllowed.length ? `Competitors in scope: ${compAllowed.slice(0, 4).join(", ")}.` : "";
+  const how_to_win_paragraph = trim([
+    moore,
+    (Array.isArray(sw?.strengths) && sw.strengths.length) ? `Strengths: ${sw.strengths.slice(0, 3).join(", ")}.` : "",
+    (Array.isArray(sw?.opportunities) && sw.opportunities.length) ? `Opportunities: ${sw.opportunities.slice(0, 3).join(", ")}.` : "",
+    compTxt
+  ].filter(Boolean).join(" "));
+
+  // (4) Success (specific outcome if available)
+  const success_paragraph = trim(
+    strategy?.specific_outcome
+      ? `What success looks like: ${strategy.specific_outcome}.`
+      : ""
+  );
+
+  // (5) Next steps (execution_checks/route aware)
+  const checks = Array.isArray(strategy?.execution_checks) ? strategy.execution_checks.filter(Boolean) : [];
+  const next = checks.length ? checks.slice(0, 2).join("; ") : "";
+  const route = String(strategy?.go_to_market?.route || input?.sales_model || input?.salesModel || "").toLowerCase();
+  const routeLine = route === "partner"
+    ? "Next steps: initiate partner plan and MDF approval."
+    : "Next steps: launch first-wave outreach with tracked landing and CRM capture.";
+  const next_steps_paragraph = trim([next ? `Pre-conditions: ${next}.` : "", routeLine].filter(Boolean).join(" "));
+
+  return {
+    environment_paragraph,
+    rationale_paragraph,
+    how_to_win_paragraph,
+    success_paragraph,
+    next_steps_paragraph
+  };
+}
+
+function buildValuePropNarrative({ strategy, input, csvNormalized, evidence }) {
+  const trim = (v) => (v == null ? "" : String(v)).replace(/\s+/g, " ").trim();
+  const moore = trim(strategy?.value_proposition_moore?.paragraph || "");
+  const lead = moore || trim(buildMooreValueProp({
+    company: strategy?.meta?.company || input?.supplier_company || input?.company_name,
+    industry: strategy?.meta?.industry || csvNormalized?.selected_industry || csvNormalized?.meta?.selected_industry,
+    usps: strategy?.meta?.usps || input?.supplier_usps || [],
+    claimId: (strategy?.evidence_links || [])[0] || null
+  }));
+
+  const sig = csvNormalized?.signals || {};
+  const needs = Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length ? sig.top_needs_supplier
+    : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
+  const blockers = Array.isArray(sig.top_blockers) ? sig.top_blockers : [];
+
+  const customer_problem_paragraph = trim(
+    needs.length ? `Customers need ${needs.slice(0, 3).join(", ")} and are held back by ${blockers.slice(0, 3).join(", ")}.` : ""
+  );
+
+  const right_to_play_paragraph = trim(
+    (strategy?.insight?.product_fit?.rationale || []).join(" ")
+  );
+
+  const differentiation_paragraph = trim(
+    Array.isArray(strategy?.how_win?.differentiators) && strategy.how_win.differentiators.length
+      ? `Differentiation: ${strategy.how_win.differentiators.slice(0, 4).join(", ")}.`
+      : ""
+  );
+
+  const compAllowed = Array.isArray(strategy?.meta?.relevant_competitors)
+    ? strategy.meta.relevant_competitors.map(s => String(s || "").trim()).filter(Boolean)
+    : [];
+  const competitor_positions_paragraph = trim(
+    compAllowed.length ? `Competitor context: ${compAllowed.slice(0, 4).join(", ")}.` : "TBD"
+  );
+
+  const proof_points_paragraph = trim(
+    (Array.isArray(strategy?.evidence_links) && strategy.evidence_links.length)
+      ? `Proof points: ${strategy.evidence_links.join(", ")}.`
+      : ""
+  );
+
+  return {
+    lead,
+    customer_problem_paragraph,
+    right_to_play_paragraph,
+    differentiation_paragraph,
+    competitor_positions_paragraph,
+    proof_points_paragraph
+  };
+}
+
 // ---------------- Executive Summary shaping + Title (v16) ------------------
 // Business-leader sign-off paragraph + bullets with safe fallbacks.
 // No fabrication: only input.json, csv_normalized.meta, and verified evidence.
@@ -1408,6 +1547,18 @@ module.exports = async function (context, queueItem) {
       chosen_products: Array.isArray(productsChosen) ? productsChosen.slice(0, 4) : []
     };
 
+    // Narrative VP (deeper than ES): attach for writer/frontend consumption
+    try {
+      const vpNarr = buildValuePropNarrative({
+        strategy,
+        input: mergedInput,
+        csvNormalized: csvNormalizedFixed,
+        evidence: evidenceLogFixed
+      });
+      strategy.positioning_and_differentiation = strategy.positioning_and_differentiation || {};
+      strategy.positioning_and_differentiation.value_prop_narrative = vpNarr;
+    } catch { /* non-fatal */ }
+
     // Keep legacy one-liner populated for current UI if missing
     strategy.positioning_and_differentiation = strategy.positioning_and_differentiation || {};
     try {
@@ -1583,6 +1734,16 @@ module.exports = async function (context, queueItem) {
     } catch (shapeErr) {
       context.log.warn("executive_summary_shape_coercion_failed", String(shapeErr?.message || shapeErr));
     }
+    // Also attach the five-paragraph narrative ES (preferred by updated UI/writer)
+    try {
+      draft.executive_summary_narrative = synthesizeExecutiveSummaryNarrative({
+        input: mergedInput,
+        csvNormalized,
+        strategy,
+        evidence
+      });
+    } catch { /* non-fatal */ }
+
 
     // Write campaign.json
     await putJson(container, `${prefix}campaign.json`, draft);

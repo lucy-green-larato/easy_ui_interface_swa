@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js 12-11-2025 v28 (Writer/Assembler)
+// /api/campaign-write/index.js 12-11-2025 v30.0 (Writer/Assembler)
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> writes sections/<finalKey>.json
 // - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%
@@ -590,53 +590,52 @@ function buildSectionSystem(finalKey, persona) {
     return [
       personaPrefix + "You are a senior UK B2B strategist.",
       "Write a board-ready Executive Summary for a go/no-go decision.",
-      "Begin exactly in this order (short paragraph on each): Strategy → Target prospects → Buyer problems → Campaign type (upsell/win-back/growth + one-line rationale).",
-      "Then add bullets covering each of: Moore value proposition; Addressable market; Market context (with citations); Buyer blockers (from CSV); Sales enablement note.",
-      "Use ONLY these data sources: CSV canonical (cohort size + signals), industry packs, company profile pack, and explicit input notes.",
-      "If competitors are provided in the input, USE ONLY those; do not introduce others.",
-      "For Addressable market, DO NOT estimate; the writer will insert the cohort and focus subset from CSV.",
-      "Cite external facts inline using short tags or https URLs.",
-      "Return STRICT JSON: executive_summary as an array of strings (first = paragraph, rest = bullets)."
+      "Deliver a persuasive narrative in exactly five short paragraphs (no bullets):",
+      "1) Market environment — key trends; exact addressable cohort size from CSV; buyer landscape (current investments, blockers, spend cues, and needs from a supplier).",
+      "2) Strategic rationale — why the supplier should implement this campaign now, explicitly connecting the market environment to the strategy.",
+      "3) How to win — use Geoffrey Moore’s value proposition (clean sentence) and reasoned SWOT plus brief, evidenced competitor commentary (use ONLY supplied competitors).",
+      "4) What success looks like — quantified campaign outcome (ranges ok) and time frame, grounded in evidence and supplier capability.",
+      "5) Next steps — concrete actions to begin.",
+      "Use ONLY these data sources: CSV canonical (cohort size, signals), evidence.json / evidence_log.json (with URLs or short source tags), industry packs, company profile pack, and explicit input notes.",
+      "Cite external facts inline with short tags or https URLs. Do not invent competitors; if none supplied, omit competitor commentary.",
+      'Return STRICT JSON with the key "executive_summary" as an OBJECT:',
+      '{',
+      '  "environment_paragraph": "<string>",',
+      '  "rationale_paragraph": "<string>",',
+      '  "how_to_win_paragraph": "<string>",',
+      '  "success_paragraph": "<string>",',
+      '  "next_steps_paragraph": "<string>"',
+      '}'
     ].join("\n");
   }
 
   if (finalKey === "positioning_and_differentiation") {
     return [
       personaPrefix + "You are a senior UK B2B strategist.",
-      "Provide Geoffrey Moore’s value proposition and a competitor contrast table.",
-      "Use ONLY competitors supplied in the input; if none supplied, write 'TBD' rather than introducing generic telcos.",
-      "Ground claims in CSV signals, industry packs, and the customer profile pack; include claim_ids or short citations inline.",
-      'Return STRICT JSON for "positioning_and_differentiation".'
-    ].join("\n");
-  }
-
-  if (finalKey === "campaign_strategy") {
-    return [
-      personaPrefix + "You are a senior UK B2B strategist.",
-      "You are formulating a campaign strategy for a technology supplier.",
-      "Base your reasoning strictly on the supplied evidence and inputs.",
-      "Deliver a coherent, practical plan that positions the supplier to win within the chosen prospect base.",
-      "",
-      "Cover these items explicitly (short paragraph on each one):",
-      "• Strategic rationale — why the supplier should play in this market.",
-      "• Advantage — how the supplier can be better than competitors (specific differentiators).",
-      "• Coherent choices — the concrete actions and constraints that define the campaign (segments, offer, channels, messaging, sequencing).",
-      "• Feasibility — practical enablers/limits (teams, systems, dependencies).",
-      "• Specific expected outcome — quantified KPI/timeframe if available; otherwise 'TBD'.",
-      "",
-      "Rules:",
-      "• No fabrication. Cite only what is supported by inputs/evidence.",
-      "• Prefer specifics over generalities; avoid marketing fluff.",
-      "• Strategy must be compelling for senior business leader sign off.",
-      "",
-      `Generate STRICT JSON only for the requested section "${finalKey}".`,
-      "Return JSON only, no markdown fences. Do NOT include keys for other sections.",
-      "",
-      "CITATION RULE (inline, end of sentences using external evidence):",
-      "Use short tags in parentheses (e.g., (Company site), (CSV)) or https URLs: (Company site), (LinkedIn), (CSV), (Ofcom), (ONS), (DSIT), (PDF extract), (Trade press), (Directory).",
-      "",
-      "STYLE: UK English, concise, specific, evidence-led. Prefer concrete buyer outcomes with inline citations where used.",
-      "VALIDATION: All URLs https. Arrays required by the schema must be present (empty if necessary). No invented numbers/sources; write 'no external citation available' if needed."
+      "Provide a deeper Value Proposition narrative than the Executive Summary.",
+      "Include Geoffrey Moore’s value proposition (clean sentence) and expand it into several short paragraphs:",
+      "- Customer problem and impact (grounded in CSV/evidence).",
+      "- Right-to-play for the supplier.",
+      "- Differentiation and proof points.",
+      "- Competitor commentary: USE ONLY competitors supplied in input; if none, write 'TBD' for commentary.",
+      "Also include SWOT (S/W/O/T arrays), a concise differentiators array, and (optionally) a competitor_set table with vendor, reason_in_set, url.",
+      "Cite external facts inline via short tags or URLs.",
+      'Return STRICT JSON for "positioning_and_differentiation" as an OBJECT that may include:',
+      '{',
+      '  "value_prop": "<one-line generic value if needed>",',
+      '  "value_prop_moore": { "paragraph": "<clean sentence>", "fields": { "for": "...", "who_need": "...", "the": "...", "is_a": "...", "that": "...", "unlike": "...", "provides": "...", "proof_points": ["...", "..."] } },',
+      '  "value_prop_narrative": {',
+      '    "lead": "<Moore sentence again (clean)>",',
+      '    "customer_problem_paragraph": "<string>",',
+      '    "right_to_play_paragraph": "<string>",',
+      '    "differentiation_paragraph": "<string>",',
+      '    "competitor_positions_paragraph": "<string or \\"TBD\\">",',
+      '    "proof_points_paragraph": "<string>"',
+      '  },',
+      '  "swot": { "strengths": [], "weaknesses": [], "opportunities": [], "threats": [] },',
+      '  "differentiators": [],',
+      '  "competitor_set": [{ "vendor": "Acme", "reason_in_set": "…", "url": "https://…" }]',
+      '}'
     ].join("\n");
   }
 
@@ -655,34 +654,48 @@ function buildSectionSystem(finalKey, persona) {
 
 function targetsFor(finalKey) {
   if (finalKey === "executive_summary") {
-    // Array of strings (first = paragraph; rest = bullets)
     return `{
-  "executive_summary": [
-    "<paragraph: Strategy → Target prospects → Buyer problems → Campaign type>",
-    "<bullet 1: Moore value proposition (with claim_ids)>",
-    "<bullet 2: Addressable market (CSV row count or 'unknown')>",
-    "<bullet 3: Dependencies>",
-    "<bullet 4: Decision points>",
-    "<bullet 5: Sales enablement note>"
-  ]
+  "executive_summary": {
+    "environment_paragraph": "<string>",
+    "rationale_paragraph": "<string>",
+    "how_to_win_paragraph": "<string>",
+    "success_paragraph": "<string>",
+    "next_steps_paragraph": "<string>"
+  }
 }`.trim();
   }
-
   if (finalKey === "positioning_and_differentiation") {
     return `{
   "positioning_and_differentiation": {
-    "moore_value_prop": "For <target> who <need>, <Supplier> is a <category> that <key benefit>. Unlike <competitor(s)>, our <service> <differentiator>.",
-    "competitor_contrast": [
-      {
-        "vendor": "<name>",
-        "what_they_do": "<one line>",
-        "our_differentiators": ["<short, concrete items>"],
-        "evidence_claim_ids": ["<claim_id>"]
+    "value_prop": "<one-line generic value if needed>",
+    "value_prop_moore": {
+      "paragraph": "<clean Moore sentence>",
+      "fields": {
+        "for": "<who>",
+        "who_need": "<need>",
+        "the": "<product/service>",
+        "is_a": "<category>",
+        "that": "<primary benefit>",
+        "unlike": "<reference competitor(s) or status quo>",
+        "provides": "<what we do differently>",
+        "proof_points": ["<short, evidenced items>"]
       }
-    ]
+    },
+    "value_prop_narrative": {
+      "lead": "<Moore sentence again (clean)>",
+      "customer_problem_paragraph": "<string>",
+      "right_to_play_paragraph": "<string>",
+      "differentiation_paragraph": "<string>",
+      "competitor_positions_paragraph": "<string or \\"TBD\\">",
+      "proof_points_paragraph": "<string>"
+    },
+    "swot": { "strengths": [], "weaknesses": [], "opportunities": [], "threats": [] },
+    "differentiators": [],
+    "competitor_set": [{ "vendor": "Acme", "reason_in_set": "…", "url": "https://…" }]
   }
 }`.trim();
   }
+
   if (finalKey === "campaign_strategy") {
     return `{
   "campaign_strategy": {
@@ -756,9 +769,14 @@ Context:
 - Outline fragment: ${outlineNotes}
 
 Instructions:
-- First element: one compact paragraph in this order → Strategy, Target prospects, Buyer problems, Campaign type.
-- Next elements: 3–6 short bullets (Moore value prop, AM size, Dependencies, Decision points, Sales enablement note).
-- Cite claim_ids where you use external evidence. No fabrication.
+- Write a persuasive Executive Summary in exactly five short paragraphs (no bullets):
+  1) Market environment — key trends; exact addressable cohort size from CSV; buyer landscape (investments, blockers, spend cues, needs from supplier).
+  2) Strategic rationale — why the supplier should implement this campaign now, explicitly connecting the environment to the strategy.
+  3) How to win — Geoffrey Moore value proposition (clean paragraph) + reasoned SWOT and brief, evidenced competitor commentary (USE ONLY competitors supplied).
+  4) What success looks like — quantified campaign outcome (ranges ok) + timeframe, grounded in evidence and capability.
+  5) Next steps — concrete actions to begin.
+- Cite external facts inline via short tags or https URLs. If no competitors supplied, omit competitor commentary.
+- No lists; no placeholders.
 
 Emit STRICT JSON:
 ${targetsFor("executive_summary")}
@@ -929,48 +947,42 @@ module.exports = async function (context, queueItem) {
         merged[finalKey] = piece[finalKey];
 
         // Special handling for Executive Summary: ensure both shapes + carry AM
+        // Special handling for Executive Summary: prefer narrative passthrough; carry AM if provided
         if (finalKey === "executive_summary") {
           const es = merged.executive_summary;
-          if (Array.isArray(es)) {
-            // Legacy array input → normalise to object (lead + bullets), no legacy output
+
+          // 1) If we already have the new narrative shape, pass it through untouched
+          const hasNarrative =
+            es && typeof es === "object" && !Array.isArray(es) &&
+            ("environment_paragraph" in es || "rationale_paragraph" in es || "how_to_win_paragraph" in es);
+
+          if (hasNarrative) {
+            merged.executive_summary = es; // keep narrative
+          } else if (Array.isArray(es)) {
+            // 2) Old runs: best-effort normalisation for backward compatibility
             const lead = String(es[0] || "").trim();
-            const bullets = es
-              .slice(1)
-              .map(s => String(s || "").trim())
-              .filter(Boolean)
-              .slice(0, 6);
-            merged.executive_summary = { lead_paragraph: lead, bullets };
-          } else if (es && typeof es === "object") {
-            // Structured object input → clean and cap
-            const lead = typeof es.lead_paragraph === "string" ? es.lead_paragraph.trim() : "";
-            const bullets = Array.isArray(es.bullets)
-              ? es.bullets.map(s => String(s || "").trim()).filter(Boolean).slice(0, 6)
-              : [];
-            merged.executive_summary = { lead_paragraph: lead, bullets };
+            const rest = es.slice(1).map(s => String(s || "").trim()).filter(Boolean);
+            merged.executive_summary = {
+              environment_paragraph: lead || "",
+              rationale_paragraph: rest[0] || "",
+              how_to_win_paragraph: rest[1] || "",
+              success_paragraph: rest[2] || "",
+              next_steps_paragraph: rest[3] || ""
+            };
           } else {
-            // Absent or unrecognised → empty structured ES
-            merged.executive_summary = { lead_paragraph: "", bullets: [] };
+            // 3) Nothing available → empty narrative shell
+            merged.executive_summary = {
+              environment_paragraph: "",
+              rationale_paragraph: "",
+              how_to_win_paragraph: "",
+              success_paragraph: "",
+              next_steps_paragraph: ""
+            };
           }
+
           // Carry Addressable Market when present in the ES section file
           if (Object.prototype.hasOwnProperty.call(piece, "addressable_market") && piece.addressable_market != null) {
             merged.addressable_market = piece.addressable_market;
-          }
-        }
-      } else {
-        context.log.warn(`[campaign-write] missing section during assemble: ${finalKey}`);
-        // PATCH COM-EMPTY-NOTE: advisory filler for empty sections
-        if (!merged[finalKey]) {
-          merged[finalKey] = { note: "Section missing — verify earlier pipeline phases." };
-        }
-
-        // Ensure Executive Summary never breaks the UI (both shapes exist)
-        if (finalKey === "executive_summary") {
-          if (
-            !merged.executive_summary ||
-            typeof merged.executive_summary !== "object" ||
-            (!Array.isArray(merged.executive_summary.bullets) && !merged.executive_summary.lead_paragraph)
-          ) {
-            merged.executive_summary = { lead_paragraph: "", bullets: [] };
           }
         }
       }
@@ -987,7 +999,6 @@ module.exports = async function (context, queueItem) {
 
     // PATCH COM-NORMALISE: ensure safe arrays (operate on the ordered object)
     try {
-      if (!Array.isArray(ordered.executive_summary_legacy)) ordered.executive_summary_legacy = [];
       if (!Array.isArray(ordered.evidence_log)) ordered.evidence_log = [];
       for (const k of ["bullets", "matrix", "competitor_set"]) {
         if (ordered[k] && !Array.isArray(ordered[k])) ordered[k] = [ordered[k]];
@@ -1058,88 +1069,36 @@ module.exports = async function (context, queueItem) {
     if (finalKey !== "executive_summary") {
       out[finalKey] = sect || {};
     } else {
-      // Exec summary must be array<string>. Coerce common shapes.
-      if (Array.isArray(sect)) {
-        out.executive_summary = sect.map(s => String(s || "").trim()).filter(Boolean);
-      } else if (typeof sect === "string") {
-        out.executive_summary = [sect.trim()];
-      } else if (sect && typeof sect === "object") {
-        // Common object payload (like your sample) → synthesise a paragraph + bullets
-        const headline = [sect.headline, sect.title].map(x => String(x || "").trim()).find(Boolean) || "";
-        const paraBits = [
-          headline,
-          (sect.industry ? `Industry: ${sect.industry}` : ""),
-          (sect.objective ? `Objective: ${sect.objective}` : "")
-        ].filter(Boolean);
-        const paragraph = paraBits.join(" — ");
+      // Expect object with 5 narrative paragraphs; coerce common shapes defensively.
+      const esIn = (sect && typeof sect === "object") ? sect : {};
+      const mooreLine = mooreBulletFromStrategy(strategy) || "";
+      const trim = (v) => (v == null ? "" : String(v)).replace(/\s+/g, " ").trim();
 
-        const bulletsObj = [];
-        if (Array.isArray(sect.why_now) && sect.why_now.length) bulletsObj.push(...sect.why_now.map(String));
-        if (sect.addressable_market && Number.isFinite(Number(sect.addressable_market.cohort_size))) {
-          bulletsObj.push(`Addressable market (payload): ${Number(sect.addressable_market.cohort_size).toLocaleString()}.`);
-        }
-        if (Array.isArray(sect.buyer_needs)) bulletsObj.push(`Buyer needs: ${sect.buyer_needs.join("; ")}`);
-        if (Array.isArray(sect.buyer_blockers)) bulletsObj.push(`Buyer blockers: ${sect.buyer_blockers.join("; ")}`);
+      let environment_paragraph = trim(esIn.environment_paragraph || "");
+      let rationale_paragraph = trim(esIn.rationale_paragraph || "");
+      let how_to_win_paragraph = trim(esIn.how_to_win_paragraph || "");
+      let success_paragraph = trim(esIn.success_paragraph || "");
+      let next_steps_paragraph = trim(esIn.next_steps_paragraph || "");
 
-        out.executive_summary = [paragraph, ...bulletsObj].map(s => String(s || "").trim()).filter(Boolean);
-      } else {
-        out.executive_summary = [];
+      // Ensure Moore leads the how-to-win paragraph (if missing, prepend it)
+      if (mooreLine && how_to_win_paragraph && !how_to_win_paragraph.toLowerCase().includes(mooreLine.toLowerCase())) {
+        how_to_win_paragraph = `${mooreLine} ${how_to_win_paragraph}`.replace(/\s+/g, " ").trim();
+      } else if (mooreLine && !how_to_win_paragraph) {
+        how_to_win_paragraph = mooreLine;
       }
-    }
 
-    if (finalKey === "executive_summary") {
+      // Optional, safe guardrails:
+      // - Suppress invented competitor comparisons if none were supplied in outline.
       try {
-        const current = Array.isArray(out.executive_summary) ? out.executive_summary.slice() : [];
-        let paragraph = current[0] || "";
-        const llmBullets = current.slice(1).map(s => String(s || "").trim()).filter(Boolean);
-
-        const eb = evidenceBundle || {};
-        const csvC = csvCanon || {};
-        const ol = outline || {};
-
-        // Deterministic augments (if helper available)
-        const aug = (typeof buildExecAugments === "function")
-          ? (buildExecAugments({ evidenceBundle: eb, csvCanon: csvC, outline: ol, strategy }) || {})
-          : {};
-
-        // COM–AM–GUARD: avoid “0” by falling back to Strategy coverage
-        if (!aug.amLine || /0\s*(companies|orgs|organisations)/i.test(String(aug.amLine))) {
-          const stratTotal =
-            Number(strategy?.insight?.coverage?.total ?? 0) ||
-            Number(strategy?.prospect_base?.tam ?? 0);
-
-          if (stratTotal > 0) {
-            aug.amLine = `Target market of ${stratTotal.toLocaleString()} organisations identified in CSV.`;
-          }
-        }
-
-        // Filter LLM bullets (generic, no brand lists)
-        const notAmLine = (s) => !/^addressable market\b/i.test(s);
-        const looksCited = (s) => /https?:\/\/\S+/.test(s) || /\([^)]{3,}\)/.test(s) || /\[[^\]]{3,}\]/.test(s);
-        const notUncitedWhyNow = (s) => {
-          const isWhy = /\bwhy now\b/i.test(s) || /\bcontext\b/i.test(s) || /\bmarket\b/i.test(s);
-          return !isWhy || looksCited(s);
-        };
-        const company = String(ol?.input_notes?.supplier_company || "").toLowerCase();
-        const fromOutline = Array.isArray(ol?.input_notes?.competitors)
-          ? ol.input_notes.competitors
-          : (Array.isArray(ol?.input_notes?.relevant_competitors) ? ol.input_notes.relevant_competitors : []);
-        const fromStrategy = Array.isArray(strategy?.meta?.relevant_competitors)
-          ? strategy.meta.relevant_competitors
-          : [];
-        const fromEvidenceSet = Array.isArray(strategy?.positioning_and_differentiation?.competitor_set)
-          ? strategy.positioning_and_differentiation.competitor_set.map(x => String(x?.vendor || "").trim()).filter(Boolean)
-          : [];
-
-        const allowed = new Set(
-          [company]
-            .concat(fromOutline, fromStrategy, fromEvidenceSet)
-            .map(x => String(x).toLowerCase())
-            .filter(Boolean)
-        );
+        const supplied = []
+          .concat(Array.isArray(outline?.input_notes?.competitors) ? outline.input_notes.competitors : [])
+          .concat(Array.isArray(outline?.input_notes?.relevant_competitors) ? outline.input_notes.relevant_competitors : [])
+          .map(x => String(x || "").toLowerCase())
+          .filter(Boolean);
+        const allowed = new Set(supplied);
         const comparisonCue = /\b(vs|versus|against|compared|than|alternative|competitor|compare)\b/i;
-        const mentionsDisallowedBrandInComparison = (s) => {
-          if (!allowed.size) return false;
+        const hasDisallowed = (s) => {
+          if (!s) return false;
           if (!comparisonCue.test(s)) return false;
           const tokens = s.match(/\b[A-Z][a-z][A-Za-z0-9&.\-]+\b/g) || [];
           const whitelist = new Set(["UK", "EU", "RTO", "RPO", "SLA", "QoS", "WAN", "SD-WAN", "IoT", "AI", "CCTV", "POS", "VPN", "MPLS", "LTE", "FTTP", "SoGEA", "DSL", "IP"]);
@@ -1149,134 +1108,26 @@ module.exports = async function (context, queueItem) {
           }
           return false;
         };
-        const filteredLlmBullets = llmBullets
-          .filter(notAmLine)
-          .filter(notUncitedWhyNow)
-          .filter(s => !mentionsDisallowedBrandInComparison(s));
-
-        let competitorLine = "";
-        try {
-          const compSet = Array.isArray(strategy?.positioning_and_differentiation?.competitor_set)
-            ? strategy.positioning_and_differentiation.competitor_set
-            : [];
-          if (compSet.length) {
-            const names = compSet.slice(0, 3).map(c => String(c.vendor || "").trim()).filter(Boolean);
-            if (names.length) {
-              competitorLine = `Competitive context: prioritise wins against ${names.join(", ")} with clear, evidenced differentiators.`;
-            }
-          }
-        } catch { /* non-fatal */ }
-        try {
-          if (!aug.marketContext) {
-            let claims = [];
-
-            // Prefer canonical evidence.json
-            try {
-              const evCanon = await getJson(container, `${prefix}evidence.json`);
-              if (evCanon && Array.isArray(evCanon.claims)) claims = evCanon.claims;
-            } catch { /* non-fatal */ }
-
-            // Fallback to legacy evidence_log.json
-            if (!Array.isArray(claims) || !claims.length) {
-              try {
-                const evLegacy = await getJson(container, `${prefix}evidence_log.json`);
-                if (Array.isArray(evLegacy)) {
-                  claims = evLegacy;
-                } else if (evLegacy && Array.isArray(evLegacy.evidence_log)) {
-                  claims = evLegacy.evidence_log;
-                }
-              } catch { /* non-fatal */ }
-            }
-
-            if (Array.isArray(claims) && claims.length) {
-              const safe = (v) => (v == null ? "" : String(v));
-
-              // Pick a concise, high-signal claim
-              const pick =
-                claims.find(c =>
-                  /market|growth|adoption|demand|breach|compliance/i.test(
-                    `${safe(c.title)} ${safe(c.summary)}`
-                  )
-                ) || claims[0];
-
-              // Build a readable source
-              let host = "";
-              try {
-                const u = safe(pick.url || pick.source_url);
-                if (u) host = new URL(u).hostname.replace(/^www\./, "");
-              } catch { /* ignore bad URL */ }
-              const src = safe(pick.source || pick.source_name || host).trim();
-
-              // Compose message
-              const msg = `Why now: ${safe(pick.title) || safe(pick.summary) || safe(pick.quote)}`
-                .replace(/\s+/g, " ")
-                .trim();
-
-              aug.marketContext = src ? `${msg} [${src}]` : msg;
-            }
-          }
-        } catch { /* keep going */ }
-
-        // Build Moore line from strategy (paragraph → fields)
-        const mooreLine = mooreBulletFromStrategy(strategy) || "";
-
-        // Build the final bullets, always injecting deterministic lines first (if present)
-        const newBullets = [
-          ...(mooreLine ? [mooreLine] : []),
-          ...((aug.fov || []).filter(Boolean)),
-          ...(aug.amLine ? [aug.amLine] : []),
-          ...(aug.marketContext ? [aug.marketContext] : []),
-          ...(competitorLine ? [competitorLine] : []),
-          ...(aug.blockersLine ? [aug.blockersLine] : []),
-          ...filteredLlmBullets
-        ].filter(Boolean);
-
-        // Headline guard: if paragraph is empty or looks like a headline, synthesise one from data
-        if (!paragraph || looksLikeHeadline(paragraph)) {
-          const pSynth = synthesizeExecParagraph({ outline: ol, csvCanon: csvC, strategy });
-          if (pSynth && pSynth.trim()) paragraph = pSynth.trim();
+        if (!allowed.size) {
+          // If none supplied, strip any comparison language
+          if (hasDisallowed(environment_paragraph)) environment_paragraph = environment_paragraph.replace(comparisonCue, " ").trim();
+          if (hasDisallowed(rationale_paragraph)) rationale_paragraph = rationale_paragraph.replace(comparisonCue, " ").trim();
+          if (hasDisallowed(how_to_win_paragraph)) how_to_win_paragraph = how_to_win_paragraph.replace(comparisonCue, " ").trim();
         }
+      } catch { /* non-fatal */ }
 
-        // If we still have no bullets, ensure we at least output AM/context/blockers from aug
-        const ensuredBullets = newBullets.length
-          ? newBullets
-          : [
-            ...(aug.amLine ? [aug.amLine] : []),
-            ...(aug.marketContext ? [aug.marketContext] : []),
-            ...(aug.blockersLine ? [aug.blockersLine] : [])
-          ].filter(Boolean);
+      out.executive_summary = {
+        environment_paragraph,
+        rationale_paragraph,
+        how_to_win_paragraph,
+        success_paragraph,
+        next_steps_paragraph
+      };
+    }
 
-        // Prefer Moore as the ES lead (if present); otherwise use the synthesised/current paragraph
-        const lead = (mooreLine || paragraph || "").trim();
-
-        // Deduplicate, drop any bullet equal to lead, and cap to ≤6 in the Structured-Consultant order
-        const seen = new Set();
-        const bullets = [];
-        for (const s of ensuredBullets) {
-          const t = String(s || "").trim();
-          if (!t || t === lead) continue;
-          if (seen.has(t)) continue;
-          seen.add(t);
-          bullets.push(t);
-          if (bullets.length === 6) break;
-        }
-
-        // Tone-polish lead + bullets (idempotent)
-        let finalLead = lead;
-        let finalBullets = bullets.slice(0);
-        if (typeof polishExecSummaryLines === "function") {
-          const polished = polishExecSummaryLines([finalLead, ...finalBullets]).filter(Boolean);
-          finalLead = polished[0] || finalLead;
-          finalBullets = polished.slice(1).filter(Boolean).slice(0, 6);
-        }
-
-        // New structured shape for modern UI
-        out.executive_summary = {
-          lead_paragraph: finalLead,
-          bullets: finalBullets
-        };
-
-        // ---- Persist Addressable Market facts (cohort + focus subset) ----
+    if (finalKey === "executive_summary") {
+      try {
+        // Persist Addressable Market facts (cohort + focus subset) next to the narrative
         const cohortSize = Number.isFinite(Number(csvCanon?.meta?.rows)) ? Number(csvCanon.meta.rows) : null;
         const focusLabel = (outline?.input_notes?.campaign_focus || outline?.input_notes?.selected_product || "").toString().trim() || null;
         const focusCount = (focusLabel && Number.isFinite(Number(csvCanon?.signals?.counts?.by_need?.[focusLabel])))
@@ -1288,22 +1139,9 @@ module.exports = async function (context, queueItem) {
           focus_label: focusLabel,
           focus_count: focusCount
         };
-        context.log("[writer] ES diag",
-          {
-            hasOutline: !!outline, hasCsv: !!csvCanon, hasEvidence: !!evidenceBundle,
-            aug: {
-              hasFOV: !!(aug && aug.fov && aug.fov.length),
-              hasAM: !!(aug && aug.amLine),
-              hasCtx: !!(aug && aug.marketContext),
-              hasBlockers: !!(aug && aug.blockersLine)
-            },
-            llmBullets: llmBullets.length
-          }
-        );
-      } catch (esErr) {
-        context.log.warn("[writer] exec-summary post-processor failed; using unprocessed ES", String(esErr?.message || esErr));
-      }
+      } catch { /* non-fatal */ }
     }
+
     await putJson(container, `${prefix}sections/${finalKey}.json`, out);
     await patchStatus(container, prefix, "SectionWrites", {
       runId, written: finalKey, updatedAt: nowISO(), op: "section"

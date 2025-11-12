@@ -166,8 +166,46 @@ window.CampaignUI = window.CampaignUI || {};
     return { lead: "", bullets: [] };
   }
 
-  // ---------- Renderers (unchanged logic) ----------
   function renderExecutiveSummary() {
+    // 1) Prefer the narrative object (new contract), in any of these locations
+    //    - writer/assemble:   contract.executive_summary  (object)
+    //    - writer sections:   contract.sections.executive_summary (object)
+    //    - worker fast path:  contract.executive_summary_narrative (object)
+    const esNarr =
+      (state.contract && typeof state.contract.executive_summary === "object" && !Array.isArray(state.contract.executive_summary))
+        ? state.contract.executive_summary
+        : (state.contract && typeof state.contract?.sections?.executive_summary === "object" && !Array.isArray(state.contract.sections.executive_summary))
+          ? state.contract.sections.executive_summary
+          : (state.contract && typeof state.contract.executive_summary_narrative === "object" && !Array.isArray(state.contract.executive_summary_narrative))
+            ? state.contract.executive_summary_narrative
+            : null;
+
+    const wrap = document.createElement("div");
+
+    // If we have narrative fields, render them in the required order (no bullets)
+    if (esNarr) {
+      const order = [
+        "environment_paragraph",
+        "rationale_paragraph",
+        "how_to_win_paragraph",
+        "success_paragraph",
+        "next_steps_paragraph"
+      ];
+      const hasAny = order.some(k => typeof esNarr[k] === "string" && esNarr[k].trim());
+      if (hasAny) {
+        order.forEach(k => {
+          const v = typeof esNarr[k] === "string" ? esNarr[k].trim() : "";
+          if (!v) return;
+          const p = document.createElement("p");
+          p.textContent = v;
+          wrap.appendChild(p);
+        });
+        setPanelContent(wrap);
+        return;
+      }
+    }
+
+    // 2) Backward-compatibility: fall back to your existing lead+bullets/array logic
     const esObj = state.contract?.sections?.executive_summary || state.contract?.executive_summary_object || null;
     const esLegacy = Array.isArray(state.contract?.executive_summary_legacy)
       ? state.contract.executive_summary_legacy
@@ -181,18 +219,15 @@ window.CampaignUI = window.CampaignUI || {};
       return;
     }
 
-    // Normalise to { lead, bullets[] } using the existing helper
+    // Normalise to { lead, bullets[] } using your helper
     const norm = resolveExecutiveSummaryShapes(esObj, esLegacy);
     const para = typeof norm?.lead === "string" ? norm.lead.trim() : "";
     let bullets = Array.isArray(norm?.bullets) ? norm.bullets.filter(Boolean) : [];
 
-    // Prefer the Moore VP as the Executive Summary lead if available,
-    // falling back to the normalised lead; always cap bullets to ≤ 6.
+    // Prefer Moore VP as the lead if available, and cap bullets ≤ 6
     const mooreObj =
-      // primary: positioning section (preferred location in assembled contract)
       state.contract?.positioning_and_differentiation?.value_prop_moore ||
       state.contract?.positioning_and_differentiation?.value_proposition_moore ||
-      // secondary: strategy copy if included in assembled contract
       state.contract?.campaign_strategy?.value_proposition_moore ||
       state.contract?.strategy?.value_proposition_moore;
 
@@ -200,14 +235,11 @@ window.CampaignUI = window.CampaignUI || {};
     const finalLead = mooreLead || para;
     bullets = bullets.slice(0, 6);
 
-    const wrap = document.createElement("div");
-
-    if (para) {
+    if (finalLead) {
       const p = document.createElement("p");
-      p.textContent = para;
+      p.textContent = finalLead;
       wrap.appendChild(p);
     }
-
     if (bullets.length) {
       const ul = document.createElement("ul");
       ul.className = "list";
@@ -472,21 +504,42 @@ window.CampaignUI = window.CampaignUI || {};
     const pos = state.contract?.positioning_and_differentiation || {};
     const wrap = document.createElement("div");
 
-    const h1 = document.createElement("h3"); h1.textContent = "Value Proposition";
+    const h1 = document.createElement("h3");
+    h1.textContent = "Value Proposition";
     wrap.appendChild(h1);
 
+    // 1) Prefer deeper VP narrative when available
+    const vpn = pos.value_prop_narrative;
+    if (vpn && typeof vpn === "object") {
+      const order = [
+        "lead", // Moore sentence again (clean)
+        "customer_problem_paragraph",
+        "right_to_play_paragraph",
+        "differentiation_paragraph",
+        "competitor_positions_paragraph",
+        "proof_points_paragraph"
+      ];
+      order.forEach(k => {
+        const v = (typeof vpn[k] === "string") ? vpn[k].trim() : "";
+        if (!v) return;
+        const el = document.createElement(k === "lead" ? "pre" : "p");
+        el.textContent = v;
+        wrap.appendChild(el);
+      });
+    }
+
+    // 2) Then show structured Moore sentence + fields table (as you already do)
     const vpm =
       pos.value_prop_moore ||
       pos.value_proposition_moore ||
       state.contract?.campaign_strategy?.value_proposition_moore ||
       state.contract?.strategy?.value_proposition_moore;
+
     if (vpm && (vpm.paragraph || vpm.fields)) {
-      // Paragraph
       const pre = document.createElement("pre");
       pre.textContent = String(vpm.paragraph || pos.value_prop || "");
       wrap.appendChild(pre);
 
-      // Structured Moore table (read-only, falls back cleanly)
       const f = vpm.fields || {};
       wrap.appendChild(makeTable(
         ["For", "Who need", "The", "Is a", "That", "Unlike", "Provides", "Proof points"],
@@ -501,16 +554,18 @@ window.CampaignUI = window.CampaignUI || {};
           rowsOf(f.proof_points)
         ]]
       ));
-    } else {
-      // Legacy one-liner path
+    } else if (!vpn) {
+      // 3) Legacy one-liner fallback only if neither narrative nor Moore struct exist
       wrap.appendChild(makePre(pos.value_prop || ""));
     }
 
+    // 4) SWOT (unchanged)
     const sw = pos.swot || {};
     const hasSw = [sw.strengths, sw.weaknesses, sw.opportunities, sw.threats]
       .some(a => Array.isArray(a) && a.length);
 
-    const h2 = document.createElement("h3"); h2.textContent = "SWOT";
+    const h2 = document.createElement("h3");
+    h2.textContent = "SWOT";
     wrap.appendChild(h2);
 
     if (hasSw) {
@@ -525,14 +580,19 @@ window.CampaignUI = window.CampaignUI || {};
       wrap.appendChild(p);
     }
 
+    // 5) Differentiators (unchanged)
     if (Array.isArray(pos.differentiators) && pos.differentiators.length) {
-      const h3 = document.createElement("h3"); h3.textContent = "Differentiators";
-      wrap.appendChild(h3); wrap.appendChild(makeList(pos.differentiators));
+      const h3 = document.createElement("h3");
+      h3.textContent = "Differentiators";
+      wrap.appendChild(h3);
+      wrap.appendChild(makeList(pos.differentiators));
     }
 
+    // 6) Competitor set (unchanged)
     const comp = rowsOf(pos.competitor_set);
     if (comp.length) {
-      const h4 = document.createElement("h3"); h4.textContent = "Competitor Set";
+      const h4 = document.createElement("h3");
+      h4.textContent = "Competitor Set";
       wrap.appendChild(h4);
       wrap.appendChild(makeTable(
         ["Vendor", "Reason in set", "URL"],
