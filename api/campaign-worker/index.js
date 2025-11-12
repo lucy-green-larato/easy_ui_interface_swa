@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 11-11-2025 v35
+// /api/campaign-worker/index.js 12-11-2025 v37
 // Option B pipeline — worker fast path (draft campaign.json) with business-leader Executive Summary shaping
 // Preserves v14 structure: phased status, append-only event logger, robust loaders, and sanitizer.
 // Writes under results/<prefix> (container-relative, trailing slash). No renames of queues/ops/keys.
@@ -1773,25 +1773,25 @@ module.exports = async function (context, queueItem) {
         }
       } catch { /* non-fatal */ }
 
-      draft.executive_summary = shapeExecutiveSummary({
-        existing: draft.executive_summary,
-        input: mergedInput,
-        csvNormalized,
-        strategy,
-        evidence,
-      });
+      // --- remove generic ES injection; let writer own ES synthesis ---
+      try {
+        if (!Array.isArray(draft.executive_summary) || draft.executive_summary.length === 0) {
+          delete draft.executive_summary; // omit field; writer will populate from evidence + csv + strategy
+        }
+        draft.markers = Object.assign({}, draft.markers, { workerDraft: true });
+      } catch (e) {
+        context.log && context.log.warn && context.log.warn("[worker] executive_summary suppression failed", String(e?.message || e));
+      }
+
       draft.markers = Object.assign({}, draft.markers, { workerDraft: true, strategyV: "v16.1" });
     } catch (shapeErr) {
       context.log.warn("executive_summary_shape_coercion_failed", String(shapeErr?.message || shapeErr));
     }
-    // Also attach the five-paragraph narrative ES (preferred by updated UI/writer)
     try {
-      draft.executive_summary_narrative = synthesizeExecutiveSummaryNarrative({
-        input: mergedInput,
-        csvNormalized,
-        strategy,
-        evidence
-      });
+      // If a high-quality narrative was injected upstream, keep it; otherwise omit so writer composes it.
+      if (!draft || typeof draft.executive_summary_narrative !== "object" || Array.isArray(draft.executive_summary_narrative)) {
+        delete draft.executive_summary_narrative;
+      }
     } catch { /* non-fatal */ }
 
     // Constrain Positioning.competitor_set to user-allowed names (outline/competitors.json/meta)
@@ -1840,13 +1840,16 @@ module.exports = async function (context, queueItem) {
 
     // Write campaign.json
     await putJson(container, `${prefix}campaign.json`, draft);
+    try {
+      const status = (await getJson(container, `${prefix}status.json`)) || {};
+      status.markers = status.markers || {};
+      status.markers.workerDraftWritten = true;
+      await putJson(container, `${prefix}status.json`, status);
+    } catch { /* non-fatal */ }
+
 
     // Phase 4 — Quality Gate (placeholder)
-    await setPhase(container, prefix, "QualityGate", { durationMs: Date.now() - startedAt });
-
-    // Phase 5 — Completed (worker fast path; writer may overwrite later)
-    await setPhase(container, prefix, "Completed", { completedAt: new Date().toISOString() });
-
+    await setPhase(container, prefix, "strategy_ready", { completedAt: new Date().toISOString() });
   } catch (err) {
     context.log.error("campaign-worker error", err?.message || err);
     try {
