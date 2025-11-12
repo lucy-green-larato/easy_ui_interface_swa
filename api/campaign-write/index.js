@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js 11-11-2025 v25 (Writer/Assembler)
+// /api/campaign-write/index.js 12-11-2025 v28 (Writer/Assembler)
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> writes sections/<finalKey>.json
 // - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%
@@ -406,16 +406,16 @@ function deriveAmLine(csvCanon, outline) {
     ""
   ).trim();
 
-  // Resolve focus count (prefer explicit counts; else approximate via top_purchases match)
+  // Resolve focus count (prefer explicit counts; else soft evidence only)
   let focusCount = null;
   const countsByNeed = csvCanon?.signals?.counts?.by_need || null;
   if (countsByNeed && focusLabel && Number.isFinite(Number(countsByNeed[focusLabel]))) {
     focusCount = Number(countsByNeed[focusLabel]);
   } else if (focusLabel) {
-    // soft match against top_purchases (no numbers, so just state label)
+    // match presence against top_purchases if we lack numbers
     const tps = Array.isArray(csvCanon?.signals?.top_purchases) ? csvCanon.signals.top_purchases : [];
     const hit = tps.find(tp => String(tp).toLowerCase().includes(focusLabel.toLowerCase()));
-    if (hit) focusCount = null; // we have evidence of focus label, but no numeric subset
+    if (hit) focusCount = null; // evidence of focus label, but no numeric subset
   }
 
   if (total != null && total > 0) {
@@ -424,7 +424,7 @@ function deriveAmLine(csvCanon, outline) {
     }
     return `Addressable market in scope: **${total.toLocaleString()}** organisations (from campaign source data).`;
   }
-  // No reliable total → no AM line (we’ll let bullets carry evidence instead of printing "0")
+  // No reliable total → omit (avoid printing "0")
   return "";
 }
 
@@ -555,14 +555,12 @@ function synthesizeExecParagraph({ outline, csvCanon, strategy }) {
   const outcome = (strategy?.specific_outcome && String(strategy.specific_outcome).trim()) || "";
 
   if (moorePara || (f.for_who && f.the && f.is_a && f.that)) {
-    // Build a reasoned, benefit-led sentence (not just inputs)
     const parts = [];
     if (f.for_who) parts.push(`For ${String(f.for_who).trim()}`);
     if (f.the && f.is_a) parts.push(`${String(f.the).trim()} is a ${String(f.is_a).trim()}`);
     if (f.that) parts.push(`that ${String(f.that).trim()}`);
     if (buyerProblems.length) parts.push(`to address ${buyerProblems.join(" and ")}`);
     if (outcome) parts.push(`with a specific objective: ${outcome}`);
-
     const paragraph = parts.join(", ").replace(/\s{2,}/g, " ").replace(/,\s*$/, "") + ".";
     return paragraph;
   }
@@ -619,7 +617,7 @@ function buildSectionSystem(finalKey, persona) {
       "Base your reasoning strictly on the supplied evidence and inputs.",
       "Deliver a coherent, practical plan that positions the supplier to win within the chosen prospect base.",
       "",
-      "Cover these items explicitly (short paragaraph on each one):",
+      "Cover these items explicitly (short paragraph on each one):",
       "• Strategic rationale — why the supplier should play in this market.",
       "• Advantage — how the supplier can be better than competitors (specific differentiators).",
       "• Coherent choices — the concrete actions and constraints that define the campaign (segments, offer, channels, messaging, sequencing).",
@@ -933,29 +931,26 @@ module.exports = async function (context, queueItem) {
         // Special handling for Executive Summary: ensure both shapes + carry AM
         if (finalKey === "executive_summary") {
           const es = merged.executive_summary;
-
-          // Normalise to object + legacy array, regardless of how the section was written
           if (Array.isArray(es)) {
+            // Legacy array input → normalise to object (lead + bullets), no legacy output
             const lead = String(es[0] || "").trim();
-            const bullets = es.slice(1).map(s => String(s || "").trim()).filter(Boolean);
+            const bullets = es
+              .slice(1)
+              .map(s => String(s || "").trim())
+              .filter(Boolean)
+              .slice(0, 6);
             merged.executive_summary = { lead_paragraph: lead, bullets };
-            merged.executive_summary_legacy = [lead, ...bullets].filter(Boolean);
           } else if (es && typeof es === "object") {
-            const lead = typeof es.lead_paragraph === "string" ? es.lead_paragraph : "";
+            // Structured object input → clean and cap
+            const lead = typeof es.lead_paragraph === "string" ? es.lead_paragraph.trim() : "";
             const bullets = Array.isArray(es.bullets)
-              ? es.bullets.map(s => String(s || "").trim()).filter(Boolean)
+              ? es.bullets.map(s => String(s || "").trim()).filter(Boolean).slice(0, 6)
               : [];
             merged.executive_summary = { lead_paragraph: lead, bullets };
-            if (Array.isArray(piece.executive_summary_legacy)) {
-              merged.executive_summary_legacy = piece.executive_summary_legacy.filter(Boolean);
-            } else {
-              merged.executive_summary_legacy = [lead, ...bullets].filter(Boolean);
-            }
           } else {
+            // Absent or unrecognised → empty structured ES
             merged.executive_summary = { lead_paragraph: "", bullets: [] };
-            merged.executive_summary_legacy = [];
           }
-
           // Carry Addressable Market when present in the ES section file
           if (Object.prototype.hasOwnProperty.call(piece, "addressable_market") && piece.addressable_market != null) {
             merged.addressable_market = piece.addressable_market;
@@ -976,9 +971,6 @@ module.exports = async function (context, queueItem) {
             (!Array.isArray(merged.executive_summary.bullets) && !merged.executive_summary.lead_paragraph)
           ) {
             merged.executive_summary = { lead_paragraph: "", bullets: [] };
-          }
-          if (!Array.isArray(merged.executive_summary_legacy)) {
-            merged.executive_summary_legacy = [];
           }
         }
       }
@@ -1011,7 +1003,7 @@ module.exports = async function (context, queueItem) {
       const prev = String(cur.state || "");
       const terminal = new Set(["assembled", "error", "Failed"]);
       if (!terminal.has(prev)) {
-         await patchStatus(container, prefix, "assembled", { assembledAt: nowISO(), op: "assemble" });
+        await patchStatus(container, prefix, "assembled", { assembledAt: nowISO(), op: "assemble" });
       }
     }
 
@@ -1052,69 +1044,6 @@ module.exports = async function (context, queueItem) {
     await patchStatus(container, prefix, "SectionWrites", {
       runId, writing: finalKey, updatedAt: nowISO(), op: "section"
     });
-
-    if (DETERMINISTIC_SECTIONS.has(finalKey)) {
-      let out;
-      if (finalKey === "positioning_and_differentiation") {
-        out = { positioning_and_differentiation: renderPositioningFromStrategy({ strategy, evidenceBundle, csvCanon }) };
-      } else if (finalKey === "messaging_matrix") {
-        out = { messaging_matrix: renderMessagingFromStrategy({ strategy, evidenceBundle, csvCanon, outline }) };
-      } else { // sales_enablement
-        out = { sales_enablement: renderSalesEnablementFromStrategy({ strategy, evidenceBundle, csvCanon }) };
-      }
-
-      // PATCH COM-ES-CHOSEN: add chosen products bullet if missing
-      try {
-        if (finalKey === "executive_summary") {
-          const chosen = Array.isArray(strategy?.prospect_base?.products?.chosen)
-            ? strategy.prospect_base.products.chosen.filter(Boolean)
-            : [];
-          if (chosen.length) {
-            out.executive_summary.bullets = Array.isArray(out.executive_summary.bullets)
-              ? out.executive_summary.bullets
-              : [];
-            const line = `Focus products: ${chosen.join(", ")}`;
-            const exists = out.executive_summary.bullets.some(b => String(b || "").toLowerCase() === line.toLowerCase());
-            if (!exists) out.executive_summary.bullets.push(line);
-          }
-        }
-      } catch { /* non-fatal */ }
-
-      // PATCH COM-ES-WHYNOW: cite top cues
-      try {
-        if (finalKey === "executive_summary") {
-          const cues = Array.isArray(strategy?.insight?.why_now?.cues) ? strategy.insight.why_now.cues : [];
-          if (cues.length) {
-            const top = cues.slice(0, 2).map(c => c.url).filter(Boolean);
-            const line = top.length === 1
-              ? `Why now: see ${top[0]}`
-              : `Why now: see ${top[0]} and ${top[1]}`;
-            out.executive_summary.bullets = Array.isArray(out.executive_summary.bullets)
-              ? out.executive_summary.bullets
-              : [];
-            const exists = out.executive_summary.bullets.some(b => String(b || "").toLowerCase().startsWith("why now:"));
-            if (!exists) out.executive_summary.bullets.push(line);
-          }
-        }
-      } catch { /* non-fatal */ }
-      // PATCH COM-ES-DEDUPE: remove duplicates and cap to 6 bullets
-      try {
-        if (finalKey === "executive_summary" && Array.isArray(out.executive_summary?.bullets)) {
-          const seen = new Set();
-          out.executive_summary.bullets = out.executive_summary.bullets
-            .map(b => (typeof b === "string" ? b.trim() : ""))
-            .filter(b => b.length)
-            .filter(b => (seen.has(b.toLowerCase()) ? false : (seen.add(b.toLowerCase()), true)))
-            .slice(0, 6);
-        }
-      } catch { /* non-fatal */ }
-
-      await putJson(container, `${prefix}sections/${finalKey}.json`, out);
-      await patchStatus(container, prefix, "SectionWrites", {
-        runId, written: finalKey, updatedAt: nowISO(), op: "section"
-      });
-      return; // short-circuit: do NOT call the LLM for these sections
-    }
 
     const persona = outline?.meta?.persona || "";
     const system = buildSectionSystem(finalKey, persona);
@@ -1157,30 +1086,7 @@ module.exports = async function (context, queueItem) {
         out.executive_summary = [];
       }
     }
-    // ---- Exec Summary post-processor (tone + data-led bullets; headline guard; no hard-wiring) ----
-    const mooreLine = mooreBulletFromStrategy(strategy) || "";
 
-    // Competitors: prefer user inputs; then strategy section; then evidence
-    let competitorNames = [];
-    try {
-      const fromOutline = Array.isArray(outline?.input_notes?.competitors)
-        ? outline.input_notes.competitors
-        : (Array.isArray(outline?.input_notes?.relevant_competitors) ? outline.input_notes.relevant_competitors : []);
-
-      const fromStrategySet = Array.isArray(strategy?.positioning_and_differentiation?.competitor_set)
-        ? strategy.positioning_and_differentiation.competitor_set.map(c => String(c?.vendor || "").trim()).filter(Boolean)
-        : [];
-
-      // user first, then strategy; dedupe while preserving order
-      const seenComp = new Set();
-      for (const name of [...fromOutline, ...fromStrategySet]) {
-        const key = String(name || "").toLowerCase();
-        if (!key || seenComp.has(key)) continue;
-        seenComp.add(key);
-        competitorNames.push(name);
-      }
-      competitorNames = competitorNames.slice(0, 4);
-    } catch { /* non-fatal */ }
     if (finalKey === "executive_summary") {
       try {
         const current = Array.isArray(out.executive_summary) ? out.executive_summary.slice() : [];
@@ -1235,7 +1141,7 @@ module.exports = async function (context, queueItem) {
         const mentionsDisallowedBrandInComparison = (s) => {
           if (!allowed.size) return false;
           if (!comparisonCue.test(s)) return false;
-          const tokens = s.match(/\b[A-Z][a-z][A-Za-z0-9&.-]+\b/g) || [];
+          const tokens = s.match(/\b[A-Z][a-z][A-Za-z0-9&.\-]+\b/g) || [];
           const whitelist = new Set(["UK", "EU", "RTO", "RPO", "SLA", "QoS", "WAN", "SD-WAN", "IoT", "AI", "CCTV", "POS", "VPN", "MPLS", "LTE", "FTTP", "SoGEA", "DSL", "IP"]);
           for (const t of tokens) {
             if (whitelist.has(t)) continue;
@@ -1316,17 +1222,13 @@ module.exports = async function (context, queueItem) {
 
         // Build the final bullets, always injecting deterministic lines first (if present)
         const newBullets = [
-          ...(mooreLine ? [mooreLine] : []),               // 1) Moore (grounded in Strategy)
-          ...((aug.fov || []).filter(Boolean)),            // 2) Feature→Outcome→Value bullets (0–3)
-          ...(aug.amLine ? [aug.amLine] : []),             // 3) Addressable market (CSV/Strategy-safe)
-          ...(aug.marketContext ? [aug.marketContext] : []), // 4) Market context (with citations)
-          ...(
-            competitorNames.length
-              ? [`Competitive context: prioritise wins against ${competitorNames.join(", ")} with clear, evidenced differentiators.`]
-              : []
-          ),
-          ...(aug.blockersLine ? [aug.blockersLine] : []), // 6) Buyer blockers from CSV
-          ...filteredLlmBullets                             // 7) Any surviving LLM bullets (after filters)
+          ...(mooreLine ? [mooreLine] : []),
+          ...((aug.fov || []).filter(Boolean)),
+          ...(aug.amLine ? [aug.amLine] : []),
+          ...(aug.marketContext ? [aug.marketContext] : []),
+          ...(competitorLine ? [competitorLine] : []),
+          ...(aug.blockersLine ? [aug.blockersLine] : []),
+          ...filteredLlmBullets
         ].filter(Boolean);
 
         // Headline guard: if paragraph is empty or looks like a headline, synthesise one from data
@@ -1344,22 +1246,36 @@ module.exports = async function (context, queueItem) {
             ...(aug.blockersLine ? [aug.blockersLine] : [])
           ].filter(Boolean);
 
-        const polished = (typeof polishExecSummaryLines === "function")
-          ? polishExecSummaryLines([paragraph, ...ensuredBullets])
-          : [paragraph, ...ensuredBullets];
+        // Prefer Moore as the ES lead (if present); otherwise use the synthesised/current paragraph
+        const lead = (mooreLine || paragraph || "").trim();
 
-        const polishedArr = polished.filter(Boolean);
-        const lead = polishedArr[0] || "";
-        const bullets = polishedArr.slice(1).filter(Boolean);
+        // Deduplicate, drop any bullet equal to lead, and cap to ≤6 in the Structured-Consultant order
+        const seen = new Set();
+        const bullets = [];
+        for (const s of ensuredBullets) {
+          const t = String(s || "").trim();
+          if (!t || t === lead) continue;
+          if (seen.has(t)) continue;
+          seen.add(t);
+          bullets.push(t);
+          if (bullets.length === 6) break;
+        }
+
+        // Tone-polish lead + bullets (idempotent)
+        let finalLead = lead;
+        let finalBullets = bullets.slice(0);
+        if (typeof polishExecSummaryLines === "function") {
+          const polished = polishExecSummaryLines([finalLead, ...finalBullets]).filter(Boolean);
+          finalLead = polished[0] || finalLead;
+          finalBullets = polished.slice(1).filter(Boolean).slice(0, 6);
+        }
 
         // New structured shape for modern UI
         out.executive_summary = {
-          lead_paragraph: lead,
-          bullets
+          lead_paragraph: finalLead,
+          bullets: finalBullets
         };
 
-        // Legacy array for older consumers
-        out.executive_summary_legacy = [lead, ...bullets].filter(Boolean);
         // ---- Persist Addressable Market facts (cohort + focus subset) ----
         const cohortSize = Number.isFinite(Number(csvCanon?.meta?.rows)) ? Number(csvCanon.meta.rows) : null;
         const focusLabel = (outline?.input_notes?.campaign_focus || outline?.input_notes?.selected_product || "").toString().trim() || null;

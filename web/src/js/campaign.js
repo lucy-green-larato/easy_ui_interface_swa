@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 11-11-2025 v11
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 12-11-2025 v12
    Changes vs v5:
    - Support resuming an existing run selected in #runSelect (no CSV required)
    - Poller: tolerate a single transient status fetch error before failing
@@ -184,7 +184,21 @@ window.CampaignUI = window.CampaignUI || {};
     // Normalise to { lead, bullets[] } using the existing helper
     const norm = resolveExecutiveSummaryShapes(esObj, esLegacy);
     const para = typeof norm?.lead === "string" ? norm.lead.trim() : "";
-    const bullets = Array.isArray(norm?.bullets) ? norm.bullets.filter(Boolean) : [];
+    let bullets = Array.isArray(norm?.bullets) ? norm.bullets.filter(Boolean) : [];
+
+    // Prefer the Moore VP as the Executive Summary lead if available,
+    // falling back to the normalised lead; always cap bullets to ≤ 6.
+    const mooreObj =
+      // primary: positioning section (preferred location in assembled contract)
+      state.contract?.positioning_and_differentiation?.value_prop_moore ||
+      state.contract?.positioning_and_differentiation?.value_proposition_moore ||
+      // secondary: strategy copy if included in assembled contract
+      state.contract?.campaign_strategy?.value_proposition_moore ||
+      state.contract?.strategy?.value_proposition_moore;
+
+    const mooreLead = (mooreObj && (mooreObj.paragraph || "")) ? String(mooreObj.paragraph).trim() : "";
+    const finalLead = mooreLead || para;
+    bullets = bullets.slice(0, 6);
 
     const wrap = document.createElement("div");
 
@@ -461,7 +475,11 @@ window.CampaignUI = window.CampaignUI || {};
     const h1 = document.createElement("h3"); h1.textContent = "Value Proposition";
     wrap.appendChild(h1);
 
-    const vpm = pos.value_prop_moore || pos.value_proposition_moore;
+    const vpm =
+      pos.value_prop_moore ||
+      pos.value_proposition_moore ||
+      state.contract?.campaign_strategy?.value_proposition_moore ||
+      state.contract?.strategy?.value_proposition_moore;
     if (vpm && (vpm.paragraph || vpm.fields)) {
       // Paragraph
       const pre = document.createElement("pre");
@@ -946,7 +964,7 @@ window.CampaignUI = window.CampaignUI || {};
     let attempt = 0;
     let consecutiveErrors = 0;
 
-     const okDuring = new Set([
+    const okDuring = new Set([
       // queue / early
       "Queued", "ValidatingInput", "PacksLoad", "ingest", "DraftCampaign",
       // evidence & outline
