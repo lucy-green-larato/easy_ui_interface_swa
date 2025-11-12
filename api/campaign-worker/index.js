@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 11-11-2025 v33
+// /api/campaign-worker/index.js 11-11-2025 v35
 // Option B pipeline — worker fast path (draft campaign.json) with business-leader Executive Summary shaping
 // Preserves v14 structure: phased status, append-only event logger, robust loaders, and sanitizer.
 // Writes under results/<prefix> (container-relative, trailing slash). No renames of queues/ops/keys.
@@ -734,80 +734,103 @@ function mapFeaturesToBenefits({ usps, evidence, csvSignals, strategy }) {
 
 // -------- Narrative builders (deterministic; no model calls) -----------------
 function synthesizeExecutiveSummaryNarrative({ input, csvNormalized, strategy, evidence }) {
-  const trim = (v) => (v == null ? "" : String(v)).replace(/\s+/g, " ").trim();
-  const company = trim(strategy?.meta?.company || input?.supplier_company || input?.company_name || "");
-  const industry = trim(strategy?.meta?.industry || csvNormalized?.selected_industry || csvNormalized?.meta?.selected_industry || input?.selected_industry || input?.campaign_industry || "");
-  const rows = Number(csvNormalized?.meta?.rows || 0) || Number(strategy?.prospect_base?.tam || 0) || null;
+  const T = v => (v == null ? "" : String(v)).replace(/\s+/g, " ").trim();
+  const low = s => String(s || "").toLowerCase();
 
-  // Buyer landscape (signals)
+  // Inputs
+  const industry = T(strategy?.meta?.industry || csvNormalized?.selected_industry || csvNormalized?.meta?.selected_industry || input?.selected_industry || input?.campaign_industry || "");
+  const cohort = Number(csvNormalized?.meta?.rows || 0) || Number(strategy?.prospect_base?.tam || 0) || 0;
+
+  // Signals (use short, readable selections only)
   const sig = csvNormalized?.signals || {};
-  const gs = csvNormalized?.global_signals || {};
-  const needs = Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length ? sig.top_needs_supplier
-    : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
-  const blockers = Array.isArray(sig.top_blockers) && sig.top_blockers.length ? sig.top_blockers
-    : (Array.isArray(gs.top_blockers) ? gs.top_blockers : []);
-  const spendCues = Array.isArray(sig.top_purchases) ? sig.top_purchases : [];
+  const needsList = Array.isArray(sig.top_needs_supplier) ? sig.top_needs_supplier : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
+  const blockList = Array.isArray(sig.top_blockers) ? sig.top_blockers : [];
+  const spendList = Array.isArray(sig.top_purchases) ? sig.top_purchases : [];
 
-  // Evidence-led market context (short, cited-like phrasing)
-  const marketContext = deriveMarketContext({
-    evidence,
-    csvSignals: (csvNormalized && csvNormalized.signals) ? csvNormalized.signals : undefined,
-    usps: strategy?.meta?.usps || input?.supplier_usps || [],
-    company,
-    industry
-  });
+  const take = (arr, n) => (arr || []).map(T).filter(Boolean).slice(0, n);
+  const toClause = (arr) => {
+    const a = (arr || []).map(T).filter(Boolean);
+    if (!a.length) return "";
+    if (a.length === 1) return a[0];
+    return `${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}`;
+  };
 
-  // (1) Environment
-  const cohortTxt = rows ? `${rows.toLocaleString()} organisations` : "a defined set of organisations";
-  const needTxt = needs.length ? `buyers need ${needs.slice(0, 3).join(", ")}` : "";
-  const blockTxt = blockers.length ? `but face ${blockers.slice(0, 3).join(", ")}` : "";
-  const spendTxt = spendCues.length ? `spend signals include ${spendCues.slice(0, 3).join(", ")}.` : "";
-  const envParts = [
-    industry ? `In ${industry},` : "",
-    `the addressable cohort contains ${cohortTxt}.`,
-    marketContext,
-    (needTxt || blockTxt) ? `Buyer landscape: ${[needTxt, blockTxt].filter(Boolean).join(" ")}.` : "",
-    spendTxt
-  ].filter(Boolean);
-  const environment_paragraph = trim(envParts.join(" "));
+  // Evidence: pick one high-signal claim for Why-now (recent, market/impact words, industry-relevant)
+  const claims = Array.isArray(evidence?.claims) ? evidence.claims : [];
+  const scoreClaim = (c) => {
+    const txt = `${T(c.title)} ${T(c.summary)}`.toLowerCase();
+    let s = 0;
+    if (/market|growth|adoption|demand|regulat|compliance|breach|shortage|spend/.test(txt)) s += 3;
+    if (industry && txt.includes(industry.toLowerCase())) s += 2;
+    if (/202\d|20[2-9]\d/.test(txt)) s += 1;
+    return s;
+  };
+  const best = claims.slice().sort((a, b) => scoreClaim(b) - scoreClaim(a))[0] || null;
+  const shortSrc = (c) => {
+    try {
+      const src = T(c?.source || c?.source_name || "");
+      if (src) return src;
+      const u = T(c?.url || c?.source_url || "");
+      return u ? new URL(u).hostname.replace(/^www\./, "") : "";
+    } catch { return ""; }
+  };
+
+  // (1) Market environment
+  const cohortStr = cohort > 0 ? `${cohort.toLocaleString()} organisations` : "a defined set of organisations";
+  const needsStr = toClause(take(needsList, 3));
+  const blockStr = toClause(take(blockList, 3));
+  const spendStr = toClause(take(spendList, 3));
+
+  const environment_paragraph = T([
+    industry ? `In ${industry}, the addressable market comprises ${cohortStr}.` : `The addressable market comprises ${cohortStr}.`,
+    needsStr ? `Buyers typically need ${needsStr}` : "",
+    blockStr ? (needsStr ? ` and are held back by ${blockStr}.` : `They are held back by ${blockStr}.`) : (needsStr ? "." : ""),
+    spendStr ? `Recent purchasing signals include ${spendStr}.` : ""
+  ].filter(Boolean).join(" "));
 
   // (2) Strategic rationale
-  const rationaleHints = Array.isArray(strategy?.insight?.product_fit?.rationale)
-    ? strategy.insight.product_fit.rationale.filter(Boolean)
-    : [];
-  const rationale_paragraph = trim([
-    `Why now: ${rationaleHints.join(" ")}`
-  ].filter(Boolean).join(" "));
+  const fit = Number(strategy?.insight?.product_fit?.avg_score || strategy?.product_fit?.avg_score || 0);
+  const focus = T(strategy?.how_win?.chosen_focus || strategy?.go_to_market?.focus || input?.campaign_focus || "");
+  const whyLine = best ? `Why now: ${T(best.title || best.summary || "")}${shortSrc(best) ? ` [${shortSrc(best)}]` : ""}.` : "";
+  const marketLine = cohort > 0 ? `We have a clearly defined in-scope market of ${cohort.toLocaleString()} accounts derived from the CSV.` : "";
+  const fitLine = fit ? `Product–market fit indicators are positive (average fit score ${fit.toFixed(1)}).` : "";
+  const focusLine = focus ? `Initial emphasis will be on ${focus}.` : "";
 
-  // (3) How to win (Moore + SWOT + competitors)
-  const moore = trim(strategy?.value_proposition_moore?.paragraph || "");
-  const sw = strategy?.swot || {}; // optional; may be absent here
-  const compAllowed = Array.isArray(strategy?.meta?.relevant_competitors)
-    ? strategy.meta.relevant_competitors.map(s => String(s || "").trim()).filter(Boolean)
+  const rationale_paragraph = T([whyLine, marketLine, fitLine, focusLine].filter(Boolean).join(" "));
+
+  // (3) How the supplier can win (Moore + reasoned SWOT + competitor commentary)
+  const moore = T(strategy?.value_proposition_moore?.paragraph || "");
+  const sw = strategy?.swot || {};
+  const strengths = toClause(take(sw?.strengths, 2));
+  const opportunities = toClause(take(sw?.opportunities, 2));
+
+  const allowedComps = Array.isArray(strategy?.meta?.relevant_competitors)
+    ? strategy.meta.relevant_competitors.map(T).filter(Boolean)
     : [];
-  const compTxt = compAllowed.length ? `Competitors in scope: ${compAllowed.slice(0, 4).join(", ")}.` : "";
-  const how_to_win_paragraph = trim([
+  const compLine = allowedComps.length ? `Competitor context: focus on out-executing ${toClause(take(allowedComps, 3))}.` : "";
+
+  const how_to_win_paragraph = T([
     moore,
-    (Array.isArray(sw?.strengths) && sw.strengths.length) ? `Strengths: ${sw.strengths.slice(0, 3).join(", ")}.` : "",
-    (Array.isArray(sw?.opportunities) && sw.opportunities.length) ? `Opportunities: ${sw.opportunities.slice(0, 3).join(", ")}.` : "",
-    compTxt
+    strengths ? `Key strengths: ${strengths}.` : "",
+    opportunities ? `Opportunities: ${opportunities}.` : "",
+    compLine
   ].filter(Boolean).join(" "));
 
-  // (4) Success (specific outcome if available)
-  const success_paragraph = trim(
+  // (4) What success looks like
+  const success_paragraph = T(
     strategy?.specific_outcome
       ? `What success looks like: ${strategy.specific_outcome}.`
-      : ""
+      : (cohort > 0 ? `What success looks like: create early qualified opportunities within the first six weeks across ${cohort.toLocaleString()} target accounts.` : "")
   );
 
-  // (5) Next steps (execution_checks/route aware)
-  const checks = Array.isArray(strategy?.execution_checks) ? strategy.execution_checks.filter(Boolean) : [];
-  const next = checks.length ? checks.slice(0, 2).join("; ") : "";
-  const route = String(strategy?.go_to_market?.route || input?.sales_model || input?.salesModel || "").toLowerCase();
+  // (5) Next steps
+  const preconds = Array.isArray(strategy?.execution_checks) ? strategy.execution_checks.map(T).filter(Boolean) : [];
+  const preLine = preconds.length ? `Pre-conditions: ${toClause(take(preconds, 2))}.` : "";
+  const route = low(strategy?.go_to_market?.route || input?.sales_model || input?.salesModel || "");
   const routeLine = route === "partner"
-    ? "Next steps: initiate partner plan and MDF approval."
-    : "Next steps: launch first-wave outreach with tracked landing and CRM capture.";
-  const next_steps_paragraph = trim([next ? `Pre-conditions: ${next}.` : "", routeLine].filter(Boolean).join(" "));
+    ? "Next steps: initiate partner enablement, secure MDF, and release the first joint offer."
+    : "Next steps: launch the first-wave outreach with tracked landing and CRM capture.";
+  const next_steps_paragraph = T([preLine, routeLine].filter(Boolean).join(" "));
 
   return {
     environment_paragraph,
@@ -819,46 +842,65 @@ function synthesizeExecutiveSummaryNarrative({ input, csvNormalized, strategy, e
 }
 
 function buildValuePropNarrative({ strategy, input, csvNormalized, evidence }) {
-  const trim = (v) => (v == null ? "" : String(v)).replace(/\s+/g, " ").trim();
-  const moore = trim(strategy?.value_proposition_moore?.paragraph || "");
-  const lead = moore || trim(buildMooreValueProp({
-    company: strategy?.meta?.company || input?.supplier_company || input?.company_name,
-    industry: strategy?.meta?.industry || csvNormalized?.selected_industry || csvNormalized?.meta?.selected_industry,
-    usps: strategy?.meta?.usps || input?.supplier_usps || [],
-    claimId: (strategy?.evidence_links || [])[0] || null
-  }));
+  const T = v => (v == null ? "" : String(v)).replace(/\s+/g, " ").trim();
+  const low = s => String(s || "").toLowerCase();
 
+  const moore = T(strategy?.value_proposition_moore?.paragraph || "");
+  const lead = moore; // clean Moore sentence up front
+
+  // Signals to ground the problem/impact
   const sig = csvNormalized?.signals || {};
-  const needs = Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length ? sig.top_needs_supplier
-    : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
-  const blockers = Array.isArray(sig.top_blockers) ? sig.top_blockers : [];
+  const needsList = Array.isArray(sig.top_needs_supplier) ? sig.top_needs_supplier : (Array.isArray(sig.top_needs) ? sig.top_needs : []);
+  const blockList = Array.isArray(sig.top_blockers) ? sig.top_blockers : [];
 
-  const customer_problem_paragraph = trim(
-    needs.length ? `Customers need ${needs.slice(0, 3).join(", ")} and are held back by ${blockers.slice(0, 3).join(", ")}.` : ""
-  );
+  const take = (arr, n) => (arr || []).map(T).filter(Boolean).slice(0, n);
+  const toClause = (arr) => {
+    const a = (arr || []).map(T).filter(Boolean);
+    if (!a.length) return "";
+    if (a.length === 1) return a[0];
+    return `${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}`;
+  };
 
-  const right_to_play_paragraph = trim(
-    (strategy?.insight?.product_fit?.rationale || []).join(" ")
-  );
+  const customer_problem_paragraph = T([
+    take(needsList, 3).length ? `Customers in scope typically need ${toClause(take(needsList, 3))}` : "",
+    take(blockList, 3).length ? `and are constrained by ${toClause(take(blockList, 3))}.` : (take(needsList, 3).length ? "." : "")
+  ].filter(Boolean).join(" "));
 
-  const differentiation_paragraph = trim(
-    Array.isArray(strategy?.how_win?.differentiators) && strategy.how_win.differentiators.length
-      ? `Differentiation: ${strategy.how_win.differentiators.slice(0, 4).join(", ")}.`
-      : ""
-  );
+  // Right-to-play grounded in strategy rationale + supplier context
+  const rtp = Array.isArray(strategy?.insight?.product_fit?.rationale) ? strategy.insight.product_fit.rationale.map(T).filter(Boolean) : [];
+  const right_to_play_paragraph = T(rtp.join(" "));
 
-  const compAllowed = Array.isArray(strategy?.meta?.relevant_competitors)
-    ? strategy.meta.relevant_competitors.map(s => String(s || "").trim()).filter(Boolean)
+  // Differentiation grounded in chosen products / how-win
+  const diffs = Array.isArray(strategy?.how_win?.differentiators) ? strategy.how_win.differentiators.map(T).filter(Boolean) : [];
+  const differentiation_paragraph = diffs.length ? `Differentiation: ${toClause(diffs.slice(0, 4))}.` : "";
+
+  // Competitors: allowed only; commentary stays brief
+  const allowed = Array.isArray(strategy?.meta?.relevant_competitors)
+    ? strategy.meta.relevant_competitors.map(T).filter(Boolean)
     : [];
-  const competitor_positions_paragraph = trim(
-    compAllowed.length ? `Competitor context: ${compAllowed.slice(0, 4).join(", ")}.` : "TBD"
-  );
+  const competitor_positions_paragraph = allowed.length
+    ? `Competitor context: concentrate on out-performing ${toClause(allowed.slice(0, 4))} where resilience, time-to-value and proof of delivery matter most.`
+    : "TBD";
 
-  const proof_points_paragraph = trim(
-    (Array.isArray(strategy?.evidence_links) && strategy.evidence_links.length)
-      ? `Proof points: ${strategy.evidence_links.join(", ")}.`
-      : ""
-  );
+  // Proof points (human readable, deduped, with short source tags)
+  const claims = Array.isArray(evidence?.claims) ? evidence.claims : [];
+  const seen = new Set();
+  const pp = [];
+  for (const c of claims) {
+    const title = T(c?.title || c?.summary || c?.quote || "");
+    if (!title) continue;
+    let src = T(c?.source || c?.source_name || "");
+    if (!src) {
+      try { src = new URL(c?.url || c?.source_url || "").hostname.replace(/^www\./, ""); } catch { /* ignore */ }
+    }
+    const line = src ? `${title} [${src}]` : title;
+    const k = low(line);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    pp.push(line);
+    if (pp.length === 3) break;
+  }
+  const proof_points_paragraph = pp.length ? `Proof points: ${pp.join("; ")}.` : "";
 
   return {
     lead,
@@ -880,62 +922,6 @@ function deriveCampaignTitle({ company, industry, requirement }) {
   const mid = parts.join(" | ");
   const suffix = requirement ? `${cap(requirement)} Campaign` : "Campaign";
   return [mid || "Campaign", suffix].filter(Boolean).join(" ");
-}
-
-function buildMooreValueProp({ company, industry, usps, claimId }) {
-  const who = industry ? `senior decision-makers in ${industry}` : "senior decision-makers";
-  const offer = company ? `${company} offers` : "This campaign offers";
-  const uspText = Array.isArray(usps) && usps.length
-    ? usps.slice(0, 3).join("; ")
-    : "a focused proposition aligned to measurable outcomes";
-  const base = `For ${who}, ${offer} ${uspText} — unlike generic telco options.`;
-  return claimId ? `${base} [${claimId}]` : base;
-}
-
-// Build an exec-summary intro grounded in CSV signals and needs coverage, plain business tone.
-function buildLeadParagraph({ company, industry, requirement, csvNormalized, needsMap }) {
-  const objective =
-    (String(requirement || "").toLowerCase() === "upsell")
-      ? "upsell services to existing customers"
-      : (String(requirement || "").toLowerCase() === "win-back")
-        ? "win back high-potential lapsed customers"
-        : "create near-term growth";
-
-  // ICP phrase
-  const icp =
-    industry
-      ? `one clear audience first: leaders on ${industry} projects`
-      : "one clear audience first";
-
-  // Buyer problems from CSV signals (prefer industry-specific, fall back to global)
-  const sig = csvNormalized?.signals;
-  const gs = csvNormalized?.global_signals;
-  const topProblems = (Array.isArray(sig?.top_blockers) && sig.top_blockers.length
-    ? sig.top_blockers
-    : (gs?.top_blockers || []))
-    .filter(Boolean)
-    .slice(0, 2);
-
-  const problemsText = topProblems.length
-    ? `They face ${topProblems.join("; ")}.`
-    : "";
-
-  // Fit/coverage from needs_map.json
-  const cov = needsMap?.coverage || { matched: 0, partial: 0, gap: 0 };
-  const gapNote = (cov.gap > 0)
-    ? "We will highlight any capability gaps and address them explicitly."
-    : "";
-
-  const supplier = company ? `${company} ` : "";
-  const sector = industry ? ` in ${industry}` : "";
-
-  // Keep it non-jargon, sign-off intent
-  return [
-    `This campaign’s objective is to ${objective}${sector}.`,
-    `We will start with ${icp} and prove results quickly on agreed measures.`,
-    problemsText,
-    gapNote
-  ].filter(Boolean).join(" ");
 }
 
 function shapeExecutiveSummary({ existing, input, csvNormalized, strategy, evidence }) {
@@ -1385,18 +1371,31 @@ module.exports = async function (context, queueItem) {
       const perHost = new Map();
       const deduped = [];
       // Guard: if no evidence items, skip ranking/why_now to prevent empty-array ops
-      if (!withUrl.length) return;
-      for (const c of withUrl) {
-        try {
-          if (!c.url || seenUrl.has(c.url)) continue;
-          const host = new URL(c.url).hostname.replace(/^www\./, "");
-          const n = perHost.get(host) || 0;
-          if (n >= 2) continue;
-          perHost.set(host, n + 1);
-          seenUrl.add(c.url);
-          deduped.push(c);
-        } catch {
-          /* skip malformed */
+      if (Array.isArray(withUrl) && withUrl.length) {
+        for (const c of withUrl) {
+          try {
+            const url = String(c?.url || "");
+            if (!url) continue;
+            if (seenUrl.has(url)) continue;
+
+            // Robust host extraction
+            let host;
+            try {
+              host = new URL(url).hostname.replace(/^www\./, "");
+            } catch (e) {
+              continue; // skip malformed URLs
+            }
+
+            const n = perHost.get(host) || 0;
+            if (n >= 2) continue;
+
+            perHost.set(host, n + 1);
+            seenUrl.add(url);
+            deduped.push(c);
+          } catch (e) {
+            /* skip malformed */
+            continue;
+          }
         }
       }
 
@@ -1763,6 +1762,16 @@ module.exports = async function (context, queueItem) {
         industry: firstNonEmpty(mergedInput.selected_industry, mergedInput.campaign_industry, csvNormalized?.selected_industry, csvNormalized?.meta?.selected_industry),
         requirement: firstNonEmpty(mergedInput.campaign_requirement, draft.campaign_requirement)
       });
+      if (!draft.title && draft.campaign_title) {
+        draft.title = draft.campaign_title;
+      }
+      // Optional: make it discoverable from strategy too
+      try {
+        strategy.meta = strategy.meta || {};
+        if (!strategy.meta.title && draft.campaign_title) {
+          strategy.meta.title = draft.campaign_title;
+        }
+      } catch { /* non-fatal */ }
 
       draft.executive_summary = shapeExecutiveSummary({
         existing: draft.executive_summary,
