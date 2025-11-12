@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js 12-11-2025 v33 (Writer/Assembler)
+// /api/campaign-write/index.js 12-11-2025 v35 (Writer/Assembler)
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> writes sections/<finalKey>.json
 // - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%
@@ -86,6 +86,47 @@ function safeForPrompt(v, max = 280000) {
     const k = Math.floor(max / 2);
     return s.slice(0, k) + " …TRUNCATED… " + s.slice(-k);
   } catch { return "null"; }
+}
+
+function buildPersonaBrief({ outline, csvCanon, needsMap }) {
+  try {
+    const personaName =
+      (outline?.meta?.persona || outline?.input_notes?.persona || outline?.input_notes?.target_persona || "").toString().trim();
+
+    const route =
+      (outline?.input_notes?.sales_model || outline?.meta?.sales_model || "").toString().trim(); // direct/partner/etc.
+
+    const topNeeds = Array.isArray(csvCanon?.signals?.top_needs_supplier)
+      ? csvCanon.signals.top_needs_supplier.filter(Boolean).slice(0, 3)
+      : [];
+
+    const topBlockers = Array.isArray(csvCanon?.signals?.top_blockers)
+      ? csvCanon.signals.top_blockers.filter(Boolean).slice(0, 3)
+      : [];
+
+    // Map first need through needs_map to produce capability hints (non-deterministic text, just cues)
+    let capabilityHints = [];
+    if (needsMap && typeof needsMap === "object") {
+      const nm = needsMap.mapping || needsMap.map || {};
+      for (const n of topNeeds) {
+        const m = nm[n];
+        if (m && Array.isArray(m.capabilities)) {
+          capabilityHints = capabilityHints.concat(m.capabilities.slice(0, 2));
+        }
+      }
+      capabilityHints = capabilityHints.filter(Boolean).slice(0, 3);
+    }
+
+    return {
+      persona: personaName || null,
+      route: route || null,
+      top_needs: topNeeds,
+      top_blockers: topBlockers,
+      capability_hints: capabilityHints
+    };
+  } catch {
+    return { persona: null, route: null, top_needs: [], top_blockers: [], capability_hints: [] };
+  }
 }
 
 function nowISO() { return new Date().toISOString(); }
@@ -478,6 +519,7 @@ function buildSectionSystem(finalKey, persona) {
     return [
       personaPrefix + "You are a senior UK B2B strategist.",
       "Provide a deeper Value Proposition narrative than the Executive Summary.",
+      "Consultant standard: Evidence-based, Interpreted, Connected, Strategic, Commercial. Cite claim_id where appropriate.",
       "Include Geoffrey Moore’s value proposition (clean sentence) and expand it into several short paragraphs:",
       "- Customer problem and impact (grounded in CSV/evidence).",
       "- Right-to-play for the supplier.",
@@ -506,6 +548,8 @@ function buildSectionSystem(finalKey, persona) {
 
   if (finalKey === "sales_enablement") {
     return `You are a senior UK B2B go-to-market consultant.
+    "Consultant standard: Evidence-based, Interpreted, Connected, Strategic, Commercial. Cite claim_id where appropriate.",
+    "Write a concise, persuasive sales enablement 'Battle Card' grounded ONLY in CSV signals, evidence claims, outline, and allowed competitors.",
 Write a concise, persuasive sales enablement “Battle Card” grounded ONLY in the supplied CSV signals, evidence claims (cite claim_ids or short [Tag] where applicable), outline inputs, and allowed competitors.
 Do NOT fabricate facts, metrics, or competitor names. If a specific proof element is missing, write "TBD" rather than inventing it.
 Use plain UK business English and keep every section decision-oriented.
@@ -583,6 +627,7 @@ Emit STRICT JSON:
 }
 
 function buildSectionUser(finalKey, { outline, evidenceBundle, csvCanon, allowedCompetitors }) {
+  // ---- existing inputs, preserved ----
   const ev = safeForPrompt(evidenceBundle?.catalog || []);
   const csv = safeForPrompt(csvCanon || {});
   const prod = safeForPrompt(evidenceBundle?.productNames || []);
@@ -595,51 +640,107 @@ function buildSectionUser(finalKey, { outline, evidenceBundle, csvCanon, allowed
   const persona = safeForPrompt(outline?.meta?.persona || "");
   const addressable_market = Number.isFinite(Number(csvCanon?.meta?.rows)) ? Number(csvCanon.meta.rows) : null;
 
+  // ---- small persona brief (no new schema; just prompt context) ----
+  const personaBrief = (() => {
+    try {
+      const route = (outline?.input_notes?.sales_model || outline?.meta?.sales_model || "").toString().trim();
+      const topNeeds = Array.isArray(csvCanon?.signals?.top_needs_supplier)
+        ? csvCanon.signals.top_needs_supplier.filter(Boolean).slice(0, 3)
+        : [];
+      const topBlockers = Array.isArray(csvCanon?.signals?.top_blockers)
+        ? csvCanon.signals.top_blockers.filter(Boolean).slice(0, 3)
+        : [];
+      // light capability hints from needs_map (if present in evidenceBundle)
+      const nm = evidenceBundle?.needsMap || {};
+      let capability_hints = [];
+      if (nm && typeof nm === "object") {
+        const mapping = nm.mapping || nm.map || {};
+        for (const n of topNeeds) {
+          const m = mapping[n];
+          if (m && Array.isArray(m.capabilities)) capability_hints = capability_hints.concat(m.capabilities.slice(0, 2));
+        }
+        capability_hints = capability_hints.filter(Boolean).slice(0, 3);
+      }
+      return {
+        persona: persona || null,
+        route: route || null,
+        top_needs: topNeeds,
+        top_blockers: topBlockers,
+        capability_hints
+      };
+    } catch {
+      return { persona: persona || null, route: null, top_needs: [], top_blockers: [], capability_hints: [] };
+    }
+  })();
+
+  // consultant standard (kept terse; applied in both ES and other sections)
+  const CONSULTANT_STANDARD =
+    "Every statement must be: 1) Evidence-based (cite claim_id where appropriate); " +
+    "2) Interpreted (convert facts into insight); 3) Connected (tie to supplier right-to-play); " +
+    "4) Strategic (facts → why it matters → how to win); 5) Commercial (decision- and outcome-oriented).";
+
   if (finalKey === "executive_summary") {
     const supplier = (outline?.input_notes?.supplier_company || outline?.input_notes?.prospect_company || "").trim();
     const outlineNotes = safeForPrompt(outline?.sections?.exec || {});
     return [
-      `Cohort size (addressable_market): ${addressable_market ?? "unknown"}`,
-      `Supplier: ${supplier}`,
-      `Competitors (allowed): ${competitors}`,
-      "",
+      `You are a senior UK B2B go-to-market consultant.`,
+      CONSULTANT_STANDARD,
+      // keep your system brief for ES, but we strengthen the user task to force 5 paras (no bullets)
       buildSectionSystem(finalKey, persona),
       "",
+      "Task:",
+      "Write the Executive Summary as exactly FIVE short paragraphs (no bullets).",
+      "Paragraphs:",
+      "1) Market environment — use CSV signals (needs/blockers/spend) and one relevant evidence claim (cite claim_id). Include cohort size if available.",
+      "2) Strategic rationale — why act now, cite one high-signal claim by claim_id (e.g., regulator/ONS), connect to supplier focus and buyer context.",
+      "3) How to win — one clean Moore sentence plus TWO strengths and TWO opportunities woven into the paragraph (no lists). Contrast only with allowed competitors when needed.",
+      "4) What success looks like — quantified, timebound outcome anchored to cohort and route.",
+      "5) Next steps — concrete, route-aware actions and pre-conditions in one paragraph.",
+      "",
       "Context:",
+      `- Cohort size (addressable_market): ${addressable_market ?? "unknown"}`,
+      `- Supplier: ${supplier}`,
+      `- PersonaBrief: ${JSON.stringify(personaBrief)}`,
       `- Evidence catalog ARRAY (use claim_ids): ${ev}`,
       `- CSV signals: ${csv}`,
       `- Product anchors: ${prod}`,
-      `- Named competitors: ${competitors}`,
+      `- Named competitors (allowed): ${competitors}`,
       `- Persona: ${persona}`,
       `- Outline fragment: ${outlineNotes}`,
       "",
       "Instructions:",
-      `- Produce concise, practical content aligned to "${finalKey}". Cite claim_ids for external evidence. No fabrication.`,
+      `- Produce concise, persuasive content aligned to "${finalKey}".`,
+      "- Cite claim_ids for external evidence where used.",
+      "- No fabrication; if a specific proof is missing, write 'TBD' rather than inventing.",
       "",
-      "Emit STRICT JSON:",
-      `${targetsFor(finalKey)}`,
-      "Return JSON only."
+      "Emit STRICT JSON ONLY:",
+      `{"executive_summary": ["<p1>", "<p2>", "<p3>", "<p4>", "<p5>"]}`
     ].join("\n").trim();
   }
 
+  // All other sections keep your current pattern, but we include persona brief + consultant standard
   return [
+    `You are a senior UK B2B go-to-market consultant.`,
+    CONSULTANT_STANDARD,
     buildSectionSystem(finalKey, persona),
     "",
     "Context:",
+    `- PersonaBrief: ${JSON.stringify(personaBrief)}`,
     `- Evidence catalog ARRAY (use claim_ids): ${ev}`,
     `- CSV signals: ${csv}`,
     `- Product anchors: ${prod}`,
-    `- Named competitors: ${competitors}`,
+    `- Named competitors (allowed): ${competitors}`,
     `- Persona: ${persona}`,
     "",
     "Instructions:",
-    `- Produce concise, practical content aligned to "${finalKey}". Cite claim_ids for external evidence. No fabrication.`,
+    `- Produce concise, practical content aligned to "${finalKey}". Cite claim_ids for external evidence where appropriate. No fabrication.`,
     "",
     "Emit STRICT JSON:",
     `${targetsFor(finalKey)}`,
     "Return JSON only."
   ].join("\n").trim();
 }
+
 
 // ==== Main handler ====
 module.exports = async function (context, queueItem) {
@@ -925,8 +1026,6 @@ module.exports = async function (context, queueItem) {
         // Copy the section through
         merged[finalKey] = piece[finalKey];
 
-        // Special handling for Executive Summary: ensure both shapes + carry AM
-        // Special handling for Executive Summary: prefer narrative passthrough; carry AM if provided
         if (finalKey === "executive_summary") {
           const es = merged.executive_summary;
 
@@ -1040,6 +1139,79 @@ module.exports = async function (context, queueItem) {
     }
     return;
   }
+// --- ES quality guard: single repair pass if shape is wrong (idempotent) ---
+if (finalKey === "executive_summary") {
+  try {
+    const arr = (sect && Array.isArray(sect.executive_summary)) ? sect.executive_summary : (Array.isArray(sect) ? sect : null);
+    const needsRepair =
+      !Array.isArray(arr) ||
+      arr.length !== 5 ||
+      arr.some(p => typeof p !== "string" || !p.trim());
+
+    if (needsRepair) {
+      // Build a compact persona brief (same logic as in buildSectionUser)
+      const personaBrief = (() => {
+        try {
+          const route = (outline?.input_notes?.sales_model || outline?.meta?.sales_model || "").toString().trim();
+          const topNeeds = Array.isArray(csvCanon?.signals?.top_needs_supplier)
+            ? csvCanon.signals.top_needs_supplier.filter(Boolean).slice(0, 3)
+            : [];
+          const topBlockers = Array.isArray(csvCanon?.signals?.top_blockers)
+            ? csvCanon.signals.top_blockers.filter(Boolean).slice(0, 3)
+            : [];
+          const nm = evidenceBundle?.needsMap || {};
+          let capability_hints = [];
+          if (nm && typeof nm === "object") {
+            const mapping = nm.mapping || nm.map || {};
+            for (const n of topNeeds) {
+              const m = mapping[n];
+              if (m && Array.isArray(m.capabilities)) capability_hints = capability_hints.concat(m.capabilities.slice(0, 2));
+            }
+            capability_hints = capability_hints.filter(Boolean).slice(0, 3);
+          }
+          return {
+            persona: (outline?.meta?.persona || "").toString().trim() || null,
+            route: route || null,
+            top_needs: topNeeds,
+            top_blockers: topBlockers,
+            capability_hints
+          };
+        } catch {
+          return { persona: (outline?.meta?.persona || "").toString().trim() || null, route: null, top_needs: [], top_blockers: [], capability_hints: [] };
+        }
+      })();
+
+      const repairSystem =
+        "Repair the Executive Summary to exactly five short paragraphs, following the consultant standard: " +
+        "Evidence-based (cite claim_id where appropriate), Interpreted, Connected, Strategic, Commercial. " +
+        "Return STRICT JSON only: {\"executive_summary\":[\"p1\",\"p2\",\"p3\",\"p4\",\"p5\"]}.";
+
+      const repairUser = [
+        "CONTEXT (for repair):",
+        `- PersonaBrief: ${JSON.stringify(personaBrief)}`,
+        `- Allowed competitors: ${safeForPrompt(allowedCompetitors || [])}`,
+        `- Evidence (catalog; cite claim_ids): ${safeForPrompt(evidenceBundle?.catalog || [])}`,
+        `- CSV signals: ${safeForPrompt(csvCanon || {})}`,
+        `- Product anchors: ${safeForPrompt(evidenceBundle?.productNames || [])}`,
+        "",
+        "PRIOR JSON (to repair):",
+        JSON.stringify(sect || {})
+      ].join("\n");
+
+      const { callChatJsonObject } = await loadPromptHarness();
+      const repaired = await callChatJsonObject({ system: repairSystem, user: repairUser, timeoutMs: LLM_TIMEOUT_MS });
+
+      if (repaired && Array.isArray(repaired.executive_summary) && repaired.executive_summary.length === 5
+          && repaired.executive_summary.every(p => typeof p === "string" && p.trim())) {
+        sect = { executive_summary: repaired.executive_summary };
+      }
+    }
+  } catch (e) {
+    context.log && context.log.warn && context.log.warn("[writer] ES repair pass failed", String(e?.message || e));
+    // non-fatal; fall through and persist whatever we have
+  }
+}
+// --- end ES quality guard ---
 
   // ---- Generate a single section ----
   if (op === "write_section" || op === "section") {
