@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js 12-11-2025 v30.0 (Writer/Assembler)
+// /api/campaign-write/index.js 12-11-2025 v32 (Writer/Assembler)
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> writes sections/<finalKey>.json
 // - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%
@@ -13,12 +13,6 @@ const STORAGE_CONN = process.env.AzureWebJobsStorage;
 const CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const MAIN_QUEUE = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 60000);
-// Sections we render deterministically (strategy + CSV + evidence only)
-const DETERMINISTIC_SECTIONS = new Set([
-  "positioning_and_differentiation",
-  "messaging_matrix",
-  "sales_enablement"
-]);
 
 // Final section keys (exact, stable set)
 const FINAL_SECTION_KEYS = [
@@ -238,136 +232,8 @@ function renderPositioningFromStrategy({ strategy, evidenceBundle, csvCanon }) {
     competitor_set: compSet                              // user-first, then evidence; normalised objects
   };
 }
-function renderMessagingFromStrategy({ strategy, evidenceBundle, csvCanon, outline }) {
-  const s = strategy || {};
-  const meta = s.meta || {};
-  const usps = Array.isArray(meta.usps) ? meta.usps.filter(Boolean) : [];
-
-  const sig = (csvCanon && csvCanon.signals) || {};
-  const pains = Array.isArray(sig.top_blockers) ? sig.top_blockers.filter(Boolean) : [];
-  const needs = (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length
-    ? sig.top_needs_supplier
-    : (Array.isArray(sig.top_needs) ? sig.top_needs : [])
-  ).filter(Boolean);
-
-  // Build matrix rows ONLY when we have both a pain (from CSV) and a proof (claim_id/URL) from evidence
-  const catalog = Array.isArray(evidenceBundle?.catalog) ? evidenceBundle.catalog : [];
-  const claimsByTopic = [];
-  for (const it of catalog) {
-    const topicCue = (it.title || it.note || "").toString().toLowerCase();
-    const claim = it.claim_id || it.url || "";
-    if (!claim) continue;
-    claimsByTopic.push({ topicCue, claim });
-  }
-
-  const personas = [
-    (outline && outline.meta && outline.meta.persona) || "Budget holder",
-    "IT lead",
-    "Site operations"
-  ];
-
-  const matrix = [];
-  let personaIdx = 0;
-  for (const pain of pains) {
-    // find a claim whose topic roughly matches the pain words
-    const cue = String(pain).toLowerCase();
-    const hit = claimsByTopic.find(c => c.topicCue.includes(cue.split(" ")[0] || ""));
-    if (!hit) continue; // skip rows without proof
-    matrix.push({
-      persona: personas[personaIdx % personas.length],
-      pain: pain,
-      value_statement: usps.length ? `Address ${pain} via ${usps.join("; ")}` : "", // only real USPs; else empty
-      proof: hit.claim, // claim_id or URL
-      cta: "Agree the first site review" // concise, non-generic next step; acceptable as call-to-action wording
-    });
-    personaIdx += 1;
-  }
-
-  // nonnegotiables: only USPs or CSV needs if USPs are absent; never placeholders
-  const nonnegotiables = usps.length ? usps : needs;
-
-  return {
-    nonnegotiables,
-    matrix // may be < 3 if we cannot justify more without placeholders
-  };
-}
-
-function renderSalesEnablementFromStrategy({ strategy, evidenceBundle, csvCanon }) {
-  const s = strategy || {};
-  const meta = s.meta || {};
-  const usps = Array.isArray(meta.usps) ? meta.usps.filter(Boolean) : [];
-
-  // Discovery questions: derive from CSV buyer data only
-  const sig = (csvCanon && csvCanon.signals) || {};
-  const blockers = Array.isArray(sig.top_blockers) ? sig.top_blockers.filter(Boolean) : [];
-  const needs = (Array.isArray(sig.top_needs_supplier) && sig.top_needs_supplier.length
-    ? sig.top_needs_supplier
-    : (Array.isArray(sig.top_needs) ? sig.top_needs : [])
-  ).filter(Boolean);
-
-  // Turn blockers/needs into questions (no placeholders)
-  const toQuestion = (txt) => {
-    const t = String(txt).trim();
-    if (!t) return null;
-    // Make it interrogative without inventing content
-    if (/[\.\?]$/.test(t)) return t.replace(/\.$/, "?");
-    return `How are you addressing ${t.toLowerCase()}?`;
-  };
-
-  const dqSet = [];
-  for (const b of blockers) {
-    const q = toQuestion(b);
-    if (q) dqSet.push(q);
-  }
-  for (const n of needs) {
-    const q = toQuestion(n);
-    if (q) dqSet.push(q);
-  }
-
-  // Objection cards ONLY where we have evidence claim/URL
-  const catalog = Array.isArray(evidenceBundle?.catalog) ? evidenceBundle.catalog : [];
-  const objections = [];
-  for (let i = 0; i < catalog.length; i++) {
-    const e = catalog[i];
-    const claim = e.claim_id || e.url || "";
-    if (!claim) continue;
-    const title = (e.title || "").toString();
-    // Map a nearby blocker/need to the objection if possible; else skip (no placeholders)
-    const topic = (title || "").toLowerCase();
-    const match = blockers.find(b => topic.includes(String(b).toLowerCase().split(" ")[0] || "")) ||
-      needs.find(n => topic.includes(String(n).toLowerCase().split(" ")[0] || ""));
-    if (!match) continue;
-    objections.push({
-      blocker: match,
-      reframe_with_claimid: claim,
-      proof: claim,
-      risk_reversal: "" // if you do not have a concrete, evidenced risk reversal, leave empty (no placeholder)
-    });
-    if (objections.length >= 5) break;
-  }
-
-  // Proof pack outline: ONLY include items when relevant signals exist—no generic placeholders
-  const proof_pack_outline = [];
-  if (catalog.length) proof_pack_outline.push("Customer reference summaries");
-  if (usps.length) proof_pack_outline.push("Service/architecture overview aligned to USPs");
-  if (dqSet.length) proof_pack_outline.push("Discovery question set and notes");
-
-  // Handoff rules: emit only if we have a specific campaign outcome stated
-  const handoff_rules = s.specific_outcome
-    ? `Sales to run pilot scoping and confirm: ${s.specific_outcome}`
-    : "";
-
-  return {
-    discovery_questions: dqSet,
-    objection_cards: objections,
-    proof_pack_outline,
-    handoff_rules
-  };
-}
-
 // -------- Exec Summary helpers (writer-only; no schema changes) --------
-
-// A) Tone polish for exec summary lines (remove internal project wording)
+// A) Tone polish for exec summary lines
 function polishExecSummaryLines(lines) {
   if (!Array.isArray(lines)) return lines;
   const repl = [
@@ -593,7 +459,7 @@ function buildSectionSystem(finalKey, persona) {
       "Deliver a persuasive narrative in exactly five short paragraphs (no bullets):",
       "1) Market environment — key trends; exact addressable cohort size from CSV; buyer landscape (current investments, blockers, spend cues, and needs from a supplier).",
       "2) Strategic rationale — why the supplier should implement this campaign now, explicitly connecting the market environment to the strategy.",
-      "3) How to win — use Geoffrey Moore’s value proposition (clean sentence) and reasoned SWOT plus brief, evidenced competitor commentary (use ONLY supplied competitors).",
+      "3) How to win — use Geoffrey Moore’s value proposition and reasoned SWOT plus brief, evidenced competitor commentary (use ONLY supplied competitors).",
       "4) What success looks like — quantified campaign outcome (ranges ok) and time frame, grounded in evidence and supplier capability.",
       "5) Next steps — concrete actions to begin.",
       "Use ONLY these data sources: CSV canonical (cohort size, signals), evidence.json / evidence_log.json (with URLs or short source tags), industry packs, company profile pack, and explicit input notes.",
@@ -640,16 +506,79 @@ function buildSectionSystem(finalKey, persona) {
   }
 
   if (finalKey === "sales_enablement") {
-    return [
-      (persona ? `PERSONA\n${persona}\n\n` : "") + "You are a senior UK B2B sales enablement lead.",
-      "Produce a practical pack for salespeople that they can use immediately.",
-      "Include: campaign rationale, campaign strategy & objective, target prospect overview (why these companies), services included and why, competitor landscape; a master sales pitch; and discovery questions each with a brief explanation of why it matters.",
-      "Ground content in provided evidence and CSV signals; no fabrication.",
-      "",
-      `Generate STRICT JSON only for "${finalKey}" and match the target shapes.`,
-      "Return JSON only; no markdown."
-    ].join("\n");
+    return `You are a senior UK B2B go-to-market consultant.
+Write a concise, persuasive sales enablement “Battle Card” grounded ONLY in the supplied CSV signals, evidence claims (cite claim_ids or short [Tag] where applicable), outline inputs, and allowed competitors.
+Do NOT fabricate facts, metrics, or competitor names. If a specific proof element is missing, write "TBD" rather than inventing it.
+Use plain UK business English and keep every section decision-oriented.
+
+Emit STRICT JSON:
+{
+  "sales_enablement": {
+    "overview_and_rationale": {
+      "purpose": "<one sentence>",
+      "market_driver": "<one or two sentences tying cohort and blockers/needs to why this matters now (cite claim_ids or [Tag])>",
+      "campaign_focus": "<one sentence explaining who/what we are targeting and why (cohort/focus)>"
+    },
+    "buyer_value": [
+      { "outcome": "<buyer outcome>", "why_it_matters": "<commercial reason>" }
+    ],
+    "discovery_questions": [
+      { "question": "<text>", "why_it_matters": "<diagnostic reason linked to blockers/needs/proof>" }
+    ],
+    "competitive_positioning": {
+      "allowed_competitors_only": true,
+      "how_we_win": "<short paragraph: differentiation vs allowed competitors only; if none supplied, write 'TBD'>"
+    },
+    "master_sales_pitch": {
+      "opening": "<buyer-centred opener>",
+      "problem": "<in buyer terms>",
+      "value": "<our value with proof cues>",
+      "example": "<concise customer example or 'TBD'>",
+      "call_to_action": "<clear next step>"
+    }
   }
+}`.trim();
+  }
+}
+
+if (finalKey === "messaging_matrix") {
+  return `You are a senior UK B2B strategist.
+Using the supplied CSV signals, evidence claims, outline, and campaign strategy, write a Go-to-Market Messaging Matrix for this supplier’s campaign.
+Use the data as context only; do not hard-code example names.
+If any proof or metrics are missing, write "TBD" rather than inventing.
+
+Emit STRICT JSON:
+{
+  "messaging_matrix": {
+    "campaign_overview_and_rationale": {
+      "objective": "<one paragraph: commercial goal and why now>",
+      "strategic_rationale": "<one paragraph: market facts, blockers, or evidence claims (cite claim_ids or [Tag])>"
+    },
+    "target_market_actions": {
+      "marketing": ["<bullet points for marketing team actions>"],
+      "sales": ["<bullet points for sales team actions>"]
+    },
+    "product_proposition_and_positioning": {
+      "proposition": "<short one-line proposition>",
+      "positioning": "<paragraph: differentiation and proof cues>",
+      "proof_points": ["<short, evidenced items>"]
+    },
+    "marketing_and_sales_enablement_required": [
+      { "area": "<area>", "deliverable": "<what to create>", "purpose": "<why it matters>" }
+    ],
+    "pipeline_model": {
+      "cohort_basis": "<summary sentence referencing campaign cohort size from CSV>",
+      "stages": [
+        { "stage": "MQL", "conversion_rate": "<percent>", "derived_volume": "<number>", "description": "<short explanation>" },
+        { "stage": "SAL", "conversion_rate": "<percent>", "derived_volume": "<number>", "description": "<short explanation>" },
+        { "stage": "SQL", "conversion_rate": "<percent>", "derived_volume": "<number>", "description": "<short explanation>" },
+        { "stage": "Deal", "conversion_rate": "<percent>", "derived_volume": "<number>", "description": "<short explanation>" }
+      ],
+      "pipeline_yield": "<one-sentence summary of total funnel yield>"
+    },
+    "summary_call_to_action": "<short paragraph directing next steps>"
+  }
+}`.trim();
 }
 
 function targetsFor(finalKey) {
@@ -717,6 +646,36 @@ function targetsFor(finalKey) {
   }
 }`.trim();
   }
+  if (finalKey === "messaging_matrix") {
+    return `{
+  "messaging_matrix": {
+    "campaign_overview_and_rationale": {
+      "objective": "<string>",
+      "strategic_rationale": "<string>"
+    },
+    "target_market_actions": {
+      "marketing": ["<string>"],
+      "sales": ["<string>"]
+    },
+    "product_proposition_and_positioning": {
+      "proposition": "<string>",
+      "positioning": "<string>",
+      "proof_points": ["<string>"]
+    },
+    "marketing_and_sales_enablement_required": [
+      { "area": "<string>", "deliverable": "<string>", "purpose": "<string>" }
+    ],
+    "pipeline_model": {
+      "cohort_basis": "<string>",
+      "stages": [
+        { "stage": "<string>", "conversion_rate": "<string>", "derived_volume": "<string>", "description": "<string>" }
+      ],
+      "pipeline_yield": "<string>"
+    },
+    "summary_call_to_action": "<string>"
+  }
+}`.trim();
+  }
   if (finalKey === "sales_enablement") {
     return `{
   "sales_enablement": {
@@ -744,11 +703,13 @@ function targetsFor(finalKey) {
   return `{"${finalKey}": {}}`;
 }
 
-function buildSectionUser(finalKey, { outline, evidenceBundle, csvCanon }) {
+function buildSectionUser(finalKey, { outline, evidenceBundle, csvCanon, allowedCompetitors }) {
   const ev = safeForPrompt(evidenceBundle?.catalog || []);
   const csv = safeForPrompt(csvCanon || {});
   const prod = safeForPrompt(evidenceBundle?.productNames || []);
-  const competitorsArr = (outline?.input_notes?.competitors || outline?.input_notes?.relevant_competitors || []);
+  const competitorsArr = (Array.isArray(allowedCompetitors) && allowedCompetitors.length)
+    ? allowedCompetitors
+    : (outline?.input_notes?.competitors || outline?.input_notes?.relevant_competitors || []);
   const competitors = safeForPrompt(competitorsArr.slice(0, 8));
   const services = safeForPrompt(outline?.input_notes?.supplier_usps || []);
   const objective = safeForPrompt(outline?.input_notes?.campaign_requirement || "");
@@ -758,71 +719,47 @@ function buildSectionUser(finalKey, { outline, evidenceBundle, csvCanon }) {
   if (finalKey === "executive_summary") {
     const supplier = (outline?.input_notes?.supplier_company || outline?.input_notes?.prospect_company || "").trim();
     const outlineNotes = safeForPrompt(outline?.sections?.exec || {});
-    return `
-Context:
-- Supplier: ${supplier || "unknown"}
-- Evidence catalog ARRAY (use claim_ids): ${ev}
-- CSV signals: ${csv}
-- Addressable market (row count): ${addressable_market ?? "unknown"}
-- Campaign objective: ${objective}
-- Persona: ${persona}
-- Outline fragment: ${outlineNotes}
-
-Instructions:
-- Write a persuasive Executive Summary in exactly five short paragraphs (no bullets):
-  1) Market environment — key trends; exact addressable cohort size from CSV; buyer landscape (investments, blockers, spend cues, needs from supplier).
-  2) Strategic rationale — why the supplier should implement this campaign now, explicitly connecting the environment to the strategy.
-  3) How to win — Geoffrey Moore value proposition (clean paragraph) + reasoned SWOT and brief, evidenced competitor commentary (USE ONLY competitors supplied).
-  4) What success looks like — quantified campaign outcome (ranges ok) + timeframe, grounded in evidence and capability.
-  5) Next steps — concrete actions to begin.
-- Cite external facts inline via short tags or https URLs. If no competitors supplied, omit competitor commentary.
-- No lists; no placeholders.
-
-Emit STRICT JSON:
-${targetsFor("executive_summary")}
-Return JSON only.`.trim();
+    return [
+      `Cohort size (addressable_market): ${addressable_market ?? "unknown"}`,
+      `Supplier: ${supplier}`,
+      `Competitors (allowed): ${competitors}`,
+      "",
+      buildSectionSystem(finalKey, persona),
+      "",
+      "Context:",
+      `- Evidence catalog ARRAY (use claim_ids): ${ev}`,
+      `- CSV signals: ${csv}`,
+      `- Product anchors: ${prod}`,
+      `- Named competitors: ${competitors}`,
+      `- Persona: ${persona}`,
+      `- Outline fragment: ${outlineNotes}`,
+      "",
+      "Instructions:",
+      `- Produce concise, practical content aligned to "${finalKey}". Cite claim_ids for external evidence. No fabrication.`,
+      "",
+      "Emit STRICT JSON:",
+      `${targetsFor(finalKey)}`,
+      "Return JSON only."
+    ].join("\n").trim();
   }
 
-  if (finalKey === "sales_enablement") {
-    const supplier = (outline?.input_notes?.supplier_company || outline?.input_notes?.prospect_company || "").trim();
-    const outlineNotes = safeForPrompt(outline?.sections?.sales || {});
-    return `
-Context:
-- Supplier: ${supplier || "unknown"}
-- Services anchors: ${services}
-- Named competitors: ${competitors}
-- Evidence catalog ARRAY (use claim_ids): ${ev}
-- CSV signals: ${csv}
-- Product anchors: ${prod}
-- Campaign objective: ${objective}
-- Persona: ${persona}
-- Outline fragment: ${outlineNotes}
-
-Instructions:
-- Campaign summary for sales; Master sales pitch; Discovery questions (each with 'why_it_matters').
-- Cite claim_ids where you use external evidence. No fabrication.
-
-Emit STRICT JSON:
-${targetsFor("sales_enablement")}
-Return JSON only.`.trim();
-  }
-
-  const outlineNotes = safeForPrompt(outline?.sections || {});
-  return `
-Context:
-- Evidence catalog ARRAY (use claim_ids): ${ev}
-- CSV signals: ${csv}
-- Product anchors: ${prod}
-- Named competitors: ${competitors}
-- Persona: ${persona}
-- Outline fragment: ${outlineNotes}
-
-Instructions:
-- Produce concise, practical content aligned to "${finalKey}". Cite claim_ids for external evidence. No fabrication.
-
-Emit STRICT JSON:
-${targetsFor(finalKey)}
-Return JSON only.`.trim();
+  return [
+    buildSectionSystem(finalKey, persona),
+    "",
+    "Context:",
+    `- Evidence catalog ARRAY (use claim_ids): ${ev}`,
+    `- CSV signals: ${csv}`,
+    `- Product anchors: ${prod}`,
+    `- Named competitors: ${competitors}`,
+    `- Persona: ${persona}`,
+    "",
+    "Instructions:",
+    `- Produce concise, practical content aligned to "${finalKey}". Cite claim_ids for external evidence. No fabrication.`,
+    "",
+    "Emit STRICT JSON:",
+    `${targetsFor(finalKey)}`,
+    "Return JSON only."
+  ].join("\n").trim();
 }
 
 // ==== Main handler ====
@@ -891,6 +828,169 @@ module.exports = async function (context, queueItem) {
     csvCanon: csvCanon || {},
     productNames
   });
+  // Load needs map (best-effort) for deterministic Feature→Outcome→Value cues
+  let needsMap = null;
+  try {
+    needsMap = await getJson(container, `${prefix}needs_map.json`);
+  } catch { /* tolerate absence */ }
+
+  // Helper: derive focus count & label from csv + outline (prefer csv.meta.focus_count)
+  function deriveFocus({ csvCanon, outline }) {
+    try {
+      const meta = (csvCanon && csvCanon.meta) || {};
+      const signals = (csvCanon && csvCanon.signals) || {};
+      const counts = (signals && signals.counts) || {};
+      const byNeed = counts.by_need || {};
+      const byPurchase = counts.by_purchase || counts.by_intent || {};
+      const total = Number.isFinite(Number(meta.rows)) ? Number(meta.rows) : null;
+
+      const fromOutline =
+        (outline?.input_notes?.selected_product || outline?.meta?.selected_product ||
+          outline?.input_notes?.selected_offer || outline?.meta?.selected_offer || "");
+
+      const focusLabel = String(fromOutline || "").trim();
+      let focusCount = (meta && Number.isFinite(Number(meta.focus_count))) ? Number(meta.focus_count) : null;
+
+      if (focusLabel && focusCount == null) {
+        focusCount = Number.isFinite(Number(byNeed[focusLabel])) ? Number(byNeed[focusLabel])
+          : Number.isFinite(Number(byPurchase[focusLabel])) ? Number(byPurchase[focusLabel])
+            : null;
+      }
+      return { total, focusLabel, focusCount };
+    } catch {
+      return { total: null, focusLabel: "", focusCount: null };
+    }
+  }
+
+  // Helper: compose one concise market-context sentence
+  function composeMarketContext({ csvCanon, outline }) {
+    try {
+      const { total, focusLabel, focusCount } = deriveFocus({ csvCanon, outline });
+      const sig = (csvCanon && csvCanon.signals) || {};
+      const blockers = Array.isArray(sig.top_blockers) ? sig.top_blockers.filter(Boolean).slice(0, 2) : [];
+      const parts = [];
+
+      if (Number.isFinite(Number(total))) {
+        parts.push(`Within the current campaign cohort, ${total.toLocaleString()} organisations have been identified`);
+      }
+      if (focusLabel && Number.isFinite(Number(focusCount))) {
+        parts.push(`and ${focusCount.toLocaleString()} of them show explicit intent for “${focusLabel}”`);
+      }
+      if (parts.length) {
+        let s = parts.join(", ") + ".";
+        if (blockers.length) {
+          const bl = blockers.join(" and ");
+          s += ` Common blockers include ${bl}.`;
+        }
+        return s;
+      }
+      return "";
+    } catch { return ""; }
+  }
+
+  // Helper: choose one high-signal, recent “Why now” claim from evidence
+  function pickWhyNowClaim(evidenceBundle) {
+    try {
+      const cat = Array.isArray(evidenceBundle?.catalog) ? evidenceBundle.catalog : [];
+      if (!cat.length) return "";
+
+      // Simple priority: regulator/government tags first; else first claim with a short title
+      const priority = (c) => {
+        const t = (c.tag || c.source_tag || c.source || "").toString().toLowerCase();
+        if (/\b(ofcom|ons|nso|gov|regulator|government)\b/.test(t)) return 0;
+        if (/\b(ofcom|ons)\b/i.test(c?.title || "")) return 1;
+        return 2;
+      };
+
+      const sorted = cat
+        .map(c => ({
+          title: (c.title || c.summary || "").toString().trim(),
+          tag: (c.tag || c.source_tag || c.source || "").toString().trim()
+        }))
+        .filter(c => c.title)
+        .sort((a, b) => priority(a) - priority(b));
+
+      if (!sorted.length) return "";
+      const top = sorted[0];
+      const tag = top.tag ? ` [${top.tag}]` : "";
+      return `${top.title}${tag}`; // e.g., "UK 5G coverage varies ... [Ofcom]"
+    } catch { return ""; }
+  }
+
+  // Helper: one allowed-competitor sentence (cap to two names)
+  function composeCompetitorLine(allowedCompetitors) {
+    try {
+      const arr = Array.isArray(allowedCompetitors) ? allowedCompetitors.map(s => String(s || "").trim()).filter(Boolean) : [];
+      if (!arr.length) return "";
+      const shortlist = arr.slice(0, 2);
+      if (shortlist.length === 1) {
+        return `Against ${shortlist[0]}, the supplier differentiates on execution, resilience, and speed to deploy.`;
+      }
+      return `Against competitors such as ${shortlist[0]} and ${shortlist[1]}, the supplier differentiates on execution, resilience, and speed to deploy.`;
+    } catch { return ""; }
+  }
+
+  // Helper: compose up to 3 Feature→Outcome→Value sentences from CSV signals + needs map
+  function composeFOV({ csvCanon, needsMapObj, max = 3 }) {
+    try {
+      const sig = (csvCanon && csvCanon.signals) || {};
+      const needs = Array.isArray(sig.top_needs_supplier) ? sig.top_needs_supplier.filter(Boolean) : [];
+      const take = needs.slice(0, Math.max(0, Math.min(max, 3)));
+      if (!take.length) return "";
+
+      // Resolve simple mappings if present; stay generic if not.
+      const getCap = (need) => {
+        if (!needsMapObj) return "";
+        // common shapes: needsMap.items[], needsMap.map{}, needsMap.mapping{}
+        if (Array.isArray(needsMapObj.items)) {
+          const hit = needsMapObj.items.find(x => String(x?.need || "").toLowerCase() === String(need || "").toLowerCase());
+          return (hit?.capability || hit?.service || hit?.maps_to || "").toString();
+        }
+        const maps = needsMapObj.map || needsMapObj.mapping || {};
+        const key = String(need || "").toLowerCase();
+        for (const [k, v] of Object.entries(maps)) {
+          if (String(k || "").toLowerCase() === key) return (Array.isArray(v) ? v[0] : v) || "";
+        }
+        return "";
+      };
+
+      const sentences = [];
+      for (const need of take) {
+        const cap = String(getCap(need) || "").trim();
+        if (cap) {
+          sentences.push(`Deliver ${cap} to address ${need}, resulting in faster execution and lower operational risk.`);
+        } else {
+          // generic but still interprets the signal
+          sentences.push(`Solve ${need} decisively to unlock near-term operational gains and a stronger compliance posture.`);
+        }
+      }
+      // Join as one compact paragraph
+      return sentences.join(" ");
+    } catch {
+      return "";
+    }
+  }
+  // Authoritative competitor allow-list: prefer competitors.json; fallback to outline/strategy lists
+  let allowedCompetitors = [];
+  try {
+    const cj = await getJson(container, `${prefix}competitors.json`);
+    if (Array.isArray(cj?.competitors) && cj.competitors.length) {
+      allowedCompetitors = cj.competitors.map(s => String(s || "").trim()).filter(Boolean);
+    }
+  } catch { /* tolerate missing file */ }
+  if (!allowedCompetitors.length) {
+    const fromOutlineA = Array.isArray(outline?.input_notes?.competitors) ? outline.input_notes.competitors : [];
+    const fromOutlineB = Array.isArray(outline?.input_notes?.relevant_competitors) ? outline.input_notes.relevant_competitors : [];
+    const fromStrategy = Array.isArray(strategy?.meta?.relevant_competitors) ? strategy.meta.relevant_competitors : [];
+    const merged = [...fromOutlineA, ...fromOutlineB, ...fromStrategy].map(s => String(s || '').trim()).filter(Boolean);
+    const seen = new Set();
+    allowedCompetitors = merged.filter(n => {
+      const key = n.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 12);
+  }
 
   // ---- Assemble whole campaign ----
   if (op === "assemble") {
@@ -1005,6 +1105,27 @@ module.exports = async function (context, queueItem) {
       }
     } catch { /* non-fatal */ }
 
+    // Enforce competitor allow-list on final campaign payload
+    try {
+      const allowed = new Set((Array.isArray(allowedCompetitors) ? allowedCompetitors : []).map(s => String(s || '').toLowerCase()));
+      if (ordered && ordered.positioning_and_differentiation && Array.isArray(ordered.positioning_and_differentiation.competitor_set)) {
+        let filtered = ordered.positioning_and_differentiation.competitor_set
+          .map(c => (typeof c === "string" ? { vendor: c } : c))
+          .filter(c => allowed.size ? allowed.has(String(c?.vendor || "").trim().toLowerCase()) : true);
+        if (!filtered.length && allowed.size) {
+          filtered = [...allowed].slice(0, 5).map(name => ({ vendor: name }));
+        }
+        ordered.positioning_and_differentiation.competitor_set = filtered;
+      }
+    } catch { /* non-fatal */ }
+
+    // Mirror campaign_title to title (do not rename keys)
+    try {
+      if (ordered && ordered.campaign_title && (!ordered.title || ordered.title !== ordered.campaign_title)) {
+        ordered.title = ordered.campaign_title;
+      }
+    } catch { /* non-fatal */ }
+
     // Write in deterministic order
     await putJson(container, `${prefix}campaign.json`, ordered);
 
@@ -1058,7 +1179,14 @@ module.exports = async function (context, queueItem) {
 
     const persona = outline?.meta?.persona || "";
     const system = buildSectionSystem(finalKey, persona);
-    const user = buildSectionUser(finalKey, { outline, evidenceBundle, csvCanon });
+    const user = buildSectionUser(finalKey, { outline, evidenceBundle, csvCanon, allowedCompetitors });
+    // Deterministic summaries available for ES augmentation (no duplicates, pure append-only)
+    const aug = buildExecAugments({ evidenceBundle, csvCanon, outline, strategy });
+    const fovES = composeFOV({ csvCanon, needsMapObj: needsMap, max: 3 });
+    const marketContext = composeMarketContext({ csvCanon, outline });
+    const competitorLine = composeCompetitorLine(allowedCompetitors);
+    const whyNow = pickWhyNowClaim(evidenceBundle);
+
 
     const { callChatJsonObject } = await loadPromptHarness();
     const raw = await callChatJsonObject({ system, user, timeoutMs: LLM_TIMEOUT_MS });
@@ -1090,30 +1218,59 @@ module.exports = async function (context, queueItem) {
       // Optional, safe guardrails:
       // - Suppress invented competitor comparisons if none were supplied in outline.
       try {
-        const supplied = []
-          .concat(Array.isArray(outline?.input_notes?.competitors) ? outline.input_notes.competitors : [])
-          .concat(Array.isArray(outline?.input_notes?.relevant_competitors) ? outline.input_notes.relevant_competitors : [])
-          .map(x => String(x || "").toLowerCase())
-          .filter(Boolean);
-        const allowed = new Set(supplied);
-        const comparisonCue = /\b(vs|versus|against|compared|than|alternative|competitor|compare)\b/i;
-        const hasDisallowed = (s) => {
-          if (!s) return false;
-          if (!comparisonCue.test(s)) return false;
-          const tokens = s.match(/\b[A-Z][a-z][A-Za-z0-9&.\-]+\b/g) || [];
-          const whitelist = new Set(["UK", "EU", "RTO", "RPO", "SLA", "QoS", "WAN", "SD-WAN", "IoT", "AI", "CCTV", "POS", "VPN", "MPLS", "LTE", "FTTP", "SoGEA", "DSL", "IP"]);
+        const allowed = new Set((Array.isArray(allowedCompetitors) ? allowedCompetitors : []).map(s => String(s || '').toLowerCase()));
+        const whitelist = new Set(['market', 'environment', 'buyer', 'demand', 'need', 'needs', 'blockers', 'spend', 'investment']);
+        const hasDisallowed = (txt) => {
+          if (!txt) return false;
+          const tokens = String(txt).toLowerCase().split(/[^a-z0-9]+/);
+          const comparisonCue = /\b(vs|versus|against|compared|than|alternative|competitor|compare)\b/i;
+          if (!comparisonCue.test(txt)) return false;
           for (const t of tokens) {
             if (whitelist.has(t)) continue;
-            if (!allowed.has(t.toLowerCase())) return true;
+            if (allowed.has(t)) return false;
           }
-          return false;
+          return allowed.size === 0;
         };
         if (!allowed.size) {
-          // If none supplied, strip any comparison language
-          if (hasDisallowed(environment_paragraph)) environment_paragraph = environment_paragraph.replace(comparisonCue, " ").trim();
-          if (hasDisallowed(rationale_paragraph)) rationale_paragraph = rationale_paragraph.replace(comparisonCue, " ").trim();
-          if (hasDisallowed(how_to_win_paragraph)) how_to_win_paragraph = how_to_win_paragraph.replace(comparisonCue, " ").trim();
+          if (hasDisallowed(environment_paragraph)) environment_paragraph = environment_paragraph.replace(/\b(vs|versus|against|compared|than|alternative|competitor|compare)\b/gi, ' ').trim();
+          if (hasDisallowed(rationale_paragraph)) rationale_paragraph = rationale_paragraph.replace(/\b(vs|versus|against|compared|than|alternative|competitor|compare)\b/gi, ' ').trim();
+          if (hasDisallowed(how_to_win_paragraph)) how_to_win_paragraph = how_to_win_paragraph.replace(/\b(vs|versus|against|compared|than|alternative|competitor|compare)\b/gi, ' ').trim();
         }
+      } catch { /* non-fatal */ }
+
+      try {
+        // Environment: add AM + market context + blockers if not present
+        const envParts = [environment_paragraph];
+        if (aug?.amLine && !environment_paragraph.includes(aug.amLine)) envParts.push(aug.amLine);
+        if (aug?.marketContext && !environment_paragraph.includes(aug.marketContext)) envParts.push(aug.marketContext);
+        if (aug?.blockersLine && !environment_paragraph.includes(aug.blockersLine)) envParts.push(aug.blockersLine);
+        environment_paragraph = envParts.filter(Boolean).join(" ").trim();
+
+        // Rationale: add single why-now claim
+        if (whyNow && !rationale_paragraph.includes(whyNow)) {
+          rationale_paragraph = [rationale_paragraph, whyNow].filter(Boolean).join(" ").trim();
+        }
+
+        // How to win: add allowed-competitor line + F→O→V
+        if (competitorLine && !how_to_win_paragraph.includes(competitorLine)) {
+          how_to_win_paragraph = [how_to_win_paragraph, competitorLine].filter(Boolean).join(" ").trim();
+        }
+        if (Array.isArray(aug?.fov) && aug.fov.length) {
+          const fovJoined = aug.fov.join(" ");
+          if (fovJoined && !how_to_win_paragraph.includes(fovJoined)) {
+            how_to_win_paragraph = [how_to_win_paragraph, fovJoined].filter(Boolean).join(" ").trim();
+          }
+        }
+
+        // Final tone polish (no admin-y phrasing)
+        const polished = polishExecSummaryLines([
+          environment_paragraph,
+          rationale_paragraph,
+          how_to_win_paragraph,
+          success_paragraph,
+          next_steps_paragraph
+        ]);
+        [environment_paragraph, rationale_paragraph, how_to_win_paragraph, success_paragraph, next_steps_paragraph] = polished;
       } catch { /* non-fatal */ }
 
       out.executive_summary = {
