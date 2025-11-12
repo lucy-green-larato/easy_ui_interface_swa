@@ -1,4 +1,4 @@
-// /api/campaign-outline/index.js 07-11-2025 v8 (Option B – Prose-free Outline, idempotent, guarded)
+// /api/campaign-outline/index.js 12-11-2025 v9
 // Queue-triggered on %Q_CAMPAIGN_OUTLINE% (by router) to create <prefix>outline.json,
 // then posts a single {op:"afteroutline"} to %CAMPAIGN_QUEUE_NAME%.
 //

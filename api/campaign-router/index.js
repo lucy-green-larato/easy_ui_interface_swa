@@ -1,4 +1,4 @@
-// /api/campaign-router/index.js 11-11-2025 v12
+// /api/campaign-router/index.js 12-11-2025 v13
 // Trigger: queue %CAMPAIGN_QUEUE_NAME%
 // Routes:
 //   - { op:"afterevidence", runId, page, prefix }  → enqueue to %Q_CAMPAIGN_OUTLINE%

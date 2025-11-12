@@ -448,7 +448,6 @@ function synthesizeExecParagraph({ outline, csvCanon, strategy }) {
 }
 
 // ==== Prompts ====
-// Executive Summary must be ARRAY OF STRINGS so the UI can render it fully.
 function buildSectionSystem(finalKey, persona) {
   const personaPrefix = persona ? `PERSONA\n${persona}\n\n` : "";
 
@@ -539,10 +538,8 @@ Emit STRICT JSON:
   }
 }`.trim();
   }
-}
-
-if (finalKey === "messaging_matrix") {
-  return `You are a senior UK B2B strategist.
+  if (finalKey === "messaging_matrix") {
+    return `You are a senior UK B2B strategist.
 Using the supplied CSV signals, evidence claims, outline, and campaign strategy, write a Go-to-Market Messaging Matrix for this supplier’s campaign.
 Use the data as context only; do not hard-code example names.
 If any proof or metrics are missing, write "TBD" rather than inventing.
@@ -579,128 +576,10 @@ Emit STRICT JSON:
     "summary_call_to_action": "<short paragraph directing next steps>"
   }
 }`.trim();
-}
-
-function targetsFor(finalKey) {
-  if (finalKey === "executive_summary") {
-    return `{
-  "executive_summary": {
-    "environment_paragraph": "<string>",
-    "rationale_paragraph": "<string>",
-    "how_to_win_paragraph": "<string>",
-    "success_paragraph": "<string>",
-    "next_steps_paragraph": "<string>"
-  }
-}`.trim();
-  }
-  if (finalKey === "positioning_and_differentiation") {
-    return `{
-  "positioning_and_differentiation": {
-    "value_prop": "<one-line generic value if needed>",
-    "value_prop_moore": {
-      "paragraph": "<clean Moore sentence>",
-      "fields": {
-        "for": "<who>",
-        "who_need": "<need>",
-        "the": "<product/service>",
-        "is_a": "<category>",
-        "that": "<primary benefit>",
-        "unlike": "<reference competitor(s) or status quo>",
-        "provides": "<what we do differently>",
-        "proof_points": ["<short, evidenced items>"]
-      }
-    },
-    "value_prop_narrative": {
-      "lead": "<Moore sentence again (clean)>",
-      "customer_problem_paragraph": "<string>",
-      "right_to_play_paragraph": "<string>",
-      "differentiation_paragraph": "<string>",
-      "competitor_positions_paragraph": "<string or \\"TBD\\">",
-      "proof_points_paragraph": "<string>"
-    },
-    "swot": { "strengths": [], "weaknesses": [], "opportunities": [], "threats": [] },
-    "differentiators": [],
-    "competitor_set": [{ "vendor": "Acme", "reason_in_set": "…", "url": "https://…" }]
-  }
-}`.trim();
   }
 
-  if (finalKey === "campaign_strategy") {
-    return `{
-  "campaign_strategy": {
-    "strategic_rationale": "<why we should play in this prospect base; tie to CSV addressable_market and evidence (claim_ids)>",
-    "advantage": [
-      "<how we are better than competitors (specific differentiators; cite claim_ids)>"
-    ],
-    "coherent_choices": [
-      "target_segments: <which segments and why>",
-      "offer_outline: <what we will offer and why>",
-      "primary_channels: <channels to prioritise and why>",
-      "messaging_focus: <core themes anchored to evidence>",
-      "sequencing/ordering: <phasing across weeks/waves>"
-    ],
-    "feasibility": [
-      "<key teams/systems/dependencies/constraints>"
-    ],
-    "expected_outcome": "<quantified KPI & timeframe if available; otherwise 'TBD'>"
-  }
-}`.trim();
-  }
-  if (finalKey === "messaging_matrix") {
-    return `{
-  "messaging_matrix": {
-    "campaign_overview_and_rationale": {
-      "objective": "<string>",
-      "strategic_rationale": "<string>"
-    },
-    "target_market_actions": {
-      "marketing": ["<string>"],
-      "sales": ["<string>"]
-    },
-    "product_proposition_and_positioning": {
-      "proposition": "<string>",
-      "positioning": "<string>",
-      "proof_points": ["<string>"]
-    },
-    "marketing_and_sales_enablement_required": [
-      { "area": "<string>", "deliverable": "<string>", "purpose": "<string>" }
-    ],
-    "pipeline_model": {
-      "cohort_basis": "<string>",
-      "stages": [
-        { "stage": "<string>", "conversion_rate": "<string>", "derived_volume": "<string>", "description": "<string>" }
-      ],
-      "pipeline_yield": "<string>"
-    },
-    "summary_call_to_action": "<string>"
-  }
-}`.trim();
-  }
-  if (finalKey === "sales_enablement") {
-    return `{
-  "sales_enablement": {
-    "campaign_summary_for_sales": {
-      "rationale": "<why this campaign (evidence-led)>",
-      "strategy_and_objective": "<one paragraph>",
-      "target_prospect_overview": ["<why these companies/segments>"],
-      "included_services_and_why": ["<service: reason tied to buyer need/evidence>"],
-      "competitor_landscape": ["<points with claim_ids where applicable>"]
-    },
-    "master_sales_pitch": {
-      "opening": "<buyer-centric>",
-      "problem": "<in buyer terms>",
-      "value": "<our value with proof cues>",
-      "example": "<concise customer example or 'TBD'>",
-      "call_to_action": "<clear next step>"
-    },
-    "discovery_questions": [
-      { "question": "<text>", "why_it_matters": "<explanation for the rep>" }
-    ]
-  }
-}`.trim();
-  }
-
-  return `{"${finalKey}": {}}`;
+  // default fallback
+  return "";
 }
 
 function buildSectionUser(finalKey, { outline, evidenceBundle, csvCanon, allowedCompetitors }) {
