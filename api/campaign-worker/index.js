@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 11-11-2025 v32
+// /api/campaign-worker/index.js 11-11-2025 v33
 // Option B pipeline — worker fast path (draft campaign.json) with business-leader Executive Summary shaping
 // Preserves v14 structure: phased status, append-only event logger, robust loaders, and sanitizer.
 // Writes under results/<prefix> (container-relative, trailing slash). No renames of queues/ops/keys.
@@ -1555,23 +1555,43 @@ module.exports = async function (context, queueItem) {
         csvNormalized: csvNormalizedFixed,
         evidence: evidenceLogFixed
       });
-      strategy.positioning_and_differentiation = strategy.positioning_and_differentiation || {};
-      strategy.positioning_and_differentiation.value_prop_narrative = vpNarr;
-    } catch { /* non-fatal */ }
 
-    // Keep legacy one-liner populated for current UI if missing
+      if (vpNarr && typeof vpNarr === "object") {
+        // Ensure strategy carries the narrative (don't overwrite if already set)
+        strategy.positioning_and_differentiation = strategy.positioning_and_differentiation || {};
+        if (!strategy.positioning_and_differentiation.value_prop_narrative) {
+          strategy.positioning_and_differentiation.value_prop_narrative = vpNarr;
+        }
+
+        // Mirror into the draft so campaign.json exposes it to the UI
+        draft.positioning_and_differentiation = draft.positioning_and_differentiation || {};
+        if (!draft.positioning_and_differentiation.value_prop_narrative) {
+          draft.positioning_and_differentiation.value_prop_narrative =
+            strategy.positioning_and_differentiation.value_prop_narrative;
+        }
+      }
+    } catch (e) { /* non-fatal */ }
+
+    // Keep legacy one-liner populated for current UI if missing,
+    // and mirror outline input notes + allowed competitors into strategy.
     strategy.positioning_and_differentiation = strategy.positioning_and_differentiation || {};
+
     try {
       if (outlineFixed && outlineFixed.input_notes && typeof outlineFixed.input_notes === "object") {
-        // mirror full input_notes (bounded, safe)
+        // Mirror bounded input_notes (arrays capped; strings/scalars passed through)
         strategy.input_notes = strategy.input_notes || {};
         for (const [k, v] of Object.entries(outlineFixed.input_notes)) {
           if (v == null) continue;
-          if (Array.isArray(v)) strategy.input_notes[k] = v.slice(0, 16);
-          else if (typeof v === "string") strategy.input_notes[k] = v;
-          else strategy.input_notes[k] = v; // keep simple scalars
+          if (Array.isArray(v)) {
+            strategy.input_notes[k] = v.slice(0, 16);
+          } else if (typeof v === "string") {
+            strategy.input_notes[k] = v;
+          } else {
+            strategy.input_notes[k] = v; // keep simple scalars/objects as-is
+          }
         }
-        // also mirror into meta.relevant_competitors for Writer's competitor set
+
+        // Also mirror allowed competitors into meta for downstream guards
         if (Array.isArray(outlineFixed.input_notes.relevant_competitors)) {
           strategy.meta = strategy.meta || {};
           strategy.meta.relevant_competitors = outlineFixed.input_notes.relevant_competitors
@@ -1579,10 +1599,31 @@ module.exports = async function (context, queueItem) {
             .filter(Boolean)
             .slice(0, 8);
         }
+        // If 'competitors' (non-relevant) is used in your forms, merge them too
+        if (Array.isArray(outlineFixed.input_notes.competitors)) {
+          strategy.meta = strategy.meta || {};
+          const base = Array.isArray(strategy.meta.relevant_competitors) ? strategy.meta.relevant_competitors : [];
+          const extra = outlineFixed.input_notes.competitors.map(s => String(s || "").trim()).filter(Boolean);
+          // de-dup while preserving order
+          const seen = new Set(base.map(x => x.toLowerCase()));
+          const merged = base.concat(extra.filter(x => {
+            const key = x.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          }));
+          strategy.meta.relevant_competitors = merged.slice(0, 8);
+        }
       }
-    } catch { /* no-op mirror */ }
+    } catch (e) { /* no-op mirror */ }
+
+    // Fallback-only legacy one-liner: do NOT overwrite richer narrative/Moore
     if (!strategy.positioning_and_differentiation.value_prop) {
-      strategy.positioning_and_differentiation.value_prop = _moore.paragraph;
+      const mooreOneLiner =
+        (strategy.value_proposition_moore && strategy.value_proposition_moore.paragraph) ? String(strategy.value_proposition_moore.paragraph).trim() : "";
+      if (mooreOneLiner) {
+        strategy.positioning_and_differentiation.value_prop = mooreOneLiner;
+      }
     }
 
     // -------- Strategy persist + status (scoped, fail-safe) --------
@@ -1742,6 +1783,49 @@ module.exports = async function (context, queueItem) {
         strategy,
         evidence
       });
+    } catch { /* non-fatal */ }
+
+    // Constrain Positioning.competitor_set to user-allowed names (outline/competitors.json/meta)
+    // and remove generic fallbacks if not allowed.
+    try {
+      // Load any competitors list (optional file)
+      const compJson = await (async () => {
+        try { return await getJson(container, `${prefix}competitors.json`); } catch { return null; }
+      })();
+
+      // Build the allowed-name set (case-insensitive)
+      const fromOutline =
+        (Array.isArray(outlineFixed?.input_notes?.competitors) && outlineFixed.input_notes.competitors) ||
+        (Array.isArray(outlineFixed?.input_notes?.relevant_competitors) && outlineFixed.input_notes.relevant_competitors) ||
+        [];
+      const fromMeta = Array.isArray(strategy?.meta?.relevant_competitors) ? strategy.meta.relevant_competitors : [];
+      const fromFile = Array.isArray(compJson?.competitors) ? compJson.competitors : [];
+
+      const allowedSet = new Set(
+        [...fromOutline, ...fromMeta, ...fromFile]
+          .map(s => String(s || "").trim().toLowerCase())
+          .filter(Boolean)
+      );
+
+      // Only proceed if we have any allowed names
+      if (allowedSet.size) {
+        // Normalise the draft competitor_set to vendor-name objects, then filter by allowedSet
+        draft.positioning_and_differentiation = draft.positioning_and_differentiation || {};
+        const current = Array.isArray(draft.positioning_and_differentiation.competitor_set)
+          ? draft.positioning_and_differentiation.competitor_set : [];
+
+        // Filter existing to allowed list
+        let filtered = current
+          .map(c => (typeof c === "string" ? { vendor: c } : c))
+          .filter(c => allowedSet.has(String(c?.vendor || "").trim().toLowerCase()));
+
+        // If nothing survives, synthesise a minimal set from the allowed names (vendor only)
+        if (!filtered.length) {
+          filtered = [...allowedSet].slice(0, 5).map(name => ({ vendor: name }));
+        }
+
+        draft.positioning_and_differentiation.competitor_set = filtered;
+      }
     } catch { /* non-fatal */ }
 
 
