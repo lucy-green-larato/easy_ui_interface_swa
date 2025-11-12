@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js 12-11-2025 v32 (Writer/Assembler)
+// /api/campaign-write/index.js 12-11-2025 v33 (Writer/Assembler)
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> writes sections/<finalKey>.json
 // - op: "assemble"                   -> stitches campaign.json and sends {op:"afterassemble"} to %CAMPAIGN_QUEUE_NAME%

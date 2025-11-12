@@ -5,3 +5,4 @@
 - Mordor Intelligence — UK construction market data and trends: https://www.mordorintelligence.com/industry-reports/united-kingdom-construction-market
 - Jones Lang Lasalle - Construction industry perspectives: https://www.jll.com/en-uk/insights
 - UK Connect - future of construction technology: https://www.ukconnect.com/post/the-future-of-construction-tech/
+

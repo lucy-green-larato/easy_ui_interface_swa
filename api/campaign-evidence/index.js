@@ -2269,14 +2269,72 @@ module.exports = async function (context, job) {
       }/* non-fatal; keep original order */
     }
 
-    // PATCH EV-WRITE-1: write both legacy array (evidence_log.json) and canonical bundle (evidence.json)
-    await putJson(container, `${prefix}evidence_log.json`, evidenceLog);
+    // Write evidence (evidence.json)
+    try {
+      // Ensure array form
+      const list = Array.isArray(evidenceLog) ? evidenceLog : [];
 
-    const evidenceBundle = {
-      claims: evidenceLog,
-      counts: summarizeClaims(evidenceLog)
-    };
-    await putJson(container, `${prefix}evidence.json`, evidenceBundle);
+      // Normalise & de-duplicate claims (idempotent, safe for re-runs)
+      const seen = new Set();
+      const claims = [];
+      for (const raw of list) {
+        const c = raw || {};
+
+        // Build a stable identity
+        const id = String(c.claim_id || c.id || c.url || c.title || "").trim();
+        const key = (String(c.title || "").trim() + "||" + String(c.url || "").trim()).toLowerCase();
+
+        if (id) {
+          if (seen.has(id) || (key && seen.has(key))) continue;
+          seen.add(id);
+          if (key) seen.add(key);
+        } else if (key) {
+          if (seen.has(key)) continue;
+          seen.add(key);
+        }
+
+        claims.push({
+          claim_id: id || undefined,
+          title: String(c.title || "").trim(),
+          summary: String(c.summary || c.quote || "").trim(),
+          source_type: String(c.source_type || c.source || "").trim(),
+          url: String(c.url || "").trim(),
+          tag: String(c.tag || c.source_tag || "").trim(),
+          date: c.date || c.published_at || null
+        });
+      }
+
+      // Persist canonical log (normalised)
+      await putJson(container, `${prefix}evidence_log.json`, claims);
+
+      // Persist canonical bundle with counts summary
+      const evidenceBundle = {
+        claims,
+        counts: summarizeClaims(claims)
+      };
+      await putJson(container, `${prefix}evidence.json`, evidenceBundle);
+    } catch (e) {
+      context.log.warn("[evidence] failed to write evidence bundle", String(e?.message || e));
+    }
+
+    // Hand off to router exactly once → afterevidence
+    try {
+      const st0 = (await getJson(container, `${prefix}status.json`)) || { markers: {} };
+      const already = !!st0?.markers?.afterevidenceSent;
+      if (!already) {
+        const { QueueServiceClient } = require("@azure/storage-queue");
+        const qs = QueueServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
+        const mainQ = qs.getQueueClient(process.env.CAMPAIGN_QUEUE_NAME || "campaign");
+        await mainQ.createIfNotExists();
+        await mainQ.sendMessage(JSON.stringify({ op: "afterevidence", runId, page: "campaign", prefix }));
+
+        // mark sent (idempotent)
+        st0.markers = { ...(st0.markers || {}), afterevidenceSent: true };
+        await putJson(container, `${prefix}status.json`, st0);
+      }
+    } catch (e) {
+      context.log.warn("[evidence] afterevidence enqueue failed", String(e?.message || e));
+    }
 
     // 7) Finalise phase
     try {
