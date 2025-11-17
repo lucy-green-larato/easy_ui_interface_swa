@@ -1,0 +1,45 @@
+// /api/dev/check-evidence-flow.js  (for local node, not a Function)
+const { BlobServiceClient } = require("@azure/storage-blob");
+const { getContainerClient, getJson } = require("../shared/storage");
+const { buildMarkdownPack } = require("../campaign-evidence/markdownPack");
+const { buildInsights } = require("../campaign-evidence/insights");
+const { buildBuyerLogic } = require("../campaign-evidence/buyerLogic");
+
+async function main() {
+  const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
+  const runId = process.argv[2];
+  if (!runId) {
+    console.error("Usage: node check-evidence-flow.js <runId>");
+    process.exit(1);
+  }
+  const prefix = `runs/${runId}/`;
+
+  const container = getContainerClient(RESULTS_CONTAINER);
+
+  console.log("== Inputs ==");
+  console.log("csv_normalized.json:", !!(await getJson(container, `${prefix}csv_normalized.json`).catch(() => null)));
+  console.log("needs_map.json:", !!(await getJson(container, `${prefix}needs_map.json`).catch(() => null)));
+  console.log("evidence.json:", !!(await getJson(container, `${prefix}evidence.json`).catch(() => null)));
+
+  console.log("\n== Building markdown_pack ==");
+  await buildMarkdownPack(container, prefix);
+  const mp = await getJson(container, `${prefix}evidence_v2/markdown_pack.json`);
+  console.log("markdown_pack keys:", mp && Object.keys(mp));
+
+  console.log("\n== Building insights ==");
+  await buildInsights(container, prefix);
+  const ins = await getJson(container, `${prefix}insights_v1/insights.json`);
+  console.log("insights keys:", ins && Object.keys(ins));
+
+  console.log("\n== Building buyer_logic ==");
+  await buildBuyerLogic(container, prefix);
+  const logic = await getJson(container, `${prefix}insights_v1/buyer_logic.json`);
+  console.log("buyer_logic keys:", logic && Object.keys(logic));
+
+  console.log("\nDone.");
+}
+
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});

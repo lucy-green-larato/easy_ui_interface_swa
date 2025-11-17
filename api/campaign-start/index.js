@@ -346,7 +346,13 @@ module.exports = async function (context, req) {
         prospect_website: supplier_website,
         prospect_linkedin: supplier_linkedin,
         user_usps: supplier_usps,
-        company_industry: campaign_industry
+        company_industry: campaign_industry,
+        flags: {
+          use_new_evidence: false,
+          use_new_insights: false,
+          use_new_strategy: false,
+          use_writer_assembler: false
+        }
       },
       enqueuedAt,
       correlationId,

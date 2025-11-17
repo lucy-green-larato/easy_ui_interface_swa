@@ -1,8 +1,4 @@
-// /api/campaign-worker/index.js 12-11-2025 v37
-// Option B pipeline — worker fast path (draft campaign.json) with business-leader Executive Summary shaping
-// Preserves v14 structure: phased status, append-only event logger, robust loaders, and sanitizer.
-// Writes under results/<prefix> (container-relative, trailing slash). No renames of queues/ops/keys.
-
+// /api/campaign-worker/index.js 13-11-2025 v38
 // ------------------------------- Imports -----------------------------------
 const { BlobServiceClient } = require("@azure/storage-blob");
 const path = require("path");
@@ -1850,6 +1846,26 @@ module.exports = async function (context, queueItem) {
 
     // Phase 4 — Quality Gate (placeholder)
     await setPhase(container, prefix, "strategy_ready", { completedAt: new Date().toISOString() });
+    try {
+      const statusPath = `${prefix}status.json`;
+      const st0 = (await getJson(container, statusPath)) || { markers: {} };
+      const already = !!st0?.markers?.afteroutlineSent;
+      if (!already) {
+        const { QueueServiceClient } = require("@azure/storage-queue");
+        const qs = QueueServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
+        const mainQ = qs.getQueueClient(process.env.CAMPAIGN_QUEUE_NAME || "campaign");
+        await mainQ.createIfNotExists();
+        await mainQ.sendMessage(JSON.stringify({ op: "afteroutline", runId, page: "campaign", prefix }));
+
+        // mark sent (idempotent)
+        st0.markers = Object.assign({}, st0.markers, { afteroutlineSent: true });
+        st0.history = Array.isArray(st0.history) ? st0.history : [];
+        st0.history.push({ at: new Date().toISOString(), phase: "Worker", op: "afteroutline→router" });
+        await putJson(container, statusPath, st0);
+      }
+    } catch (e) {
+      context.log && context.log.warn && context.log.warn("[worker] afteroutline enqueue failed", String(e?.message || e));
+    }
   } catch (err) {
     context.log.error("campaign-worker error", err?.message || err);
     try {
