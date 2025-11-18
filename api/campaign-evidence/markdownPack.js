@@ -1,4 +1,4 @@
-// /api/campaign-evidence/markdownPack.js 17-11-2025 v2
+// /api/campaign-evidence/markdownPack.js 18-11-2025 v3
 // Deterministic Markdown pack ingestion for campaign evidence.
 // Reads Markdown from:
 //   - packs/industry-sources/*.md
@@ -25,6 +25,8 @@
 
 const { listBlobsUnderPrefix, getText, putJson } = require("../shared/storage");
 const { sha1 } = require("../shared/utils");
+const { validateAndWarn } = require("../shared/schemaValidators");
+
 
 // --- small helpers ---
 
@@ -220,6 +222,7 @@ async function buildMarkdownPack(container, prefix) {
 
     try {
       const outPath = `${prefix}evidence_v2/markdown_pack.json`;
+      validateAndWarn("markdown_pack", bundle, context.log || console.log);
       await putJson(container, outPath, bundle);
     } catch {
       // Write failure is non-fatal for the caller; they just won't see the pack on disk.

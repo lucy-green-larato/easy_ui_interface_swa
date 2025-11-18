@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://your-domain.example/schemas/markdown_pack.json",
+  "title": "Markdown context pack (industry + supplier)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "industry_drivers": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/markdownItem" }
+    },
+    "industry_risks": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/markdownItem" }
+    },
+    "persona_pressures": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/markdownItem" }
+    },
+    "competitor_profiles": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/markdownItem" }
+    },
+    "content_pillars": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/markdownItem" }
+    },
+    "industry_stats": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/markdownItem" }
+    }
+  },
+  "required": [
+    "industry_drivers",
+    "industry_risks",
+    "persona_pressures",
+    "competitor_profiles",
+    "content_pillars",
+    "industry_stats"
+  ],
+  "definitions": {
+    "markdownItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable id derived from file+heading+bullet text."
+        },
+        "text": {
+          "type": "string",
+          "description": "Raw bullet text."
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "file": { "type": "string" },
+            "heading": { "type": ["string", "null"] },
+            "pack_type": { "type": ["string", "null"] }
+          },
+          "required": ["file"]
+        }
+      },
+      "required": ["id", "text", "source"]
+    }
+  }
+}

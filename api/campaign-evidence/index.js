@@ -1,7 +1,9 @@
-// /api/campaign-evidence/index.js — Split campaign build. 15-11-2025 — v27.0
+// /api/campaign-evidence/index.js — Split campaign build. 18-11-2025 — v28.0
 
 const { QueueClient } = require("@azure/storage-queue");
 const crypto = require("node:crypto");
+const { validateAndWarn } = require("../shared/schemaValidators");
+
 
 const {
   getBlobServiceClient,
@@ -796,7 +798,7 @@ module.exports = async function (context, job) {
         csvFocusInsight = { totalRows: 0, focusLabel: "", focusCount: null };
       }
     }
-
+    validateAndWarn("csv_normalized", csvNormalizedCanonical, context.log);
     await putJson(container, `${prefix}csv_normalized.json`, csvNormalizedCanonical);
 
     // Validated products (Observed/Declared cross-checked with CSV signals)
@@ -1490,7 +1492,7 @@ module.exports = async function (context, job) {
       // Normalise & de-duplicate claims (idempotent, safe for re-runs)
       const seen = new Set();
       const claims = [];
-            for (const raw of list) {
+      for (const raw of list) {
         const c = raw || {};
 
         // Build a stable identity
@@ -1526,6 +1528,7 @@ module.exports = async function (context, job) {
         });
       }
 
+      validateAndWarn("evidence_log", claims, context.log);
       // Persist canonical log (normalised)
       await putJson(container, `${prefix}evidence_log.json`, claims);
 
@@ -1534,6 +1537,7 @@ module.exports = async function (context, job) {
         claims,
         counts: summarizeClaims(claims)
       };
+      validateAndWarn("evidence", evidenceBundle, context.log);
       await putJson(container, `${prefix}evidence.json`, evidenceBundle);
     } catch (e) {
       context.log.warn("[evidence] failed to write evidence bundle", String(e?.message || e));

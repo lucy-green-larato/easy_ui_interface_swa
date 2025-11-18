@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://your-domain.example/schemas/evidence.json",
+  "title": "Evidence bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Optional semantic version for the evidence bundle, e.g. 'evidence-v1'."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Optional run identifier for this bundle."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Optional timestamp when this evidence bundle was generated."
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "source_type": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string",
+            "description": "Optional single tag or category label."
+          },
+          "date": {
+            "type": ["string", "null"],
+            "description": "Optional published-at or reference date."
+          }
+        },
+        "required": ["claim_id", "title", "summary", "source_type", "url"]
+      }
+    },
+    "counts": {
+      "type": "object",
+      "description": "Summary statistics from summarizeClaims(claims).",
+      "additionalProperties": true
+    }
+  },
+  "required": ["claims"]
+}

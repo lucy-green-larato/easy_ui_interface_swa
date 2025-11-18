@@ -1,4 +1,4 @@
-// /api/campaign-evidence/insights.js 15-11-2025 v2
+// /api/campaign-evidence/insights.js 18-11-2025 v3
 // Deterministic Insight Engine for campaign runs.
 //
 // Consumes (all best-effort; missing files are tolerated):
@@ -33,6 +33,8 @@
 
 const { getJson, putJson } = require("../shared/storage");
 const seenMap = new WeakMap();
+const { validateAndWarn } = require("../shared/schemaValidators");
+
 
 function safeArray(v) {
   return Array.isArray(v) ? v : [];
@@ -201,7 +203,8 @@ async function buildInsights(container, prefix) {
   }
 
   const nmItems = safeArray(needsMap.items);
-  for (const n of nmItems) {
+
+  nmItems.forEach((n, idx) => {
     const rawNeed =
       (typeof n?.need === "string" && n.need.trim())
         ? n.need
@@ -209,25 +212,29 @@ async function buildInsights(container, prefix) {
           ? n.label
           : "");
     const need = rawNeed.trim();
-    if (!need) continue;
+    if (!need) return;
 
     pushUnique(insights.buyer_pressures, {
       kind: "need_from_map",
       need,
       status: n.status || null,
       hits: Array.isArray(n.hits)
-        ? n.hits.map(h => ({ name: (typeof h?.name === "string" && h.name.trim()) || null }))
+        ? n.hits.map(h => ({
+          name: (typeof h?.name === "string" && h.name.trim()) || null
+        }))
         : [],
       source: {
         source_type: "needs_map",
         needs_index: idx,
         needs_status: n.status || null,
         needs_hits: Array.isArray(n.hits)
-          ? n.hits.map(h => ({ name: h.name || null }))
+          ? n.hits.map(h => ({
+            name: h.name || null
+          }))
           : []
       }
     });
-  }
+  });
 
   // --- 4) Demand signals (CSV purchases) ---
 
@@ -262,20 +269,21 @@ async function buildInsights(container, prefix) {
   ];
 
   for (const src of blockerSources) {
-    for (const v of src.values) {
-      if (typeof v !== "string") continue;
+    src.values.forEach((v, idx) => {
+      if (typeof v !== "string") return;
       const label = v.trim();
-      if (!label) continue;
+      if (!label) return;
+
       pushUnique(insights.adoption_barriers, {
         kind: "csv_blocker",
         label,
         source: {
-          source_type: "csv",
-          csv_field: src.origin || null,
+          source_type: "csv_signals",
+          field: src.origin,
           csv_index: idx ?? null
         }
       });
-    }
+    });
   }
 
   // --- 6) Risk landscape (markdown + regulator claims already added above) ---
@@ -306,34 +314,38 @@ async function buildInsights(container, prefix) {
     });
   }
 
-  // --- 8) Opportunity map (needs_map items directly) ---
+// --- 8) Opportunity map (needs_map items directly) ---
 
-  for (const n of nmItems) {
-    const rawNeed =
-      (typeof n?.need === "string" && n.need.trim())
-        ? n.need
-        : (typeof n?.label === "string" && n.label.trim()
-          ? n.label
-          : "");
-    const need = rawNeed.trim();
-    if (!need) continue;
+nmItems.forEach((n, idx) => {
+  const rawNeed =
+    (typeof n?.need === "string" && n.need.trim())
+      ? n.need
+      : (typeof n?.label === "string" && n.label.trim()
+        ? n.label
+        : "");
+  const need = rawNeed.trim();
+  if (!need) return;
 
-    pushUnique(insights.opportunity_map, {
-      need,
-      status: n.status || null,
-      hits: Array.isArray(n.hits)
-        ? n.hits.map(h => ({ name: (typeof h?.name === "string" && h.name.trim()) || null }))
-        : [],
-      source: {
-        source_type: "needs_map",
-        needs_index: idx,
-        needs_status: n.status || null,
-        needs_hits: Array.isArray(n.hits)
-          ? n.hits.map(h => ({ name: h.name || null }))
-          : []
-      }
-    });
-  }
+  pushUnique(insights.opportunity_map, {
+    need,
+    status: n.status || null,
+    hits: Array.isArray(n.hits)
+      ? n.hits.map(h => ({
+          name: (typeof h?.name === "string" && h.name.trim()) || null
+        }))
+      : [],
+    source: {
+      source_type: "needs_map",
+      needs_index: idx,
+      needs_status: n.status || null,
+      needs_hits: Array.isArray(n.hits)
+        ? n.hits.map(h => ({
+            name: h.name || null
+          }))
+        : []
+    }
+  });
+});
 
   // --- 9) Patterns.need_clusters (group needs by label) ---
 
@@ -478,6 +490,7 @@ async function buildInsights(container, prefix) {
 
   // --- 12) Persist insights bundle ---
 
+  validateAndWarn("insights", insights, console.log);
   await putJson(container, `${prefix}insights_v1/insights.json`, insights);
   return insights;
 }

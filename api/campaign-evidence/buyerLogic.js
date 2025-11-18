@@ -1,4 +1,4 @@
-//**** */ /api/campaign-evidence/buyerLogic.js 2025-11-14 v1 ****//
+// /api/campaign-evidence/buyerLogic.js 2025-11-18 v2
 // Builds: <prefix>insights_v1/buyer_logic.json
 // Inputs:
 //   - evidence.json
@@ -10,6 +10,8 @@
 
 const { getJson, putJson } = require("../shared/storage");
 const { tokenize } = require("../shared/products"); // already available in your shared layer
+const { validateAndWarn } = require("../shared/schemaValidators");
+
 
 // ---- shape + small helpers ----
 
@@ -351,6 +353,7 @@ async function buildBuyerLogic(container, prefix) {
 
   // 7) Persist output (idempotent; always full schema)
   const out = ensureBuyerLogicShape(buyerLogic);
+  validateAndWarn("buyer_logic", out, console.log);
   await putJson(container, `${prefix}insights_v1/buyer_logic.json`, out);
   return out;
 }

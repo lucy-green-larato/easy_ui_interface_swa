@@ -1,0 +1,276 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://your-domain.example/schemas/insights.json",
+  "title": "Insights v1 (non-narrative buckets)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "market_environment": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/marketEnvironmentItem" }
+    },
+    "buyer_pressures": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/buyerPressureItem" }
+    },
+    "demand_signals": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/demandSignalItem" }
+    },
+    "adoption_barriers": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/adoptionBarrierItem" }
+    },
+    "risk_landscape": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/riskItem" }
+    },
+    "timing_drivers": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/timingDriverItem" }
+    },
+    "opportunity_map": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/opportunityItem" }
+    },
+    "patterns": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "need_clusters": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/needClusterItem" }
+        },
+        "blocker_clusters": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/blockerClusterItem" }
+        },
+        "signal_themes": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/signalThemeItem" }
+        }
+      },
+      "required": ["need_clusters", "blocker_clusters", "signal_themes"]
+    }
+  },
+  "required": [
+    "market_environment",
+    "buyer_pressures",
+    "demand_signals",
+    "adoption_barriers",
+    "risk_landscape",
+    "timing_drivers",
+    "opportunity_map",
+    "patterns"
+  ],
+  "definitions": {
+    "marketEnvironmentItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string" },
+        "text": { "type": "string" },
+        "claim_id": { "type": ["string", "null"] },
+        "source_type": { "type": ["string", "null"] },
+        "url": { "type": ["string", "null"] },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source_type": { "type": ["string", "null"] },
+            "markdown_id": { "type": ["string", "null"] },
+            "markdown_file": { "type": ["string", "null"] },
+            "markdown_heading": { "type": ["string", "null"] },
+            "markdown_origin": { "type": ["string", "null"] }
+          },
+          "required": []
+        },
+        "from_markdown": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": ["text"]
+    },
+    "buyerPressureItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string" },
+        "text": { "type": "string" },
+        "need": { "type": "string" },
+        "status": { "type": ["string", "null"] },
+        "hits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": ["string", "null"] }
+            },
+            "required": []
+          }
+        },
+        "from_markdown": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": []
+    },
+    "demandSignalItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string" },
+        "label": { "type": "string" },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "field": { "type": ["string", "null"] }
+          },
+          "required": []
+        }
+      },
+      "required": ["label"]
+    },
+    "adoptionBarrierItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string" },
+        "label": { "type": "string" },
+        "source": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": ["label"]
+    },
+    "riskItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string" },
+        "text": { "type": "string" },
+        "claim_id": { "type": ["string", "null"] },
+        "source_type": { "type": ["string", "null"] },
+        "url": { "type": ["string", "null"] },
+        "from_markdown": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": ["text"]
+    },
+    "timingDriverItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string" },
+        "text": { "type": "string" },
+        "from_markdown": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": ["text"]
+    },
+    "opportunityItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "need": { "type": "string" },
+        "status": { "type": ["string", "null"] },
+        "hits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": ["string", "null"] }
+            },
+            "required": []
+          }
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": ["need"]
+    },
+    "needClusterItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "count": { "type": "integer" },
+        "statuses": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": ["label", "count"]
+    },
+    "blockerClusterItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "count": { "type": "integer" },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "field": { "type": ["string", "null"] }
+            },
+            "required": []
+          }
+        }
+      },
+      "required": ["label", "count"]
+    },
+    "signalThemeItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "count": { "type": "integer" },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "field": { "type": ["string", "null"] }
+            },
+            "required": []
+          }
+        }
+      },
+      "required": ["label", "count"]
+    }
+  }
+}

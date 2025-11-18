@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://your-domain.example/schemas/csv_normalized.json",
+  "title": "Normalised cohort signals from CSV",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "selected_industry": {
+      "type": ["string", "null"]
+    },
+    "industry_mode": {
+      "type": "string",
+      "description": "How industry was resolved: e.g. 'specific' or 'agnostic'."
+    },
+    "signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "spend_band": {
+          "type": ["string", "null"]
+        },
+        "top_blockers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "top_needs_supplier": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "top_purchases": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["top_blockers", "top_needs_supplier", "top_purchases"]
+    },
+    "global_signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "spend_band": {
+          "type": ["string", "null"]
+        },
+        "top_blockers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "top_needs_supplier": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "top_purchases": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["top_blockers", "top_needs_supplier", "top_purchases"]
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source": {
+          "type": ["string", "null"],
+          "description": "CSV filename or 'inline'."
+        },
+        "csv_has_multiple_sectors": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string",
+          "description": "Optional error marker, e.g. 'parse_or_normalize_failed'."
+        }
+      },
+      "required": ["rows", "source", "csv_has_multiple_sectors"]
+    }
+  },
+  "required": ["selected_industry", "industry_mode", "signals", "global_signals", "meta"]
+}

@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://your-domain.example/schemas/buyer_logic.json",
+  "title": "Buyer logic v1 (global buckets)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "problems": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/logicItem" }
+    },
+    "root_causes": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/logicItem" }
+    },
+    "operational_impacts": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/logicItem" }
+    },
+    "commercial_impacts": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/logicItem" }
+    },
+    "emotional_drivers": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/logicItem" }
+    },
+    "urgency_factors": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/logicItem" }
+    }
+  },
+  "required": [
+    "problems",
+    "root_causes",
+    "operational_impacts",
+    "commercial_impacts",
+    "emotional_drivers",
+    "urgency_factors"
+  ],
+  "definitions": {
+    "logicItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Source type, e.g. 'csv_need', 'need_map', 'persona_pressure'."
+        },
+        "label": {
+          "type": "string",
+          "description": "Canonicalised text of the need/blocker/impact."
+        },
+        "origin": {
+          "type": "object",
+          "description": "Source metadata (csv_signals, needs_map, markdown_pack, insights, evidence).",
+          "additionalProperties": true
+        }
+      },
+      "required": ["type", "label", "origin"]
+    }
+  }
+}

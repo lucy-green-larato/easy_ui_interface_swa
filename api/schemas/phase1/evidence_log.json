@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://your-domain.example/schemas/evidence_log.json",
+  "title": "Evidence log (normalised claims list)",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "claim_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "title": {
+        "type": "string"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "quote": {
+        "type": "string"
+      },
+      "source_type": {
+        "type": "string"
+      },
+      "url": {
+        "type": "string"
+      },
+      "tag": {
+        "type": "string"
+      },
+      "date": {
+        "type": ["string", "null"]
+      }
+    },
+    "required": ["claim_id", "title", "summary", "source_type", "url"]
+  }
+}
