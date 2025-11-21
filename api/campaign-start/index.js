@@ -1,4 +1,4 @@
-// /api/campaign-start/index.js 01-11-2025 v16
+// /api/campaign-start/index.js 21-11-2025 v17
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign-start → writes status/input, enqueues kickoff to main queue + full job to evidence queue.
 
@@ -157,7 +157,7 @@ async function normalizeCsvAndPersist(containerClient, prefix, input) {
 
 // Queue helpers
 async function enqueue(queueClient, msgObj) {
-  await queueClient.sendMessage(JSON.stringify(msgObj)); // SDK base64-encodes for you
+  return queueClient.sendMessage(JSON.stringify(msgObj)); // SDK base64-encodes for you
 }
 function safeStringify(obj) { try { return JSON.stringify(obj); } catch { return "{}"; } }
 function byteLen(s) { return Buffer.byteLength(s, "utf8"); }
@@ -479,8 +479,10 @@ module.exports = async function (context, req) {
     }
 
     // ---- Enqueue once to main + evidence ----
-    const r1 = await enqueue(qMainClient, JSON.parse(payload));
-    const r2 = await enqueue(qEvidenceClient, JSON.parse(payload));
+    const parsed = JSON.parse(payload);
+    const r1 = await enqueue(qMain, parsed);
+    const r2 = await enqueue(qEvidence, parsed);
+
 
     context.log({
       event: "campaign_start_enqueued",
