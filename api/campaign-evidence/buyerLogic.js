@@ -1,4 +1,4 @@
-// /api/campaign-evidence/buyerLogic.js 2025-11-18 v2
+// /api/campaign-evidence/buyerLogic.js 2025-11-21 v3
 // Builds: <prefix>insights_v1/buyer_logic.json
 // Inputs:
 //   - evidence.json
@@ -7,6 +7,12 @@
 //   - evidence_v2/markdown_pack.json
 //   - insights_v1/insights.json
 // Output: structured buyer_logic with no narrative or hallucination.
+// Phase 1: buildBuyerLogic
+// Deterministic classifier.
+// - No model calls
+// - No narrative generation
+// - Only classifies existing evidence, CSV signals and markdown pack content
+// - Output feeds strategy_v2 but does not contain strategy
 
 const { getJson, putJson } = require("../shared/storage");
 const { tokenize } = require("../shared/products"); // already available in your shared layer
@@ -92,13 +98,6 @@ function makeBucketPushers(buyerLogic) {
     addUrgency: (type, label, origin) =>
       push("urgency_factors", type, label, origin)
   };
-}
-
-function textTokens(text) {
-  return tokenize ? tokenize(text) : String(text || "")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
 }
 
 // ---- main builder ----

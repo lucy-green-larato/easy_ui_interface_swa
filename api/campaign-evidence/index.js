@@ -1,4 +1,13 @@
-// /api/campaign-evidence/index.js — Split campaign build. 18-11-2025 — v28.0
+// /api/campaign-evidence/index.js 21-11-2025 — v29.0
+// Phase 1 canonical outputs:
+// - csv_normalized.json
+// - needs_map.json
+// - evidence.json
+// - evidence_log.json
+// - evidence_v2/markdown_pack.json
+// - products_meta.json
+// - buyer_logic.json
+// - insights.json
 
 const { QueueClient } = require("@azure/storage-queue");
 const crypto = require("node:crypto");
@@ -6,13 +15,11 @@ const { validateAndWarn } = require("../shared/schemaValidators");
 
 
 const {
-  getBlobServiceClient,
   getContainerClient,
   getText,
   putText,
   getJson,
   putJson,
-  listBlobsUnderPrefix,
   listCsvUnderPrefix,
   RESULTS_CONTAINER
 } = require("../shared/storage");
@@ -88,11 +95,6 @@ let MAX_EVIDENCE_ITEMS = parseInt(process.env.MAX_EVIDENCE_ITEMS || "24", 10);
 if (!Number.isFinite(MAX_EVIDENCE_ITEMS) || MAX_EVIDENCE_ITEMS <= 0) MAX_EVIDENCE_ITEMS = 24;
 if (MAX_EVIDENCE_ITEMS > 128) MAX_EVIDENCE_ITEMS = 128;
 // --- CSV holders for later evidence composition ---
-let csvFocusInsight = {       // computed later from rows + input focus
-  totalRows: 0,
-  focusLabel: "",
-  focusCount: null
-};
 
 let _evidenceLib;
 
@@ -534,7 +536,7 @@ module.exports = async function (context, job) {
       }
 
       const declaredList = Array.isArray(productsMeta.declared) ? productsMeta.declared : [];
-      const observedList = Array.isArray(observed) ? observed : Array.from(observed);
+      const observedList = Array.from(observed);
       const PRODUCT_CANDIDATES = [...new Set(
         [...declaredList, ...observedList].map(x => String(x).trim()).filter(Boolean)
       )];
@@ -1016,15 +1018,6 @@ module.exports = async function (context, job) {
 
       // Merge projected industry sources too
       packEvidence = [...packEvidence, ...packIndustrySources];
-      // Prioritise industry/regulator sources when an industry is selected
-      const selInd = String(
-        csvNormalizedCanonical?.selected_industry ||
-        input?.selected_industry ||
-        input?.campaign_industry ||
-        ""
-      ).toLowerCase();
-
-
     } catch (packErr) {
       context.log.warn(
         "[campaign-evidence] packs/buildEvidence failed",
@@ -1281,9 +1274,7 @@ module.exports = async function (context, job) {
             url: liCompanyUrl,
             title: "LinkedIn — supplier/company posts"
           });
-          if (hook) {
-            safePushIfRoom(liHooks, hook, MAX_EVIDENCE_ITEMS);
-          }
+          if (liHooks.length < 12) liHooks.push(hook);
         }
 
         // Product/service mentions (from detected products list if any)

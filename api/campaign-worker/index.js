@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 18-11-2025 Strategy Engine v3.1 (deterministic, no LLM)
+// /api/campaign-worker/index.js 21-11-2025 Strategy Engine v4 (deterministic, no LLM)
 // Responsibility:
 //   - Read Phase 1 outputs (evidence, insights, buyer_logic, markdown_pack, csv_normalized, etc.).
 //   - Build a structured strategy_v2 object (story_spine, value_proposition, competitive_strategy,
@@ -199,26 +199,22 @@ function withEvidenceTag(text, claimIds) {
   return `${s} [${ids[0]}]`;
 }
 
-// Derive simple volume-based outcome (TAM sizing logic)
 function deriveOutcomeByTam(rowCount, routeHint) {
   const n = Number.isFinite(Number(rowCount)) ? Number(rowCount) : 0;
-  const route = (routeHint || "").toString().toLowerCase();
-  const motion =
-    route.includes("partner") || route.includes("channel")
-      ? "partner-led and co-marketed opportunities"
-      : "direct sales-qualified opportunities";
 
-  if (!n || n <= 0) {
-    return `Success means creating a small but well-qualified initial wave of ${motion} from the first campaign cycle, proving that the strategy works on live customers.`;
-  }
+  let bucket = "none";
+  if (n > 0 && n < 50) bucket = "very_small";
+  else if (n >= 50 && n < 400) bucket = "small_mid";
+  else if (n >= 400) bucket = "mid_large";
 
-  if (n < 50) {
-    return `Success means creating 4–6 well-qualified ${motion} from a named list of about ${n} organisations, with clear evidence that the approach can scale.`;
-  }
-  if (n < 400) {
-    return `Success means creating 6–10 well-qualified ${motion} from a named list of about ${n} organisations, with a repeatable pattern that can be extended to adjacent segments.`;
-  }
-  return `Success means creating 10–15 well-qualified ${motion} from a named list of about ${n} organisations, with a clear view of how to scale into the wider addressable market.`;
+  const raw = (routeHint || "").toString().toLowerCase();
+  let route = "unspecified";
+  if (raw.includes("partner") || raw.includes("channel")) route = "partner";
+  else if (raw.includes("direct") || raw.includes("field")) route = "direct";
+  else if (raw) route = "mixed";
+
+  // Deterministic, non-narrative signal string for the writer to interpret
+  return `TAM_BUCKET=${bucket}; COHORT_SIZE=${n}; ROUTE_MODEL=${route}`;
 }
 
 // ---------------------- Strategy builders ---------------------- //
@@ -280,13 +276,6 @@ function buildStorySpine({
     cfaBullets.push(withEvidenceTag(ci.label, ids));
   });
 
-  // Optional summarising line (neutral and conditional)
-  if (cfaBullets.length) {
-    const longCycle =
-      "If these issues are not addressed, organisations are likely to experience continuing operational risk, delays and avoidable cost.";
-    cfaBullets.push(longCycle);
-  }
-
   const case_for_action = uniqNonEmpty(cfaBullets).slice(0, 6);
 
   // how_we_win: supplier_capability + differentiator + content pillars
@@ -327,13 +316,21 @@ function buildStorySpine({
 
   const success = uniqNonEmpty(successBullets).slice(0, 4);
 
-  // next_steps: generic but structured execution steps (sector-agnostic)
+   // next_steps: meta signals derived from inputs & other spine parts
   const next_steps = uniqNonEmpty([
-    "Lock the target account list, chosen routes to market and campaign objectives with the leadership team.",
-    "Align sales, marketing and partners on the positioning, value proof, qualification criteria and follow-up process.",
-    "Prepare core enablement assets (narrative, talk-tracks, email/LinkedIn copy and discovery questions) tailored to the target personas.",
-    "Start a limited first-wave launch, measure early results and refine the strategy before scaling into the full addressable market."
-  ]);
+    rowCount
+      ? `NEXT_STEP:target_cohort_size=${rowCount}`
+      : "",
+    environment.length
+      ? `NEXT_STEP:align_to_environment_signals=${environment.length}`
+      : "",
+    case_for_action.length
+      ? `NEXT_STEP:prioritise_case_for_action_top=${Math.min(case_for_action.length, 3)}`
+      : "",
+    how_we_win.length
+      ? `NEXT_STEP:validate_how_we_win_points=${Math.min(how_we_win.length, 3)}`
+      : ""
+  ]).slice(0, 4);
 
   return {
     environment,
@@ -355,37 +352,37 @@ function buildValueProposition({
   const byTag = indexClaimsByTag(evidence);
 
   // Moore-style chain (deterministic templates)
-  const industry =
+   const industry =
     mergedInput.selected_industry ||
     mergedInput.industry ||
     safeGet(csvNormalized, "meta.industry") ||
-    "leaders in the target segment";
+    "input_cohort";
 
-  const buyers =
+   const buyers =
     mergedInput.buyer_type ||
-    "operations, IT and commercial leaders accountable for delivery, cost and risk in their segment";
+    "buyer_personas_from_persona_pack_or_input";
 
-  const topProblem =
+    const topProblem =
     safeGet(buyerLogic, "problems.0.label") ||
     safeGet(insights, "buyer_pressures.0.text") ||
-    "a combination of operational risk, technology constraints and commercial pressure that threatens delivery, margins and reputation";
+    "";
 
   const capClaim =
     (byTag.supplier_capability || [])[0] ||
     (byTag.right_to_play || [])[0] ||
     (byTag.supplier_overview || [])[0];
 
-  const ourSolutionCore = capClaim
+    const ourSolutionCore = capClaim
     ? bulletFromClaim(capClaim).replace(/\s*\[[A-Z0-9_:-]+\]\s*$/, "")
-    : "an integrated service model that combines the supplier’s evidenced capabilities to address these needs without unnecessary complexity or long-term lock-in";
+    : "";
 
   const outcomeCore =
     safeGet(buyerLogic, "commercial_impacts.0.label") ||
-    "projects and services stay on track, margins are protected and the organisation is better insulated from operational disruption";
+    "";
 
-  const unlikeCore =
+ const unlikeCore =
     safeGet(markdownPack, "competitor_profiles.0.summary") ||
-    "buyers are not forced to trade between short-term fixes and long implementation cycles with rigid commercial terms";
+    "";
 
   const moore_chain = {
     for_who: `For ${industry} ${buyers}`,
@@ -495,8 +492,7 @@ function buildCompetitiveStrategy({ evidence, markdownPack }) {
   let vulnerability_map = uniqNonEmpty(vulnBullets).slice(0, 6);
   if (!vulnerability_map.length) {
     vulnerability_map = [
-      "Vulnerability mapping is limited because specific risk or blocker signals are thin in the available evidence.",
-      "Review and extend the evidence base to identify where the proposition is weakest relative to buyer expectations and competitors."
+      "VULNERABILITY_SIGNALS=INSUFFICIENT"
     ];
   }
 
@@ -567,45 +563,35 @@ function buildGtmStrategy({ csvNormalized, mergedInput }) {
     "";
   const routeLower = routeRaw.toString().toLowerCase();
 
-  let routeImplication;
+  let routeCode = "mixed";
   if (routeLower.includes("partner") || routeLower.includes("channel")) {
-    routeImplication =
-      "The primary route-to-market is via partners and the wider channel. Campaigns must combine partner enablement, joint value propositions and coordinated outreach into named end-customer accounts.";
+    routeCode = "partner";
   } else if (routeLower.includes("direct") || routeLower.includes("field")) {
-    routeImplication =
-      "The primary route-to-market is direct. Campaigns must equip sales with clear narratives, qualification criteria and repeatable plays into named target accounts.";
-  } else {
-    routeImplication =
-      "Route-to-market is mixed. The strategy should support both direct teams and partners with consistent messaging, evidence and qualification criteria.";
+    routeCode = "direct";
   }
 
-  const route_implications = [routeImplication];
+  const route_implications = [
+    `ROUTE_MODEL=${routeCode}`
+  ];
 
   const rowCount = safeGet(csvNormalized, "meta.rows", 0);
   const successNarrative = deriveOutcomeByTam(rowCount, routeRaw);
 
   const success_target = {
     narrative: successNarrative,
-    commercial_focus:
-      "Focus on qualified opportunities and pipeline value, not just activity volume. Prioritise accounts where the risk, urgency and commercial impact are highest.",
+    commercial_focus: "",
     leading_indicators: [
-      "Number of named accounts engaged with campaign assets and discovery conversations.",
-      "Volume and quality of opportunities created against the target list.",
-      "Conversion from first meeting to qualified opportunity and from opportunity to closed-won."
+      `LEADING_INDICATOR:cohort_size=${rowCount}`,
+      `LEADING_INDICATOR:route_model=${routeCode}`
     ]
   };
 
   const pipeline_model = {
     tiers: [
-      "Tier 1: high-fit, high-pain accounts (top of the CSV) with clear project risk or urgency.",
-      "Tier 2: good-fit accounts with moderate urgency where a lower-touch, more programmatic motion is appropriate.",
-      "Tier 3: wider market and emerging opportunities that can be nurtured via digital and partner-led campaigns."
+      `PIPELINE_TIER_MODEL=3`,
+      `PIPELINE_TIER_CRITERIA=urgency_and_fit`
     ],
-    motions: [
-      "Deep, consultative engagement for Tier 1 accounts, combining senior sponsorship, technical scoping and proof.",
-      "Programmatic outbound and partner-led plays for Tier 2 accounts, aligned to the core value story.",
-      "Always-on digital demand-gen for Tier 3 accounts, capturing interest and feeding the pipeline over time."
-    ]
+    motions: []
   };
 
   return {
@@ -698,7 +684,7 @@ module.exports = async function (context, queueItem) {
   );
 
   try {
-    // Load Phase 1 artefacts (missing files are tolerated)
+    // Load Phase 1 artefacts (missing files are tolerated) outline/evidenceLog reserved for future strategy versions
     const [
       evidence,
       evidenceLog,
@@ -711,9 +697,23 @@ module.exports = async function (context, queueItem) {
     ] = await Promise.all([
       readJsonIfExists(container, `${prefix}evidence.json`),
       readJsonIfExists(container, `${prefix}evidence_log.json`),
-      readJsonIfExists(container, `${prefix}insights.json`),
-      readJsonIfExists(container, `${prefix}buyer_logic.json`),
-      readJsonIfExists(container, `${prefix}markdown_pack.json`),
+
+      // Prefer v1 folder, fallback to legacy root
+      (async () =>
+        await readJsonIfExists(container, `${prefix}insights_v1/insights.json`) ||
+        await readJsonIfExists(container, `${prefix}insights.json`)
+      )(),
+      (async () =>
+        await readJsonIfExists(container, `${prefix}insights_v1/buyer_logic.json`) ||
+        await readJsonIfExists(container, `${prefix}buyer_logic.json`)
+      )(),
+
+      // Prefer evidence_v2, fallback to legacy root
+      (async () =>
+        await readJsonIfExists(container, `${prefix}evidence_v2/markdown_pack.json`) ||
+        await readJsonIfExists(container, `${prefix}markdown_pack.json`)
+      )(),
+
       readJsonIfExists(container, `${prefix}csv_normalized.json`),
       readJsonIfExists(container, `${prefix}outline.json`),
       readJsonIfExists(container, `${prefix}input.json`)

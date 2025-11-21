@@ -1,4 +1,4 @@
-// /api/campaign-evidence/insights.js 18-11-2025 v3
+// /api/campaign-evidence/insights.js 21-11-2025 v4
 // Deterministic Insight Engine for campaign runs.
 //
 // Consumes (all best-effort; missing files are tolerated):
@@ -39,7 +39,9 @@ const { validateAndWarn } = require("../shared/schemaValidators");
 function safeArray(v) {
   return Array.isArray(v) ? v : [];
 }
-
+// normaliseMarkdownPack:
+// Encodes the assumed shape of evidence_v2/markdown_pack.json.
+// If the markdown pack schema changes, update this normaliser first.
 function normaliseMarkdownPack(raw) {
   const keys = [
     "industry_drivers",
@@ -107,7 +109,10 @@ async function readJsonSafe(container, path, fallback = null) {
     return fallback;
   }
 }
-
+// buildInsights: deterministic, non-generative Phase 1 insight engine.
+// - Only derives from evidence.json, csv_normalized.json, needs_map.json, markdown_pack.json
+// - No model calls, no narrative generation
+// - Every item must be traceable back to source artefacts
 async function buildInsights(container, prefix) {
   // 1) Load inputs (best-effort)
   const evidenceRaw = await readJsonSafe(container, `${prefix}evidence.json`, null);
@@ -138,6 +143,11 @@ async function buildInsights(container, prefix) {
         markdown_file: item.source?.file || null,
         markdown_heading: item.source?.heading || null,
         markdown_origin: item.source?.origin || null
+      },
+      // add a standard from_markdown field for future use
+      from_markdown: {
+        id: item.id || null,
+        source: item.source || null
       }
     });
   }
@@ -314,38 +324,37 @@ async function buildInsights(container, prefix) {
     });
   }
 
-// --- 8) Opportunity map (needs_map items directly) ---
+  // --- 8) Opportunity map (needs_map items directly) ---
+  nmItems.forEach((n, idx) => {
+    const rawNeed =
+      (typeof n?.need === "string" && n.need.trim())
+        ? n.need
+        : (typeof n?.label === "string" && n.label.trim()
+          ? n.label
+          : "");
+    const need = rawNeed.trim();
+    if (!need) return;
 
-nmItems.forEach((n, idx) => {
-  const rawNeed =
-    (typeof n?.need === "string" && n.need.trim())
-      ? n.need
-      : (typeof n?.label === "string" && n.label.trim()
-        ? n.label
-        : "");
-  const need = rawNeed.trim();
-  if (!need) return;
-
-  pushUnique(insights.opportunity_map, {
-    need,
-    status: n.status || null,
-    hits: Array.isArray(n.hits)
-      ? n.hits.map(h => ({
+    pushUnique(insights.opportunity_map, {
+      need,
+      status: n.status || null,
+      hits: Array.isArray(n.hits)
+        ? n.hits.map(h => ({
           name: (typeof h?.name === "string" && h.name.trim()) || null
         }))
-      : [],
-    source: {
-      source_type: "needs_map",
-      needs_index: idx,
-      needs_status: n.status || null,
-      needs_hits: Array.isArray(n.hits)
-        ? n.hits.map(h => ({
+        : [],
+      source: {
+        source_type: "needs_map",
+        needs_index: idx,
+        needs_status: n.status || null,
+        needs_hits: Array.isArray(n.hits)
+          ? n.hits.map(h => ({
             name: h.name || null
           }))
-        : []
-    }
+          : []
+      }
+    });
   });
-});
 
   // --- 9) Patterns.need_clusters (group needs by label) ---
 

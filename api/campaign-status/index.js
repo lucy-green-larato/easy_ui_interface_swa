@@ -135,7 +135,7 @@ module.exports = async function (context, req) {
     const blobService = BlobServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
     const container = blobService.getContainerClient(RESULTS_CONTAINER);
 
-    // -------- Resolve prefix (explicit > recent.json > legacy) --------
+    // -------- Resolve prefix (explicit > recent.json > legacy) Prefix must point at run folder. --------
     let resolvedPrefix = null;
 
     // 1) Explicit ?prefix=...

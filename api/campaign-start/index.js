@@ -100,7 +100,8 @@ async function writeInitialStatus(containerClient, relPrefix, status) {
   await writeJson(containerClient, `${relPrefix}status.json`, status);
 }
 
-// PATCH ST-CSV: canonical seed for csv_normalized.json (non-breaking; Evidence will overwrite later)
+
+// Canonical seed for csv_normalized.json. Evidence phase may overwrite/extend this later, but all writers should preserve this shape.
 async function normalizeCsvAndPersist(containerClient, prefix, input) {
   const csv = input?.csvSummary || {};
   const rows = Number.isFinite(Number(input?.rowCount)) ? Number(input.rowCount) : Number(csv.rowCountScoped || 0);
@@ -117,13 +118,13 @@ async function normalizeCsvAndPersist(containerClient, prefix, input) {
       source: csv?.source || (input?.csvFilename || null),
       csv_has_multiple_sectors: Boolean(csv?.csvHasMultipleSectors || csv?.hasMultipleSectors)
     },
-    // optional preview for UI only; ignored by downstream logic
     preview: {
       cohort: Array.isArray(csv.sampleRows) ? csv.sampleRows.slice(0, 5) : []
     }
   };
+
   try {
-    const sum = csvSummary && typeof csvSummary === "object" ? csvSummary : null;
+    const sum = csv && typeof csv === "object" ? csv : null;
     if (sum) {
       const takeTop = (arr, key = "value", n = 8) =>
         Array.isArray(arr) ? arr.map(x => String(x?.[key] || "").trim()).filter(Boolean).slice(0, n) : [];
@@ -145,10 +146,14 @@ async function normalizeCsvAndPersist(containerClient, prefix, input) {
         };
       }
     }
-  } catch { /* safe best-effort */ }
+  } catch {
+    // safe best-effort; leave normalized with defaults
+  }
+
   await writeJson(containerClient, `${prefix}csv_normalized.json`, normalized);
   return normalized;
 }
+
 
 // Queue helpers
 async function enqueue(queueClient, msgObj) {
@@ -474,10 +479,6 @@ module.exports = async function (context, req) {
     }
 
     // ---- Enqueue once to main + evidence ----
-    const qsClient = QueueServiceClient.fromConnectionString(STORAGE_CONN);
-    const qMainClient = qsClient.getQueueClient(QUEUE_NAME);
-    const qEvidenceClient = qsClient.getQueueClient(EVIDENCE_QUEUE);
-
     const r1 = await enqueue(qMainClient, JSON.parse(payload));
     const r2 = await enqueue(qEvidenceClient, JSON.parse(payload));
 
@@ -503,10 +504,14 @@ module.exports = async function (context, req) {
       }
     };
   } catch (e) {
-    context.log.error("campaign_start_failed", e);
+    context.log.error("campaign_start_failed", { error: String(e?.message || e), correlationId });
     context.res = {
       status: 500,
-      headers: { ...CORS, "content-type": "application/json; charset=utf-8", "x-correlation-id": getCorrelationId(req) },
+      headers: {
+        ...CORS,
+        "content-type": "application/json; charset=utf-8",
+        "x-correlation-id": correlationId,
+      },
       body: { error: "server_error", message: String(e?.message || e) },
     };
   }

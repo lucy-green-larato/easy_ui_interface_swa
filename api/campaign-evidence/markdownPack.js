@@ -21,7 +21,6 @@
 //  - Only headings + bullet lists are used.
 //  - Everything is deterministic rule-based.
 //  - Items are traceable via a stable id derived from file+heading+line.
-//  - Diagnostics are recorded in markdown_pack_diag.json so skipped content is visible.
 
 const { listBlobsUnderPrefix, getText, putJson } = require("../shared/storage");
 const { sha1 } = require("../shared/utils");
@@ -46,7 +45,8 @@ function ensurePackShape(raw) {
   }
   return out;
 }
-
+// IMPORTANT: All markdown heading styles used in packs must be mapped here.
+// Unmatched headings are ignored by design.
 function headingToBucket(title) {
   const t = String(title || "").toLowerCase();
 
@@ -222,7 +222,7 @@ async function buildMarkdownPack(container, prefix) {
 
     try {
       const outPath = `${prefix}evidence_v2/markdown_pack.json`;
-      validateAndWarn("markdown_pack", bundle, context.log || console.log);
+      validateAndWarn("markdown_pack", bundle, console.log);
       await putJson(container, outPath, bundle);
     } catch {
       // Write failure is non-fatal for the caller; they just won't see the pack on disk.
