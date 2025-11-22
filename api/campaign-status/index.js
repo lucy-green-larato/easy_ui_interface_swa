@@ -210,58 +210,99 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // Download JSON text
-    const dl = await found.download();
-    const bodyText = await streamToString(dl.readableStreamBody);
+   // Download JSON text
+const dl = await found.download();
+const bodyText = await streamToString(dl.readableStreamBody);
 
-    // Validate + parse JSON (log but avoid leaking payload)
-    let statusPayload;
-    try {
-      statusPayload = JSON.parse(bodyText);
-    } catch (e) {
-      context.log.warn("[campaign-status] status.json is not valid JSON", { runId, error: String(e?.message || e) });
-      context.res = {
-        status: 502,
-        headers: { ...CORS, "Content-Type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "bad_status_payload", message: "status.json is not valid JSON" }
-      };
-      return;
+// Validate + parse JSON (log but avoid leaking payload)
+let statusPayload;
+try {
+  statusPayload = JSON.parse(bodyText);
+} catch (e) {
+  context.log.warn("[campaign-status] status.json is not valid JSON", {
+    runId,
+    error: String(e?.message || e)
+  });
+  context.res = {
+    status: 502,
+    headers: {
+      ...CORS,
+      "Content-Type": "application/json",
+      "x-correlation-id": correlationId
+    },
+    body: {
+      error: "bad_status_payload",
+      message: "status.json is not valid JSON"
     }
+  };
+  return;
+}
 
-    // ---- Flag normalisation (no change to state) ----
-    // Expose flags on the root object, merging any existing status.flags
-    // with input.flags. We do NOT change statusPayload.state here.
-    try {
-      const topFlags = statusPayload.flags || {};
-      const inputFlags =
-        (statusPayload.input && statusPayload.input.flags) || {};
-      const flags = { ...topFlags, ...inputFlags };
+// ---- Flag normalisation + derived terminal state for strategy-only runs ----
+try {
+  // Merge flags from root + input.flags so callers have a single source
+  const topFlags =
+    statusPayload && typeof statusPayload === "object" && statusPayload.flags
+      ? statusPayload.flags
+      : {};
+  const inputFlags =
+    statusPayload &&
+    typeof statusPayload === "object" &&
+    statusPayload.input &&
+    statusPayload.input.flags
+      ? statusPayload.input.flags
+      : {};
 
-      if (Object.keys(flags).length > 0) {
-        statusPayload.flags = flags;
-      }
-    } catch (e) {
-      context.log.warn("[campaign-status] flag normalisation failed", {
-        runId,
-        error: String(e?.message || e)
+  const flags = { ...inputFlags, ...topFlags };
+
+  if (Object.keys(flags).length > 0) {
+    statusPayload.flags = flags;
+  }
+
+  // If strategy is ready and writer is disabled, treat as a completed run
+  if (
+    statusPayload.state === "strategy_ready" &&
+    flags.use_writer_assembler === false
+  ) {
+    const history = Array.isArray(statusPayload.history)
+      ? statusPayload.history
+      : [];
+
+    const last = history[history.length - 1] || null;
+    if (!last || last.state !== "Completed") {
+      history.push({
+        at: new Date().toISOString(),
+        state: "Completed",
+        note: "Strategy-only run completed (writer disabled)"
       });
     }
 
-    const responseText = JSON.stringify(statusPayload);
+    statusPayload.history = history;
+    statusPayload.state = "Completed";
+  }
+} catch (e) {
+  context.log.warn("[campaign-status] flag/terminal-state normalisation failed", {
+    runId,
+    error: String(e?.message || e)
+  });
+}
 
-    context.res = {
-      status: 200,
-      headers: {
-        ...CORS,
-        "Content-Type": "application/json",
-        "ETag": etag,
-        ...(lastModified ? { "Last-Modified": lastModified } : {}),
-        "Cache-Control": "no-cache",
-        "x-correlation-id": correlationId
-      },
-      // Return the parsed+normalised JSON, not the raw blob text
-      body: responseText
-    };
+const responseText = JSON.stringify(statusPayload);
+
+context.res = {
+  status: 200,
+  headers: {
+    ...CORS,
+    "Content-Type": "application/json",
+    "ETag": etag,
+    ...(lastModified ? { "Last-Modified": lastModified } : {}),
+    "Cache-Control": "no-cache",
+    "x-correlation-id": correlationId
+  },
+  // Return the parsed+normalised JSON, not the raw blob text
+  body: responseText
+};
+    
   } catch (err) {
     context.log.error(JSON.stringify({
       event: "campaign_status_error",
