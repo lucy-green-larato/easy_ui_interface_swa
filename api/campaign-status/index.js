@@ -1,4 +1,4 @@
-// /api/campaign-status/index.js 07-11-2025 v3 (hardened, drop-in)
+// /api/campaign-status/index.js 22-11-2025 v4
 // GET /api/campaign-status?runId=... [&prefix=containerOrRelativePrefix]
 //
 // Resolves status.json in priority order:
@@ -214,8 +214,11 @@ module.exports = async function (context, req) {
     const dl = await found.download();
     const bodyText = await streamToString(dl.readableStreamBody);
 
-    // Validate JSON (log but avoid leaking payload)
-    try { JSON.parse(bodyText); } catch (e) {
+    // Validate + parse JSON (log but avoid leaking payload)
+    let statusPayload;
+    try {
+      statusPayload = JSON.parse(bodyText);
+    } catch (e) {
       context.log.warn("[campaign-status] status.json is not valid JSON", { runId, error: String(e?.message || e) });
       context.res = {
         status: 502,
@@ -224,6 +227,40 @@ module.exports = async function (context, req) {
       };
       return;
     }
+
+    // ---- Derived terminal state for strategy-only runs ----
+    // We treat state:"strategy_ready" + use_writer_assembler:false as a completed run
+    // without mutating the underlying blob. This is a view-layer adjustment only.
+    try {
+      const topFlags = statusPayload.flags || {};
+      const inputFlags = (statusPayload.input && statusPayload.input.flags) || {};
+      const flags = { ...inputFlags, ...topFlags };
+
+      if (statusPayload.state === "strategy_ready" && flags.use_writer_assembler === false) {
+        // Normalise history
+        const history = Array.isArray(statusPayload.history) ? statusPayload.history : [];
+        const last = history[history.length - 1] || null;
+
+        if (!last || last.state !== "completed") {
+          history.push({
+            at: new Date().toISOString(),
+            state: "completed",
+            note: "Strategy-only run completed (writer disabled)"
+          });
+        }
+
+        statusPayload.history = history;
+        statusPayload.state = "completed";
+      }
+    } catch (e) {
+      // If anything goes wrong here, we fall back to the raw payload
+      context.log.warn("[campaign-status] derived state adjustment failed", {
+        runId,
+        error: String(e?.message || e)
+      });
+    }
+
+    const responseText = JSON.stringify(statusPayload);
 
     context.res = {
       status: 200,
@@ -235,7 +272,7 @@ module.exports = async function (context, req) {
         "Cache-Control": "no-cache",
         "x-correlation-id": correlationId
       },
-      body: bodyText
+      body: responseText
     };
   } catch (err) {
     context.log.error(JSON.stringify({
