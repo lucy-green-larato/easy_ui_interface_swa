@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 12-11-2025 v12
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 22-11-2025 v13
    Changes vs v5:
    - Support resuming an existing run selected in #runSelect (no CSV required)
    - Poller: tolerate a single transient status fetch error before failing
@@ -991,14 +991,20 @@ window.CampaignUI = window.CampaignUI || {};
   }
 
   async function pollToCompletion(runId, allowPoll = true) {
+    // Normalise state names so "Completed" and "completed" behave identically
+    const normState = (s) => String(s || "Unknown");
+    const stateKey = (s) => normState(s).toLowerCase();
+
     // First peek—if already completed, short-circuit
     try {
       const peek = await http("GET", API.status(runId), { timeoutMs: 12000 });
-      const stateName = peek?.state || "Unknown";
+      const stateName = normState(peek?.state);
+      const stateK = stateKey(peek?.state);
+
       UI.setStatus(stateName, stateName === "Failed" ? "err" : "run");
       UI.log(`Status: ${stateName}`);
 
-      if (stateName === "Completed") {
+      if (stateK === "completed") {
         // Short bounded retry loop for contract fetch to avoid a just-written race
         let lastErr;
         for (let k = 0; k < 4; k++) { // up to ~2.5s total
@@ -1013,6 +1019,7 @@ window.CampaignUI = window.CampaignUI || {};
         }
         throw lastErr || new Error("Contract fetch failed");
       }
+
       if (!allowPoll) throw new Error(`Run is not completed (state: ${stateName})`);
     } catch (e) {
       // If even the first status fails, let the loop try once (below)
@@ -1024,6 +1031,7 @@ window.CampaignUI = window.CampaignUI || {};
     let attempt = 0;
     let consecutiveErrors = 0;
 
+    // Normalise allowed states to lowercase for comparison
     const okDuring = new Set([
       // queue / early
       "Queued", "ValidatingInput", "PacksLoad", "ingest", "DraftCampaign",
@@ -1035,7 +1043,7 @@ window.CampaignUI = window.CampaignUI || {};
       "SectionWrites", "writer_working", "Assemble", "assembled",
       // terminal
       "Completed"
-    ]);;
+    ].map(s => s.toLowerCase()));
 
     while (true) {
       if (Date.now() - started > MAX_MS) throw new Error("Timed out waiting for completion");
@@ -1044,17 +1052,19 @@ window.CampaignUI = window.CampaignUI || {};
         const st = await http("GET", API.status(runId), { timeoutMs: 15000 });
         consecutiveErrors = 0; // success resets the error counter
 
-        const stateName = st?.state || "Unknown";
+        const stateName = normState(st?.state);
+        const stateK = stateKey(st?.state);
+
         UI.setStatus(stateName, stateName === "Failed" ? "err" : "run");
         UI.log(`Status: ${stateName}`);
 
-        if (stateName === "Completed") {
+        if (stateK === "completed") {
           const contract = await http("GET", API.fetchContract(runId), { timeoutMs: 30000 });
           if (!contract || typeof contract !== "object") throw new Error("Empty or invalid contract JSON");
           return contract;
         }
 
-        if (stateName === "Failed" || stateName === "Unknown" || !okDuring.has(stateName)) {
+        if (stateName === "Failed" || stateName === "Unknown" || !okDuring.has(stateK)) {
           const msg = st?.error?.message || `Run ended with unexpected state: ${stateName}`;
           throw new Error(msg);
         }
