@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 22-11-2025 — v30.0
+// /api/campaign-evidence/index.js 22-11-2025 — v31.0
 // Phase 1 canonical outputs:
 // - csv_normalized.json
 // - needs_map.json
@@ -131,6 +131,35 @@ async function loadEvidenceLib() {
       `evidence lib load failed: ${firstError?.message || firstError} | ${e2?.message || e2}`
     );
   }
+}
+// Local helper: use schema validation as a warning, never as a hard stop
+async function safeValidate(label, schemaKey, payload, log, statusUpdater) {
+  try {
+    validateAndWarn(schemaKey, payload, log);
+  } catch (err) {
+    const msg = String(err?.message || err);
+    log?.warn?.(
+      `[campaign-evidence] ${label} validation failed; writing anyway`,
+      msg
+    );
+    // Optionally mark this in status.json so the router / UI can surface it
+    if (typeof statusUpdater === "function") {
+      try {
+        await statusUpdater({
+          [`${schemaKey}_validation_error`]: msg
+        });
+      } catch {
+        // status update failure is non-fatal
+      }
+    }
+  }
+}
+
+async function patchStatus(container, prefix, patch) {
+  const statusPath = `${prefix}status.json`;
+  const cur = (await getJson(container, statusPath)) || {};
+  cur.validation = { ...(cur.validation || {}), ...patch };
+  await putJson(container, statusPath, cur);
 }
 
 function supplierIdentityEvidence(company, website, artifactUrl) {
@@ -1478,19 +1507,16 @@ module.exports = async function (context, job) {
         it.claim_id = `CLM-${String(i + 1).padStart(3, "0")}`;
       });
     }
-
     // Write evidence (evidence.json)
     try {
       // Ensure array form
       const list = Array.isArray(evidenceLog) ? evidenceLog : [];
 
-      // Normalise & de-duplicate claims (idempotent, safe for re-runs)
       const seen = new Set();
       const claims = [];
       for (const raw of list) {
         const c = raw || {};
 
-        // Build a stable identity
         const id = String(c.claim_id || c.id || c.url || c.title || "").trim();
         const key = (
           String(c.title || "").trim() +
@@ -1509,7 +1535,7 @@ module.exports = async function (context, job) {
 
         const rawSummary = String(c.summary || "").trim();
         const rawQuote = String(c.quote || "").trim();
-        const summary = rawSummary || rawQuote; // preserve existing behaviour
+        const summary = rawSummary || rawQuote;
 
         claims.push({
           claim_id: id || undefined,
@@ -1523,20 +1549,38 @@ module.exports = async function (context, job) {
         });
       }
 
-      validateAndWarn("evidence_log", claims, context.log);
-      // Persist canonical log (normalised)
+      // Validate, but never allow validation to block writing
+      await safeValidate(
+        "evidence_log",
+        "evidence_log",
+        claims,
+        context.log,
+        (patch) => patchStatus(container, prefix, patch)
+      );
+
       await putJson(container, `${prefix}evidence_log.json`, claims);
 
-      // Persist canonical bundle with counts summary
       const evidenceBundle = {
         claims,
         counts: summarizeClaims(claims)
       };
-      validateAndWarn("evidence", evidenceBundle, context.log);
+
+      await safeValidate(
+        "evidence bundle",
+        "evidence",
+        evidenceBundle,
+        context.log,
+        (patch) => patchStatus(container, prefix, patch)
+      );
+
       await putJson(container, `${prefix}evidence.json`, evidenceBundle);
     } catch (e) {
-      context.log.warn("[evidence] failed to write evidence bundle", String(e?.message || e));
+      context.log.warn(
+        "[evidence] failed to write evidence bundle (unexpected error)",
+        String(e?.message || e)
+      );
     }
+
     // Build evidence_v2/markdown_pack.json, insights_v1/insights.json and buyer_logic.json
     try {
       const markdownPack = await buildMarkdownPack(container, prefix);
