@@ -1,4 +1,4 @@
-// /api/campaign-status/index.js 22-11-2025 v4
+// /api/campaign-status/index.js 22-11-2025 v5
 // GET /api/campaign-status?runId=... [&prefix=containerOrRelativePrefix]
 //
 // Resolves status.json in priority order:
@@ -228,33 +228,20 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // ---- Derived terminal state for strategy-only runs ----
-    // We treat state:"strategy_ready" + use_writer_assembler:false as a completed run
-    // without mutating the underlying blob. This is a view-layer adjustment only.
+    // ---- Flag normalisation (no change to state) ----
+    // Expose flags on the root object, merging any existing status.flags
+    // with input.flags. We do NOT change statusPayload.state here.
     try {
       const topFlags = statusPayload.flags || {};
-      const inputFlags = (statusPayload.input && statusPayload.input.flags) || {};
-      const flags = { ...inputFlags, ...topFlags };
+      const inputFlags =
+        (statusPayload.input && statusPayload.input.flags) || {};
+      const flags = { ...topFlags, ...inputFlags };
 
-      if (statusPayload.state === "strategy_ready" && flags.use_writer_assembler === false) {
-        // Normalise history
-        const history = Array.isArray(statusPayload.history) ? statusPayload.history : [];
-        const last = history[history.length - 1] || null;
-
-        if (!last || last.state !== "completed") {
-          history.push({
-            at: new Date().toISOString(),
-            state: "completed",
-            note: "Strategy-only run completed (writer disabled)"
-          });
-        }
-
-        statusPayload.history = history;
-        statusPayload.state = "completed";
+      if (Object.keys(flags).length > 0) {
+        statusPayload.flags = flags;
       }
     } catch (e) {
-      // If anything goes wrong here, we fall back to the raw payload
-      context.log.warn("[campaign-status] derived state adjustment failed", {
+      context.log.warn("[campaign-status] flag normalisation failed", {
         runId,
         error: String(e?.message || e)
       });
@@ -272,6 +259,7 @@ module.exports = async function (context, req) {
         "Cache-Control": "no-cache",
         "x-correlation-id": correlationId
       },
+      // Return the parsed+normalised JSON, not the raw blob text
       body: responseText
     };
   } catch (err) {
