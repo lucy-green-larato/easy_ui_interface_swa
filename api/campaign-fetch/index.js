@@ -1,4 +1,4 @@
-// /api/campaign-fetch/index.js 22-11-2025 v15
+// /api/campaign-fetch/index.js 22-11-2025 v16
 // GET /api/campaign-fetch?runId=<id>&file=<campaign|evidence_log|csv|status|outline|sections|section>&name=<sectionName?>
 // Optional: &prefix=<container-relative override>
 
@@ -221,7 +221,11 @@ module.exports = async function (context, req) {
       }
 
       // 4) Nothing found
-      context.res = { status: 404, headers: { ...H, "content-type": "application/json" }, body: { error: "not_found", message: "Evidence not found" } };
+      context.res = {
+        status: 200,
+        headers: { ...H, "content-type": "application/json; charset=utf-8" },
+        body: { claims: [], counts: {} }
+      };
       return;
     }
 

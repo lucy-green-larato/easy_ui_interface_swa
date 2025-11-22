@@ -1,4 +1,4 @@
-// /api/campaign-status/index.js 22-11-2025 v5
+// /api/campaign-status/index.js 22-11-2025 v6
 // GET /api/campaign-status?runId=... [&prefix=containerOrRelativePrefix]
 //
 // Resolves status.json in priority order:
