@@ -1,4 +1,4 @@
-// /api/campaign-fetch/index.js 11-11-2025 v14
+// /api/campaign-fetch/index.js 22-11-2025 v15
 // GET /api/campaign-fetch?runId=<id>&file=<campaign|evidence_log|csv|status|outline|sections|section>&name=<sectionName?>
 // Optional: &prefix=<container-relative override>
 
@@ -238,13 +238,41 @@ module.exports = async function (context, req) {
       }
       return counts;
     }
-
-    // campaign/evidence/outline may appear moments after status flips → tiny retry
+       // campaign/evidence/outline may appear moments after status flips → tiny retry
     const shouldRetry = fileKey === "campaign" || fileKey === "evidence_log" || fileKey === "outline";
     const ok = await existsWithTinyRetry(blob, shouldRetry);
+
     if (!ok) {
+      // ---- Strategy-only fallback: no campaign.json, but strategy_v2 exists ----
+      if (fileKey === "campaign") {
+        const stratBlob = container.getBlockBlobClient(
+          `${base}strategy_v2/campaign_strategy.json`
+        );
+        if (await existsWithTinyRetry(stratBlob, true)) {
+          const dl2 = await stratBlob.download();
+          const text2 = await streamToString(dl2.readableStreamBody);
+          let obj2 = null;
+          try {
+            obj2 = text2 ? JSON.parse(text2) : null;
+          } catch {
+            obj2 = null;
+          }
+          context.res = {
+            status: 200,
+            headers: {
+              ...H,
+              "content-type": "application/json; charset=utf-8"
+            },
+            // For strategy-only runs, the "contract" is just the strategy payload
+            body: obj2 || {}
+          };
+          return;
+        }
+      }
+
       context.res = {
-        status: 404, headers: { ...H, "content-type": "application/json" },
+        status: 404,
+        headers: { ...H, "content-type": "application/json" },
         body: { error: "not_found", message: "File not found" }
       };
       return;
