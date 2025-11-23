@@ -12,7 +12,18 @@
 const { QueueClient } = require("@azure/storage-queue");
 const crypto = require("node:crypto");
 const { validateAndWarn } = require("../shared/schemaValidators");
+const { nowIso } = require("../shared/utils");
 
+const {
+  makeClaimIdFactory,
+  addCitation,
+  safePushIfRoom,
+  isPlaceholderEvidence,
+  dedupeEvidence,
+  summarizeClaims,
+  classifySourceType,
+  scoreIndustryEvidence
+} = require("../shared/evidenceUtils");
 
 const {
   getContainerClient,
@@ -65,28 +76,14 @@ const {
   csvSignalsEvidence
 } = require("../shared/csvSignals");
 
-const {
-  nowIso,
-  nextClaimId,
-  addCitation,
-  safePushIfRoom,
-  isPlaceholderEvidence,
-  dedupeEvidence,
-  summarizeClaims,
-  classifySourceType,
-  mdSection,
-  bullets,
-  scoreIndustryEvidence
-} = require("../shared/evidenceUtils");
-
 const { loadPacks } = require("../shared/packloader");
 const { pathToFileURL } = require("url");
 const { updateStatus } = require("../shared/status");
 const { buildMarkdownPack } = require("./markdownPack");
 const { buildInsights } = require("./insights");
 const { buildBuyerLogic } = require("./buyerLogic");
+const nextClaimId = makeClaimIdFactory();
 
-// ---------- Config ----------
 const START_QUEUE_NAME = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const FETCH_TIMEOUT_MS = Number(process.env.HTTP_FETCH_TIMEOUT_MS || 8000);
 const MAX_SITE_PAGES = 8;                  // crawl budget (homepage + up to 7 pages)
@@ -94,7 +91,6 @@ const MAX_CASESTUDIES = 8;                 // cap case study items stored
 let MAX_EVIDENCE_ITEMS = parseInt(process.env.MAX_EVIDENCE_ITEMS || "24", 10);
 if (!Number.isFinite(MAX_EVIDENCE_ITEMS) || MAX_EVIDENCE_ITEMS <= 0) MAX_EVIDENCE_ITEMS = 24;
 if (MAX_EVIDENCE_ITEMS > 128) MAX_EVIDENCE_ITEMS = 128;
-// --- CSV holders for later evidence composition ---
 
 let _evidenceLib;
 
@@ -160,6 +156,54 @@ async function patchStatus(container, prefix, patch) {
   const cur = (await getJson(container, statusPath)) || {};
   cur.validation = { ...(cur.validation || {}), ...patch };
   await putJson(container, statusPath, cur);
+}
+
+// --- Minimal Markdown helpers: local to campaign-evidence ---
+// Extract a section of markdown starting at the first heading whose text
+// matches a regexp pattern, up to (but not including) the next heading.
+function mdSection(markdown, headingPattern) {
+  const text = String(markdown || "");
+  if (!text.trim()) return "";
+
+  const re = new RegExp(`^\\s{0,3}#{1,6}\\s+(${headingPattern})\\s*$`, "i");
+  const lines = text.split(/\r?\n/);
+
+  let inSection = false;
+  const out = [];
+
+  for (const line of lines) {
+    if (re.test(line)) {
+      inSection = true;
+      out.push(line);
+      continue;
+    }
+
+    if (inSection && /^\\s{0,3}#{1,6}\\s+/.test(line)) {
+      // next heading – section ends
+      break;
+    }
+
+    if (inSection) {
+      out.push(line);
+    }
+  }
+
+  return out.join("\n").trim();
+}
+
+// Return bullet lines (text only) from a markdown section
+function bullets(sectionText) {
+  const lines = String(sectionText || "").split(/\r?\n/);
+  const out = [];
+
+  for (let line of lines) {
+    const m = /^\s*([-*•]|\d+\.)\s+(.*)$/.exec(line);
+    if (m && m[2]) {
+      out.push(m[2].trim());
+    }
+  }
+
+  return out;
 }
 
 function supplierIdentityEvidence(company, website, artifactUrl) {
@@ -833,7 +877,14 @@ module.exports = async function (context, job) {
         csvFocusInsight = { totalRows: 0, focusLabel: "", focusCount: null };
       }
     }
-    validateAndWarn("csv_normalized", csvNormalizedCanonical, context.log);
+
+    await safeValidate(
+      "csv_normalized",
+      "csv_normalized",
+      csvNormalizedCanonical,
+      context.log,
+      (patch) => patchStatus(container, prefix, patch)
+    );
     await putJson(container, `${prefix}csv_normalized.json`, csvNormalizedCanonical);
 
     // Validated products (Observed/Declared cross-checked with CSV signals)
@@ -1150,7 +1201,8 @@ module.exports = async function (context, job) {
       prefix,
       container.url,
       csvFocusInsight,
-      industryName
+      industryName,
+      nextClaimId
     );
 
     if (csvSummaryItem) {
@@ -1160,7 +1212,7 @@ module.exports = async function (context, job) {
 
     // 6.1b CSV buyer signals (blockers/needs/purchases)
     if (evidenceLog.length < MAX_EVIDENCE_ITEMS) {
-      const _csvSignalsItem = csvSignalsEvidence(csvNormalizedCanonical, prefix, container.url);
+      const _csvSignalsItem = csvSignalsEvidence(csvNormalizedCanonical, prefix, container.url, nextClaimId);
       if (_csvSignalsItem) safePushIfRoom(evidenceLog, _csvSignalsItem, MAX_EVIDENCE_ITEMS);
     }
     // 6.1c Capability coverage summary (from needs_map.json)
