@@ -14,6 +14,7 @@ const crypto = require("node:crypto");
 const { validateAndWarn } = require("../shared/schemaValidators");
 const { nowIso } = require("../shared/utils");
 
+
 const {
   makeClaimIdFactory,
   addCitation,
@@ -24,6 +25,7 @@ const {
   classifySourceType,
   scoreIndustryEvidence
 } = require("../shared/evidenceUtils");
+const nextClaimId = makeClaimIdFactory();
 
 const {
   getContainerClient,
@@ -82,7 +84,6 @@ const { updateStatus } = require("../shared/status");
 const { buildMarkdownPack } = require("./markdownPack");
 const { buildInsights } = require("./insights");
 const { buildBuyerLogic } = require("./buyerLogic");
-const nextClaimId = makeClaimIdFactory();
 
 const START_QUEUE_NAME = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const FETCH_TIMEOUT_MS = Number(process.env.HTTP_FETCH_TIMEOUT_MS || 8000);
@@ -1202,7 +1203,7 @@ module.exports = async function (context, job) {
       container.url,
       csvFocusInsight,
       industryName,
-      nextClaimId
+      {nextClaimId}
     );
 
     if (csvSummaryItem) {
