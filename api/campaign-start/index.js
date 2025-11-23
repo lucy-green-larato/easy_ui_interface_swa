@@ -1,4 +1,4 @@
-// /api/campaign-start/index.js 21-11-2025 v17
+// /api/campaign-start/index.js 23-11-2025 v18
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign-start → writes status/input, enqueues kickoff to main queue + full job to evidence queue.
 

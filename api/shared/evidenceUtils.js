@@ -1,4 +1,4 @@
-// **** /api/shared/evidenceUtils.js 14-11-2025 v2 ****
+// /api/shared/evidenceUtils.js 23-11-2025 v3
 //
 // Responsibilities:
 //  - Claim ID generation (CLM-001 style)
@@ -20,6 +20,9 @@
  *   const nextClaimId = makeClaimIdFactory();
  *   const id = nextClaimId(); // "CLM-001"
  */
+
+const { nowIso } = require("./utils");
+
 function makeClaimIdFactory(startAt = 0) {
   let n = Number.isFinite(startAt) && startAt >= 0 ? startAt : 0;
   return function nextId() {
@@ -251,6 +254,9 @@ function scoreIndustryEvidence(pe, selectedIndustry) {
 }
 
 module.exports = {
+   // time helpers
+  nowIso, 
+
   // IDs
   makeClaimIdFactory,
 
