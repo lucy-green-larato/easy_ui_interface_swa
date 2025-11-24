@@ -39,6 +39,7 @@
     "campaign-worker",
     "campaign-evidence",
     "campaign-outline",
+    "campaign-router",
     "campaign-write",
     "campaign-status",
     "campaign-fetch"

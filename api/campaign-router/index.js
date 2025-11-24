@@ -1,10 +1,8 @@
-// /api/campaign-router/index.js 24-11-2025 v16
+// /api/campaign-router/index.js 24-11-2025 v16 (with tracing)
 // Trigger: queue %CAMPAIGN_QUEUE_NAME%
 // Routes:
 //   - { op:"afterevidence", runId, page, prefix }  → enqueue to %Q_CAMPAIGN_OUTLINE%
-//   - { op:"afteroutline",  runId, page, prefix }  →
-//        * if writer enabled: enqueue N section jobs + one {op:"assemble"} to %Q_CAMPAIGN_WRITE%
-//        * if writer disabled: mark strategy-only completion, do NOT enqueue writer jobs
+//   - { op:"afteroutline",  runId, page, prefix }  → enqueue N section jobs + one {op:"assemble"} to %Q_CAMPAIGN_WRITE%
 //
 // Idempotence:
 //   - Uses status.json markers: outlineEnqueued, sectionsEnqueued, assembleEnqueued
@@ -77,6 +75,12 @@ function nowISO() { return new Date().toISOString(); }
 
 // ---- router ----
 module.exports = async function (context, queueItem) {
+  // TRACE 1: raw trigger payload
+  context.log("[router] trigger", {
+    type: typeof queueItem,
+    raw: typeof queueItem === "string" ? queueItem.slice(0, 500) : queueItem
+  });
+
   if (!STORAGE_CONN) {
     context.log.error("[router] AzureWebJobsStorage missing");
     return;
@@ -85,19 +89,41 @@ module.exports = async function (context, queueItem) {
   // Parse message (support string/object)
   let msg = queueItem;
   if (typeof msg === "string") {
-    try { msg = JSON.parse(msg); } catch { msg = {}; }
+    try { msg = JSON.parse(msg); } catch (e) {
+      context.log.error("[router] failed to parse queueItem JSON", {
+        error: String(e?.message || e),
+        raw: msg.slice(0, 500)
+      });
+      msg = {};
+    }
   }
+
   const op    = (msg && msg.op)    || "";
   const runId = (msg && msg.runId) || "";
+  const page  = (msg && msg.page)  || "campaign";
+
   // Use getRunPrefix for the default, then normalize
   const defaultPrefix = runId ? getRunPrefix(runId) : "";
   let prefix = normalizePrefix((msg && msg.prefix) || defaultPrefix);
-  const page   = (msg && msg.page)   || "campaign";
+
+  // TRACE 2: parsed message
+  context.log("[router] parsed message", {
+    op,
+    runId,
+    page,
+    prefix,
+    defaultPrefix,
+    MAIN_QUEUE,
+    OUTLINE_QUEUE,
+    WRITE_QUEUE
+  });
 
   if (!op || !runId || !prefix) {
-    context.log.warn("[router] invalid payload", {
-      type: typeof queueItem,
-      sample: String(queueItem).slice(0, 200)
+    context.log.warn("[router] invalid payload; dropping", {
+      reason: "missing_op_runId_or_prefix",
+      op,
+      runId,
+      prefix
     });
     return;
   }
@@ -108,6 +134,7 @@ module.exports = async function (context, queueItem) {
   const qs        = QueueServiceClient.fromConnectionString(STORAGE_CONN);
   const outlineQ  = qs.getQueueClient(OUTLINE_QUEUE);
   const writeQ    = qs.getQueueClient(WRITE_QUEUE);
+
   await outlineQ.createIfNotExists();
   await writeQ.createIfNotExists();
 
@@ -119,32 +146,67 @@ module.exports = async function (context, queueItem) {
   status0.markers = status0.markers || {};
 
   // ---- Phase 0: normalise and persist feature flags ----
-  // Ensure flags exist for this run (backwards compatible with old runs)
   const flags = getFlags(status0);
   status0.flags = flags;
-  const writerEnabled = flags.use_writer_assembler !== false; // default: true if undefined
-  context.log("[router] flags", { runId, flags, writerEnabled });
+
+  // TRACE 3: status + flags snapshot
+  context.log("[router] status snapshot", {
+    runId,
+    prefix,
+    op,
+    state: status0.state || null,
+    markers: status0.markers,
+    flags
+  });
 
   // Helper: persist status changes (while preserving flags normalisation)
   async function saveStatus(notePatch = {}) {
     const next = { ...status0, ...notePatch };
-    // Re-normalise flags so they are always present and merged
     next.flags = getFlags(next);
     await putJson(container, statusPath, next);
+
+    context.log("[router] status saved", {
+      runId,
+      prefix,
+      state: next.state || null,
+      markers: next.markers,
+      notePatch
+    });
   }
 
   try {
     if (op === "afterevidence") {
+      context.log("[router] handling afterevidence", { runId, prefix });
+
       // Only route to outline ONCE
       if (status0.markers.outlineEnqueued) {
-        context.log("[router] outline already enqueued; skipping", { runId });
+        context.log("[router] outline already enqueued; skipping", {
+          runId,
+          prefix
+        });
         return;
       }
 
       // Strong guard: require evidence.json or evidence_log.json to exist
-      const evBlob    = container.getBlockBlobClient(`${prefix}evidence.json`);
-      const evLogBlob = container.getBlockBlobClient(`${prefix}evidence_log.json`);
-      const evOk      = (await evBlob.exists()) || (await evLogBlob.exists());
+      const evBlobName    = `${prefix}evidence.json`;
+      const evLogBlobName = `${prefix}evidence_log.json`;
+      const evBlob        = container.getBlockBlobClient(evBlobName);
+      const evLogBlob     = container.getBlockBlobClient(evLogBlobName);
+
+      const evExists    = await evBlob.exists();
+      const evLogExists = await evLogBlob.exists();
+
+      // TRACE 4: evidence existence check
+      context.log("[router] evidence existence", {
+        runId,
+        prefix,
+        evBlobName,
+        evLogBlobName,
+        evExists,
+        evLogExists
+      });
+
+      const evOk = evExists || evLogExists;
 
       if (!evOk) {
         // Persist a forward-only marker that we are waiting on Evidence
@@ -156,7 +218,10 @@ module.exports = async function (context, queueItem) {
         });
         status0.markers.waitingForEvidence = true;
         await saveStatus();
-        context.log.warn("[router] evidence missing; not enqueuing outline", { runId, prefix });
+        context.log.warn("[router] evidence missing; not enqueuing outline", {
+          runId,
+          prefix
+        });
         return;
       }
 
@@ -165,7 +230,17 @@ module.exports = async function (context, queueItem) {
         status0.markers.evidenceDigestCompleted === true ||
         status0.state === "EvidenceDigest";
 
-      await outlineQ.sendMessage(JSON.stringify({ runId, page, prefix }));
+      const msgPayload = { runId, page, prefix };
+      await outlineQ.sendMessage(JSON.stringify(msgPayload));
+
+      // TRACE 5: outline enqueued
+      context.log("[router] enqueued outline", {
+        runId,
+        prefix,
+        queue: OUTLINE_QUEUE,
+        payload: msgPayload
+      });
+
       status0.history.push({
         at: nowISO(),
         phase: "Router",
@@ -175,34 +250,25 @@ module.exports = async function (context, queueItem) {
       status0.markers.outlineEnqueued = true;
       await saveStatus();
 
-      context.log("[router] enqueued outline", { runId, prefix });
       return;
     }
 
     if (op === "afteroutline") {
-      // If writer is disabled, treat this as a strategy-only completion
-      if (!writerEnabled) {
-        status0.history.push({
-          at: nowISO(),
-          phase: "Router",
-          op: "afteroutline",
-          note: "writer_disabled_strategy_only"
-        });
-        status0.markers.writerDisabled = true;
-        // Do NOT enqueue any writer jobs when writer is disabled
-        await saveStatus();
-        context.log("[router] writer disabled; strategy-only run, no writer jobs enqueued", {
-          runId,
-          prefix
-        });
-        return;
-      }
+      context.log("[router] handling afteroutline", { runId, prefix });
 
       // Fan-out sections exactly once
       if (!status0.markers.sectionsEnqueued) {
         for (const key of SECTION_KEYS) {
           const payload = { op: "section", runId, page, prefix, section: key };
           await writeQ.sendMessage(JSON.stringify(payload));
+
+          // TRACE 6: per-section enqueue
+          context.log("[router] enqueued section", {
+            runId,
+            prefix,
+            section: key,
+            queue: WRITE_QUEUE
+          });
         }
         status0.markers.sectionsEnqueued = true;
         status0.history.push({
@@ -212,14 +278,30 @@ module.exports = async function (context, queueItem) {
           count: SECTION_KEYS.length
         });
         await saveStatus();
-        context.log("[router] enqueued sections", { runId, count: SECTION_KEYS.length });
+        context.log("[router] all sections enqueued", {
+          runId,
+          count: SECTION_KEYS.length
+        });
       } else {
-        context.log("[router] sections already enqueued; skipping", { runId });
+        context.log("[router] sections already enqueued; skipping", {
+          runId,
+          prefix
+        });
       }
 
       // Enqueue a single assemble once
       if (!status0.markers.assembleEnqueued) {
-        await writeQ.sendMessage(JSON.stringify({ op: "assemble", runId, page, prefix }));
+        const assemblePayload = { op: "assemble", runId, page, prefix };
+        await writeQ.sendMessage(JSON.stringify(assemblePayload));
+
+        // TRACE 7: assemble enqueue
+        context.log("[router] enqueued assemble", {
+          runId,
+          prefix,
+          queue: WRITE_QUEUE,
+          payload: assemblePayload
+        });
+
         status0.markers.assembleEnqueued = true;
         status0.history.push({
           at: nowISO(),
@@ -227,17 +309,20 @@ module.exports = async function (context, queueItem) {
           op: "afteroutline→assemble"
         });
         await saveStatus();
-        context.log("[router] enqueued assemble", { runId });
       } else {
-        context.log("[router] assemble already enqueued; skipping", { runId });
+        context.log("[router] assemble already enqueued; skipping", {
+          runId,
+          prefix
+        });
       }
       return;
     }
 
     // Unknown op: log and drop (no loops)
-    context.log.warn("[router] unhandled op; dropping", { op, runId });
+    context.log.warn("[router] unhandled op; dropping", { op, runId, prefix });
   } catch (err) {
-    context.log.error("[router] failure", String(err?.message || err));
+    const msgText = String(err?.message || err);
+    context.log.error("[router] failure", msgText);
     try {
       const cur = (await getJson(container, statusPath)) || { runId, history: [], markers: {} };
       cur.history = Array.isArray(cur.history) ? cur.history : [];
@@ -246,7 +331,7 @@ module.exports = async function (context, queueItem) {
         at: nowISO(),
         phase: "Router",
         op,
-        error: String(err?.message || err)
+        error: msgText
       });
       await putJson(container, statusPath, cur);
     } catch {
