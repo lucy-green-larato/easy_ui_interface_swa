@@ -1195,6 +1195,10 @@ module.exports = async function (context, job) {
       input?.selected_industry ||
       input?.campaign_industry ||
       "";
+    context.log("[campaign-evidence] before csvSummaryEvidence", {
+      typeofCsvSummary: typeof csvSummaryEvidence,
+      typeofNextClaimId: typeof nextClaimId
+    });
 
     const csvSummaryItem = csvSummaryEvidence(
       csvNormalizedCanonical,
@@ -1203,7 +1207,7 @@ module.exports = async function (context, job) {
       container.url,
       csvFocusInsight,
       industryName,
-      {nextClaimId}
+      { nextClaimId }
     );
 
     if (csvSummaryItem) {
