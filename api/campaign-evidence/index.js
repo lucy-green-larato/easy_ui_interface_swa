@@ -9,9 +9,9 @@
 // - buyer_logic.json
 // - insights.json
 
-const { QueueClient } = require("@azure/storage-queue");
 const crypto = require("node:crypto");
 const { validateAndWarn } = require("../shared/schemaValidators");
+const { enqueueStart } = require("../lib/campaign-queue");
 const { nowIso } = require("../shared/utils");
 
 
@@ -85,7 +85,6 @@ const { buildMarkdownPack } = require("./markdownPack");
 const { buildInsights } = require("./insights");
 const { buildBuyerLogic } = require("./buyerLogic");
 
-const START_QUEUE_NAME = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const FETCH_TIMEOUT_MS = Number(process.env.HTTP_FETCH_TIMEOUT_MS || 8000);
 const MAX_SITE_PAGES = 8;                  // crawl budget (homepage + up to 7 pages)
 const MAX_CASESTUDIES = 8;                 // cap case study items stored
@@ -1207,7 +1206,7 @@ module.exports = async function (context, job) {
       containerUrl: container.url,
       focusInsight: csvFocusInsight,
       industry: industryName,
-      nextClaimId,     
+      nextClaimId,
       addCitation
     });
 
@@ -1674,9 +1673,8 @@ module.exports = async function (context, job) {
       const st0 = (await getJson(container, `${prefix}status.json`)) || { runId, history: [], markers: {} };
       const already = !!st0?.markers?.afterevidenceSent;
       if (!already) {
-        const mainQ = new QueueClient(process.env.AzureWebJobsStorage, START_QUEUE_NAME);
-        await mainQ.createIfNotExists();
-        await mainQ.sendMessage(JSON.stringify({ op: "afterevidence", runId, page: "campaign", prefix }));
+        // enqueue to the main/router queue (CAMPAIGN_QUEUE_NAME)
+        await enqueueStart({ op: "afterevidence", runId, page: "campaign", prefix });
 
         // mark sent (idempotent)
         st0.markers = { ...(st0.markers || {}), afterevidenceSent: true };
