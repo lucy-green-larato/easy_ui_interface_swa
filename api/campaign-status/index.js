@@ -1,5 +1,5 @@
-// /api/campaign-status/index.js 22-11-2025 v6
-// GET /api/campaign-status?runId=... [&prefix=containerOrRelativePrefix]
+// /api/campaign-status/index.js 24-11-2025 v7 
+// // GET /api/campaign-status?runId=... [&prefix=containerOrRelativePrefix]
 //
 // Resolves status.json in priority order:
 //   1) Explicit ?prefix=… (container-relative normalised; or absolute starting with <container>/)
@@ -26,19 +26,23 @@ function readHeader(req, name) {
   const h = req.headers;
   return h[name] ?? h[name.toLowerCase()] ?? h[name.toUpperCase()];
 }
+
 function genId() {
   const s = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).slice(1);
   return `${s()}${s()}-${s()}-${s()}-${s()}-${s()}${s()}${s()}`;
 }
+
 function correlationIdFrom(req) {
   return String(readHeader(req, "x-correlation-id") || genId());
 }
+
 async function streamToString(readable) {
   if (!readable) return "";
   const chunks = [];
   for await (const chunk of readable) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf8");
 }
+
 function normalizePrefix(p) {
   let x = String(p || "").trim();
   if (!x) return null;
@@ -60,6 +64,7 @@ function decodeClientPrincipal(req) {
     return null;
   }
 }
+
 function userIdFromReq(req) {
   const cp = decodeClientPrincipal(req) || {};
   const claims = Array.isArray(cp.claims) ? cp.claims : [];
@@ -135,7 +140,7 @@ module.exports = async function (context, req) {
     const blobService = BlobServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
     const container = blobService.getContainerClient(RESULTS_CONTAINER);
 
-    // -------- Resolve prefix (explicit > recent.json > legacy) Prefix must point at run folder. --------
+    // -------- Resolve prefix (explicit > recent.json > legacy). Prefix must point at run folder. --------
     let resolvedPrefix = null;
 
     // 1) Explicit ?prefix=...
@@ -153,14 +158,19 @@ module.exports = async function (context, req) {
           const dl = await idxClient.download();
           const txt = await streamToString(dl.readableStreamBody);
           const idx = JSON.parse(txt);
-          const hit = (Array.isArray(idx?.items) ? idx.items : []).find(x => String(x?.runId || "") === runId);
+          const hit = (Array.isArray(idx?.items) ? idx.items : []).find(
+            x => String(x?.runId || "") === runId
+          );
           if (hit && typeof hit.prefix === "string") {
             const norm = normalizePrefix(hit.prefix);
             if (norm) resolvedPrefix = norm;
           }
         }
       } catch (e) {
-        context.log.warn("campaign-status: recent.json lookup failed", { runId, err: String(e?.message || e) });
+        context.log.warn("campaign-status: recent.json lookup failed", {
+          runId,
+          err: String(e?.message || e)
+        });
       }
     }
 
@@ -175,7 +185,11 @@ module.exports = async function (context, req) {
       const client = container.getBlockBlobClient(blobName);
       if (await client.exists()) {
         found = client;
-        context.log({ event: "campaign_status_target", blob: `${RESULTS_CONTAINER}/${blobName}`, correlationId });
+        context.log({
+          event: "campaign_status_target",
+          blob: `${RESULTS_CONTAINER}/${blobName}`,
+          correlationId
+        });
         break;
       }
     }
@@ -183,7 +197,12 @@ module.exports = async function (context, req) {
     if (!found) {
       context.res = {
         status: 404,
-        headers: { ...CORS, "Content-Type": "application/json", "x-correlation-id": correlationId, "Cache-Control": "no-cache" },
+        headers: {
+          ...CORS,
+          "Content-Type": "application/json",
+          "x-correlation-id": correlationId,
+          "Cache-Control": "no-cache"
+        },
         body: { state: "Unknown", runId }
       };
       return;
@@ -210,108 +229,88 @@ module.exports = async function (context, req) {
       return;
     }
 
-   // Download JSON text
-const dl = await found.download();
-const bodyText = await streamToString(dl.readableStreamBody);
+    // Download JSON text
+    const dl = await found.download();
+    const bodyText = await streamToString(dl.readableStreamBody);
 
-// Validate + parse JSON (log but avoid leaking payload)
-let statusPayload;
-try {
-  statusPayload = JSON.parse(bodyText);
-} catch (e) {
-  context.log.warn("[campaign-status] status.json is not valid JSON", {
-    runId,
-    error: String(e?.message || e)
-  });
-  context.res = {
-    status: 502,
-    headers: {
-      ...CORS,
-      "Content-Type": "application/json",
-      "x-correlation-id": correlationId
-    },
-    body: {
-      error: "bad_status_payload",
-      message: "status.json is not valid JSON"
+    // Validate + parse JSON (log but avoid leaking payload)
+    let statusPayload;
+    try {
+      statusPayload = JSON.parse(bodyText);
+    } catch (e) {
+      context.log.warn("[campaign-status] status.json is not valid JSON", {
+        runId,
+        error: String(e?.message || e)
+      });
+      context.res = {
+        status: 502,
+        headers: {
+          ...CORS,
+          "Content-Type": "application/json",
+          "x-correlation-id": correlationId
+        },
+        body: {
+          error: "bad_status_payload",
+          message: "status.json is not valid JSON"
+        }
+      };
+      return;
     }
-  };
-  return;
-}
 
-// ---- Flag normalisation + derived terminal state for strategy-only runs ----
-try {
-  // Merge flags from root + input.flags so callers have a single source
-  const topFlags =
-    statusPayload && typeof statusPayload === "object" && statusPayload.flags
-      ? statusPayload.flags
-      : {};
-  const inputFlags =
-    statusPayload &&
-    typeof statusPayload === "object" &&
-    statusPayload.input &&
-    statusPayload.input.flags
-      ? statusPayload.input.flags
-      : {};
+    // ---- Flag normalisation only (no derived 'strategy-only' completion) ----
+    try {
+      const topFlags =
+        statusPayload && typeof statusPayload === "object" && statusPayload.flags
+          ? statusPayload.flags
+          : {};
+      const inputFlags =
+        statusPayload &&
+        typeof statusPayload === "object" &&
+        statusPayload.input &&
+        statusPayload.input.flags
+          ? statusPayload.input.flags
+          : {};
 
-  const flags = { ...inputFlags, ...topFlags };
-
-  if (Object.keys(flags).length > 0) {
-    statusPayload.flags = flags;
-  }
-
-  // If strategy is ready and writer is disabled, treat as a completed run
-  if (
-    statusPayload.state === "strategy_ready" &&
-    flags.use_writer_assembler === false
-  ) {
-    const history = Array.isArray(statusPayload.history)
-      ? statusPayload.history
-      : [];
-
-    const last = history[history.length - 1] || null;
-    if (!last || last.state !== "Completed") {
-      history.push({
-        at: new Date().toISOString(),
-        state: "Completed",
-        note: "Strategy-only run completed (writer disabled)"
+      const mergedFlags = { ...inputFlags, ...topFlags };
+      if (Object.keys(mergedFlags).length > 0) {
+        statusPayload.flags = mergedFlags;
+      }
+    } catch (e) {
+      context.log.warn("[campaign-status] flag normalisation failed", {
+        runId,
+        error: String(e?.message || e)
       });
     }
 
-    statusPayload.history = history;
-    statusPayload.state = "Completed";
-  }
-} catch (e) {
-  context.log.warn("[campaign-status] flag/terminal-state normalisation failed", {
-    runId,
-    error: String(e?.message || e)
-  });
-}
+    const responseText = JSON.stringify(statusPayload);
 
-const responseText = JSON.stringify(statusPayload);
-
-context.res = {
-  status: 200,
-  headers: {
-    ...CORS,
-    "Content-Type": "application/json",
-    "ETag": etag,
-    ...(lastModified ? { "Last-Modified": lastModified } : {}),
-    "Cache-Control": "no-cache",
-    "x-correlation-id": correlationId
-  },
-  // Return the parsed+normalised JSON, not the raw blob text
-  body: responseText
-};
-    
+    context.res = {
+      status: 200,
+      headers: {
+        ...CORS,
+        "Content-Type": "application/json",
+        "ETag": etag,
+        ...(lastModified ? { "Last-Modified": lastModified } : {}),
+        "Cache-Control": "no-cache",
+        "x-correlation-id": correlationId
+      },
+      body: responseText
+    };
   } catch (err) {
-    context.log.error(JSON.stringify({
-      event: "campaign_status_error",
-      correlationId,
-      error: String(err?.message || err)
-    }));
+    context.log.error(
+      JSON.stringify({
+        event: "campaign_status_error",
+        correlationId,
+        error: String(err?.message || err)
+      })
+    );
     context.res = {
       status: 500,
-      headers: { ...CORS, "Content-Type": "application/json", "x-correlation-id": correlationId },
+      headers: {
+        ...CORS,
+        "Content-Type": "application/json",
+        "x-correlation-id": correlationId
+      },
       body: { error: "internal", message: "Unexpected error" }
     };
   }

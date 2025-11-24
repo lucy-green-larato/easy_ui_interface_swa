@@ -1,8 +1,10 @@
-// /api/campaign-router/index.js 12-11-2025 v14 (Phase 0 update)
+// /api/campaign-router/index.js 24-11-2025 v16
 // Trigger: queue %CAMPAIGN_QUEUE_NAME%
 // Routes:
 //   - { op:"afterevidence", runId, page, prefix }  → enqueue to %Q_CAMPAIGN_OUTLINE%
-//   - { op:"afteroutline",  runId, page, prefix }  → enqueue N section jobs + one {op:"assemble"} to %Q_CAMPAIGN_WRITE%
+//   - { op:"afteroutline",  runId, page, prefix }  →
+//        * if writer enabled: enqueue N section jobs + one {op:"assemble"} to %Q_CAMPAIGN_WRITE%
+//        * if writer disabled: mark strategy-only completion, do NOT enqueue writer jobs
 //
 // Idempotence:
 //   - Uses status.json markers: outlineEnqueued, sectionsEnqueued, assembleEnqueued
@@ -120,7 +122,8 @@ module.exports = async function (context, queueItem) {
   // Ensure flags exist for this run (backwards compatible with old runs)
   const flags = getFlags(status0);
   status0.flags = flags;
-  context.log("[router] flags", { runId, flags });
+  const writerEnabled = flags.use_writer_assembler !== false; // default: true if undefined
+  context.log("[router] flags", { runId, flags, writerEnabled });
 
   // Helper: persist status changes (while preserving flags normalisation)
   async function saveStatus(notePatch = {}) {
@@ -177,6 +180,24 @@ module.exports = async function (context, queueItem) {
     }
 
     if (op === "afteroutline") {
+      // If writer is disabled, treat this as a strategy-only completion
+      if (!writerEnabled) {
+        status0.history.push({
+          at: nowISO(),
+          phase: "Router",
+          op: "afteroutline",
+          note: "writer_disabled_strategy_only"
+        });
+        status0.markers.writerDisabled = true;
+        // Do NOT enqueue any writer jobs when writer is disabled
+        await saveStatus();
+        context.log("[router] writer disabled; strategy-only run, no writer jobs enqueued", {
+          runId,
+          prefix
+        });
+        return;
+      }
+
       // Fan-out sections exactly once
       if (!status0.markers.sectionsEnqueued) {
         for (const key of SECTION_KEYS) {
