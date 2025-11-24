@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 22-11-2025 — v31.0
+// /api/campaign-evidence/index.js 24-11-2025 — v32.0
 // Phase 1 canonical outputs:
 // - csv_normalized.json
 // - needs_map.json
@@ -1200,15 +1200,16 @@ module.exports = async function (context, job) {
       typeofNextClaimId: typeof nextClaimId
     });
 
-    const csvSummaryItem = csvSummaryEvidence(
-      csvNormalizedCanonical,
+    const csvSummaryItem = csvSummaryEvidence({
+      csvCanonical: csvNormalizedCanonical,
       input,
       prefix,
-      container.url,
-      csvFocusInsight,
-      industryName,
-      { nextClaimId }
-    );
+      containerUrl: container.url,
+      focusInsight: csvFocusInsight,
+      industry: industryName,
+      nextClaimId,     
+      addCitation
+    });
 
     if (csvSummaryItem) {
       evidenceLog.unshift(csvSummaryItem);

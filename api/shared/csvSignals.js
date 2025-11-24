@@ -1,4 +1,4 @@
-// **** /api/shared/csvSignals.js 14-11-2025 v2 ****
+// /api/shared/csvSignals.js 24-11-2025 v24
 //
 // Responsibilities:
 //  - Parse loose CSV into rows
@@ -504,6 +504,40 @@ function buildCsvCanonical({
  *  - nextClaimId(): function → string
  *  - addCitation(text, tag): function → string
  */
+
+
+// Local fallbacks so this helper can never crash a run
+let _csvSummaryClaimCounter = 0;
+
+function fallbackNextClaimId() {
+  _csvSummaryClaimCounter += 1;
+  return `CLM-${String(_csvSummaryClaimCounter).padStart(3, "0")}`;
+}
+
+function fallbackAddCitation(text, tag) {
+  const t = String(text || "").trim();
+  const label = String(tag || "").trim() || "source";
+  if (!t) return `(${label})`;
+  // If something already looks like it ends with "(...)", leave it alone
+  return /\([^()]{2,}\)\.?$/.test(t) ? t : `${t} (${label})`;
+}
+
+/**
+ * Build a single CSV population evidence item.
+ *
+ * Expected usage (object-style):
+ *
+ *   const csvSummaryItem = csvSummaryEvidence({
+ *     csvCanonical: csvNormalizedCanonical,
+ *     input,
+ *     prefix,
+ *     containerUrl: container.url,
+ *     focusInsight: csvFocusInsight,
+ *     industry: industryName,
+ *     nextClaimId,   // optional but preferred
+ *     addCitation    // optional but preferred
+ *   });
+ */
 function csvSummaryEvidence({
   csvCanonical,
   input,
@@ -514,15 +548,13 @@ function csvSummaryEvidence({
   nextClaimId,
   addCitation
 }) {
-  if (typeof nextClaimId !== "function") {
-    throw new Error("csvSummaryEvidence: nextClaimId function is required.");
-  }
-  if (typeof addCitation !== "function") {
-    throw new Error("csvSummaryEvidence: addCitation function is required.");
-  }
+  // Safe function handles – never throw if either is missing
+  const next = typeof nextClaimId === "function" ? nextClaimId : fallbackNextClaimId;
+  const cite = typeof addCitation === "function" ? addCitation : fallbackAddCitation;
 
   const rows = Number(csvCanonical?.meta?.rows || input?.rowCount || 0);
   const fileName = csvCanonical?.meta?.source || input?.csvFilename || "inline";
+
   const root = String(containerUrl || "").replace(/\/+$/, "");
   const pfx = String(prefix || "").replace(/^\/+/, "");
   const cleanName = String(fileName || "").replace(/^\/+/, "");
@@ -537,6 +569,7 @@ function csvSummaryEvidence({
     industry && String(industry).trim() ? `${industry} ` : "";
 
   let summaryLine = "";
+
   if (
     Number.isFinite(f.totalRows) &&
     f.totalRows > 0 &&
@@ -548,12 +581,13 @@ function csvSummaryEvidence({
       `${f.focusCount.toLocaleString()} of them plan to purchase ${f.focusLabel}.`;
   } else if (rows > 0) {
     let focusNote = "";
-    if (rows >= 180 && rows <= 320)
+    if (rows >= 180 && rows <= 320) {
       focusNote = " Good focus range for a single campaign (≈200–300).";
-    else if (rows > 320)
+    } else if (rows > 320) {
       focusNote = " Large set; consider segmenting into waves for focus.";
-    else
+    } else {
       focusNote = " Very narrow set; consider broadening if volume is required.";
+    }
     summaryLine = `Addressable market: ${rows.toLocaleString()} companies in ${fileName}.${focusNote}`;
   } else {
     summaryLine =
@@ -561,14 +595,22 @@ function csvSummaryEvidence({
   }
 
   return {
-    claim_id: nextClaimId(),
+    claim_id: next(),
     source_type: "CSV",
     title: "CSV population",
     url: csvUrl,
-    summary: addCitation(summaryLine.trim(), "CSV"),
+    summary: cite(summaryLine.trim(), "CSV"),
     quote: "CSV-derived population and segment insight."
   };
 }
+
+module.exports = {
+  // ... keep your other exports ...
+  csvSummaryEvidence,
+  // csvSignalsEvidence,
+  // etc.
+};
+
 
 /**
  * Build an evidence item summarising CSV buyer signals.
