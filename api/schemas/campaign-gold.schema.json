@@ -1,0 +1,308 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/schemas/campaign-gold.schema.json",
+  "title": "Gold Campaign",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "runId": {
+      "type": "string",
+      "description": "Unique identifier for the run (e.g. 'gold')."
+    },
+    "supplier": {
+      "type": "string",
+      "description": "Name of the supplier this campaign is for."
+    },
+    "industry": {
+      "type": "string",
+      "description": "Industry or sector focus for the campaign."
+    },
+    "persona": {
+      "type": "string",
+      "description": "Primary buyer persona targeted by this campaign."
+    },
+
+    "executive_summary": {
+      "type": "object",
+      "description": "Final consultant-grade executive summary narrative with inline [CLAIM_ID] tags and a citations array.",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Headline title for the executive summary."
+        },
+        "paragraphs": {
+          "type": "array",
+          "description": "Ordered paragraphs forming the full executive summary narrative (typically 5–6: environment, case for action, how we win, success, next steps).",
+          "items": {
+            "type": "string",
+            "description": "Paragraph text with inline [CLAIM_ID] tags where appropriate."
+          }
+        },
+        "citations": {
+          "type": "array",
+          "description": "List of all claim_ids referenced in the executive summary paragraphs.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["title", "paragraphs", "citations"]
+    },
+
+    "value_proposition": {
+      "type": "object",
+      "description": "Narrative value proposition derived from strategy_v2.value_proposition.",
+      "additionalProperties": false,
+      "properties": {
+        "narrative": {
+          "type": "string",
+          "description": "Multi-paragraph value proposition narrative with inline [CLAIM_ID] tags as needed."
+        },
+        "moore": {
+          "type": "object",
+          "description": "Moore positioning sentence components.",
+          "additionalProperties": false,
+          "properties": {
+            "for": { "type": "string" },
+            "who": { "type": "string" },
+            "the": { "type": "string" },
+            "is_a": { "type": "string" },
+            "that": { "type": "string" },
+            "unlike": { "type": "string" },
+            "we_provide": { "type": "string" }
+          },
+          "required": []
+        },
+        "competitive_position": {
+          "type": "string",
+          "description": "Summary of how the supplier is positioned competitively, in buyer language."
+        },
+        "proof_points": {
+          "type": "array",
+          "description": "Key proof points, ideally with inline [CLAIM_ID] tags.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "citations": {
+          "type": "array",
+          "description": "All claim_ids referenced in the value proposition narrative and proof points.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["narrative"]
+    },
+
+    "messaging_matrix": {
+      "type": "object",
+      "description": "High-level messaging matrix derived from strategy and buyer logic.",
+      "additionalProperties": false,
+      "properties": {
+        "audiences": {
+          "type": "array",
+          "description": "Key audience types or personas.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pillars": {
+          "type": "array",
+          "description": "Core messaging pillars.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "support_points": {
+          "type": "array",
+          "description": "Supporting points under each pillar (may be written as a flat list, grouped in narrative form).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "citations": {
+          "type": "array",
+          "description": "All claim_ids referenced in the messaging matrix.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": []
+    },
+
+    "sales_enablement": {
+      "type": "object",
+      "description": "Sales enablement content derived from strategy and buyer logic.",
+      "additionalProperties": false,
+      "properties": {
+        "campaign_overview": {
+          "type": "string",
+          "description": "Short narrative overview describing what the campaign is about and why it matters."
+        },
+        "buyer_outcomes": {
+          "type": "array",
+          "description": "List of outcomes the buyer can expect if they act.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "discovery_questions": {
+          "type": "array",
+          "description": "Discovery questions for sales, ideally written with an implicit rationale behind each.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "competitive_battlecard": {
+          "type": "object",
+          "description": "Structured notes for handling competitors in conversation.",
+          "additionalProperties": true,
+          "properties": {},
+          "default": {}
+        },
+        "master_pitch": {
+          "type": "string",
+          "description": "A single, cohesive pitch sales can deliver, in natural language."
+        },
+        "citations": {
+          "type": "array",
+          "description": "All claim_ids referenced in the sales enablement content.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": []
+    },
+
+    "go_to_market_plan": {
+      "type": "object",
+      "description": "Go-to-market plan derived from gtm_strategy and cohort data.",
+      "additionalProperties": false,
+      "properties": {
+        "objective": {
+          "type": "string",
+          "description": "Clear, commercial objective for the campaign."
+        },
+        "target_market": {
+          "type": "object",
+          "description": "Description of the target market and cohorts.",
+          "additionalProperties": true,
+          "properties": {},
+          "default": {}
+        },
+        "marketing_actions": {
+          "type": "array",
+          "description": "Prioritised marketing actions (what marketing will do).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sales_actions": {
+          "type": "array",
+          "description": "Prioritised sales actions (what sales will do).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pipeline_model": {
+          "type": "object",
+          "description": "Summary of the pipeline model (tiers, motions, assumptions).",
+          "additionalProperties": true,
+          "properties": {},
+          "default": {}
+        },
+        "cta": {
+          "type": "string",
+          "description": "The recommended call to action the supplier should take next with this cohort."
+        },
+        "citations": {
+          "type": "array",
+          "description": "All claim_ids referenced in the GTM plan.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["objective"]
+    },
+
+    "risks_and_contingencies": {
+      "type": "object",
+      "description": "Key risks and mitigation strategies for this campaign.",
+      "additionalProperties": false,
+      "properties": {
+        "risks": {
+          "type": "array",
+          "description": "List of key risks.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mitigations": {
+          "type": "array",
+          "description": "Mitigation strategies corresponding to, or complementing, the risks.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": []
+    },
+
+    "compliance_and_governance": {
+      "type": "object",
+      "description": "Notes on compliance, governance and constraints relevant to this campaign.",
+      "additionalProperties": false,
+      "properties": {
+        "notes": {
+          "type": "string",
+          "description": "Narrative description of compliance and governance considerations."
+        },
+        "citations": {
+          "type": "array",
+          "description": "All claim_ids referenced in this section.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": []
+    },
+
+    "one_pager_summary": {
+      "type": "object",
+      "description": "Concise one-pager summary of the campaign.",
+      "additionalProperties": false,
+      "properties": {
+        "positioning": {
+          "type": "string",
+          "description": "Short statement of how the supplier is positioned in this campaign."
+        },
+        "core_message": {
+          "type": "string",
+          "description": "Single core message capturing the essence of the campaign."
+        },
+        "quick_facts": {
+          "type": "array",
+          "description": "Bullet list of quick facts or soundbites.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": []
+    }
+  },
+  "required": [
+    "runId",
+    "supplier",
+    "industry",
+    "persona",
+    "executive_summary",
+    "value_proposition"
+  ]
+}
