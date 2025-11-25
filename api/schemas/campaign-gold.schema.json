@@ -21,7 +21,6 @@
       "type": "string",
       "description": "Primary buyer persona targeted by this campaign."
     },
-
     "executive_summary": {
       "type": "object",
       "description": "Final consultant-grade executive summary narrative with inline [CLAIM_ID] tags and a citations array.",
@@ -53,7 +52,6 @@
         "citations"
       ]
     },
-
     "value_proposition": {
       "type": "object",
       "description": "Narrative value proposition derived from strategy_v2.value_proposition.",
@@ -127,7 +125,6 @@
         "citations"
       ]
     },
-
     "messaging_matrix": {
       "type": "object",
       "description": "High-level messaging matrix derived from strategy and buyer logic.",
@@ -169,7 +166,6 @@
         "citations"
       ]
     },
-
     "sales_enablement": {
       "type": "object",
       "description": "Sales enablement content derived from strategy and buyer logic.",
@@ -196,9 +192,24 @@
         "competitive_battlecard": {
           "type": "object",
           "description": "Structured notes for handling competitors in conversation.",
-          "additionalProperties": true,
-          "properties": {},
-          "default": {}
+          "additionalProperties": false,
+          "properties": {
+            "summary": {
+              "type": "string",
+              "description": "High-level narrative summary of how to handle competitors."
+            },
+            "competitor_notes": {
+              "type": "array",
+              "description": "Per-competitor notes (e.g. strengths, weaknesses, how we respond).",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "summary",
+            "competitor_notes"
+          ]
         },
         "master_pitch": {
           "type": "string",
@@ -221,7 +232,6 @@
         "citations"
       ]
     },
-
     "go_to_market_plan": {
       "type": "object",
       "description": "Go-to-market plan derived from gtm_strategy and cohort data.",
@@ -234,9 +244,24 @@
         "target_market": {
           "type": "object",
           "description": "Description of the target market and cohorts.",
-          "additionalProperties": true,
-          "properties": {},
-          "default": {}
+          "additionalProperties": false,
+          "properties": {
+            "summary": {
+              "type": "string",
+              "description": "Narrative description of the target market."
+            },
+            "cohorts": {
+              "type": "array",
+              "description": "Named cohorts or segments within the target market.",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "summary",
+            "cohorts"
+          ]
         },
         "marketing_actions": {
           "type": "array",
@@ -255,9 +280,24 @@
         "pipeline_model": {
           "type": "object",
           "description": "Summary of the pipeline model (tiers, motions, assumptions).",
-          "additionalProperties": true,
-          "properties": {},
-          "default": {}
+          "additionalProperties": false,
+          "properties": {
+            "summary": {
+              "type": "string",
+              "description": "Narrative summary of the pipeline model."
+            },
+            "assumptions": {
+              "type": "array",
+              "description": "Key numeric or qualitative assumptions used in the model.",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "summary",
+            "assumptions"
+          ]
         },
         "cta": {
           "type": "string",
@@ -281,7 +321,6 @@
         "citations"
       ]
     },
-
     "risks_and_contingencies": {
       "type": "object",
       "description": "Key risks and mitigation strategies for this campaign.",
@@ -307,7 +346,6 @@
         "mitigations"
       ]
     },
-
     "compliance_and_governance": {
       "type": "object",
       "description": "Notes on compliance, governance and constraints relevant to this campaign.",
@@ -330,7 +368,6 @@
         "citations"
       ]
     },
-
     "one_pager_summary": {
       "type": "object",
       "description": "Concise one-pager summary of the campaign.",
