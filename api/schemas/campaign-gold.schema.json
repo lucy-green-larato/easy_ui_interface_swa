@@ -47,7 +47,11 @@
           }
         }
       },
-      "required": ["title", "paragraphs", "citations"]
+      "required": [
+        "title",
+        "paragraphs",
+        "citations"
+      ]
     },
 
     "value_proposition": {
@@ -64,15 +68,37 @@
           "description": "Moore positioning sentence components.",
           "additionalProperties": false,
           "properties": {
-            "for": { "type": "string" },
-            "who": { "type": "string" },
-            "the": { "type": "string" },
-            "is_a": { "type": "string" },
-            "that": { "type": "string" },
-            "unlike": { "type": "string" },
-            "we_provide": { "type": "string" }
+            "for": {
+              "type": "string"
+            },
+            "who": {
+              "type": "string"
+            },
+            "the": {
+              "type": "string"
+            },
+            "is_a": {
+              "type": "string"
+            },
+            "that": {
+              "type": "string"
+            },
+            "unlike": {
+              "type": "string"
+            },
+            "we_provide": {
+              "type": "string"
+            }
           },
-          "required": []
+          "required": [
+            "for",
+            "who",
+            "the",
+            "is_a",
+            "that",
+            "unlike",
+            "we_provide"
+          ]
         },
         "competitive_position": {
           "type": "string",
@@ -93,7 +119,13 @@
           }
         }
       },
-      "required": ["narrative"]
+      "required": [
+        "narrative",
+        "moore",
+        "competitive_position",
+        "proof_points",
+        "citations"
+      ]
     },
 
     "messaging_matrix": {
@@ -130,7 +162,12 @@
           }
         }
       },
-      "required": []
+      "required": [
+        "audiences",
+        "pillars",
+        "support_points",
+        "citations"
+      ]
     },
 
     "sales_enablement": {
@@ -175,7 +212,14 @@
           }
         }
       },
-      "required": []
+      "required": [
+        "campaign_overview",
+        "buyer_outcomes",
+        "discovery_questions",
+        "competitive_battlecard",
+        "master_pitch",
+        "citations"
+      ]
     },
 
     "go_to_market_plan": {
@@ -227,7 +271,15 @@
           }
         }
       },
-      "required": ["objective"]
+      "required": [
+        "objective",
+        "target_market",
+        "marketing_actions",
+        "sales_actions",
+        "pipeline_model",
+        "cta",
+        "citations"
+      ]
     },
 
     "risks_and_contingencies": {
@@ -250,7 +302,10 @@
           }
         }
       },
-      "required": []
+      "required": [
+        "risks",
+        "mitigations"
+      ]
     },
 
     "compliance_and_governance": {
@@ -270,7 +325,10 @@
           }
         }
       },
-      "required": []
+      "required": [
+        "notes",
+        "citations"
+      ]
     },
 
     "one_pager_summary": {
@@ -294,7 +352,11 @@
           }
         }
       },
-      "required": []
+      "required": [
+        "positioning",
+        "core_message",
+        "quick_facts"
+      ]
     }
   },
   "required": [
@@ -303,6 +365,12 @@
     "industry",
     "persona",
     "executive_summary",
-    "value_proposition"
+    "value_proposition",
+    "messaging_matrix",
+    "sales_enablement",
+    "go_to_market_plan",
+    "risks_and_contingencies",
+    "compliance_and_governance",
+    "one_pager_summary"
   ]
 }
