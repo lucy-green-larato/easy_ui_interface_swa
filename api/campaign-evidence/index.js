@@ -13,6 +13,7 @@ const crypto = require("node:crypto");
 const { validateAndWarn } = require("../shared/schemaValidators");
 const { enqueueStart } = require("../lib/campaign-queue");
 const { nowIso } = require("../shared/utils");
+const ROUTER_QUEUE_NAME = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
 
 
 const {
@@ -1673,8 +1674,8 @@ module.exports = async function (context, job) {
       const st0 = (await getJson(container, `${prefix}status.json`)) || { runId, history: [], markers: {} };
       const already = !!st0?.markers?.afterevidenceSent;
       if (!already) {
-        // enqueue to the main/router queue (CAMPAIGN_QUEUE_NAME)
-        await enqueueStart({ op: "afterevidence", runId, page: "campaign", prefix });
+        // enqueue to the dedicated router queue
+        await enqueueTo(ROUTER_QUEUE_NAME, { op: "afterevidence", runId, page: "campaign", prefix });
 
         // mark sent (idempotent)
         st0.markers = { ...(st0.markers || {}), afterevidenceSent: true };

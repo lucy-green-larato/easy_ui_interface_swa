@@ -14,6 +14,7 @@
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { QueueServiceClient } = require("@azure/storage-queue");
+const { enqueueTo } = require("../lib/campaign-queue");
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
@@ -21,8 +22,8 @@ const fs = require("fs");
 // ---- ENV ----
 const STORAGE_CONN = process.env.AzureWebJobsStorage;
 const CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
-const CAMPAIGN_QUEUE = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 45000);
+const ROUTER_QUEUE_NAME = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
 
 // ---- Outline schema (prose-free; claim_ids only) ----
 const OUTLINE_SCHEMA = {
@@ -209,12 +210,12 @@ function extractJsonCandidate(s) {
 }
 function tryParseOrRepair(rawText) {
   const candidate = extractJsonCandidate(String(rawText || ""));
-  try { return JSON.parse(candidate); } catch {}
+  try { return JSON.parse(candidate); } catch { }
   const repaired = candidate
     .replace(/^\uFEFF/, "")
     .replace(/"([^"\\]*(\\.[^"\\]*)*)"/g, m => m.replace(/\r?\n/g, "\\n"))
     .replace(/,\s*([}\]])/g, "$1");
-  try { return JSON.parse(repaired); } catch {}
+  try { return JSON.parse(repaired); } catch { }
   const err = new Error("draft_json_parse_error: unrecoverable JSON");
   err.code = "draft_json_parse_error";
   err.details = { length: candidate.length, head: candidate.slice(0, 1200), tail: candidate.slice(-1200) };
@@ -311,14 +312,14 @@ module.exports = async function (context, queueItem) {
     if (status0?.markers?.outlineCompleted) {
       if (!status0?.markers?.afteroutlineSent) {
         try {
-          const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
-          const qc = qs.getQueueClient(CAMPAIGN_QUEUE);
-          await qc.createIfNotExists();
-          await qc.sendMessage(JSON.stringify({ op: "afteroutline", runId, page, prefix }));
+          await enqueueTo(ROUTER_QUEUE_NAME, { op: "afteroutline", runId, page, prefix });
+
           const st = await readStatus(container, prefix);
           st.markers = { ...(st.markers || {}), afteroutlineSent: true };
           await putJson(container, `${prefix}status.json`, st);
-        } catch (e) { context.log.warn("[outline] resend afteroutline failed", String(e?.message || e)); }
+        } catch (e) {
+          context.log.warn("[outline] resend afteroutline failed", String(e?.message || e));
+        }
       }
       context.log("[outline] already completed; skipping", { runId });
       return;
@@ -329,7 +330,7 @@ module.exports = async function (context, queueItem) {
 
     // ---- Load artifacts ----
     const evidenceRaw = await getJson(container, `${prefix}evidence_log.json`);
-        let evidenceArr = [];
+    let evidenceArr = [];
     try {
       const evCanon = await getJson(container, `${prefix}evidence.json`);
       if (evCanon && Array.isArray(evCanon.claims)) evidenceArr = evCanon.claims;
@@ -371,25 +372,25 @@ module.exports = async function (context, queueItem) {
     let productNames = Array.isArray(productsFile?.products) && productsFile.products.length
       ? productsFile.products
       : (() => {
-          const first = site?.[0]?.snippet || "";
-          if (!first) return [];
-          const lines = first.split(/\r?\n/).slice(0, 2000);
-          const out = new Set();
-          for (const line of lines) {
-            if (/(<h1|<h2|<h3|<li|product|solutions|services)/i.test(line)) {
-              const m = line.match(/>([^<>]{3,120})</);
-              if (m) {
-                const val = m[1].trim();
-                if (
-                  val &&
-                  !/^(home|about|contact|login|support|learn|blog|cookie|privacy|terms|partners|resources)$/i.test(val) &&
-                  !/^(read more|learn more)$/i.test(val)
-                ) out.add(val);
-              }
+        const first = site?.[0]?.snippet || "";
+        if (!first) return [];
+        const lines = first.split(/\r?\n/).slice(0, 2000);
+        const out = new Set();
+        for (const line of lines) {
+          if (/(<h1|<h2|<h3|<li|product|solutions|services)/i.test(line)) {
+            const m = line.match(/>([^<>]{3,120})</);
+            if (m) {
+              const val = m[1].trim();
+              if (
+                val &&
+                !/^(home|about|contact|login|support|learn|blog|cookie|privacy|terms|partners|resources)$/i.test(val) &&
+                !/^(read more|learn more)$/i.test(val)
+              ) out.add(val);
             }
           }
-          return Array.from(out);
-        })();
+        }
+        return Array.from(out);
+      })();
 
     // CSV → derive mode + signals
     const modeSpecific = (csvNorm && csvNorm.industry_mode === "specific" && csvNorm.selected_industry);
@@ -425,7 +426,7 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
     };
 
     // competitor-steering
-        const userCompetitors = Array.isArray(input?.relevant_competitors)
+    const userCompetitors = Array.isArray(input?.relevant_competitors)
       ? input.relevant_competitors
       : (Array.isArray(input?.competitors) ? input.competitors : []);
 
@@ -611,10 +612,7 @@ ${safeForPrompt(runConfig.relevant_competitors || [])}
     // Single-shot notify {op:"afteroutline"} on main queue
     if (!stDone.markers.afteroutlineSent) {
       try {
-        const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
-        const qc = qs.getQueueClient(CAMPAIGN_QUEUE);
-        await qc.createIfNotExists();
-        await qc.sendMessage(JSON.stringify({ op: "afteroutline", runId, page, prefix }));
+        await enqueueTo(ROUTER_QUEUE_NAME, { op: "afteroutline", runId, page, prefix });
 
         const st2 = await readStatus(container, prefix);
         st2.markers = { ...(st2.markers || {}), afteroutlineSent: true };
@@ -623,7 +621,6 @@ ${safeForPrompt(runConfig.relevant_competitors || [])}
         context.log.warn("[outline] notify afteroutline failed", String(notifyErr?.message || notifyErr));
       }
     }
-
     context.log("[outline] success", { runId });
   } catch (err) {
     context.log.error("[outline] failure", String(err?.message || err));
