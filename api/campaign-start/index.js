@@ -1,4 +1,4 @@
-// /api/campaign-start/index.js 23-11-2025 v18
+// /api/campaign-start/index.js 25-11-2025 v19
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign-start → writes status/input, enqueues kickoff to main queue + full job to evidence queue.
 
@@ -8,7 +8,7 @@ const crypto = require("crypto");
 
 // ---- Config ----
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
-const QUEUE_NAME = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
+const WORKER_QUEUE = process.env.Q_CAMPAIGN_WORKER || "campaign-worker-jobs";
 const EVIDENCE_QUEUE = process.env.Q_CAMPAIGN_EVIDENCE || "campaign-evidence-jobs";
 const STORAGE_CONN = process.env.AzureWebJobsStorage;
 
@@ -480,9 +480,8 @@ module.exports = async function (context, req) {
 
     // ---- Enqueue once to main + evidence ----
     const parsed = JSON.parse(payload);
-    const r1 = await enqueue(qMain, parsed);
-    const r2 = await enqueue(qEvidence, parsed);
-
+    await enqueueTo(WORKER_QUEUE, parsed);   
+    await enqueueTo(EVIDENCE_QUEUE, parsed);
 
     context.log({
       event: "campaign_start_enqueued",
