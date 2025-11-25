@@ -1,4 +1,4 @@
-// /api/campaign-outline/index.js 12-11-2025 v10.0
+// /api/campaign-outline/index.js 25-11-2025 v10.2
 // Queue-triggered on %Q_CAMPAIGN_OUTLINE% (by router) to create <prefix>outline.json,
 // then posts a single {op:"afteroutline"} to %CAMPAIGN_QUEUE_NAME%.
 //
@@ -13,7 +13,6 @@
 // - Robust prompt-harness loader (CJS/ESM)
 
 const { BlobServiceClient } = require("@azure/storage-blob");
-const { QueueServiceClient } = require("@azure/storage-queue");
 const { enqueueTo } = require("../lib/campaign-queue");
 const path = require("path");
 const os = require("os");
@@ -60,7 +59,22 @@ const OUTLINE_SCHEMA = {
         campaign_requirement: { type: "string" },
         relevant_competitors: { type: "array", items: { type: "string" } },
         notes: { type: "string" }
-      }
+      },
+      required: [
+        "spend_band",
+        "top_blockers",
+        "top_needs_supplier",
+        "top_purchases",
+        "product_mentions",
+        "supplier_company",
+        "supplier_website",
+        "supplier_linkedin",
+        "supplier_usps",
+        "campaign_industry",
+        "campaign_requirement",
+        "relevant_competitors",
+        "notes"
+      ]
     },
     sections: {
       type: "object",
