@@ -3,7 +3,6 @@
 // POST /api/campaign-start → writes status/input, enqueues kickoff to main queue + full job to evidence queue.
 
 const { BlobServiceClient } = require("@azure/storage-blob");
-const { QueueServiceClient } = require("@azure/storage-queue");
 const { enqueueTo } = require("../lib/campaign-queue");
 const crypto = require("crypto");
 
@@ -157,9 +156,6 @@ async function normalizeCsvAndPersist(containerClient, prefix, input) {
 
 
 // Queue helpers
-async function enqueue(queueClient, msgObj) {
-  return queueClient.sendMessage(JSON.stringify(msgObj)); // SDK base64-encodes for you
-}
 function safeStringify(obj) { try { return JSON.stringify(obj); } catch { return "{}"; } }
 function byteLen(s) { return Buffer.byteLength(s, "utf8"); }
 
@@ -186,14 +182,6 @@ module.exports = async function (context, req) {
         status: 500,
         headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
         body: { error: "config", message: "AzureWebJobsStorage app setting is missing" },
-      };
-      return;
-    }
-    if (!QUEUE_NAME) {
-      context.res = {
-        status: 500,
-        headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "config", message: "CAMPAIGN_QUEUE_NAME app setting is missing" },
       };
       return;
     }
@@ -312,13 +300,7 @@ module.exports = async function (context, req) {
     const blobService = BlobServiceClient.fromConnectionString(STORAGE_CONN);
     const containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
     await containerClient.createIfNotExists();
-
-    const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
-    const qMain = qs.getQueueClient(QUEUE_NAME);
-    const qEvidence = qs.getQueueClient(EVIDENCE_QUEUE);
-    await qMain.createIfNotExists();
-    await qEvidence.createIfNotExists();
-
+    
     // ---- runId / prefix / idempotency ----
     const clientRunKey = body.clientRunKey || readHeader(req, "x-idempotency-key") || null;
     const runId = clientRunKey
@@ -481,13 +463,13 @@ module.exports = async function (context, req) {
 
     // ---- Enqueue once to main + evidence ----
     const parsed = JSON.parse(payload);
-    await enqueueTo(WORKER_QUEUE, parsed);   
-    await enqueueTo(EVIDENCE_QUEUE, parsed);
+    const r1 = await enqueueTo(WORKER_QUEUE, parsed);
+    const r2 = await enqueueTo(EVIDENCE_QUEUE, parsed);
 
     context.log({
       event: "campaign_start_enqueued",
       runId,
-      mainQueue: QUEUE_NAME,
+      workerQueue: WORKER_QUEUE,
       evidenceQueue: EVIDENCE_QUEUE,
       mainMsgId: r1?.messageId,
       evidMsgId: r2?.messageId,
