@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 24-11-2025 — v32.0
+// /api/campaign-evidence/index.js 25-11-2025 — v33.0
 // Phase 1 canonical outputs:
 // - csv_normalized.json
 // - needs_map.json
@@ -11,7 +11,7 @@
 
 const crypto = require("node:crypto");
 const { validateAndWarn } = require("../shared/schemaValidators");
-const { enqueueStart } = require("../lib/campaign-queue");
+const { enqueueTo } = require("../lib/campaign-queue");
 const { nowIso } = require("../shared/utils");
 const ROUTER_QUEUE_NAME = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
 
