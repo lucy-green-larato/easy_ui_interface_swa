@@ -1,8 +1,9 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 22-11-2025 v13
-   Changes vs v5:
-   - Support resuming an existing run selected in #runSelect (no CSV required)
-   - Poller: tolerate a single transient status fetch error before failing
-   - Clearer logs/status for resume vs new run
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 25-11-2025 v14
+   Gold schema aware:
+   - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
+     messaging_matrix, sales_enablement, go_to_market_plan, risks_and_contingencies,
+     compliance_and_governance, one_pager_summary).
+   - Falls back to legacy shapes if Gold fields are absent.
 */
 
 window.CampaignUI = window.CampaignUI || {};
@@ -134,7 +135,7 @@ window.CampaignUI = window.CampaignUI || {};
     };
   }
 
-  // -- PATCH F1 helper: normalise Executive Summary shapes --
+  // -- helper: normalise Executive Summary shapes --
   function resolveExecutiveSummaryShapes(es, esLegacy) {
     // Prefer new object shape
     if (es && typeof es === "object" && !Array.isArray(es)) {
@@ -166,11 +167,43 @@ window.CampaignUI = window.CampaignUI || {};
     return { lead: "", bullets: [] };
   }
 
+  // ---------- Renderers (Gold-aware) ----------
+
   function renderExecutiveSummary() {
-    // 1) Prefer the narrative object (new contract), in any of these locations
-    //    - writer/assemble:   contract.executive_summary  (object)
-    //    - writer sections:   contract.sections.executive_summary (object)
-    //    - worker fast path:  contract.executive_summary_narrative (object)
+    const wrap = document.createElement("div");
+
+    // GOLD SHAPE: contract.executive_summary { title, paragraphs[], citations[] }
+    const esGold = state.contract?.executive_summary;
+    if (esGold && typeof esGold === "object" && Array.isArray(esGold.paragraphs)) {
+      if (esGold.title) {
+        const h = document.createElement("h3");
+        h.textContent = esGold.title;
+        wrap.appendChild(h);
+      }
+
+      esGold.paragraphs.forEach(pTxt => {
+        if (!pTxt) return;
+        const p = document.createElement("p");
+        p.textContent = String(pTxt);
+        wrap.appendChild(p);
+      });
+
+      if (Array.isArray(esGold.citations) && esGold.citations.length) {
+        const h2 = document.createElement("h4");
+        h2.textContent = "Citations";
+        h2.style.marginTop = "1rem";
+        wrap.appendChild(h2);
+        wrap.appendChild(makeList(esGold.citations));
+      }
+
+      setPanelContent(wrap);
+      return;
+    }
+
+    // LEGACY NARRATIVE OBJECTS:
+    //    - contract.executive_summary (object)
+    //    - contract.sections.executive_summary (object)
+    //    - contract.executive_summary_narrative (object)
     const esNarr =
       (state.contract && typeof state.contract.executive_summary === "object" && !Array.isArray(state.contract.executive_summary))
         ? state.contract.executive_summary
@@ -179,8 +212,6 @@ window.CampaignUI = window.CampaignUI || {};
           : (state.contract && typeof state.contract.executive_summary_narrative === "object" && !Array.isArray(state.contract.executive_summary_narrative))
             ? state.contract.executive_summary_narrative
             : null;
-
-    const wrap = document.createElement("div");
 
     // If we have narrative fields, render them in the required order (no bullets)
     if (esNarr) {
@@ -205,7 +236,7 @@ window.CampaignUI = window.CampaignUI || {};
       }
     }
 
-    // 2) Backward-compatibility: fall back to your existing lead+bullets/array logic
+    // Legacy lead+bullets / array logic
     const esObj = state.contract?.sections?.executive_summary || state.contract?.executive_summary_object || null;
     const esLegacy = Array.isArray(state.contract?.executive_summary_legacy)
       ? state.contract.executive_summary_legacy
@@ -219,7 +250,7 @@ window.CampaignUI = window.CampaignUI || {};
       return;
     }
 
-    // Normalise to { lead, bullets[] } using your helper
+    // Normalise to { lead, bullets[] } using helper
     const norm = resolveExecutiveSummaryShapes(esObj, esLegacy);
     const para = typeof norm?.lead === "string" ? norm.lead.trim() : "";
     let bullets = Array.isArray(norm?.bullets) ? norm.bullets.filter(Boolean) : [];
@@ -501,12 +532,70 @@ window.CampaignUI = window.CampaignUI || {};
   }
 
   function renderPositioning() {
-    const pos = state.contract?.positioning_and_differentiation || {};
     const wrap = document.createElement("div");
 
     const h1 = document.createElement("h3");
     h1.textContent = "Value Proposition";
     wrap.appendChild(h1);
+
+    // GOLD SHAPE: contract.value_proposition
+    const vpGold = state.contract?.value_proposition;
+    if (vpGold && typeof vpGold === "object") {
+      if (vpGold.narrative) {
+        const paraBlocks = String(vpGold.narrative)
+          .split(/\n{2,}/)
+          .map(p => p.trim())
+          .filter(Boolean);
+        paraBlocks.forEach(pTxt => {
+          const p = document.createElement("p");
+          p.textContent = pTxt;
+          wrap.appendChild(p);
+        });
+      }
+
+      const moore = vpGold.moore;
+      if (moore && typeof moore === "object") {
+        const h2 = document.createElement("h3");
+        h2.textContent = "Positioning (Moore)";
+        h2.style.marginTop = "1rem";
+        wrap.appendChild(h2);
+
+        wrap.appendChild(makeTable(
+          ["For", "Who", "The", "Is a", "That", "Unlike", "We provide"],
+          [[
+            moore.for || "",
+            moore.who || "",
+            moore.the || "",
+            moore.is_a || "",
+            moore.that || "",
+            moore.unlike || "",
+            moore.we_provide || ""
+          ]]
+        ));
+      }
+
+      if (vpGold.competitive_position) {
+        const h3 = document.createElement("h3");
+        h3.textContent = "Competitive position";
+        h3.style.marginTop = "1rem";
+        wrap.appendChild(h3);
+        wrap.appendChild(makePre(vpGold.competitive_position));
+      }
+
+      if (Array.isArray(vpGold.proof_points) && vpGold.proof_points.length) {
+        const h4 = document.createElement("h3");
+        h4.textContent = "Proof points";
+        h4.style.marginTop = "1rem";
+        wrap.appendChild(h4);
+        wrap.appendChild(makeList(vpGold.proof_points));
+      }
+
+      setPanelContent(wrap);
+      return;
+    }
+
+    // LEGACY POSITIONING
+    const pos = state.contract?.positioning_and_differentiation || {};
 
     // 1) Prefer deeper VP narrative when available
     const vpn = pos.value_prop_narrative;
@@ -528,7 +617,7 @@ window.CampaignUI = window.CampaignUI || {};
       });
     }
 
-    // 2) Then show structured Moore sentence + fields table (as you already do)
+    // 2) Structured Moore sentence + fields
     const vpm =
       pos.value_prop_moore ||
       pos.value_proposition_moore ||
@@ -559,7 +648,7 @@ window.CampaignUI = window.CampaignUI || {};
       wrap.appendChild(makePre(pos.value_prop || ""));
     }
 
-    // 4) SWOT (unchanged)
+    // 4) SWOT
     const sw = pos.swot || {};
     const hasSw = [sw.strengths, sw.weaknesses, sw.opportunities, sw.threats]
       .some(a => Array.isArray(a) && a.length);
@@ -580,7 +669,7 @@ window.CampaignUI = window.CampaignUI || {};
       wrap.appendChild(p);
     }
 
-    // 5) Differentiators (unchanged)
+    // 5) Differentiators
     if (Array.isArray(pos.differentiators) && pos.differentiators.length) {
       const h3 = document.createElement("h3");
       h3.textContent = "Differentiators";
@@ -588,7 +677,7 @@ window.CampaignUI = window.CampaignUI || {};
       wrap.appendChild(makeList(pos.differentiators));
     }
 
-    // 6) Competitor set (unchanged)
+    // 6) Competitor set
     const comp = rowsOf(pos.competitor_set);
     if (comp.length) {
       const h4 = document.createElement("h3");
@@ -607,6 +696,43 @@ window.CampaignUI = window.CampaignUI || {};
     const mm = state.contract?.messaging_matrix || {};
     const wrap = document.createElement("div");
 
+    // GOLD SHAPE: audiences[], pillars[], support_points[]
+    const hasGold =
+      (Array.isArray(mm.audiences) && mm.audiences.length) ||
+      (Array.isArray(mm.pillars) && mm.pillars.length) ||
+      (Array.isArray(mm.support_points) && mm.support_points.length);
+
+    if (hasGold) {
+      const h1 = document.createElement("h3");
+      h1.textContent = "Key audiences";
+      wrap.appendChild(h1);
+      wrap.appendChild(makeList(mm.audiences || []));
+
+      const h2 = document.createElement("h3");
+      h2.textContent = "Messaging pillars";
+      h2.style.marginTop = "1rem";
+      wrap.appendChild(h2);
+      wrap.appendChild(makeList(mm.pillars || []));
+
+      const h3 = document.createElement("h3");
+      h3.textContent = "Support points";
+      h3.style.marginTop = "1rem";
+      wrap.appendChild(h3);
+      wrap.appendChild(makeList(mm.support_points || []));
+
+      if (Array.isArray(mm.citations) && mm.citations.length) {
+        const h4 = document.createElement("h3");
+        h4.textContent = "Citations";
+        h4.style.marginTop = "1rem";
+        wrap.appendChild(h4);
+        wrap.appendChild(makeList(mm.citations));
+      }
+
+      setPanelContent(wrap);
+      return;
+    }
+
+    // LEGACY MATRIX SHAPE
     const h1 = document.createElement("h3"); h1.textContent = "Non-negotiables";
     wrap.appendChild(h1); wrap.appendChild(makeList(mm.nonnegotiables || []));
 
@@ -631,9 +757,62 @@ window.CampaignUI = window.CampaignUI || {};
   }
 
   function renderOffer() {
+    const wrap = document.createElement("div");
+
+    // GOLD SHAPE: go_to_market_plan as "Strategy & Assets"
+    const gtm = state.contract?.go_to_market_plan || {};
+    const hasGtm = gtm && typeof gtm === "object" && Object.keys(gtm).length;
+
+    if (hasGtm) {
+      const h0 = document.createElement("h3");
+      h0.textContent = "Go-to-market strategy";
+      wrap.appendChild(h0);
+
+      const rows = [];
+
+      if (gtm.objective) {
+        rows.push(["Objective", gtm.objective]);
+      }
+      if (gtm.target_market) {
+        const tm = gtm.target_market;
+        const summary = tm.summary || "";
+        const cohorts = Array.isArray(tm.cohorts) ? tm.cohorts : [];
+        rows.push(["Target market summary", summary]);
+        if (cohorts.length) {
+          rows.push(["Cohorts", cohorts]);
+        }
+      }
+      if (Array.isArray(gtm.marketing_actions) && gtm.marketing_actions.length) {
+        rows.push(["Marketing actions", gtm.marketing_actions]);
+      }
+      if (Array.isArray(gtm.sales_actions) && gtm.sales_actions.length) {
+        rows.push(["Sales actions", gtm.sales_actions]);
+      }
+      if (gtm.pipeline_model && typeof gtm.pipeline_model === "object") {
+        rows.push(["Pipeline model", JSON.stringify(gtm.pipeline_model, null, 2)]);
+      }
+      if (gtm.cta) {
+        rows.push(["Recommended CTA", gtm.cta]);
+      }
+
+      wrap.appendChild(makeTable(["Field", "Value"], rows));
+
+      if (Array.isArray(gtm.citations) && gtm.citations.length) {
+        const h1 = document.createElement("h3");
+        h1.textContent = "Citations";
+        h1.style.marginTop = "1rem";
+        wrap.appendChild(h1);
+        wrap.appendChild(makeList(gtm.citations));
+      }
+
+      setPanelContent(wrap);
+      return;
+    }
+
+    // LEGACY offer_strategy
     const offer = state.contract?.offer_strategy || {};
     const lp = offer.landing_page || {};
-    const wrap = document.createElement("div");
+
     const rows = [
       ["Hero", lp.hero || ""],
       ["Why it matters", rowsOf(lp.why_it_matters)],
@@ -694,8 +873,64 @@ window.CampaignUI = window.CampaignUI || {};
   }
 
   function renderSalesEnablement() {
-    const se = state.contract?.sales_enablement || {};
     const wrap = document.createElement("div");
+
+    // GOLD SHAPE: contract.sales_enablement
+    const seGold = state.contract?.sales_enablement || {};
+    const hasGold = seGold && typeof seGold === "object" && (
+      seGold.campaign_overview ||
+      (Array.isArray(seGold.buyer_outcomes) && seGold.buyer_outcomes.length) ||
+      (Array.isArray(seGold.discovery_questions) && seGold.discovery_questions.length) ||
+      seGold.master_pitch
+    );
+
+    if (hasGold) {
+      if (seGold.campaign_overview) {
+        const h0 = document.createElement("h3");
+        h0.textContent = "Campaign overview";
+        wrap.appendChild(h0);
+        wrap.appendChild(makePre(seGold.campaign_overview));
+      }
+
+      if (Array.isArray(seGold.buyer_outcomes) && seGold.buyer_outcomes.length) {
+        const h1 = document.createElement("h3");
+        h1.textContent = "Buyer outcomes";
+        h1.style.marginTop = "1rem";
+        wrap.appendChild(h1);
+        wrap.appendChild(makeList(seGold.buyer_outcomes));
+      }
+
+      if (Array.isArray(seGold.discovery_questions) && seGold.discovery_questions.length) {
+        const h2 = document.createElement("h3");
+        h2.textContent = "Discovery questions";
+        h2.style.marginTop = "1rem";
+        wrap.appendChild(h2);
+        wrap.appendChild(makeList(seGold.discovery_questions));
+      }
+
+      if (seGold.master_pitch) {
+        const h3 = document.createElement("h3");
+        h3.textContent = "Master pitch";
+        h3.style.marginTop = "1rem";
+        wrap.appendChild(h3);
+        wrap.appendChild(makePre(seGold.master_pitch));
+      }
+
+      if (seGold.competitive_battlecard && typeof seGold.competitive_battlecard === "object") {
+        const h4 = document.createElement("h3");
+        h4.textContent = "Competitive battlecard";
+        h4.style.marginTop = "1rem";
+        wrap.appendChild(h4);
+        const rows = Object.entries(seGold.competitive_battlecard).map(([k, v]) => [k, Array.isArray(v) ? v : String(v)]);
+        wrap.appendChild(makeTable(["Field", "Value"], rows));
+      }
+
+      setPanelContent(wrap);
+      return;
+    }
+
+    // LEGACY SHAPE
+    const se = state.contract?.sales_enablement || {};
 
     const h1 = document.createElement("h3"); h1.textContent = "Discovery Questions";
     wrap.appendChild(h1); wrap.appendChild(makeList(rowsOf(se.discovery_questions)));
@@ -727,8 +962,31 @@ window.CampaignUI = window.CampaignUI || {};
   }
 
   function renderCompliance() {
-    const cg = state.contract?.compliance_and_governance || {};
     const wrap = document.createElement("div");
+
+    // GOLD SHAPE: compliance_and_governance.notes + citations
+    const cgGold = state.contract?.compliance_and_governance || {};
+    const hasGold = cgGold && typeof cgGold === "object" && (cgGold.notes || (Array.isArray(cgGold.citations) && cgGold.citations.length));
+
+    if (hasGold) {
+      const rows = [];
+      if (cgGold.notes) rows.push(["Notes", cgGold.notes]);
+      wrap.appendChild(makeTable(["Field", "Value"], rows));
+
+      if (Array.isArray(cgGold.citations) && cgGold.citations.length) {
+        const h = document.createElement("h3");
+        h.textContent = "Citations";
+        h.style.marginTop = "1rem";
+        wrap.appendChild(h);
+        wrap.appendChild(makeList(cgGold.citations));
+      }
+
+      setPanelContent(wrap);
+      return;
+    }
+
+    // LEGACY SHAPE
+    const cg = state.contract?.compliance_and_governance || {};
     wrap.appendChild(makeTable(["Field", "Value"], [
       ["Substantiation file", cg.substantiation_file || ""],
       ["GDPR/PECR checklist", cg.gdpr_pecr_checklist || ""],
@@ -739,11 +997,46 @@ window.CampaignUI = window.CampaignUI || {};
   }
 
   function renderRisks() {
+    const wrap = document.createElement("div");
+
+    // GOLD SHAPE: risks_and_contingencies { risks[], mitigations[] }
+    const rcGold = state.contract?.risks_and_contingencies || {};
+    if (rcGold && typeof rcGold === "object" &&
+      (Array.isArray(rcGold.risks) || Array.isArray(rcGold.mitigations))) {
+      const rows = [];
+      rows.push(["Risks", rowsOf(rcGold.risks)]);
+      rows.push(["Mitigations", rowsOf(rcGold.mitigations)]);
+      wrap.appendChild(makeTable(["Field", "Value"], rows));
+      setPanelContent(wrap);
+      return;
+    }
+
+    // LEGACY SHAPE: treat as list
     setPanelContent(makeList(rowsOf(state.contract?.risks_and_contingencies)));
   }
 
   function renderOnePager() {
     const wrap = document.createElement("div");
+
+    // GOLD SHAPE: one_pager_summary { positioning, core_message, quick_facts[] }
+    const op = state.contract?.one_pager_summary || {};
+    if (op && typeof op === "object" && (op.positioning || op.core_message || Array.isArray(op.quick_facts))) {
+      const h = document.createElement("h3");
+      h.textContent = "One-page summary";
+      wrap.appendChild(h);
+
+      const rows = [];
+      if (op.positioning) rows.push(["Positioning", op.positioning]);
+      if (op.core_message) rows.push(["Core message", op.core_message]);
+      if (Array.isArray(op.quick_facts) && op.quick_facts.length) {
+        rows.push(["Quick facts", op.quick_facts]);
+      }
+      wrap.appendChild(makeTable(["Field", "Value"], rows));
+      setPanelContent(wrap);
+      return;
+    }
+
+    // LEGACY SHAPE
     const h = document.createElement("h3"); h.textContent = "One-pager bullets";
     wrap.appendChild(h);
     wrap.appendChild(makeList(rowsOf(state.contract?.one_pager_summary)));
@@ -889,7 +1182,7 @@ window.CampaignUI = window.CampaignUI || {};
     const supplier_company = ($("#companyName")?.value || "").trim();
     const supplier_website = ($("#companyWebsite")?.value || "").trim();
     const supplier_linkedin = ($("#companyLinkedIn")?.value || "").trim();
-    const supplier_products = (document.getElementById('supplier_products')?.value || "").trim(); // <-- added
+    const supplier_products = (document.getElementById('supplier_products')?.value || "").trim();
 
     const uspsText = ($("#companyUsps")?.value || "").trim();
     const supplier_usps = uspsText ? uspsText.split(/\r?\n|;|,/).map(s => s.trim()).filter(Boolean) : [];
@@ -918,7 +1211,7 @@ window.CampaignUI = window.CampaignUI || {};
       return await fetchCompleteRun(selectedRunId, /*allowPoll*/ true);
     }
 
-    // Otherwise, we’re starting a fresh run
+    // Otherwise, start a fresh run
     UI.setStatus("Submitting…", "run");
     UI.log("Submitting job to /api/campaign-start");
 
@@ -946,7 +1239,7 @@ window.CampaignUI = window.CampaignUI || {};
       supplier_company,
       supplier_website,
       supplier_linkedin,
-      supplier_products, // <-- added
+      supplier_products,
       supplier_usps,
       campaign_industry: buyer_industry,
       relevant_competitors,
@@ -975,10 +1268,8 @@ window.CampaignUI = window.CampaignUI || {};
       if (evCanon && typeof evCanon === "object" && Array.isArray(evCanon.claims)) {
         evidenceItems = evCanon.claims;
       } else if (Array.isArray(evCanon)) {
-        // Some environments still return a bare array at /evidence
         evidenceItems = evCanon;
       } else {
-        // Fallback to legacy file
         const evLegacy = await http("GET", API.fetchEvidenceLog(runId), { timeoutMs: 20000 });
         if (Array.isArray(evLegacy)) evidenceItems = evLegacy;
       }
@@ -994,6 +1285,7 @@ window.CampaignUI = window.CampaignUI || {};
     // Normalise state names so "Completed" and "completed" behave identically
     const normState = (s) => String(s || "Unknown");
     const stateKey = (s) => normState(s).toLowerCase();
+
     async function fetchCampaignContract(runId) {
       const contract = await http("GET", API.fetchContract(runId), { timeoutMs: 30000 });
       if (!contract || typeof contract !== "object") {
@@ -1003,44 +1295,37 @@ window.CampaignUI = window.CampaignUI || {};
     }
 
     function isTerminalSuccess(statusObj) {
-      const stateName = normState(statusObj?.state);
       const k = stateKey(statusObj?.state);
       const markers = statusObj?.markers || {};
-
-      // Treat both "completed" and "assembled" (or afterassembleSent) as final success
       if (k === "completed") return true;
       if (k === "assembled") return true;
       if (markers.afterassembleSent === true) return true;
-
       return false;
     }
+
     // First peek—if already completed, short-circuit
     try {
       const peek = await http("GET", API.status(runId), { timeoutMs: 12000 });
       const stateName = normState(peek?.state);
-      const stateK = stateKey(peek?.state);
-
       UI.setStatus(stateName, stateName === "Failed" ? "err" : "run");
       UI.log(`Status: ${stateName}`);
 
-      if (isTerminalSuccess(peek))  {
-        // Short bounded retry loop for contract fetch to avoid a just-written race
+      if (isTerminalSuccess(peek)) {
         let lastErr;
-        for (let k = 0; k < 4; k++) { // up to ~2.5s total
+        for (let k = 0; k < 4; k++) {
           try {
             const contract = await fetchCampaignContract(runId);
             return contract;
           } catch (e) {
             lastErr = e;
           }
-          await new Promise(r => setTimeout(r, 300 + k * 400)); // 300ms, 700ms, 1100ms, 1500ms
+          await new Promise(r => setTimeout(r, 300 + k * 400));
         }
         throw lastErr || new Error("Contract fetch failed");
       }
 
       if (!allowPoll) throw new Error(`Run is not completed (state: ${stateName})`);
     } catch (e) {
-      // If even the first status fails, let the loop try once (below)
       UI.log("First status check failed, will retry once: " + (e?.message || e));
     }
 
@@ -1049,17 +1334,11 @@ window.CampaignUI = window.CampaignUI || {};
     let attempt = 0;
     let consecutiveErrors = 0;
 
-    // Normalise allowed states to lowercase for comparison
     const okDuring = new Set([
-      // queue / early
       "Queued", "ValidatingInput", "PacksLoad", "ingest", "DraftCampaign",
-      // evidence & outline
       "EvidenceDigest", "Outline",
-      // strategy & handoff
       "StrategySynthesis", "strategy_working", "strategy_ready",
-      // writer & assembly
       "SectionWrites", "writer_working", "Assemble", "assembled",
-      // terminal
       "Completed"
     ].map(s => s.toLowerCase()));
 
@@ -1068,7 +1347,7 @@ window.CampaignUI = window.CampaignUI || {};
 
       try {
         const st = await http("GET", API.status(runId), { timeoutMs: 15000 });
-        consecutiveErrors = 0; // success resets the error counter
+        consecutiveErrors = 0;
 
         const stateName = normState(st?.state);
         const stateK = stateKey(st?.state);
@@ -1076,7 +1355,7 @@ window.CampaignUI = window.CampaignUI || {};
         UI.setStatus(stateName, stateName === "Failed" ? "err" : "run");
         UI.log(`Status: ${stateName}`);
 
-       if (isTerminalSuccess(st)) {
+        if (isTerminalSuccess(st)) {
           const contract = await fetchCampaignContract(runId);
           return contract;
         }
@@ -1088,11 +1367,11 @@ window.CampaignUI = window.CampaignUI || {};
       } catch (e) {
         consecutiveErrors += 1;
         UI.log("Status poll error: " + (e?.message || e));
-        if (consecutiveErrors > 1) throw e; // tolerate one transient error
+        if (consecutiveErrors > 1) throw e;
       }
 
       attempt += 1;
-      const sleepMs = Math.min(1000 + attempt * 500, 5000); // 1s → 5s
+      const sleepMs = Math.min(1000 + attempt * 500, 5000);
       await new Promise(r => setTimeout(r, sleepMs));
     }
   }
@@ -1179,17 +1458,17 @@ window.CampaignUI = window.CampaignUI || {};
   });
 
   const SECTIONS = [
-    { id: "exec", label: "Executive Summary", render: renderExecutiveSummary },
-    { id: "elog", label: "Evidence Log", render: renderEvidenceLog },
-    { id: "cases", label: "Case Studies", render: renderCaseLibrary },
-    { id: "pos", label: "Positioning", render: renderPositioning },
-    { id: "icp", label: "Messaging", render: renderICPMatrix },
-    { id: "offer", label: "Strategy & Assets", render: renderOffer },
-    { id: "chan", label: "Go-to-market", render: renderChannel },
-    { id: "se", label: "Sales Battle Card", render: renderSalesEnablement },
-    { id: "ml", label: "Measurement", render: renderMeasurement },
-    { id: "comp", label: "Governance", render: renderCompliance },
-    { id: "risk", label: "Contingencies", render: renderRisks },
-    { id: "one", label: "One Page Summary", render: renderOnePager }
+    { id: "exec",  label: "Executive Summary",   render: renderExecutiveSummary },
+    { id: "elog",  label: "Evidence Log",        render: renderEvidenceLog },
+    { id: "cases", label: "Case Studies",        render: renderCaseLibrary },
+    { id: "pos",   label: "Positioning",         render: renderPositioning },
+    { id: "icp",   label: "Messaging",           render: renderICPMatrix },
+    { id: "offer", label: "Strategy & Assets",   render: renderOffer },
+    { id: "chan",  label: "Go-to-market",        render: renderChannel },
+    { id: "se",    label: "Sales Battle Card",   render: renderSalesEnablement },
+    { id: "ml",    label: "Measurement",         render: renderMeasurement },
+    { id: "comp",  label: "Governance",          render: renderCompliance },
+    { id: "risk",  label: "Contingencies",       render: renderRisks },
+    { id: "one",   label: "One Page Summary",    render: renderOnePager }
   ];
 })();
