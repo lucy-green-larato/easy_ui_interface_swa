@@ -994,7 +994,26 @@ window.CampaignUI = window.CampaignUI || {};
     // Normalise state names so "Completed" and "completed" behave identically
     const normState = (s) => String(s || "Unknown");
     const stateKey = (s) => normState(s).toLowerCase();
+    async function fetchCampaignContract(runId) {
+      const contract = await http("GET", API.fetchContract(runId), { timeoutMs: 30000 });
+      if (!contract || typeof contract !== "object") {
+        throw new Error("Empty or invalid contract JSON");
+      }
+      return contract;
+    }
 
+    function isTerminalSuccess(statusObj) {
+      const stateName = normState(statusObj?.state);
+      const k = stateKey(statusObj?.state);
+      const markers = statusObj?.markers || {};
+
+      // Treat both "completed" and "assembled" (or afterassembleSent) as final success
+      if (k === "completed") return true;
+      if (k === "assembled") return true;
+      if (markers.afterassembleSent === true) return true;
+
+      return false;
+    }
     // First peek—if already completed, short-circuit
     try {
       const peek = await http("GET", API.status(runId), { timeoutMs: 12000 });
@@ -1004,14 +1023,13 @@ window.CampaignUI = window.CampaignUI || {};
       UI.setStatus(stateName, stateName === "Failed" ? "err" : "run");
       UI.log(`Status: ${stateName}`);
 
-      if (stateK === "completed") {
+      if (isTerminalSuccess(peek))  {
         // Short bounded retry loop for contract fetch to avoid a just-written race
         let lastErr;
         for (let k = 0; k < 4; k++) { // up to ~2.5s total
           try {
-            const contract = await http("GET", API.fetchContract(runId), { timeoutMs: 30000 });
-            if (contract && typeof contract === "object") return contract;
-            lastErr = new Error("Empty or invalid contract JSON");
+            const contract = await fetchCampaignContract(runId);
+            return contract;
           } catch (e) {
             lastErr = e;
           }
@@ -1058,9 +1076,8 @@ window.CampaignUI = window.CampaignUI || {};
         UI.setStatus(stateName, stateName === "Failed" ? "err" : "run");
         UI.log(`Status: ${stateName}`);
 
-        if (stateK === "completed") {
-          const contract = await http("GET", API.fetchContract(runId), { timeoutMs: 30000 });
-          if (!contract || typeof contract !== "object") throw new Error("Empty or invalid contract JSON");
+       if (isTerminalSuccess(st)) {
+          const contract = await fetchCampaignContract(runId);
           return contract;
         }
 
