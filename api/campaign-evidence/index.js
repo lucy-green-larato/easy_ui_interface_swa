@@ -1071,9 +1071,14 @@ module.exports = async function (context, job) {
             return {
               url,
               title,
-              summary,
+              summary: `${snippet} ${claim}`.trim(),
               source_type,
-              quote: claim
+              quote: claim,
+              tag: it?.tag || "markdown_pack",
+              topic: it?.field || null,
+              markdown_id: it?.id || null,
+              pack_type: it?.source?.pack_type || null,
+              heading: it?.source?.heading || null
             };
           })
           .filter(Boolean);
@@ -1184,7 +1189,13 @@ module.exports = async function (context, job) {
         title: pe.title,
         url: pe.url,
         summary: addCitation(pe.summary, pe.source_type || "source"),
-        quote: pe.quote || ""
+        quote: pe.quote || "",
+        tag: pe.tag || "markdown_pack",
+        topic: pe.topic || null,
+        markdown_id: pe.markdown_id || null,
+        heading: pe.heading || null,
+        pack_type: pe.pack_type || null,
+        target_field: pe.topic || null
       }, MAX_EVIDENCE_ITEMS);
       if (evidenceLog.length >= MAX_EVIDENCE_ITEMS) break;
     }
