@@ -4,6 +4,7 @@
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { QueueServiceClient } = require("@azure/storage-queue");
+const { enqueueTo } = require("../lib/campaign-queue");
 const crypto = require("crypto");
 
 // ---- Config ----
