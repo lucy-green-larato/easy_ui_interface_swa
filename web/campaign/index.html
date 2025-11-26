@@ -69,7 +69,6 @@
         <label for="csvUpload" style="margin-top:6px">Upload CSV (testing only)</label>
         <input id="csvUpload" type="file" accept=".csv" />
         <div style="display:flex; gap:8px; align-items:center; margin-top:8px">
-          <button id="goBtn" class="btn primary btn-cta" type="button" disabled>Go</button>
           <div class="muted"><span id="csvBadge">(no file)</span></div>
         </div>
       </div>
@@ -122,7 +121,7 @@
       </div>
 
       <div class="group">
-        <h3>Options</h3>
+        <h3>Formatting & preferences</h3>
         <label for="pageKey">Page (folder key)</label>
         <input id="pageKey" type="text" placeholder="Direct" value="Direct" />
         <label for="tone" style="margin-top:8px">Tone</label>
@@ -131,15 +130,9 @@
           <option value="professional" selected>Professional</option>
           <option value="warm">Warm</option>
         </select>
-        <label for="evidenceWindow" style="margin-top:8px">Evidence window (months)</label>
-        <select id="evidenceWindow">
-          <option>6</option>
-          <option>9</option>
-          <option>12</option>
-        </select>
-        <label style="display:flex; align-items:center; gap:8px; margin-top:8px">
-          <input id="includeCompliance" type="checkbox" checked /> Include compliance footer
-        </label>
+        <div style="display:flex; gap:8px; align-items:center; margin-top:8px">
+          <button id="goBtn" class="btn primary btn-cta" type="button" disabled>Go</button>
+        </div>
       </div>
 
       <div class="group">

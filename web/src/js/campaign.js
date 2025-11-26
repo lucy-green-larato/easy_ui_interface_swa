@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 25-11-2025 v14
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 26-11-2025 v15
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, risks_and_contingencies,
@@ -828,50 +828,6 @@ window.CampaignUI = window.CampaignUI || {};
     setPanelContent(wrap);
   }
 
-  function renderChannel() {
-    const plan = state.contract?.channel_plan || {};
-    const wrap = document.createElement("div");
-
-    const h1 = document.createElement("h3"); h1.textContent = "Emails";
-    wrap.appendChild(h1);
-    const emailHeaders = ["Subject", "Preview", "Body"];
-    const emailRows = rowsOf(plan.emails).map(e => [e.subject || "", e.preview || "", e.body || ""]);
-    const emailTbl = makeTable(emailHeaders, emailRows);
-    $$("td", emailTbl).forEach(td => td.style.whiteSpace = "pre-wrap");
-    wrap.appendChild(emailTbl);
-
-    const h2 = document.createElement("h3"); h2.textContent = "LinkedIn";
-    wrap.appendChild(h2);
-    const li = plan.linkedin || {};
-    wrap.appendChild(makeTable(["Field", "Value"], [
-      ["Connect note", li.connect_note || ""],
-      ["Insight post", li.insight_post || ""],
-      ["DM", li.dm || ""],
-      ["Comment strategy", li.comment_strategy || ""]
-    ]));
-
-    if (Array.isArray(plan.paid) && plan.paid.length) {
-      const h3 = document.createElement("h3"); h3.textContent = "Paid";
-      wrap.appendChild(h3);
-      wrap.appendChild(makeTable(["Variant", "Proof (cited)", "CTA"],
-        plan.paid.map(p => [p.variant || "", p.proof || "", p.cta || ""])));
-    }
-
-    if (plan.event) {
-      const ev = plan.event;
-      const h4 = document.createElement("h3"); h4.textContent = "Event / Webinar";
-      wrap.appendChild(h4);
-      wrap.appendChild(makeTable(["Field", "Value"], [
-        ["Concept", ev.concept || ""],
-        ["Agenda", ev.agenda || ""],
-        ["Speakers", ev.speakers || ""],
-        ["CTA", ev.cta || ""]
-      ]));
-    }
-
-    setPanelContent(wrap);
-  }
-
   function renderSalesEnablement() {
     const wrap = document.createElement("div");
 
@@ -947,72 +903,6 @@ window.CampaignUI = window.CampaignUI || {};
     wrap.appendChild(h4); wrap.appendChild(makePre(se.handoff_rules || ""));
 
     setPanelContent(wrap);
-  }
-
-  function renderMeasurement() {
-    const m = state.contract?.measurement_and_learning || {};
-    const wrap = document.createElement("div");
-    wrap.appendChild(makeTable(["Field", "Value"], [
-      ["KPIs", rowsOf(m.kpis)],
-      ["Weekly test plan", m.weekly_test_plan || ""],
-      ["UTM & CRM", m.utm_and_crm || ""],
-      ["Evidence freshness rule", m.evidence_freshness_rule || ""]
-    ]));
-    setPanelContent(wrap);
-  }
-
-  function renderCompliance() {
-    const wrap = document.createElement("div");
-
-    // GOLD SHAPE: compliance_and_governance.notes + citations
-    const cgGold = state.contract?.compliance_and_governance || {};
-    const hasGold = cgGold && typeof cgGold === "object" && (cgGold.notes || (Array.isArray(cgGold.citations) && cgGold.citations.length));
-
-    if (hasGold) {
-      const rows = [];
-      if (cgGold.notes) rows.push(["Notes", cgGold.notes]);
-      wrap.appendChild(makeTable(["Field", "Value"], rows));
-
-      if (Array.isArray(cgGold.citations) && cgGold.citations.length) {
-        const h = document.createElement("h3");
-        h.textContent = "Citations";
-        h.style.marginTop = "1rem";
-        wrap.appendChild(h);
-        wrap.appendChild(makeList(cgGold.citations));
-      }
-
-      setPanelContent(wrap);
-      return;
-    }
-
-    // LEGACY SHAPE
-    const cg = state.contract?.compliance_and_governance || {};
-    wrap.appendChild(makeTable(["Field", "Value"], [
-      ["Substantiation file", cg.substantiation_file || ""],
-      ["GDPR/PECR checklist", cg.gdpr_pecr_checklist || ""],
-      ["Brand & accessibility checks", cg.brand_accessibility_checks || ""],
-      ["Approval log note", cg.approval_log_note || ""]
-    ]));
-    setPanelContent(wrap);
-  }
-
-  function renderRisks() {
-    const wrap = document.createElement("div");
-
-    // GOLD SHAPE: risks_and_contingencies { risks[], mitigations[] }
-    const rcGold = state.contract?.risks_and_contingencies || {};
-    if (rcGold && typeof rcGold === "object" &&
-      (Array.isArray(rcGold.risks) || Array.isArray(rcGold.mitigations))) {
-      const rows = [];
-      rows.push(["Risks", rowsOf(rcGold.risks)]);
-      rows.push(["Mitigations", rowsOf(rcGold.mitigations)]);
-      wrap.appendChild(makeTable(["Field", "Value"], rows));
-      setPanelContent(wrap);
-      return;
-    }
-
-    // LEGACY SHAPE: treat as list
-    setPanelContent(makeList(rowsOf(state.contract?.risks_and_contingencies)));
   }
 
   function renderOnePager() {
@@ -1458,17 +1348,28 @@ window.CampaignUI = window.CampaignUI || {};
   });
 
   const SECTIONS = [
-    { id: "exec",  label: "Executive Summary",   render: renderExecutiveSummary },
-    { id: "elog",  label: "Evidence Log",        render: renderEvidenceLog },
-    { id: "cases", label: "Case Studies",        render: renderCaseLibrary },
-    { id: "pos",   label: "Positioning",         render: renderPositioning },
-    { id: "icp",   label: "Messaging",           render: renderICPMatrix },
-    { id: "offer", label: "Strategy & Assets",   render: renderOffer },
-    { id: "chan",  label: "Go-to-market",        render: renderChannel },
-    { id: "se",    label: "Sales Battle Card",   render: renderSalesEnablement },
-    { id: "ml",    label: "Measurement",         render: renderMeasurement },
-    { id: "comp",  label: "Governance",          render: renderCompliance },
-    { id: "risk",  label: "Contingencies",       render: renderRisks },
-    { id: "one",   label: "One Page Summary",    render: renderOnePager }
+    { id: "exec", label: "Executive summary", render: renderExecutiveSummary },
+    { id: "gtm", label: "Go-to-market", render: renderOffer },           // Campaign strategy + segments + differentiation
+    { id: "msg", label: "Messaging", render: renderICPMatrix },       // GTM messaging
+    { id: "off", label: "Offering", render: renderPositioning },     // Portfolio & Capabilities
+    { id: "se", label: "Sales enablement", render: renderSalesEnablement }, // Battle card
+    { id: "pp", label: "Proof points", render: renderCaseLibrary },     // Case studies
+    { id: "elog", label: "Evidence log", render: renderEvidenceLog }
   ];
+
+  // === ROUTING MAP (backend → UI tabs) ===
+  const TAB_FIELD_MAP = {
+    "executive_summary": "exec",
+    "go_to_market_plan": "gtm",
+    "where_to_play": "gtm",
+    "how_to_win": "gtm",
+    "competitive_context": "gtm",
+    "messaging_matrix": "msg",
+    "value_proposition": "off",
+    "portfolio_and_tech": "off",
+    "sales_enablement": "se",
+    "case_studies": "pp",
+    "proof_points": "pp",
+    "evidence_log": "elog"
+  };
 })();
