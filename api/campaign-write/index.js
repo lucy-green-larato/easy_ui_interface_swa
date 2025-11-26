@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js — Writer v2 (campaign-gold renderer) 21-11-2025 v1
+// /api/campaign-write/index.js (campaign-gold renderer) 21-11-2025 v1
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
 // - op: "section" | "write_section"  -> light markers only (no LLM).
 // - op: "assemble"                   -> calls Prompt Harness v2 to render campaign.json (campaign-gold schema).

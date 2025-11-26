@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 21-11-2025 Strategy Engine v4 (deterministic, no LLM)
+// /api/campaign-worker/index.js 26-11-2025 Strategy Engine v5 (deterministic, no LLM)
 // Responsibility:
 //   - Read Phase 1 outputs (evidence, insights, buyer_logic, markdown_pack, csv_normalized, etc.).
 //   - Build a structured strategy_v2 object (story_spine, value_proposition, competitive_strategy,

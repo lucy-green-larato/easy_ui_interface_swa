@@ -1,15 +1,17 @@
-// **** /api/shared/campaignConfig.js 14-11-2025 v2 ****
+// /api/shared/campaignConfig.js 26-11-2025 v4
 //
 // Centralised configuration for the Campaign pipeline.
 // Keeps Azure + tuning settings out of each function.
 //
 // Env vars used:
-//   AzureWebJobsStorage          (required at use-time)
-//   CAMPAIGN_RESULTS_CONTAINER   (optional, default "results")
-//   RESULTS_CONTAINER            (fallback for above)
-//   CAMPAIGN_QUEUE_NAME          (optional, default "campaign")
-//   HTTP_FETCH_TIMEOUT_MS        (optional, default 8000ms; must be >0)
-//   MAX_EVIDENCE_ITEMS           (optional, default 24, clamped [1, 128])
+//   AzureWebJobsStorage              (required at use-time)
+//   CAMPAIGN_RESULTS_CONTAINER       (optional, default "results")
+//   RESULTS_CONTAINER                (fallback for above)
+//   CAMPAIGN_INPUT_CONTAINER         (optional, default "input")   // NEW
+//   INPUT_CONTAINER                  (fallback for above)          // NEW
+//   CAMPAIGN_QUEUE_NAME              (optional, default "campaign")
+//   HTTP_FETCH_TIMEOUT_MS            (optional, default 8000ms; must be >0)
+//   MAX_EVIDENCE_ITEMS               (optional, default 24, clamped [1, 128])
 
 /**
  * Ensure an env var is present and non-empty.
@@ -80,6 +82,18 @@ function resolveResultsContainer() {
 }
 
 /**
+ * Resolve and validate the input container name (for static packs, etc.).
+ */
+function resolveInputContainer() {
+  const raw =
+    process.env.CAMPAIGN_INPUT_CONTAINER ||
+    process.env.INPUT_CONTAINER ||
+    "input"; // <- your `input` container default
+
+  return validateStorageName(raw, "input container name");
+}
+
+/**
  * Resolve and validate the campaign queue name.
  */
 function resolveCampaignQueueName() {
@@ -126,6 +140,11 @@ const config = {
   // Where campaign artefacts are written (site.json, csv_normalized.json, evidence_log.json, etc.)
   get RESULTS_CONTAINER() {
     return resolveResultsContainer();
+  },
+
+  // NEW: Where static/shared packs live (e.g. input/packs/…)
+  get INPUT_CONTAINER() {
+    return resolveInputContainer();
   },
 
   // Primary campaign queue name (validated for Azure Storage semantics)

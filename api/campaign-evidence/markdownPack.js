@@ -1,9 +1,11 @@
-// /api/campaign-evidence/markdownPack.js 18-11-2025 v3
+// /api/campaign-evidence/markdownPack.js 26-11-2025 v4
 // Deterministic Markdown pack ingestion for campaign evidence.
-// Reads Markdown from:
-//   - packs/industry-sources/*.md
-//   - packs/supplier/*.md
-// and writes a structured JSON bundle to:
+//
+// Reads Markdown from the shared INPUT container:
+//   - <INPUT_CONTAINER>/packs/industry-sources/*.md
+//   - <INPUT_CONTAINER>/packs/supplier/*.md
+//
+// Writes structured JSON bundle to the RESULTS container:
 //   <prefix>evidence_v2/markdown_pack.json
 //
 // Shape:
@@ -22,10 +24,14 @@
 //  - Everything is deterministic rule-based.
 //  - Items are traceable via a stable id derived from file+heading+line.
 
-const { listBlobsUnderPrefix, getText, putJson } = require("../shared/storage");
+const {
+  listBlobsUnderPrefix,
+  getText,
+  putJson,
+  getInputContainerClient
+} = require("../shared/storage");
 const { sha1 } = require("../shared/utils");
 const { validateAndWarn } = require("../shared/schemaValidators");
-
 
 // --- small helpers ---
 
@@ -45,6 +51,7 @@ function ensurePackShape(raw) {
   }
   return out;
 }
+
 // IMPORTANT: All markdown heading styles used in packs must be mapped here.
 // Unmatched headings are ignored by design.
 function headingToBucket(title) {
@@ -80,7 +87,6 @@ function headingToBucket(title) {
  *   diag.unknownHeadings: [{ file, heading }]
  *   diag.orphanBullets: number
  */
-
 function parseMarkdownBullets(md, filePath, packType, diag) {
   const lines = String(md || "").split(/\r?\n/);
   const out = {
@@ -142,7 +148,7 @@ function parseMarkdownBullets(md, filePath, packType, diag) {
       source: {
         file: filePath,
         heading: currentHeading || null,
-        pack_type: packType || null     
+        pack_type: packType || null
       }
     });
   }
@@ -150,21 +156,23 @@ function parseMarkdownBullets(md, filePath, packType, diag) {
   return out;
 }
 
-async function loadMarkdownUnder(container, prefix) {
+/**
+ * Load all .md files under a prefix from the given container.
+ */
+async function loadMarkdownUnder(containerClient, prefix) {
   try {
     // listBlobsUnderPrefix returns blob paths relative to the container
-    const names = await listBlobsUnderPrefix(container, prefix);
+    const names = await listBlobsUnderPrefix(containerClient, prefix);
     const mdFiles = (Array.isArray(names) ? names : []).filter(n => /\.md$/i.test(n));
     const packs = [];
 
     for (const name of mdFiles) {
       try {
-        const text = await getText(container, name);
+        const text = await getText(containerClient, name);
         if (!text) continue;
         packs.push({ path: name, text });
       } catch {
         // Best-effort: a single bad blob must not kill the whole pack.
-        // Just skip this file.
         continue;
       }
     }
@@ -178,15 +186,27 @@ async function loadMarkdownUnder(container, prefix) {
 
 // --- main entry point ---
 
-async function buildMarkdownPack(container, prefix) {
+/**
+ * Build a combined markdown pack.
+ *
+ * Reads from the INPUT container (packs/*) and writes the combined
+ * json bundle to the RESULTS container using the provided `resultsContainer`.
+ *
+ * @param {import("@azure/storage-blob").ContainerClient} resultsContainer
+ *   The results container client (usually from getContainerClient/ getResultsContainerClient).
+ * @param {string} prefix
+ *   Run-specific prefix under the RESULTS container, e.g. "runs/<runId>/".
+ */
+async function buildMarkdownPack(resultsContainer, prefix) {
   // Always return a valid pack shape, even on error.
   const emptyPack = ensurePackShape({});
 
   try {
-    // Read from shared packs in the same RESULTS container.
-    // These packs are global to the app, not per-run.
-    const industryPacks = await loadMarkdownUnder(container, "packs/industry-sources/");
-    const supplierPacks = await loadMarkdownUnder(container, "packs/supplier/");
+    // Read from shared packs in the INPUT container.
+    const inputContainer = getInputContainerClient();
+
+    const industryPacks = await loadMarkdownUnder(inputContainer, "packs/industry-sources/");
+    const supplierPacks = await loadMarkdownUnder(inputContainer, "packs/supplier/");
 
     const acc = {
       industry_drivers: [],
@@ -223,10 +243,10 @@ async function buildMarkdownPack(container, prefix) {
     try {
       const outPath = `${prefix}evidence_v2/markdown_pack.json`;
       validateAndWarn("markdown_pack", bundle, console.log);
-      await putJson(container, outPath, bundle);
+      await putJson(resultsContainer, outPath, bundle);
     } catch {
-      // Write failure is non-fatal for the caller; they just won't see the pack on disk.
-      // We still return the bundle so in-process callers could use it if needed.
+      // Write failure is non-fatal for the caller; they just won't see
+      // the pack on disk. We still return the bundle for in-process use.
     }
 
     return bundle;

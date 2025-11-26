@@ -1,4 +1,4 @@
-//  /api/shared/storage.js 17-11-2025 v4
+//  /api/shared/storage.js 26-11-2025 v6
 //
 // Shared Azure Storage helpers for the campaign pipeline.
 // Centralises container + connection config so functions stay lean.
@@ -6,7 +6,8 @@
 const { BlobServiceClient } = require("@azure/storage-blob");
 const {
   STORAGE_CONN,
-  RESULTS_CONTAINER
+  RESULTS_CONTAINER,
+  INPUT_CONTAINER,        // NEW
 } = require("./campaignConfig");
 
 // ---------- Small helpers ----------
@@ -36,10 +37,27 @@ function getBlobServiceClient() {
   return BlobServiceClient.fromConnectionString(STORAGE_CONN);
 }
 
+/**
+ * Generic container client. Defaults to RESULTS_CONTAINER.
+ */
 function getContainerClient(containerName = RESULTS_CONTAINER) {
   const name = String(containerName || RESULTS_CONTAINER).trim() || RESULTS_CONTAINER;
   const svc = getBlobServiceClient();
   return svc.getContainerClient(name);
+}
+
+/**
+ * Convenience: results container client.
+ */
+function getResultsContainerClient() {
+  return getContainerClient(RESULTS_CONTAINER);
+}
+
+/**
+ * Convenience: input container client (for input/packs/...).
+ */
+function getInputContainerClient() {
+  return getContainerClient(INPUT_CONTAINER);
 }
 
 // --- Stream/text helpers ---
@@ -122,6 +140,8 @@ async function listCsvUnderPrefix(containerClient, prefix) {
 module.exports = {
   getBlobServiceClient,
   getContainerClient,
+  getResultsContainerClient,   
+  getInputContainerClient,   
   streamToString,
   getText,
   putText,
@@ -129,5 +149,6 @@ module.exports = {
   putJson,
   listBlobsUnderPrefix,
   listCsvUnderPrefix,
-  RESULTS_CONTAINER
+  RESULTS_CONTAINER,
+  INPUT_CONTAINER,    
 };
