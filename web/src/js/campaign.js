@@ -1,7 +1,7 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 26-11-2025 v15
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 26-11-2025 v16
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
-     messaging_matrix, sales_enablement, go_to_market_plan, risks_and_contingencies,
+     messaging_matrix, sales_enablement, go_to_market_plan, 
      compliance_and_governance, one_pager_summary).
    - Falls back to legacy shapes if Gold fields are absent.
 */
@@ -165,6 +165,82 @@ window.CampaignUI = window.CampaignUI || {};
 
     // Empty default
     return { lead: "", bullets: [] };
+  }
+
+  function renderValue(value) {
+    const wrap = document.createElement("div");
+
+    if (value == null) {
+      wrap.appendChild(makePre("(none)"));
+      return wrap;
+    }
+
+    // STRING
+    if (typeof value === "string") {
+      const p = document.createElement("p");
+      p.textContent = value;
+      wrap.appendChild(p);
+      return wrap;
+    }
+
+    // ARRAY
+    if (Array.isArray(value)) {
+      if (value.every(v => typeof v === "string")) {
+        wrap.appendChild(makeList(value));
+        return wrap;
+      }
+
+      // array of objects
+      value.forEach((item, i) => {
+        const block = document.createElement("div");
+        block.style.borderLeft = "3px solid #ddd";
+        block.style.paddingLeft = "0.75rem";
+        block.style.margin = "0.5rem 0";
+
+        const h = document.createElement("h4");
+        h.textContent = item.title || `Item ${i + 1}`;
+        block.appendChild(h);
+
+        for (const [k, v] of Object.entries(item)) {
+          if (k === "title") continue;
+          const sub = document.createElement("div");
+          const lab = document.createElement("strong");
+          lab.textContent = `${k}: `;
+          sub.appendChild(lab);
+          sub.appendChild(renderValue(v));
+          block.appendChild(sub);
+        }
+        wrap.appendChild(block);
+      });
+      return wrap;
+    }
+
+    // OBJECT
+    if (typeof value === "object") {
+      for (const [k, v] of Object.entries(value)) {
+        const line = document.createElement("div");
+        const label = document.createElement("strong");
+        label.textContent = `${k}: `;
+        line.appendChild(label);
+        line.appendChild(renderValue(v));
+        wrap.appendChild(line);
+      }
+      return wrap;
+    }
+
+    // Fallback
+    wrap.textContent = String(value);
+    return wrap;
+  }
+
+  function renderField(label, value) {
+    const wrap = document.createElement("div");
+    const h = document.createElement("h4");
+    h.textContent = label;
+    h.style.marginTop = "1rem";
+    wrap.appendChild(h);
+    wrap.appendChild(renderValue(value));
+    return wrap;
   }
 
   // ---------- Renderers (Gold-aware) ----------
@@ -630,19 +706,7 @@ window.CampaignUI = window.CampaignUI || {};
       wrap.appendChild(pre);
 
       const f = vpm.fields || {};
-      wrap.appendChild(makeTable(
-        ["For", "Who need", "The", "Is a", "That", "Unlike", "Provides", "Proof points"],
-        [[
-          f.for_who || "",
-          f.who_need || "",
-          f.the || "",
-          f.is_a || "",
-          f.that || "",
-          f.unlike || "",
-          f.provides || "",
-          rowsOf(f.proof_points)
-        ]]
-      ));
+      wrap.appendChild(renderField("Positioning (Moore)", moore));
     } else if (!vpn) {
       // 3) Legacy one-liner fallback only if neither narrative nor Moore struct exist
       wrap.appendChild(makePre(pos.value_prop || ""));
@@ -683,10 +747,7 @@ window.CampaignUI = window.CampaignUI || {};
       const h4 = document.createElement("h3");
       h4.textContent = "Competitor Set";
       wrap.appendChild(h4);
-      wrap.appendChild(makeTable(
-        ["Vendor", "Reason in set", "URL"],
-        comp.map(v => [v.vendor || "", v.reason_in_set || "", v.url ? { __link: true, href: v.url, text: v.url } : ""])
-      ));
+      wrap.appendChild(renderField("Competitive battlecard", seGold.competitive_battlecard));
     }
 
     setPanelContent(wrap);
@@ -759,49 +820,25 @@ window.CampaignUI = window.CampaignUI || {};
   function renderOffer() {
     const wrap = document.createElement("div");
 
-    // GOLD SHAPE: go_to_market_plan as "Strategy & Assets"
     const gtm = state.contract?.go_to_market_plan || {};
-    const hasGtm = gtm && typeof gtm === "object" && Object.keys(gtm).length;
+    const hasGold = gtm && Object.keys(gtm).length;
 
-    if (hasGtm) {
-      const h0 = document.createElement("h3");
-      h0.textContent = "Go-to-market strategy";
-      wrap.appendChild(h0);
+    if (hasGold) {
+      wrap.appendChild(makeHeading("Go-to-market strategy"));
 
-      const rows = [];
-
-      if (gtm.objective) {
-        rows.push(["Objective", gtm.objective]);
-      }
-      if (gtm.target_market) {
-        const tm = gtm.target_market;
-        const summary = tm.summary || "";
-        const cohorts = Array.isArray(tm.cohorts) ? tm.cohorts : [];
-        rows.push(["Target market summary", summary]);
-        if (cohorts.length) {
-          rows.push(["Cohorts", cohorts]);
-        }
-      }
-      if (Array.isArray(gtm.marketing_actions) && gtm.marketing_actions.length) {
-        rows.push(["Marketing actions", gtm.marketing_actions]);
-      }
-      if (Array.isArray(gtm.sales_actions) && gtm.sales_actions.length) {
-        rows.push(["Sales actions", gtm.sales_actions]);
-      }
-      if (gtm.pipeline_model && typeof gtm.pipeline_model === "object") {
-        rows.push(["Pipeline model", JSON.stringify(gtm.pipeline_model, null, 2)]);
-      }
-      if (gtm.cta) {
-        rows.push(["Recommended CTA", gtm.cta]);
-      }
-
-      wrap.appendChild(makeTable(["Field", "Value"], rows));
+      [
+        ["Objective", gtm.objective],
+        ["Target market", gtm.target_market],
+        ["Marketing actions", gtm.marketing_actions],
+        ["Sales actions", gtm.sales_actions],
+        ["Pipeline model", gtm.pipeline_model],
+        ["Recommended CTA", gtm.cta]
+      ].forEach(([label, content]) => {
+        if (content) wrap.appendChild(renderField(label, content));
+      });
 
       if (Array.isArray(gtm.citations) && gtm.citations.length) {
-        const h1 = document.createElement("h3");
-        h1.textContent = "Citations";
-        h1.style.marginTop = "1rem";
-        wrap.appendChild(h1);
+        wrap.appendChild(makeHeading("Citations"));
         wrap.appendChild(makeList(gtm.citations));
       }
 
@@ -809,7 +846,7 @@ window.CampaignUI = window.CampaignUI || {};
       return;
     }
 
-    // LEGACY offer_strategy
+    // LEGACY SHAPE
     const offer = state.contract?.offer_strategy || {};
     const lp = offer.landing_page || {};
 
@@ -823,11 +860,15 @@ window.CampaignUI = window.CampaignUI || {};
       ["CTA", lp.cta || ""]
     ];
     wrap.appendChild(makeTable(["Field", "Value"], rows));
-    const h2 = document.createElement("h3"); h2.textContent = "Assets checklist";
-    wrap.appendChild(h2); wrap.appendChild(makeList(rowsOf(offer.assets_checklist)));
+
+    if (Array.isArray(offer.assets_checklist)) {
+      wrap.appendChild(makeHeading("Assets checklist"));
+      wrap.appendChild(makeList(offer.assets_checklist));
+    }
+
     setPanelContent(wrap);
   }
-
+  
   function renderSalesEnablement() {
     const wrap = document.createElement("div");
 
@@ -871,16 +912,6 @@ window.CampaignUI = window.CampaignUI || {};
         wrap.appendChild(h3);
         wrap.appendChild(makePre(seGold.master_pitch));
       }
-
-      if (seGold.competitive_battlecard && typeof seGold.competitive_battlecard === "object") {
-        const h4 = document.createElement("h3");
-        h4.textContent = "Competitive battlecard";
-        h4.style.marginTop = "1rem";
-        wrap.appendChild(h4);
-        const rows = Object.entries(seGold.competitive_battlecard).map(([k, v]) => [k, Array.isArray(v) ? v : String(v)]);
-        wrap.appendChild(makeTable(["Field", "Value"], rows));
-      }
-
       setPanelContent(wrap);
       return;
     }

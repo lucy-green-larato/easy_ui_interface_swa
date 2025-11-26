@@ -12,6 +12,8 @@ import { markdownPackToEvidence } from '../campaign-evidence/markdownPack.js';
 
 const markdownPack = campaignInput?.markdownPack || {};
 const markdownEvidence = markdownPackToEvidence(markdownPack);
+const { buildCampaignStrategy } = require("../shared/strategy_v2");
+
 
 console.log("[debug] markdownPack keys:", Object.keys(markdownPack));
 console.log("[debug] markdownEvidence length:", markdownEvidence.length);
@@ -725,6 +727,37 @@ module.exports = async function (context, queueItem) {
       readJsonIfExists(container, `${prefix}outline.json`),
       readJsonIfExists(container, `${prefix}input.json`)
     ]);
+
+    context.log("[worker] starting strategy_v2 generation", { prefix });
+
+    let strategyV2 = null;
+
+    try {
+      strategyV2 = await buildCampaignStrategy({
+        runId,
+        prefix,
+        input: input || {},
+        outline,
+        evidence: evidenceObj?.claims || evidenceLog || [],
+        csv_normalized: csvCanon || {},
+        buyer_logic: buyerLogic || {},
+        needs_map: needsMap || {},
+        markdown_pack: markdownPack || {}
+      });
+
+      if (!strategyV2 || typeof strategyV2 !== "object") {
+        context.log.warn("[worker] buildCampaignStrategy returned empty or invalid object");
+      } else {
+        const rel = `${prefix}strategy_v2/campaign_strategy.json`;
+        await putJson(container, rel, strategyV2);
+        context.log("[worker] strategy_v2 written", { rel });
+      }
+
+    } catch (err) {
+      context.log.error("[worker] strategy_v2 generation failed", {
+        error: String(err?.message || err)
+      });
+    }
 
     log("[*] Loaded Phase 1 artefacts", {
       hasEvidence: !!evidence,
