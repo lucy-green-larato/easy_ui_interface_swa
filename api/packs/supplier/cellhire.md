@@ -1,4 +1,3 @@
-Below is your **10/10-formatted Supplier Pack for Cellhire**, written to the exact same structure and tone as the Comms365 version you approved.
 # SUPPLIER PACK — Cellhire
 
 > NOTE: This file is used by an automated reasoning system.
