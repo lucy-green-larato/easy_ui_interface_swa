@@ -8,6 +8,13 @@
 // No calls to prompt-harness, no packloader, no LLM – fully deterministic.
 
 "use strict";
+import { markdownPackToEvidence } from '../campaign-evidence/markdownPack.js';
+
+const markdownPack = campaignInput?.markdownPack || {};
+const markdownEvidence = markdownPackToEvidence(markdownPack);
+
+console.log("[debug] markdownPack keys:", Object.keys(markdownPack));
+console.log("[debug] markdownEvidence length:", markdownEvidence.length);
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 
@@ -316,7 +323,7 @@ function buildStorySpine({
 
   const success = uniqNonEmpty(successBullets).slice(0, 4);
 
-   // next_steps: meta signals derived from inputs & other spine parts
+  // next_steps: meta signals derived from inputs & other spine parts
   const next_steps = uniqNonEmpty([
     rowCount
       ? `NEXT_STEP:target_cohort_size=${rowCount}`
@@ -352,17 +359,17 @@ function buildValueProposition({
   const byTag = indexClaimsByTag(evidence);
 
   // Moore-style chain (deterministic templates)
-   const industry =
+  const industry =
     mergedInput.selected_industry ||
     mergedInput.industry ||
     safeGet(csvNormalized, "meta.industry") ||
     "input_cohort";
 
-   const buyers =
+  const buyers =
     mergedInput.buyer_type ||
     "buyer_personas_from_persona_pack_or_input";
 
-    const topProblem =
+  const topProblem =
     safeGet(buyerLogic, "problems.0.label") ||
     safeGet(insights, "buyer_pressures.0.text") ||
     "";
@@ -372,7 +379,7 @@ function buildValueProposition({
     (byTag.right_to_play || [])[0] ||
     (byTag.supplier_overview || [])[0];
 
-    const ourSolutionCore = capClaim
+  const ourSolutionCore = capClaim
     ? bulletFromClaim(capClaim).replace(/\s*\[[A-Z0-9_:-]+\]\s*$/, "")
     : "";
 
@@ -380,7 +387,7 @@ function buildValueProposition({
     safeGet(buyerLogic, "commercial_impacts.0.label") ||
     "";
 
- const unlikeCore =
+  const unlikeCore =
     safeGet(markdownPack, "competitor_profiles.0.summary") ||
     "";
 
@@ -736,16 +743,23 @@ module.exports = async function (context, queueItem) {
       ...msg
     };
 
-    // Build strategy_v2 deterministically from inputs
+    // Inject markdownEvidence into evidence.claims
+    const combinedEvidence = {
+      claims: [
+        ...(evidence?.claims || []),
+        ...(markdownEvidence || [])
+      ]
+    };
+
+    // Build strategy_v2 deterministically from merged evidence
     const strategy_v2 = buildStrategyV2({
-      evidence: evidence || { claims: [] },
+      evidence: combinedEvidence,
       insights: insights || {},
       buyerLogic: buyerLogic || {},
       markdownPack: markdownPack || {},
       csvNormalized: csvNormalized || {},
       mergedInput
     });
-
     const out = { strategy_v2 };
 
     const strategyPath = `${prefix}strategy_v2/campaign_strategy.json`;
