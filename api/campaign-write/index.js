@@ -1,7 +1,24 @@
-// /api/campaign-write/index.js (campaign-gold renderer) 21-11-2025 v1
+// /api/campaign-write/index.js
+// 26-11-2025 Strategy Engine v5 writer (campaign-gold, strategy_v2-only)
+//
 // Queue-triggered on %Q_CAMPAIGN_WRITE%.
-// - op: "section" | "write_section"  -> light markers only (no LLM).
-// - op: "assemble"                   -> calls Prompt Harness v2 to render campaign.json (campaign-gold schema).
+//
+//   - op: "section" | "write_section"
+//       → NO LONGER writes legacy sections/*.json.
+//         We only update status to acknowledge the request.
+//   - op: "assemble"
+//       → Reads Phase 1 + strategy_v2 artefacts
+//         → Builds prompts
+//         → Calls Prompt Harness v2 to render campaign.json
+//         → Writes results/runs/<runId>/campaign.json
+//         → Writes results/runs/<runId>/input_proof.json
+//         → Updates status.json.state = "assembled"
+//
+// Hard rules:
+//   - strategy_v2 is MANDATORY (no legacy campaign_strategy.json fallback).
+//   - campaign.json must remain valid against campaign-gold.schema.json
+//     (no extra top-level keys beyond the schema).
+//   - _meta is only patched if it already exists on the campaign object.
 
 const path = require("path");
 const crypto = require("crypto");
@@ -18,9 +35,18 @@ const CONTAINER = campaignConfig.RESULTS_CONTAINER;
 const MAIN_QUEUE = campaignConfig.CAMPAIGN_QUEUE_NAME;
 
 // Use explicit schema path so we are always aligned to campaign-gold
-const DEFAULT_SCHEMA_PATH = path.join(__dirname, "..", "schemas", "campaign-gold.schema.json");
+const DEFAULT_SCHEMA_PATH = path.join(
+  __dirname,
+  "..",
+  "schemas",
+  "campaign-gold.schema.json"
+);
 
-// Final section keys (kept for back-compat with router + markers)
+// Writer/version identifiers for tracing (used in _meta when present)
+const WRITER_VERSION = "campaign-write@2025-11-26-v2";
+const STRATEGY_ENGINE_VERSION = "strategy_v2@2025-11-26-v5";
+
+// Final section keys (retained ONLY for status messages / back-compat)
 const FINAL_SECTION_KEYS = [
   "executive_summary",
   "campaign_strategy",
@@ -53,7 +79,9 @@ function requireStorage() {
   if (!STORAGE_CONN) throw new Error("AzureWebJobsStorage not configured");
   return BlobServiceClient.fromConnectionString(STORAGE_CONN);
 }
-function blobSvc() { return requireStorage(); }
+function blobSvc() {
+  return requireStorage();
+}
 
 async function getJson(containerClient, relPath) {
   const bc = containerClient.getBlockBlobClient(relPath);
@@ -61,13 +89,19 @@ async function getJson(containerClient, relPath) {
   const dl = await bc.download();
   const chunks = [];
   for await (const ch of dl.readableStreamBody) chunks.push(ch);
-  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return null; }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    return null;
+  }
 }
 
 async function putJson(containerClient, relPath, obj) {
   const bb = containerClient.getBlockBlobClient(relPath);
   const body = Buffer.from(JSON.stringify(obj, null, 2), "utf8");
-  await bb.uploadData(body, { blobHTTPHeaders: { blobContentType: "application/json; charset=utf-8" } });
+  await bb.uploadData(body, {
+    blobHTTPHeaders: { blobContentType: "application/json; charset=utf-8" }
+  });
 }
 
 function normalizePrefix(p) {
@@ -85,10 +119,14 @@ function safeForPrompt(v, max = 280000) {
     if (s.length <= max) return s;
     const k = Math.floor(max / 2);
     return s.slice(0, k) + " …TRUNCATED… " + s.slice(-k);
-  } catch { return "null"; }
+  } catch {
+    return "null";
+  }
 }
 
-function nowISO() { return new Date().toISOString(); }
+function nowISO() {
+  return new Date().toISOString();
+}
 
 function sha256OfJson(o) {
   const h = crypto.createHash("sha256");
@@ -100,8 +138,16 @@ function sha256OfJson(o) {
 async function patchStatus(container, prefix, state, extra = {}) {
   const p = `${prefix}status.json`;
   const cur = (await getJson(container, p)) || {};
-  const next = { ...cur, state, history: Array.isArray(cur.history) ? cur.history.slice() : [] };
-  next.history.push({ state, at: nowISO(), ...(extra.op ? { op: extra.op } : {}) });
+  const next = {
+    ...cur,
+    state,
+    history: Array.isArray(cur.history) ? cur.history.slice() : []
+  };
+  next.history.push({
+    state,
+    at: nowISO(),
+    ...(extra.op ? { op: extra.op } : {})
+  });
   if (!next.markers) next.markers = {};
   // copy only explicit extras (no input echo)
   for (const [k, v] of Object.entries(extra)) {
@@ -117,17 +163,23 @@ async function patchStatus(container, prefix, state, extra = {}) {
 function deriveCoreMeta(runId, outline, csvCanon) {
   const inputNotes = outline?.input_notes || {};
   const meta = outline?.meta || {};
-  const supplier =
-    (inputNotes.supplier_company ||
-      inputNotes.prospect_company ||
-      meta.company ||
-      "").toString().trim();
+  const supplier = (
+    inputNotes.supplier_company ||
+    inputNotes.prospect_company ||
+    meta.company ||
+    ""
+  )
+    .toString()
+    .trim();
 
-  const persona =
-    (meta.persona ||
-      inputNotes.persona ||
-      inputNotes.target_persona ||
-      "").toString().trim();
+  const persona = (
+    meta.persona ||
+    inputNotes.persona ||
+    inputNotes.target_persona ||
+    ""
+  )
+    .toString()
+    .trim();
 
   const industry =
     (csvCanon && csvCanon.selected_industry) ||
@@ -135,17 +187,23 @@ function deriveCoreMeta(runId, outline, csvCanon) {
     inputNotes.selected_industry ||
     "";
 
-  const route_to_market =
-    (inputNotes.sales_model ||
-      meta.sales_model ||
-      inputNotes.route_to_market ||
-      "").toString().trim();
+  const route_to_market = (
+    inputNotes.sales_model ||
+    meta.sales_model ||
+    inputNotes.route_to_market ||
+    ""
+  )
+    .toString()
+    .trim();
 
-  const requirement =
-    (inputNotes.campaign_requirement ||
-      inputNotes.requirement ||
-      inputNotes.campaign_type ||
-      "").toString().trim();
+  const requirement = (
+    inputNotes.campaign_requirement ||
+    inputNotes.requirement ||
+    inputNotes.campaign_type ||
+    ""
+  )
+    .toString()
+    .trim();
 
   const rowCountRaw =
     csvCanon?.meta?.rows ??
@@ -154,7 +212,9 @@ function deriveCoreMeta(runId, outline, csvCanon) {
     inputNotes.rowCount ??
     inputNotes.row_count;
 
-  const rowCount = Number.isFinite(Number(rowCountRaw)) ? Number(rowCountRaw) : null;
+  const rowCount = Number.isFinite(Number(rowCountRaw))
+    ? Number(rowCountRaw)
+    : null;
 
   return {
     runId: String(runId || "").trim(),
@@ -180,10 +240,16 @@ function summariseCsvForPrompt(csvCanon) {
       selected_industry: csvCanon.selected_industry || null
     },
     signals: {
-      top_needs_supplier: Array.isArray(sig.top_needs_supplier) ? sig.top_needs_supplier.slice(0, 10) : [],
+      top_needs_supplier: Array.isArray(sig.top_needs_supplier)
+        ? sig.top_needs_supplier.slice(0, 10)
+        : [],
       top_needs: Array.isArray(sig.top_needs) ? sig.top_needs.slice(0, 10) : [],
-      top_blockers: Array.isArray(sig.top_blockers) ? sig.top_blockers.slice(0, 10) : [],
-      top_purchases: Array.isArray(sig.top_purchases) ? sig.top_purchases.slice(0, 10) : [],
+      top_blockers: Array.isArray(sig.top_blockers)
+        ? sig.top_blockers.slice(0, 10)
+        : [],
+      top_purchases: Array.isArray(sig.top_purchases)
+        ? sig.top_purchases.slice(0, 10)
+        : [],
       counts: {
         by_need: counts.by_need || null,
         by_purchase: counts.by_purchase || counts.by_intent || null
@@ -198,7 +264,7 @@ function summariseBuyerLogicForPrompt(buyerLogic, buyerStrategy) {
   // Helper to normalise arrays to [{ type, label, claim_ids[] }]
   function norm(arr) {
     if (!Array.isArray(arr)) return [];
-    return arr.slice(0, 20).map(item => ({
+    return arr.slice(0, 20).map((item) => ({
       type: item.type || null,
       label: item.label || "",
       claim_ids: Array.isArray(item.origin?.related_claim_ids)
@@ -281,22 +347,31 @@ function summariseStrategyForPrompt(strategyV2) {
 }
 
 // Summarise products & competitors for prompt
-function summariseProductsAndCompetitors(productsMeta, competitorsFile, strategyV2, outline) {
+function summariseProductsAndCompetitors(
+  productsMeta,
+  competitorsFile,
+  strategyV2,
+  outline
+) {
   const products = [];
   if (Array.isArray(productsMeta?.chosen)) {
     for (const p of productsMeta.chosen) {
-      products.push(typeof p === "string" ? p : (p?.name || ""));
+      products.push(typeof p === "string" ? p : p?.name || "");
     }
   } else if (Array.isArray(productsMeta?.validated)) {
     for (const p of productsMeta.validated) {
-      products.push(typeof p === "string" ? p : (p?.name || ""));
+      products.push(typeof p === "string" ? p : p?.name || "");
     }
   }
 
   const compSet = new Set();
   if (Array.isArray(competitorsFile?.competitors)) {
     for (const c of competitorsFile.competitors) {
-      const n = (typeof c === "string" ? c : (c?.vendor || "")).toString().trim();
+      const n = (
+        (typeof c === "string" ? c : c?.vendor || "") || ""
+      )
+        .toString()
+        .trim();
       if (n) compSet.add(n);
     }
   }
@@ -327,7 +402,7 @@ function summariseProductsAndCompetitors(productsMeta, competitorsFile, strategy
   };
 }
 
-// --- NEW: deterministic v1 shape: needsMap.items[] ---
+// --- Deterministic needs/markdown summary (for prompt only) ---
 function summariseNeedsAndMarkdown(needsMap, markdownPack) {
   const needsSummary = {};
 
@@ -341,20 +416,18 @@ function summariseNeedsAndMarkdown(needsMap, markdownPack) {
       const needKey = rawNeed || `need_${idx + 1}`;
       if (!needKey) return;
 
-      // Status (gap / covered / partial / etc.)
       const status =
         typeof item?.status === "string" ? item.status.trim() : null;
 
-      // Hits → take up to 5 names (or labels) purely from existing data
       const hits = Array.isArray(item?.hits)
         ? item.hits
-          .map((h) =>
-            (typeof h?.name === "string" && h.name.trim()) ||
-            (typeof h?.label === "string" && h.label.trim()) ||
-            ""
-          )
-          .filter(Boolean)
-          .slice(0, 5)
+            .map((h) =>
+              (typeof h?.name === "string" && h.name.trim()) ||
+              (typeof h?.label === "string" && h.label.trim()) ||
+              ""
+            )
+            .filter(Boolean)
+            .slice(0, 5)
         : [];
 
       needsSummary[needKey] = {
@@ -362,9 +435,7 @@ function summariseNeedsAndMarkdown(needsMap, markdownPack) {
         hits
       };
     });
-  }
-  // --- Legacy fallback: mapping / map (kept for back-compat) ---
-  else if (needsMap && typeof needsMap === "object") {
+  } else if (needsMap && typeof needsMap === "object") {
     const mapping = needsMap.mapping || needsMap.map || {};
     const entries = Object.entries(mapping).slice(0, 10);
     for (const [need, val] of entries) {
@@ -388,7 +459,6 @@ function summariseNeedsAndMarkdown(needsMap, markdownPack) {
     }
   }
 
-  // --- Markdown summary (unchanged) ---
   let markdownSummary = markdownPack;
   if (markdownPack && typeof markdownPack === "object") {
     markdownSummary = {};
@@ -406,9 +476,10 @@ function summariseNeedsAndMarkdown(needsMap, markdownPack) {
 
 // ---- Prompt builders ----
 function buildSystemPrompt(meta, evidenceClaimIds) {
-  const idsList = evidenceClaimIds && evidenceClaimIds.length
-    ? evidenceClaimIds.join(", ")
-    : "(no claims available — do not invent any)";
+  const idsList =
+    evidenceClaimIds && evidenceClaimIds.length
+      ? evidenceClaimIds.join(", ")
+      : "(no claims available — do not invent any)";
 
   return [
     "You are a senior UK B2B go-to-market consultant and writer.",
@@ -627,50 +698,23 @@ module.exports = async function (context, queueItem) {
     return;
   }
 
-  // --- Lightweight section handlers: markers only, no LLM ---
+  // --- Lightweight section handlers: NO MORE legacy sections/*.json writes ---
   if (op === "write_section" || op === "section") {
     let requested = String(queueItem.section || "").trim().toLowerCase();
     const finalKey = FINAL_SECTION_KEYS.includes(requested)
       ? requested
       : SHORT_TO_FINAL[requested];
 
-    if (!finalKey || !FINAL_SECTION_KEYS.includes(finalKey)) {
-      context.log.warn(`[campaign-write] Unknown section "${queueItem.section}" (marker only).`);
-      await patchStatus(container, prefix, "SectionWrites", {
-        runId,
-        writing: null,
-        warning: `Unknown section "${queueItem.section}" ignored (writer now assembles whole campaign.json in one pass).`,
-        updatedAt: nowISO(),
-        op: "section"
-      });
-      return;
-    }
-
     await patchStatus(container, prefix, "SectionWrites", {
       runId,
-      writing: finalKey,
+      writing: finalKey || null,
       updatedAt: nowISO(),
-      op: "section"
+      op: "section",
+      note:
+        "Section-level writer deprecated; no sections/* blobs written. Final campaign.json is generated on 'assemble' only."
     });
 
-    const marker = {
-      _note: "Section-level writer is deprecated. The final campaign.json is generated on the 'assemble' op only.",
-      section: finalKey,
-      runId,
-      generatedAt: nowISO()
-    };
-    try {
-      await putJson(container, `${prefix}sections/${finalKey}.json`, marker);
-      await patchStatus(container, prefix, "SectionWrites", {
-        runId,
-        written: finalKey,
-        updatedAt: nowISO(),
-        op: "section"
-      });
-    } catch (err) {
-      context.log.warn("[campaign-write] Failed to write section marker", String(err?.message || err));
-    }
-
+    // NO putJson to sections/ -> this prevents legacy sections folder noise.
     return;
   }
 
@@ -682,7 +726,7 @@ module.exports = async function (context, queueItem) {
       op: "assemble"
     });
 
-    // Common inputs (best-effort reads; tolerate missing artifacts)
+    // Common inputs (best-effort reads; tolerate missing artefacts except strategy_v2)
     const [
       evidenceObj,
       evidenceLog,
@@ -693,8 +737,7 @@ module.exports = async function (context, queueItem) {
       markdownPack,
       competitorsFile,
       productsMeta,
-      strategyV2File,
-      legacyStrategy
+      strategyV2File
     ] = await Promise.all([
       getJson(container, `${prefix}evidence.json`),
       getJson(container, `${prefix}evidence_log.json`),
@@ -702,32 +745,57 @@ module.exports = async function (context, queueItem) {
       getJson(container, `${prefix}outline.json`),
       getJson(container, `${prefix}buyer_logic.json`),
       getJson(container, `${prefix}needs_map.json`),
-      // markdown pack variants: try a combined pack first, then a generic name
+      // markdown pack variants: try a combined pack first, then granular
       (async () => {
-        const combined = await getJson(container, `${prefix}markdown_pack.json`);
+        const combined = await getJson(
+          container,
+          `${prefix}markdown_pack.json`
+        );
         if (combined) return combined;
-        // optional fallbacks if your pipeline uses more granular packs
-        const supplierPack = await getJson(container, `${prefix}markdown_supplier.json`);
-        const industryPack = await getJson(container, `${prefix}markdown_industry.json`);
-        const generalPack = await getJson(container, `${prefix}markdown_general.json`);
+        const supplierPack = await getJson(
+          container,
+          `${prefix}markdown_supplier.json`
+        );
+        const industryPack = await getJson(
+          container,
+          `${prefix}markdown_industry.json`
+        );
+        const generalPack = await getJson(
+          container,
+          `${prefix}markdown_general.json`
+        );
         if (supplierPack || industryPack || generalPack) {
-          return { supplier: supplierPack || null, industry: industryPack || null, general: generalPack || null };
+          return {
+            supplier: supplierPack || null,
+            industry: industryPack || null,
+            general: generalPack || null
+          };
         }
         return null;
       })(),
       getJson(container, `${prefix}competitors.json`),
       getJson(container, `${prefix}products_meta.json`),
-      getJson(container, `${prefix}strategy_v2/campaign_strategy.json`),
-      getJson(container, `${prefix}campaign_strategy.json`)
+      getJson(container, `${prefix}strategy_v2/campaign_strategy.json`)
     ]);
 
-    // Normalise strategy_v2 whether wrapped or direct
+    // Normalise strategy_v2 (MANDATORY; no legacy fallback)
     let strategyV2 = null;
     if (strategyV2File && typeof strategyV2File === "object") {
       strategyV2 = strategyV2File.strategy_v2 || strategyV2File;
-    } else if (legacyStrategy && typeof legacyStrategy === "object") {
-      // simple back-compat: treat legacy campaign_strategy.json as strategy_v2 root
-      strategyV2 = { ...legacyStrategy };
+    }
+
+    if (!strategyV2) {
+      context.log.error(
+        "[campaign-write] Missing strategy_v2/campaign_strategy.json – assemble aborted."
+      );
+      await patchStatus(container, prefix, "error", {
+        runId,
+        errorCode: "missing_strategy_v2",
+        errorMessage:
+          "strategy_v2/campaign_strategy.json not found – writer is strategy_v2-only.",
+        op: "assemble"
+      });
+      return;
     }
 
     const meta = deriveCoreMeta(runId, outline || {}, csvCanon || {});
@@ -736,7 +804,10 @@ module.exports = async function (context, queueItem) {
       buyerLogic || {},
       (strategyV2 || {}).buyer_strategy || {}
     );
-    const evidenceSummary = summariseEvidenceForPrompt(evidenceObj, evidenceLog);
+    const evidenceSummary = summariseEvidenceForPrompt(
+      evidenceObj,
+      evidenceLog
+    );
     const strategySummary = summariseStrategyForPrompt(strategyV2 || {});
     const productsAndCompetitors = summariseProductsAndCompetitors(
       productsMeta || {},
@@ -744,7 +815,10 @@ module.exports = async function (context, queueItem) {
       strategyV2 || {},
       outline || {}
     );
-    const needsAndMarkdown = summariseNeedsAndMarkdown(needsMap || null, markdownPack || null);
+    const needsAndMarkdown = summariseNeedsAndMarkdown(
+      needsMap || null,
+      markdownPack || null
+    );
 
     const systemPrompt = buildSystemPrompt(meta, evidenceSummary.claim_ids);
     const userPrompt = buildUserPrompt({
@@ -768,7 +842,11 @@ module.exports = async function (context, queueItem) {
       const e = err instanceof Error ? err : new Error(String(err));
       const code = e.code || "llm_error";
       const details = e.details || null;
-      context.log.error("[campaign-write] LLM/harness error during assemble", code, String(e.message || e));
+      context.log.error(
+        "[campaign-write] LLM/harness error during assemble",
+        code,
+        String(e.message || e)
+      );
 
       // Persist structured error for diagnostics
       try {
@@ -780,9 +858,16 @@ module.exports = async function (context, queueItem) {
           message: e.message || String(e),
           details
         };
-        await putJson(container, `${prefix}logs/campaign-write.error.json`, errorBlob);
+        await putJson(
+          container,
+          `${prefix}logs/campaign-write.error.json`,
+          errorBlob
+        );
       } catch (logErr) {
-        context.log.warn("[campaign-write] Failed to write error log blob", String(logErr?.message || logErr));
+        context.log.warn(
+          "[campaign-write] Failed to write error log blob",
+          String(logErr?.message || logErr)
+        );
       }
 
       await patchStatus(container, prefix, "error", {
@@ -797,11 +882,14 @@ module.exports = async function (context, queueItem) {
 
     // Final guard: ensure core meta populated even if model omitted or changed them
     if (!campaign || typeof campaign !== "object" || Array.isArray(campaign)) {
-      context.log.error("[campaign-write] Invalid campaign object returned from harness");
+      context.log.error(
+        "[campaign-write] Invalid campaign object returned from harness"
+      );
       await patchStatus(container, prefix, "error", {
         runId,
         errorCode: "invalid_campaign_object",
-        errorMessage: "Prompt harness returned a non-object for campaign.json",
+        errorMessage:
+          "Prompt harness returned a non-object for campaign.json",
         op: "assemble"
       });
       return;
@@ -818,10 +906,23 @@ module.exports = async function (context, queueItem) {
       campaign.persona = meta.persona;
     }
 
+    // Patch _meta ONLY if schema already defines it (we assume campaign-gold allows this).
+    // We do not add any other top-level keys beyond the schema (additionalProperties: false).
+    if (campaign._meta && typeof campaign._meta === "object") {
+      if (!campaign._meta.version) {
+        campaign._meta.version = WRITER_VERSION;
+      }
+      if (!campaign._meta.strategy_engine) {
+        campaign._meta.strategy_engine = STRATEGY_ENGINE_VERSION;
+      }
+      if (!campaign._meta.generated_at) {
+        campaign._meta.generated_at = nowISO();
+      }
+    }
+
     // Optional: embed lightweight input proof to aid debugging without altering schema
     // (Note: campaign-gold has additionalProperties: false at top level,
-    //  so we MUST NOT add extra keys here; keep hashes separate if needed.)
-    // If you want hashes, write them to a companion blob instead:
+    //  so we MUST NOT add extra arbitrary keys to campaign.json itself.)
     try {
       const proof = {
         outline_sha256: sha256OfJson(outline || {}),
@@ -836,7 +937,10 @@ module.exports = async function (context, queueItem) {
       };
       await putJson(container, `${prefix}input_proof.json`, proof);
     } catch (proofErr) {
-      context.log.warn("[campaign-write] Failed to write input_proof.json", String(proofErr?.message || proofErr));
+      context.log.warn(
+        "[campaign-write] Failed to write input_proof.json",
+        String(proofErr?.message || proofErr)
+      );
     }
 
     // Write campaign.json
@@ -850,24 +954,34 @@ module.exports = async function (context, queueItem) {
 
     // ---- Notify orchestrator exactly once (anti-loop marker) ----
     try {
-      const postStatus = (await getJson(container, `${prefix}status.json`)) || {};
+      const postStatus =
+        (await getJson(container, `${prefix}status.json`)) || {};
       const alreadySent = !!postStatus?.markers?.afterassembleSent;
       if (!alreadySent) {
         const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
         const qc = qs.getQueueClient(MAIN_QUEUE);
         await qc.createIfNotExists();
-        const page = (queueItem && (queueItem.page || queueItem?.data?.page)) || "campaign";
-        await qc.sendMessage(JSON.stringify({ op: "afterassemble", runId, page, prefix }));
+        const page =
+          (queueItem && (queueItem.page || queueItem?.data?.page)) ||
+          "campaign";
+        await qc.sendMessage(
+          JSON.stringify({ op: "afterassemble", runId, page, prefix })
+        );
 
         postStatus.markers = postStatus.markers || {};
         postStatus.markers.afterassembleSent = true;
         await putJson(container, `${prefix}status.json`, postStatus);
       }
     } catch (notifyErr) {
-      context.log.warn("[campaign-write] notify afterassemble failed", String(notifyErr?.message || notifyErr));
+      context.log.warn(
+        "[campaign-write] notify afterassemble failed",
+        String(notifyErr?.message || notifyErr)
+      );
     }
     return;
   }
 
-  throw new Error(`Unknown job type "${op}". Use "section" / "write_section" or "assemble".`);
+  throw new Error(
+    `Unknown job type "${op}". Use "section" / "write_section" or "assemble".`
+  );
 };
