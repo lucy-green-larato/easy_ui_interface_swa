@@ -247,7 +247,23 @@ window.CampaignUI = window.CampaignUI || {};
 
   function renderExecutiveSummary() {
     const wrap = document.createElement("div");
+    const ss = state.contract?.strategy_v2?.story_spine;
+    if (ss && typeof ss === "object") {
+      const wrap = document.createElement("div");
 
+      if (ss.lead) {
+        const p = document.createElement("p");
+        p.textContent = ss.lead;
+        wrap.appendChild(p);
+      }
+
+      if (Array.isArray(ss.bullets)) {
+        wrap.appendChild(makeList(ss.bullets));
+      }
+
+      setPanelContent(wrap);
+      return;
+    }
     // GOLD SHAPE: contract.executive_summary { title, paragraphs[], citations[] }
     const esGold = state.contract?.executive_summary;
     if (esGold && typeof esGold === "object" && Array.isArray(esGold.paragraphs)) {
@@ -574,301 +590,367 @@ window.CampaignUI = window.CampaignUI || {};
     setPanelContent(wrap);
   }
 
-  function renderCaseLibrary() {
-    const listRaw =
-      rowsOf(state.contract?.case_study_library).length
-        ? rowsOf(state.contract?.case_study_library)
-        : rowsOf(state.contract?.case_studies);
+function renderCaseLibrary() {
 
-    if (!listRaw.length) {
-      setPanelContent(makePre("No verified case studies found on the company website."));
-      return;
-    }
-
-    const hasVerifiedFlag = listRaw.some(k => k && k.verified === true);
-
-    const headers = hasVerifiedFlag
-      ? ["Customer", "Industry", "Headline", "Bullets", "Link", "Source", "Verified"]
-      : ["Customer", "Industry", "Headline", "Bullets", "Link", "Source"];
-
-    const rows = listRaw.map(k => {
-      const customer = k?.customer || "";
-      const industry = k?.industry || "";
-      const headline = k?.headline || "";
-      const bullets = rowsOf(k?.bullets);
-      const href = k?.link || k?.url || "";
-      const source = k?.source || k?.source_type || "";
-      const base = [customer, industry, headline, bullets, href ? { __link: true, href, text: href } : "", source];
-      if (hasVerifiedFlag) base.push(k?.verified ? "✓" : "");
-      return base;
-    });
-
-    const table = makeTable(headers, rows);
-    setPanelContent(table);
+  // --- NEW: strategy_v2.proof_points override ---
+  const pp2 = state.contract?.strategy_v2?.proof_points;
+  if (Array.isArray(pp2) && pp2.length) {
+    const wrap = document.createElement("div");
+    wrap.appendChild(makeHeading("Proof points (v2)"));
+    wrap.appendChild(makeList(pp2));
+    setPanelContent(wrap);
+    return;
   }
 
-  function renderPositioning() {
-    const wrap = document.createElement("div");
+  // Existing legacy / website case-study logic
+  const listRaw =
+    rowsOf(state.contract?.case_study_library).length
+      ? rowsOf(state.contract?.case_study_library)
+      : rowsOf(state.contract?.case_studies);
 
-    const h1 = document.createElement("h3");
-    h1.textContent = "Value Proposition";
-    wrap.appendChild(h1);
+  if (!listRaw.length) {
+    setPanelContent(makePre("No verified case studies found on the company website."));
+    return;
+  }
 
-    // GOLD SHAPE: contract.value_proposition
-    const vpGold = state.contract?.value_proposition;
-    if (vpGold && typeof vpGold === "object") {
-      if (vpGold.narrative) {
-        const paraBlocks = String(vpGold.narrative)
-          .split(/\n{2,}/)
-          .map(p => p.trim())
-          .filter(Boolean);
-        paraBlocks.forEach(pTxt => {
-          const p = document.createElement("p");
-          p.textContent = pTxt;
-          wrap.appendChild(p);
-        });
-      }
+  const hasVerifiedFlag = listRaw.some(k => k && k.verified === true);
 
-      const moore = vpGold.moore;
-      if (moore && typeof moore === "object") {
-        const h2 = document.createElement("h3");
-        h2.textContent = "Positioning (Moore)";
-        h2.style.marginTop = "1rem";
-        wrap.appendChild(h2);
+  const headers = hasVerifiedFlag
+    ? ["Customer", "Industry", "Headline", "Bullets", "Link", "Source", "Verified"]
+    : ["Customer", "Industry", "Headline", "Bullets", "Link", "Source"];
 
-        wrap.appendChild(makeTable(
-          ["For", "Who", "The", "Is a", "That", "Unlike", "We provide"],
-          [[
-            moore.for || "",
-            moore.who || "",
-            moore.the || "",
-            moore.is_a || "",
-            moore.that || "",
-            moore.unlike || "",
-            moore.we_provide || ""
-          ]]
-        ));
-      }
+  const rows = listRaw.map(k => {
+    const customer = k?.customer || "";
+    const industry = k?.industry || "";
+    const headline = k?.headline || "";
+    const bullets = rowsOf(k?.bullets);
+    const href = k?.link || k?.url || "";
+    const source = k?.source || k?.source_type || "";
+    const base = [
+      customer,
+      industry,
+      headline,
+      bullets,
+      href ? { __link: true, href, text: href } : "",
+      source
+    ];
+    if (hasVerifiedFlag) base.push(k?.verified ? "✓" : "");
+    return base;
+  });
 
-      if (vpGold.competitive_position) {
-        const h3 = document.createElement("h3");
-        h3.textContent = "Competitive position";
-        h3.style.marginTop = "1rem";
-        wrap.appendChild(h3);
-        wrap.appendChild(makePre(vpGold.competitive_position));
-      }
+  const table = makeTable(headers, rows);
+  setPanelContent(table);
+}
 
-      if (Array.isArray(vpGold.proof_points) && vpGold.proof_points.length) {
-        const h4 = document.createElement("h3");
-        h4.textContent = "Proof points";
-        h4.style.marginTop = "1rem";
-        wrap.appendChild(h4);
-        wrap.appendChild(makeList(vpGold.proof_points));
-      }
+function renderPositioning() {
+  const wrap = document.createElement("div");
 
-      setPanelContent(wrap);
-      return;
-    }
+  const h1 = document.createElement("h3");
+  h1.textContent = "Value Proposition";
+  wrap.appendChild(h1);
 
-    // LEGACY POSITIONING
-    const pos = state.contract?.positioning_and_differentiation || {};
+  // --- NEW: strategy_v2.value_proposition + right_to_play override ---
+  const vp2 = state.contract?.strategy_v2?.value_proposition;
+  const rtp2 = state.contract?.strategy_v2?.right_to_play;
 
-    // 1) Prefer deeper VP narrative when available
-    const vpn = pos.value_prop_narrative;
-    if (vpn && typeof vpn === "object") {
-      const order = [
-        "lead", // Moore sentence again (clean)
-        "customer_problem_paragraph",
-        "right_to_play_paragraph",
-        "differentiation_paragraph",
-        "competitor_positions_paragraph",
-        "proof_points_paragraph"
-      ];
-      order.forEach(k => {
-        const v = (typeof vpn[k] === "string") ? vpn[k].trim() : "";
-        if (!v) return;
-        const el = document.createElement(k === "lead" ? "pre" : "p");
-        el.textContent = v;
-        wrap.appendChild(el);
-      });
-    }
+  if (vp2 && typeof vp2 === "object") {
+    wrap.appendChild(makeHeading("Value Proposition (v2)"));
 
-    // 2) Structured Moore sentence + fields
-    const vpm =
-      pos.value_prop_moore ||
-      pos.value_proposition_moore ||
-      state.contract?.campaign_strategy?.value_proposition_moore ||
-      state.contract?.strategy?.value_proposition_moore;
+    Object.entries(vp2).forEach(([label, value]) => {
+      wrap.appendChild(renderField(label, value));
+    });
 
-    if (vpm && (vpm.paragraph || vpm.fields)) {
-      const pre = document.createElement("pre");
-      pre.textContent = String(vpm.paragraph || pos.value_prop || "");
-      wrap.appendChild(pre);
-
-      const f = vpm.fields || {};
-      wrap.appendChild(renderField("Positioning (Moore)", moore));
-    } else if (!vpn) {
-      // 3) Legacy one-liner fallback only if neither narrative nor Moore struct exist
-      wrap.appendChild(makePre(pos.value_prop || ""));
-    }
-
-    // 4) SWOT
-    const sw = pos.swot || {};
-    const hasSw = [sw.strengths, sw.weaknesses, sw.opportunities, sw.threats]
-      .some(a => Array.isArray(a) && a.length);
-
-    const h2 = document.createElement("h3");
-    h2.textContent = "SWOT";
-    wrap.appendChild(h2);
-
-    if (hasSw) {
-      wrap.appendChild(makeTable(
-        ["Strengths", "Weaknesses", "Opportunities", "Threats"],
-        [[rowsOf(sw.strengths), rowsOf(sw.weaknesses), rowsOf(sw.opportunities), rowsOf(sw.threats)]]
-      ));
-    } else {
-      const p = document.createElement("p");
-      p.className = "muted";
-      p.textContent = "No evidence found";
-      wrap.appendChild(p);
-    }
-
-    // 5) Differentiators
-    if (Array.isArray(pos.differentiators) && pos.differentiators.length) {
-      const h3 = document.createElement("h3");
-      h3.textContent = "Differentiators";
-      wrap.appendChild(h3);
-      wrap.appendChild(makeList(pos.differentiators));
-    }
-
-    // 6) Competitor set
-    const comp = rowsOf(pos.competitor_set);
-    if (comp.length) {
-      const h4 = document.createElement("h3");
-      h4.textContent = "Competitor Set";
-      wrap.appendChild(h4);
-      wrap.appendChild(renderField("Competitive battlecard", seGold.competitive_battlecard));
+    if (rtp2) {
+      wrap.appendChild(makeHeading("Right to Play"));
+      wrap.appendChild(renderField("right_to_play", rtp2));
     }
 
     setPanelContent(wrap);
+    return;
   }
 
-  function renderICPMatrix() {
-    const mm = state.contract?.messaging_matrix || {};
-    const wrap = document.createElement("div");
+  // GOLD SHAPE
+  const vpGold = state.contract?.value_proposition;
+  if (vpGold && typeof vpGold === "object") {
+    if (vpGold.narrative) {
+      const paraBlocks = String(vpGold.narrative)
+        .split(/\n{2,}/)
+        .map(p => p.trim())
+        .filter(Boolean);
+      paraBlocks.forEach(pTxt => {
+        const p = document.createElement("p");
+        p.textContent = pTxt;
+        wrap.appendChild(p);
+      });
+    }
 
-    // GOLD SHAPE: audiences[], pillars[], support_points[]
-    const hasGold =
-      (Array.isArray(mm.audiences) && mm.audiences.length) ||
-      (Array.isArray(mm.pillars) && mm.pillars.length) ||
-      (Array.isArray(mm.support_points) && mm.support_points.length);
-
-    if (hasGold) {
-      const h1 = document.createElement("h3");
-      h1.textContent = "Key audiences";
-      wrap.appendChild(h1);
-      wrap.appendChild(makeList(mm.audiences || []));
-
+    const moore = vpGold.moore;
+    if (moore && typeof moore === "object") {
       const h2 = document.createElement("h3");
-      h2.textContent = "Messaging pillars";
+      h2.textContent = "Positioning (Moore)";
       h2.style.marginTop = "1rem";
       wrap.appendChild(h2);
-      wrap.appendChild(makeList(mm.pillars || []));
 
+      wrap.appendChild(makeTable(
+        ["For", "Who", "The", "Is a", "That", "Unlike", "We provide"],
+        [[
+          moore.for || "",
+          moore.who || "",
+          moore.the || "",
+          moore.is_a || "",
+          moore.that || "",
+          moore.unlike || "",
+          moore.we_provide || ""
+        ]]
+      ));
+    }
+
+    if (vpGold.competitive_position) {
       const h3 = document.createElement("h3");
-      h3.textContent = "Support points";
+      h3.textContent = "Competitive position";
       h3.style.marginTop = "1rem";
       wrap.appendChild(h3);
-      wrap.appendChild(makeList(mm.support_points || []));
-
-      if (Array.isArray(mm.citations) && mm.citations.length) {
-        const h4 = document.createElement("h3");
-        h4.textContent = "Citations";
-        h4.style.marginTop = "1rem";
-        wrap.appendChild(h4);
-        wrap.appendChild(makeList(mm.citations));
-      }
-
-      setPanelContent(wrap);
-      return;
+      wrap.appendChild(makePre(vpGold.competitive_position));
     }
 
-    // LEGACY MATRIX SHAPE
-    const h1 = document.createElement("h3"); h1.textContent = "Non-negotiables";
-    wrap.appendChild(h1); wrap.appendChild(makeList(mm.nonnegotiables || []));
+    if (Array.isArray(vpGold.proof_points) && vpGold.proof_points.length) {
+      const h4 = document.createElement("h3");
+      h4.textContent = "Proof points";
+      h4.style.marginTop = "1rem";
+      wrap.appendChild(h4);
+      wrap.appendChild(makeList(vpGold.proof_points));
+    }
 
-    const h2 = document.createElement("h3"); h2.textContent = "Messaging Matrix";
+    setPanelContent(wrap);
+    return;
+  }
+
+  // LEGACY POSITIONING
+  const pos = state.contract?.positioning_and_differentiation || {};
+
+  const vpn = pos.value_prop_narrative;
+  if (vpn && typeof vpn === "object") {
+    const order = [
+      "lead",
+      "customer_problem_paragraph",
+      "right_to_play_paragraph",
+      "differentiation_paragraph",
+      "competitor_positions_paragraph",
+      "proof_points_paragraph"
+    ];
+    order.forEach(k => {
+      const v = (typeof vpn[k] === "string") ? vpn[k].trim() : "";
+      if (!v) return;
+      const el = document.createElement(k === "lead" ? "pre" : "p");
+      el.textContent = v;
+      wrap.appendChild(el);
+    });
+  }
+
+  const vpm =
+    pos.value_prop_moore ||
+    pos.value_proposition_moore ||
+    state.contract?.campaign_strategy?.value_proposition_moore ||
+    state.contract?.strategy?.value_proposition_moore;
+
+  if (vpm && (vpm.paragraph || vpm.fields)) {
+    const pre = document.createElement("pre");
+    pre.textContent = String(vpm.paragraph || pos.value_prop || "");
+    wrap.appendChild(pre);
+
+    const f = vpm.fields || {};
+    wrap.appendChild(renderField("Positioning (Moore)", moore));
+  } else if (!vpn) {
+    wrap.appendChild(makePre(pos.value_prop || ""));
+  }
+
+  const sw = pos.swot || {};
+  const hasSw = [sw.strengths, sw.weaknesses, sw.opportunities, sw.threats]
+    .some(a => Array.isArray(a) && a.length);
+
+  const h2 = document.createElement("h3");
+  h2.textContent = "SWOT";
+  wrap.appendChild(h2);
+
+  if (hasSw) {
+    wrap.appendChild(makeTable(
+      ["Strengths", "Weaknesses", "Opportunities", "Threats"],
+      [[rowsOf(sw.strengths), rowsOf(sw.weaknesses), rowsOf(sw.opportunities), rowsOf(sw.threats)]]
+    ));
+  } else {
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = "No evidence found";
+    wrap.appendChild(p);
+  }
+
+  if (Array.isArray(pos.differentiators) && pos.differentiators.length) {
+    const h3 = document.createElement("h3");
+    h3.textContent = "Differentiators";
+    wrap.appendChild(h3);
+    wrap.appendChild(makeList(pos.differentiators));
+  }
+
+  const comp = rowsOf(pos.competitor_set);
+  if (comp.length) {
+    const h4 = document.createElement("h3");
+    h4.textContent = "Competitor Set";
+    wrap.appendChild(h4);
+    wrap.appendChild(renderField("Competitive battlecard", seGold?.competitive_battlecard));
+  }
+
+  setPanelContent(wrap);
+}
+
+
+function renderICPMatrix() {
+  const mm = state.contract?.messaging_matrix || {};
+  const wrap = document.createElement("div");
+
+  // --- NEW: strategy_v2.buyer_strategy override ---
+  const bs2 = state.contract?.strategy_v2?.buyer_strategy;
+  if (bs2 && typeof bs2 === "object") {
+    wrap.appendChild(makeHeading("Buyer strategy (v2)"));
+    Object.entries(bs2).forEach(([label, value]) => {
+      wrap.appendChild(renderField(label, value));
+    });
+    setPanelContent(wrap);
+    return;
+  }
+
+  // GOLD SHAPE: audiences, pillars, support_points
+  const hasGold =
+    (Array.isArray(mm.audiences) && mm.audiences.length) ||
+    (Array.isArray(mm.pillars) && mm.pillars.length) ||
+    (Array.isArray(mm.support_points) && mm.support_points.length);
+
+  if (hasGold) {
+    const h1 = document.createElement("h3");
+    h1.textContent = "Key audiences";
+    wrap.appendChild(h1);
+    wrap.appendChild(makeList(mm.audiences || []));
+
+    const h2 = document.createElement("h3");
+    h2.textContent = "Messaging pillars";
+    h2.style.marginTop = "1rem";
     wrap.appendChild(h2);
+    wrap.appendChild(makeList(mm.pillars || []));
 
-    const headers = ["Persona", "Pain", "Value statement", "Proof", "CTA"];
-    const rows = rowsOf(mm.matrix).map(r => [r.persona || "", r.pain || "", r.value_statement || "", r.proof || "", r.cta || ""]);
-    const table = makeTable(headers, rows);
+    const h3 = document.createElement("h3");
+    h3.textContent = "Support points";
+    h3.style.marginTop = "1rem";
+    wrap.appendChild(h3);
+    wrap.appendChild(makeList(mm.support_points || []));
 
-    const TRS = table.querySelectorAll("tbody tr");
-    const claimRe = /\bCLM-\d{3}\b/g;
-    rowsOf(mm.matrix).forEach((r, i) => {
-      const ids = new Set(
-        ((r.value_statement || "").match(claimRe) || []).concat((r.proof || "").match(claimRe) || [])
-      );
-      if (ids.size) TRS[i].setAttribute("data-claims", Array.from(ids).join(" "));
+    if (Array.isArray(mm.citations) && mm.citations.length) {
+      const h4 = document.createElement("h3");
+      h4.textContent = "Citations";
+      h4.style.marginTop = "1rem";
+      wrap.appendChild(h4);
+      wrap.appendChild(makeList(mm.citations));
+    }
+
+    setPanelContent(wrap);
+    return;
+  }
+
+  // LEGACY MATRIX SHAPE
+  const h1 = document.createElement("h3"); h1.textContent = "Non-negotiables";
+  wrap.appendChild(h1); 
+  wrap.appendChild(makeList(mm.nonnegotiables || []));
+
+  const h2 = document.createElement("h3"); h2.textContent = "Messaging Matrix";
+  wrap.appendChild(h2);
+
+  const headers = ["Persona", "Pain", "Value statement", "Proof", "CTA"];
+  const rows = rowsOf(mm.matrix).map(r => [
+    r.persona || "",
+    r.pain || "",
+    r.value_statement || "",
+    r.proof || "",
+    r.cta || ""
+  ]);
+
+  const table = makeTable(headers, rows);
+
+  const TRS = table.querySelectorAll("tbody tr");
+  const claimRe = /\bCLM-\d{3}\b/g;
+  rowsOf(mm.matrix).forEach((r, i) => {
+    const ids = new Set(
+      ((r.value_statement || "").match(claimRe) || [])
+      .concat((r.proof || "").match(claimRe) || [])
+    );
+    if (ids.size) TRS[i].setAttribute("data-claims", Array.from(ids).join(" "));
+  });
+
+  wrap.appendChild(table);
+  setPanelContent(wrap);
+}
+
+function renderOffer() {
+  const wrap = document.createElement("div");
+
+  // --- NEW: strategy_v2.gtm_strategy override ---
+  const gtm2 = state.contract?.strategy_v2?.gtm_strategy;
+  if (gtm2 && typeof gtm2 === "object") {
+    wrap.appendChild(makeHeading("Go-to-market strategy (v2)"));
+    Object.entries(gtm2).forEach(([label, value]) => {
+      wrap.appendChild(renderField(label, value));
+    });
+    setPanelContent(wrap);
+    return;
+  }
+
+  // GOLD SHAPE
+  const gtm = state.contract?.go_to_market_plan || {};
+  const hasGold = gtm && Object.keys(gtm).length;
+
+  if (hasGold) {
+    wrap.appendChild(makeHeading("Go-to-market strategy"));
+
+    [
+      ["Objective", gtm.objective],
+      ["Target market", gtm.target_market],
+      ["Marketing actions", gtm.marketing_actions],
+      ["Sales actions", gtm.sales_actions],
+      ["Pipeline model", gtm.pipeline_model],
+      ["Recommended CTA", gtm.cta]
+    ].forEach(([label, content]) => {
+      if (content) wrap.appendChild(renderField(label, content));
     });
 
-    wrap.appendChild(table);
-    setPanelContent(wrap);
-  }
-
-  function renderOffer() {
-    const wrap = document.createElement("div");
-
-    const gtm = state.contract?.go_to_market_plan || {};
-    const hasGold = gtm && Object.keys(gtm).length;
-
-    if (hasGold) {
-      wrap.appendChild(makeHeading("Go-to-market strategy"));
-
-      [
-        ["Objective", gtm.objective],
-        ["Target market", gtm.target_market],
-        ["Marketing actions", gtm.marketing_actions],
-        ["Sales actions", gtm.sales_actions],
-        ["Pipeline model", gtm.pipeline_model],
-        ["Recommended CTA", gtm.cta]
-      ].forEach(([label, content]) => {
-        if (content) wrap.appendChild(renderField(label, content));
-      });
-
-      if (Array.isArray(gtm.citations) && gtm.citations.length) {
-        wrap.appendChild(makeHeading("Citations"));
-        wrap.appendChild(makeList(gtm.citations));
-      }
-
-      setPanelContent(wrap);
-      return;
-    }
-
-    // LEGACY SHAPE
-    const offer = state.contract?.offer_strategy || {};
-    const lp = offer.landing_page || {};
-
-    const rows = [
-      ["Hero", lp.hero || ""],
-      ["Why it matters", rowsOf(lp.why_it_matters)],
-      ["What you get", rowsOf(lp.what_you_get)],
-      ["How it works", rowsOf(lp.how_it_works)],
-      ["Outcomes", rowsOf(lp.outcomes)],
-      ["Proof", rowsOf(lp.proof)],
-      ["CTA", lp.cta || ""]
-    ];
-    wrap.appendChild(makeTable(["Field", "Value"], rows));
-
-    if (Array.isArray(offer.assets_checklist)) {
-      wrap.appendChild(makeHeading("Assets checklist"));
-      wrap.appendChild(makeList(offer.assets_checklist));
+    if (Array.isArray(gtm.citations) && gtm.citations.length) {
+      wrap.appendChild(makeHeading("Citations"));
+      wrap.appendChild(makeList(gtm.citations));
     }
 
     setPanelContent(wrap);
+    return;
   }
-  
+
+  // LEGACY SHAPE
+  const offer = state.contract?.offer_strategy || {};
+  const lp = offer.landing_page || {};
+
+  const rows = [
+    ["Hero", lp.hero || ""],
+    ["Why it matters", rowsOf(lp.why_it_matters)],
+    ["What you get", rowsOf(lp.what_you_get)],
+    ["How it works", rowsOf(lp.how_it_works)],
+    ["Outcomes", rowsOf(lp.outcomes)],
+    ["Proof", rowsOf(lp.proof)],
+    ["CTA", lp.cta || ""]
+  ];
+  wrap.appendChild(makeTable(["Field", "Value"], rows));
+
+  if (Array.isArray(offer.assets_checklist)) {
+    wrap.appendChild(makeHeading("Assets checklist"));
+    wrap.appendChild(makeList(offer.assets_checklist));
+  }
+
+  setPanelContent(wrap);
+}
+
   function renderSalesEnablement() {
     const wrap = document.createElement("div");
 
@@ -1181,6 +1263,17 @@ window.CampaignUI = window.CampaignUI || {};
   // Fetch a run to completion (or immediately if already done)
   async function fetchCompleteRun(runId, allowPoll) {
     const contract = await pollToCompletion(runId, allowPoll);
+    let strategyV2 = null;
+    try {
+      strategyV2 = await http("GET", `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=strategy_v2`, {
+        timeoutMs: 20000
+      });
+      if (strategyV2 && typeof strategyV2 === "object") {
+        contract.strategy_v2 = strategyV2;
+      }
+    } catch (e) {
+      UI.log("strategy_v2 fetch skipped: " + (e?.message || e));
+    }
     UI.log("Contract fetched; keys=" + Object.keys(contract || {}).join(","));
     // Evidence (prefer canonical; fall back to legacy array)
     let evidenceItems = [];
@@ -1391,6 +1484,14 @@ window.CampaignUI = window.CampaignUI || {};
   // === ROUTING MAP (backend → UI tabs) ===
   const TAB_FIELD_MAP = {
     "executive_summary": "exec",
+    "strategy_v2": "exec",
+    "story_spine": "exec",
+    "value_proposition": "off",
+    "competitive_strategy": "gtm",
+    "buyer_strategy": "msg",
+    "gtm_strategy": "gtm",
+    "proof_points": "pp",
+    "right_to_play": "off",
     "go_to_market_plan": "gtm",
     "where_to_play": "gtm",
     "how_to_win": "gtm",

@@ -1,22 +1,15 @@
-// /api/campaign-worker/index.js 26-11-2025 Strategy Engine v5 (deterministic, no LLM)
+// /api/campaign-worker/index.js
+// 26-11-2025 Strategy Engine v5 (clean deterministic, no LLM)
+//
 // Responsibility:
 //   - Read Phase 1 outputs (evidence, insights, buyer_logic, markdown_pack, csv_normalized, etc.).
 //   - Build a structured strategy_v2 object (story_spine, value_proposition, competitive_strategy,
 //     buyer_strategy, gtm_strategy, proof_points, right_to_play).
 //   - Write: results/runs/<runId>/strategy_v2/campaign_strategy.json
-//   - Update: results/runs/<runId>/status.json.state = "strategy_ready"
-// No calls to prompt-harness, no packloader, no LLM – fully deterministic.
+//   - Update: results/runs/<runId>/status.json.state = "strategy_working" / "strategy_ready" / "strategy_error"
+//   - No calls to prompt-harness, no packloader, no LLM – fully deterministic.
 
 "use strict";
-import { markdownPackToEvidence } from '../campaign-evidence/markdownPack.js';
-
-const markdownPack = campaignInput?.markdownPack || {};
-const markdownEvidence = markdownPackToEvidence(markdownPack);
-const { buildCampaignStrategy } = require("../shared/strategy_v2");
-
-
-console.log("[debug] markdownPack keys:", Object.keys(markdownPack));
-console.log("[debug] markdownEvidence length:", markdownEvidence.length);
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 
@@ -334,10 +327,16 @@ function buildStorySpine({
       ? `NEXT_STEP:align_to_environment_signals=${environment.length}`
       : "",
     case_for_action.length
-      ? `NEXT_STEP:prioritise_case_for_action_top=${Math.min(case_for_action.length, 3)}`
+      ? `NEXT_STEP:prioritise_case_for_action_top=${Math.min(
+          case_for_action.length,
+          3
+        )}`
       : "",
     how_we_win.length
-      ? `NEXT_STEP:validate_how_we_win_points=${Math.min(how_we_win.length, 3)}`
+      ? `NEXT_STEP:validate_how_we_win_points=${Math.min(
+          how_we_win.length,
+          3
+        )}`
       : ""
   ]).slice(0, 4);
 
@@ -693,71 +692,37 @@ module.exports = async function (context, queueItem) {
   );
 
   try {
-    // Load Phase 1 artefacts (missing files are tolerated) outline/evidenceLog reserved for future strategy versions
-    const [
-      evidence,
-      evidenceLog,
-      insights,
-      buyerLogic,
-      markdownPack,
-      csvNormalized,
-      outline,
-      baseInput
-    ] = await Promise.all([
-      readJsonIfExists(container, `${prefix}evidence.json`),
-      readJsonIfExists(container, `${prefix}evidence_log.json`),
+    // -------- Load Phase 1 artefacts (missing files are tolerated) -------- //
+    const evidence = await readJsonIfExists(container, `${prefix}evidence.json`);
+    const evidenceLog = await readJsonIfExists(
+      container,
+      `${prefix}evidence_log.json`
+    );
 
-      // Prefer v1 folder, fallback to legacy root
-      (async () =>
-        await readJsonIfExists(container, `${prefix}insights_v1/insights.json`) ||
-        await readJsonIfExists(container, `${prefix}insights.json`)
-      )(),
-      (async () =>
-        await readJsonIfExists(container, `${prefix}insights_v1/buyer_logic.json`) ||
-        await readJsonIfExists(container, `${prefix}buyer_logic.json`)
-      )(),
+    let insights =
+      (await readJsonIfExists(
+        container,
+        `${prefix}insights_v1/insights.json`
+      )) || (await readJsonIfExists(container, `${prefix}insights.json`));
 
-      // Prefer evidence_v2, fallback to legacy root
-      (async () =>
-        await readJsonIfExists(container, `${prefix}evidence_v2/markdown_pack.json`) ||
-        await readJsonIfExists(container, `${prefix}markdown_pack.json`)
-      )(),
+    let buyerLogic =
+      (await readJsonIfExists(
+        container,
+        `${prefix}insights_v1/buyer_logic.json`
+      )) || (await readJsonIfExists(container, `${prefix}buyer_logic.json`));
 
-      readJsonIfExists(container, `${prefix}csv_normalized.json`),
-      readJsonIfExists(container, `${prefix}outline.json`),
-      readJsonIfExists(container, `${prefix}input.json`)
-    ]);
+    let markdownPack =
+      (await readJsonIfExists(
+        container,
+        `${prefix}evidence_v2/markdown_pack.json`
+      )) || (await readJsonIfExists(container, `${prefix}markdown_pack.json`));
 
-    context.log("[worker] starting strategy_v2 generation", { prefix });
-
-    let strategyV2 = null;
-
-    try {
-      strategyV2 = await buildCampaignStrategy({
-        runId,
-        prefix,
-        input: input || {},
-        outline,
-        evidence: evidenceObj?.claims || evidenceLog || [],
-        csv_normalized: csvCanon || {},
-        buyer_logic: buyerLogic || {},
-        needs_map: needsMap || {},
-        markdown_pack: markdownPack || {}
-      });
-
-      if (!strategyV2 || typeof strategyV2 !== "object") {
-        context.log.warn("[worker] buildCampaignStrategy returned empty or invalid object");
-      } else {
-        const rel = `${prefix}strategy_v2/campaign_strategy.json`;
-        await putJson(container, rel, strategyV2);
-        context.log("[worker] strategy_v2 written", { rel });
-      }
-
-    } catch (err) {
-      context.log.error("[worker] strategy_v2 generation failed", {
-        error: String(err?.message || err)
-      });
-    }
+    const csvNormalized = await readJsonIfExists(
+      container,
+      `${prefix}csv_normalized.json`
+    );
+    const outline = await readJsonIfExists(container, `${prefix}outline.json`);
+    const baseInput = await readJsonIfExists(container, `${prefix}input.json`);
 
     log("[*] Loaded Phase 1 artefacts", {
       hasEvidence: !!evidence,
@@ -770,32 +735,41 @@ module.exports = async function (context, queueItem) {
       hasInput: !!baseInput
     });
 
+    insights = insights || {};
+    buyerLogic = buyerLogic || {};
+    markdownPack = markdownPack || {};
+
     const mergedInput = {
       ...(baseInput || {}),
       ...(msg.input || {}),
       ...msg
     };
 
-    // Inject markdownEvidence into evidence.claims
-    const combinedEvidence = {
-      claims: [
-        ...(evidence?.claims || []),
-        ...(markdownEvidence || [])
-      ]
-    };
+    // Build a canonical evidence object: prefer evidence.claims; fallback to evidence array or evidenceLog array.
+    let claims = [];
+    if (evidence && Array.isArray(evidence.claims)) {
+      claims = evidence.claims;
+    } else if (Array.isArray(evidence)) {
+      claims = evidence;
+    } else if (Array.isArray(evidenceLog)) {
+      claims = evidenceLog;
+    }
 
-    // Build strategy_v2 deterministically from merged evidence
+    const combinedEvidence = { claims };
+
+    // -------- Build strategy_v2 deterministically -------- //
     const strategy_v2 = buildStrategyV2({
       evidence: combinedEvidence,
-      insights: insights || {},
-      buyerLogic: buyerLogic || {},
-      markdownPack: markdownPack || {},
+      insights,
+      buyerLogic,
+      markdownPack,
       csvNormalized: csvNormalized || {},
       mergedInput
     });
-    const out = { strategy_v2 };
 
+    const out = { strategy_v2 };
     const strategyPath = `${prefix}strategy_v2/campaign_strategy.json`;
+
     await writeJson(container, strategyPath, out);
 
     await updateStatus(
@@ -819,14 +793,10 @@ module.exports = async function (context, queueItem) {
 
     try {
       const errorPath = `${prefix}strategy_v2/error.json`;
-      await writeJson(
-        container,
-        errorPath,
-        {
-          message: String(err && err.message ? err.message : err),
-          stack: err && err.stack ? String(err.stack) : null
-        }
-      );
+      await writeJson(container, errorPath, {
+        message: String(err && err.message ? err.message : err),
+        stack: err && err.stack ? String(err.stack) : null
+      });
     } catch (e2) {
       log.error("[!] Failed to write strategy error file", String(e2));
     }
