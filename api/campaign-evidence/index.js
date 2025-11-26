@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 25-11-2025 — v33.0
+// /api/campaign-evidence/index.js 26-11-2025 — v34.0
 // Phase 1 canonical outputs:
 // - csv_normalized.json
 // - needs_map.json
@@ -1044,13 +1044,15 @@ module.exports = async function (context, job) {
     let packEvidence = [];
     try {
       const packs = await loadPacks();
+      const markdownPack = await buildMarkdownPack(container, prefix);
       const { buildEvidence } = await loadEvidenceLib();
 
       const built = await buildEvidence({
         input,
         packs,
         runId,
-        correlationId: `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`
+        correlationId: `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`,
+        markdownPack
       });
 
 
@@ -1653,6 +1655,8 @@ module.exports = async function (context, job) {
     // Build evidence_v2/markdown_pack.json, insights_v1/insights.json and buyer_logic.json
     try {
       const markdownPack = await buildMarkdownPack(container, prefix);
+      console.log("🧪 markdownPack keys:", Object.keys(markdownPack || {}));
+      console.log("🧪 sample persona_pressures:", markdownPack?.persona_pressures?.slice(0, 2));
       const ev2Prefix = `${prefix}evidence_v2/`;
       await putJson(container, `${ev2Prefix}markdown_pack.json`, markdownPack);
     } catch (e) {

@@ -107,7 +107,32 @@ async function buildEvidence({ input = {}, packs = {}, runId, correlationId }) {
       if (item) out.push(item);
     }
   }
+  if (packs.markdownPack && typeof packs.markdownPack === "object") {
+    const markdown = packs.markdownPack;
 
+    const flatten = (arr) => (Array.isArray(arr) ? arr : []).map(it => {
+      const file = it?.source?.file || "";
+      const heading = it?.source?.heading || "";
+      return {
+        url: file,
+        title: heading || "Markdown Pack",
+        snippet: it?.text || "",
+        claim: it?.text || ""
+      };
+    });
+
+    [
+      ...flatten(markdown.industry_drivers),
+      ...flatten(markdown.industry_risks),
+      ...flatten(markdown.persona_pressures),
+      ...flatten(markdown.competitor_profiles),
+      ...flatten(markdown.content_pillars),
+      ...flatten(markdown.industry_stats)
+    ].forEach(item => {
+      const normed = norm(item, "Markdown insight");
+      if (normed) out.push(normed);
+    });
+  }
   return out;
 }
 
