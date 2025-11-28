@@ -1,987 +1,726 @@
-// /api/campaign-write/index.js
-// 26-11-2025 Strategy Engine v5 writer (campaign-gold, strategy_v2-only)
+// /api/campaign-write/index.js // 27-11-2025 Gold Writer v2 (deterministic)
 //
-// Queue-triggered on %Q_CAMPAIGN_WRITE%.
-//
-//   - op: "section" | "write_section"
-//       → NO LONGER writes legacy sections/*.json.
-//         We only update status to acknowledge the request.
-//   - op: "assemble"
-//       → Reads Phase 1 + strategy_v2 artefacts
-//         → Builds prompts
-//         → Calls Prompt Harness v2 to render campaign.json
-//         → Writes results/runs/<runId>/campaign.json
-//         → Writes results/runs/<runId>/input_proof.json
-//         → Updates status.json.state = "assembled"
-//
-// Hard rules:
-//   - strategy_v2 is MANDATORY (no legacy campaign_strategy.json fallback).
-//   - campaign.json must remain valid against campaign-gold.schema.json
-//     (no extra top-level keys beyond the schema).
-//   - _meta is only patched if it already exists on the campaign object.
+// Responsibility:
+//   - Read strategy_v2 (campaign_strategy.json) produced by campaign-worker.
+//   - Read viability (strategy_v3/viability.json), if present.
+//   - Read input.json to recover campaign_requirement and supplier context.
+//   - Build a Gold Campaign contract JSON with:
+//        * executive_summary (ES-C: title + paragraphs[] + citations[])
+//        * value_proposition
+//        * go_to_market_plan
+//        * messaging_matrix (light, buyer-centric)
+//        * sales_enablement
+//        * embedded strategy_v2
+//        * embedded viability (V-A)
+//   - Write: results/runs/<runId>/campaign.json
+//   - Update: status.json.state = "writer_working" / "writer_ready"
+//   - No LLM calls, no legacy dependence – pure rendering.
 
-const path = require("path");
-const crypto = require("crypto");
+"use strict";
+
 const { BlobServiceClient } = require("@azure/storage-blob");
-const { QueueServiceClient } = require("@azure/storage-queue");
-const campaignConfig = require("../shared/campaignConfig");
 
-// ---- Prompt harness v2 (schema-enforced JSON) ----
-const { generateCampaign } = require("../lib/prompt-harness");
+const RESULTS_CONTAINER =
+  process.env.CAMPAIGN_RESULTS_CONTAINER ||
+  process.env.RESULTS_CONTAINER ||
+  "results";
 
-// ==== ENV / CONFIG ====
-const STORAGE_CONN = campaignConfig.STORAGE_CONN;
-const CONTAINER = campaignConfig.RESULTS_CONTAINER;
-const MAIN_QUEUE = campaignConfig.CAMPAIGN_QUEUE_NAME;
+// ---------------------- Blob helpers ---------------------- //
 
-// Use explicit schema path so we are always aligned to campaign-gold
-const DEFAULT_SCHEMA_PATH = path.join(
-  __dirname,
-  "..",
-  "schemas",
-  "campaign-gold.schema.json"
-);
-
-// Writer/version identifiers for tracing (used in _meta when present)
-const WRITER_VERSION = "campaign-write@2025-11-26-v2";
-const STRATEGY_ENGINE_VERSION = "strategy_v2@2025-11-26-v5";
-
-// Final section keys (retained ONLY for status messages / back-compat)
-const FINAL_SECTION_KEYS = [
-  "executive_summary",
-  "campaign_strategy",
-  "positioning_and_differentiation",
-  "offer_strategy",
-  "messaging_matrix",
-  "channel_plan",
-  "sales_enablement",
-  "measurement_and_learning",
-  "risks_and_contingencies",
-  "compliance_and_governance",
-  "one_pager_summary"
-];
-
-// Back-compat short-code → final-name mapping (accept both)
-const SHORT_TO_FINAL = {
-  exec: "executive_summary",
-  positioning: "positioning_and_differentiation",
-  messaging: "messaging_matrix",
-  offer: "offer_strategy",
-  channel: "channel_plan",
-  risks: "risks_and_contingencies",
-  compliance: "compliance_and_governance",
-  sales: "sales_enablement",
-  one: "one_pager_summary"
-};
-
-// ==== Small utils ====
-function requireStorage() {
-  if (!STORAGE_CONN) throw new Error("AzureWebJobsStorage not configured");
-  return BlobServiceClient.fromConnectionString(STORAGE_CONN);
-}
-function blobSvc() {
-  return requireStorage();
+function getBlobServiceClient() {
+  const conn =
+    process.env.AzureWebJobsStorage ||
+    process.env.AZURE_STORAGE_CONNECTION_STRING;
+  if (!conn) {
+    throw new Error(
+      "AzureWebJobsStorage (or AZURE_STORAGE_CONNECTION_STRING) not configured"
+    );
+  }
+  return BlobServiceClient.fromConnectionString(conn);
 }
 
-async function getJson(containerClient, relPath) {
-  const bc = containerClient.getBlockBlobClient(relPath);
-  if (!(await bc.exists())) return null;
-  const dl = await bc.download();
-  const chunks = [];
-  for await (const ch of dl.readableStreamBody) chunks.push(ch);
+async function getResultsContainer() {
+  const service = getBlobServiceClient();
+  const container = service.getContainerClient(RESULTS_CONTAINER);
+  await container.createIfNotExists();
+  return container;
+}
+
+function streamToString(readable) {
+  return new Promise((resolve, reject) => {
+    if (!readable) return resolve("");
+    const chunks = [];
+    readable.on("data", (d) =>
+      chunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d))
+    );
+    readable.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    readable.on("error", reject);
+  });
+}
+
+async function readJsonIfExists(container, blobPath) {
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
+    const blob = container.getBlobClient(blobPath);
+    const ok = await blob.exists();
+    if (!ok) return null;
+    const dl = await blob.download();
+    const text = await streamToString(dl.readableStreamBody);
+    if (!text) return null;
+    return JSON.parse(text);
+  } catch (e) {
     return null;
   }
 }
 
-async function putJson(containerClient, relPath, obj) {
-  const bb = containerClient.getBlockBlobClient(relPath);
-  const body = Buffer.from(JSON.stringify(obj, null, 2), "utf8");
-  await bb.uploadData(body, {
-    blobHTTPHeaders: { blobContentType: "application/json; charset=utf-8" }
+async function writeJson(container, blobPath, obj) {
+  const block = container.getBlockBlobClient(blobPath);
+  const json = JSON.stringify(obj, null, 2);
+  const data = Buffer.from(json, "utf8");
+  await block.upload(data, data.length, {
+    blobHTTPHeaders: { blobContentType: "application/json" }
   });
 }
 
-function normalizePrefix(p) {
-  let x = String(p || "").trim();
-  if (!x) return null;
-  if (x.startsWith(`${CONTAINER}/`)) x = x.slice(`${CONTAINER}/`.length);
-  x = x.replace(/^\/+/, "");
-  if (!x.endsWith("/")) x += "/";
-  return x;
-}
+// ---------------------- Status + queue helpers ---------------------- //
 
-function safeForPrompt(v, max = 280000) {
-  try {
-    const s = typeof v === "string" ? v : JSON.stringify(v ?? "");
-    if (s.length <= max) return s;
-    const k = Math.floor(max / 2);
-    return s.slice(0, k) + " …TRUNCATED… " + s.slice(-k);
-  } catch {
-    return "null";
-  }
-}
-
-function nowISO() {
-  return new Date().toISOString();
-}
-
-function sha256OfJson(o) {
-  const h = crypto.createHash("sha256");
-  h.update(Buffer.from(JSON.stringify(o || {})));
-  return h.digest("hex");
-}
-
-// ---- status (append-only history; do NOT bloat input) ----
-async function patchStatus(container, prefix, state, extra = {}) {
-  const p = `${prefix}status.json`;
-  const cur = (await getJson(container, p)) || {};
-  const next = {
-    ...cur,
-    state,
-    history: Array.isArray(cur.history) ? cur.history.slice() : []
-  };
-  next.history.push({
-    state,
-    at: nowISO(),
-    ...(extra.op ? { op: extra.op } : {})
-  });
-  if (!next.markers) next.markers = {};
-  // copy only explicit extras (no input echo)
-  for (const [k, v] of Object.entries(extra)) {
-    if (k !== "op") next[k] = v;
-  }
-  await putJson(container, p, next);
-  return next;
-}
-
-// ==== Domain helpers ====
-
-// Derive core meta from outline + csv
-function deriveCoreMeta(runId, outline, csvCanon) {
-  const inputNotes = outline?.input_notes || {};
-  const meta = outline?.meta || {};
-  const supplier = (
-    inputNotes.supplier_company ||
-    inputNotes.prospect_company ||
-    meta.company ||
-    ""
-  )
-    .toString()
-    .trim();
-
-  const persona = (
-    meta.persona ||
-    inputNotes.persona ||
-    inputNotes.target_persona ||
-    ""
-  )
-    .toString()
-    .trim();
-
-  const industry =
-    (csvCanon && csvCanon.selected_industry) ||
-    meta.selected_industry ||
-    inputNotes.selected_industry ||
-    "";
-
-  const route_to_market = (
-    inputNotes.sales_model ||
-    meta.sales_model ||
-    inputNotes.route_to_market ||
-    ""
-  )
-    .toString()
-    .trim();
-
-  const requirement = (
-    inputNotes.campaign_requirement ||
-    inputNotes.requirement ||
-    inputNotes.campaign_type ||
-    ""
-  )
-    .toString()
-    .trim();
-
-  const rowCountRaw =
-    csvCanon?.meta?.rows ??
-    csvCanon?.row_count ??
-    csvCanon?.rows ??
-    inputNotes.rowCount ??
-    inputNotes.row_count;
-
-  const rowCount = Number.isFinite(Number(rowCountRaw))
-    ? Number(rowCountRaw)
-    : null;
-
-  return {
-    runId: String(runId || "").trim(),
-    supplier: supplier || "Unknown supplier",
-    industry: (industry || "general").toString().trim(),
-    persona: persona || "Primary buyer",
-    route_to_market: route_to_market || "Unspecified",
-    requirement: requirement || "Unspecified",
-    cohort_size: rowCount
-  };
-}
-
-// Summarise CSV for prompt (no row-level data)
-function summariseCsvForPrompt(csvCanon) {
-  if (!csvCanon || typeof csvCanon !== "object") return {};
-  const meta = csvCanon.meta || {};
-  const sig = csvCanon.signals || {};
-  const counts = (sig && sig.counts) || {};
-  return {
-    meta: {
-      rows: meta.rows ?? csvCanon.row_count ?? csvCanon.rows ?? null,
-      industry_mode: csvCanon.industry_mode || null,
-      selected_industry: csvCanon.selected_industry || null
-    },
-    signals: {
-      top_needs_supplier: Array.isArray(sig.top_needs_supplier)
-        ? sig.top_needs_supplier.slice(0, 10)
-        : [],
-      top_needs: Array.isArray(sig.top_needs) ? sig.top_needs.slice(0, 10) : [],
-      top_blockers: Array.isArray(sig.top_blockers)
-        ? sig.top_blockers.slice(0, 10)
-        : [],
-      top_purchases: Array.isArray(sig.top_purchases)
-        ? sig.top_purchases.slice(0, 10)
-        : [],
-      counts: {
-        by_need: counts.by_need || null,
-        by_purchase: counts.by_purchase || counts.by_intent || null
-      }
+function parseQueueItem(raw) {
+  if (!raw) return {};
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return { raw };
     }
-  };
+  }
+  if (typeof raw === "object") return raw;
+  return { raw };
 }
 
-function summariseBuyerLogicForPrompt(buyerLogic, buyerStrategy) {
-  const out = {};
+function computePrefix(msg) {
+  let prefix = msg.prefix || msg.pathPrefix || msg.blobPrefix || "";
+  if (prefix && typeof prefix === "string") prefix = prefix.trim();
 
-  // Helper to normalise arrays to [{ type, label, claim_ids[] }]
-  function norm(arr) {
-    if (!Array.isArray(arr)) return [];
-    return arr.slice(0, 20).map((item) => ({
-      type: item.type || null,
-      label: item.label || "",
-      claim_ids: Array.isArray(item.origin?.related_claim_ids)
-        ? item.origin.related_claim_ids.slice(0, 10)
-        : []
-    }));
+  if (!prefix) {
+    const runId =
+      msg.runId ||
+      msg.run_id ||
+      msg.id ||
+      msg.fileId ||
+      msg.file_id ||
+      "unknown";
+    prefix = `runs/${String(runId).trim() || "unknown"}/`;
   }
 
-  // --- Evidence-led raw buyer_logic fields (rich, structured, claim-anchored) ---
-  out.problems_raw = norm(buyerLogic.problems);
-  out.root_causes = norm(buyerLogic.root_causes);
-  out.operational_impacts = norm(buyerLogic.operational_impacts);
-  out.commercial_impacts = norm(buyerLogic.commercial_impacts);
-  out.emotional_drivers = norm(buyerLogic.emotional_drivers);
-  out.urgency_factors = norm(buyerLogic.urgency_factors);
+  if (!prefix.endsWith("/")) prefix += "/";
+  if (!prefix.startsWith("runs/")) prefix = `runs/${prefix}`;
+  return prefix;
+}
 
-  // --- Summarised strategy_v2 → keeps the high-level framing consistent ---
-  if (buyerStrategy && typeof buyerStrategy === "object") {
-    out.problems = Array.isArray(buyerStrategy.problems)
-      ? buyerStrategy.problems.slice(0, 20)
-      : [];
-    out.barriers = Array.isArray(buyerStrategy.barriers)
-      ? buyerStrategy.barriers.slice(0, 20)
-      : [];
-    out.urgency_summary = Array.isArray(buyerStrategy.urgency)
-      ? buyerStrategy.urgency.slice(0, 20)
-      : [];
-    out.decision_drivers = Array.isArray(buyerStrategy.decision_drivers)
-      ? buyerStrategy.decision_drivers.slice(0, 20)
-      : [];
+async function updateStatus(container, prefix, state, note, extra = {}) {
+  const statusPath = `${prefix}status.json`;
+  let status = (await readJsonIfExists(container, statusPath)) || {
+    state: "pending",
+    history: []
+  };
+
+  const entry = {
+    at: new Date().toISOString(),
+    state,
+    note,
+    ...extra
+  };
+
+  status.state = state;
+  status.history = Array.isArray(status.history)
+    ? [...status.history, entry]
+    : [entry];
+
+  await writeJson(container, statusPath, status);
+}
+
+// ---------------------- Small helpers ---------------------- //
+
+function safeGet(obj, path, def = undefined) {
+  try {
+    const parts = Array.isArray(path) ? path : String(path || "").split(".");
+    let cur = obj;
+    for (const p of parts) {
+      if (cur == null) return def;
+      cur = cur[p];
+    }
+    return cur == null ? def : cur;
+  } catch {
+    return def;
   }
+}
 
+function uniqNonEmpty(arr) {
+  const seen = new Set();
+  const out = [];
+  for (const v of arr || []) {
+    if (!v) continue;
+    const s = String(v).trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
   return out;
 }
 
-// Summarise evidence claims for prompt
-function summariseEvidenceForPrompt(evidenceObj, fallbackLog) {
-  let claims = [];
-  if (Array.isArray(evidenceObj?.claims)) {
-    claims = evidenceObj.claims;
-  } else if (Array.isArray(fallbackLog)) {
-    // legacy evidence_log style; treat as claims with id+summary if present
-    claims = fallbackLog;
+const CLAIM_ID_RE = /\[([A-Z0-9_:-]{4,})\]/g;
+
+function extractClaimIdsFromText(text) {
+  const ids = new Set();
+  if (!text) return ids;
+  const s = String(text);
+  let m;
+  while ((m = CLAIM_ID_RE.exec(s))) {
+    if (m[1]) ids.add(m[1]);
   }
-
-  const maxClaims = 60;
-  const topClaims = claims.slice(0, maxClaims);
-
-  const claimIdSet = new Set();
-  for (const c of topClaims) {
-    const id = (c.claim_id || c.id || "").toString().trim();
-    if (id) claimIdSet.add(id);
-  }
-
-  return {
-    claims: topClaims,
-    claim_ids: Array.from(claimIdSet)
-  };
+  return ids;
 }
 
-// Summarise strategy_v2 for prompt (only key branches)
-function summariseStrategyForPrompt(strategyV2) {
-  if (!strategyV2 || typeof strategyV2 !== "object") return {};
-  const s = strategyV2;
-  return {
-    story_spine: {
-      environment: s.story_spine?.environment || [],
-      case_for_action: s.story_spine?.case_for_action || [],
-      how_we_win: s.story_spine?.how_we_win || [],
-      success: s.story_spine?.success || [],
-      next_steps: s.story_spine?.next_steps || []
-    },
-    value_proposition: s.value_proposition || {},
-    competitive_strategy: s.competitive_strategy || {},
-    buyer_strategy: s.buyer_strategy || {},
-    gtm_strategy: s.gtm_strategy || {},
-    proof_points: Array.isArray(s.proof_points) ? s.proof_points : [],
-    right_to_play: Array.isArray(s.right_to_play) ? s.right_to_play : []
-  };
+function extractClaimIdsFromArray(arr) {
+  const ids = new Set();
+  (arr || []).forEach((t) => {
+    extractClaimIdsFromText(t).forEach((id) => ids.add(id));
+  });
+  return ids;
 }
 
-// Summarise products & competitors for prompt
-function summariseProductsAndCompetitors(
-  productsMeta,
-  competitorsFile,
-  strategyV2,
-  outline
-) {
-  const products = [];
-  if (Array.isArray(productsMeta?.chosen)) {
-    for (const p of productsMeta.chosen) {
-      products.push(typeof p === "string" ? p : p?.name || "");
-    }
-  } else if (Array.isArray(productsMeta?.validated)) {
-    for (const p of productsMeta.validated) {
-      products.push(typeof p === "string" ? p : p?.name || "");
-    }
-  }
-
-  const compSet = new Set();
-  if (Array.isArray(competitorsFile?.competitors)) {
-    for (const c of competitorsFile.competitors) {
-      const n = (
-        (typeof c === "string" ? c : c?.vendor || "") || ""
-      )
-        .toString()
-        .trim();
-      if (n) compSet.add(n);
-    }
-  }
-  const outlineIN = outline?.input_notes || {};
-  if (Array.isArray(outlineIN.competitors)) {
-    for (const c of outlineIN.competitors) {
-      const n = (c || "").toString().trim();
-      if (n) compSet.add(n);
-    }
-  }
-  if (Array.isArray(outlineIN.relevant_competitors)) {
-    for (const c of outlineIN.relevant_competitors) {
-      const n = (c || "").toString().trim();
-      if (n) compSet.add(n);
-    }
-  }
-  // Optional hook: if strategy_v2 exposes a list of relevant_competitors, include them.
-  if (Array.isArray(strategyV2?.competitive_strategy?.relevant_competitors)) {
-    for (const c of strategyV2.competitive_strategy.relevant_competitors) {
-      const n = (c || "").toString().trim();
-      if (n) compSet.add(n);
-    }
-  }
-
-  return {
-    products: products.filter(Boolean).slice(0, 20),
-    competitors: Array.from(compSet).slice(0, 20)
-  };
+// Helper to join bullets into a readable sentence, without inventing content
+function summariseBullets(bullets, max = 4) {
+  const list = uniqNonEmpty(bullets).slice(0, max);
+  if (!list.length) return "";
+  if (list.length === 1) return list[0];
+  if (list.length === 2) return `${list[0]} and ${list[1]}`;
+  const head = list.slice(0, list.length - 1).join("; ");
+  const last = list[list.length - 1];
+  return `${head}; and ${last}`;
 }
 
-// --- Deterministic needs/markdown summary (for prompt only) ---
-function summariseNeedsAndMarkdown(needsMap, markdownPack) {
-  const needsSummary = {};
-
-  if (needsMap && Array.isArray(needsMap.items) && needsMap.items.length) {
-    needsMap.items.slice(0, 20).forEach((item, idx) => {
-      const rawNeed =
-        (typeof item?.need === "string" && item.need.trim()) ||
-        (typeof item?.label === "string" && item.label.trim()) ||
-        "";
-
-      const needKey = rawNeed || `need_${idx + 1}`;
-      if (!needKey) return;
-
-      const status =
-        typeof item?.status === "string" ? item.status.trim() : null;
-
-      const hits = Array.isArray(item?.hits)
-        ? item.hits
-            .map((h) =>
-              (typeof h?.name === "string" && h.name.trim()) ||
-              (typeof h?.label === "string" && h.label.trim()) ||
-              ""
-            )
-            .filter(Boolean)
-            .slice(0, 5)
-        : [];
-
-      needsSummary[needKey] = {
-        status: status || null,
-        hits
-      };
-    });
-  } else if (needsMap && typeof needsMap === "object") {
-    const mapping = needsMap.mapping || needsMap.map || {};
-    const entries = Object.entries(mapping).slice(0, 10);
-    for (const [need, val] of entries) {
-      if (!need) continue;
-      if (Array.isArray(val?.capabilities)) {
-        needsSummary[need] = {
-          status: null,
-          hits: val.capabilities.slice(0, 3)
-        };
-      } else if (Array.isArray(val)) {
-        needsSummary[need] = {
-          status: null,
-          hits: val.slice(0, 3)
-        };
-      } else if (typeof val === "string") {
-        needsSummary[need] = {
-          status: null,
-          hits: [val]
-        };
-      }
-    }
-  }
-
-  let markdownSummary = markdownPack;
-  if (markdownPack && typeof markdownPack === "object") {
-    markdownSummary = {};
-    for (const [k, v] of Object.entries(markdownPack)) {
-      if (typeof v === "string") {
-        markdownSummary[k] = v.slice(0, 2000);
-      } else if (Array.isArray(v)) {
-        markdownSummary[k] = v.slice(0, 10);
-      }
-    }
-  }
-
-  return { needsSummary, markdownSummary };
+function normaliseCampaignRequirement(reqRaw) {
+  const s = (reqRaw || "").toString().toLowerCase().trim();
+  if (!s) return null;
+  if (s.includes("upsell")) return "upsell";
+  if (s.includes("win-back") || s.includes("win back") || s.includes("winback"))
+    return "win-back";
+  if (s.includes("growth") || s.includes("new logo") || s.includes("acquisition"))
+    return "growth";
+  return s; // fall back to free-text
 }
 
-// ---- Prompt builders ----
-function buildSystemPrompt(meta, evidenceClaimIds) {
-  const idsList =
-    evidenceClaimIds && evidenceClaimIds.length
-      ? evidenceClaimIds.join(", ")
-      : "(no claims available — do not invent any)";
-
-  return [
-    "You are a senior UK B2B go-to-market consultant and writer.",
-    "Phase 1 (Evidence & Insights) and Phase 2 (Strategy Engine, strategy_v2) are already complete.",
-    "Your job is NOT to redo analysis or change the strategy.",
-    "Your job is to RENDER a final campaign.json document for sales and marketing enablement,",
-    "strictly following the provided campaign-gold JSON schema and target structure.",
-    "",
-    "Core rules:",
-    "- Do not change, override or invent strategy: you must respect story_spine, value_proposition, competitive_strategy, buyer_strategy, gtm_strategy, proof_points and right_to_play as given.",
-    "- Do not invent any new data structures, keys or top-level fields beyond the campaign-gold schema.",
-    "- Do not hallucinate competitors, products, technologies, metrics or personas.",
-    "- Use ONLY the claim_ids provided from evidence.json when citing external facts.",
-    "- When you reference a specific claim, include [CLAIM_ID] inline in the paragraph.",
-    "- When you write paragraphs or bullets that correspond directly to items from strategy_v2.story_spine, value_proposition, competitive_strategy, buyer_strategy, gtm_strategy, proof_points or right_to_play, reuse the same factual content and only refine the language.",
-    "- Do not introduce new numerical claims, timeframes, or comparative performance statements unless they are clearly present in evidence.claims or strategy_v2.",
-    "- For each section that uses evidence (executive_summary, value_proposition, messaging_matrix, sales_enablement, go_to_market_plan, compliance_and_governance),",
-    "  list all used claim_ids in a citations[] array on that section.",
-    "- Never invent a claim_id; if you cannot ground a statement in the provided evidence, write in qualitative terms or say 'TBD' instead of making it up.",
-    "",
-    "Language & tone:",
-    "- UK English, consultant-grade narrative.",
-    "- Structure thinking as diagnosis → insight → recommendation.",
-    "- Write for senior commercial and technical leaders.",
-    "- Be concise but rich in meaning; avoid fluffy or generic language.",
-    "",
-    "Output contract:",
-    "- You MUST return a single JSON object (no markdown, no commentary, no code fences).",
-    "- The object MUST include at least: runId, supplier, industry, persona, executive_summary, value_proposition.",
-    "- Other sections (messaging_matrix, sales_enablement, go_to_market_plan, risks_and_contingencies, compliance_and_governance, one_pager_summary)",
-    "  should be populated wherever strategy_v2 and evidence provide enough material.",
-    "",
-    `Allowed claim_ids (do not invent new ones): ${idsList}`,
-    "",
-    `This campaign is for supplier: ${meta.supplier}, industry: ${meta.industry}, persona: ${meta.persona}.`
-  ].join("\n");
+function describeCampaignAim(normalised) {
+  if (!normalised) return null;
+  switch (normalised) {
+    case "upsell":
+      return "The primary aim of this campaign is to upsell additional value to existing customers.";
+    case "win-back":
+      return "The primary aim of this campaign is to win back previously lost or inactive customers.";
+    case "growth":
+      return "The primary aim of this campaign is to acquire new customers and drive net-new growth.";
+    default:
+      return `The primary aim of this campaign is: ${normalised}.`;
+  }
 }
 
-function buildUserPrompt(args) {
-  const {
-    meta,
-    strategySummary,
-    buyerLogicSummary,
-    csvSummary,
-    evidenceSummary,
-    productsAndCompetitors,
-    needsAndMarkdown
-  } = args;
-
-  const { needsSummary, markdownSummary } = needsAndMarkdown;
-
-  const coreContext = {
-    runId: meta.runId,
-    supplier: meta.supplier,
-    industry: meta.industry,
-    persona: meta.persona,
-    route_to_market: meta.route_to_market,
-    requirement: meta.requirement,
-    cohort_size: meta.cohort_size
-  };
-
-  return [
-    "You are rendering a complete campaign.json in the campaign-gold structure.",
-    "",
-    "== HIGH-LEVEL CONTEXT ==",
-    safeForPrompt(coreContext),
-    "",
-    "== STRATEGY_V2 SUMMARY ==",
-    safeForPrompt(strategySummary),
-    "",
-    "== BUYER LOGIC SUMMARY ==",
-    safeForPrompt(buyerLogicSummary),
-    "",
-    "The buyer_logic summary has TWO layers:",
-    "- Evidence-led fields with claim_ids: problems_raw, root_causes, operational_impacts, commercial_impacts, emotional_drivers, urgency_factors.",
-    "- Strategy-level summaries from strategy_v2.buyer_strategy: problems, barriers, urgency_summary, decision_drivers.",
-    "You MUST treat the evidence-led fields as the factual source of truth and the summaries as framing only.",
-    "",
-    "== CSV NORMALISED SUMMARY (NO ROW-LEVEL DATA) ==",
-    safeForPrompt(csvSummary),
-    "",
-    "== EVIDENCE CLAIMS (use claim_id for [CLAIM_ID] and citations[]) ==",
-    safeForPrompt(evidenceSummary.claims),
-    "",
-    "== PRODUCTS & COMPETITORS ==",
-    safeForPrompt(productsAndCompetitors),
-    "",
-    "== NEEDS MAP EXCERPT ==",
-    safeForPrompt(needsSummary),
-    "",
-    "== MARKDOWN PACK EXCERPT (SUPPLIER / INDUSTRY / GENERAL NARRATIVES) ==",
-    safeForPrompt(markdownSummary),
-    "",
-    "== REQUIRED OUTPUT SECTIONS (STRUCTURE ONLY, DO NOT ECHO THIS LITERALLY) ==",
-    "- Top-level keys you MUST include:",
-    "  runId, supplier, industry, persona, executive_summary, value_proposition.",
-    "- Additional sections to populate wherever evidence and strategy_v2 support it:",
-    "  messaging_matrix, sales_enablement, go_to_market_plan,",
-    "  risks_and_contingencies, compliance_and_governance, one_pager_summary.",
-    "",
-    "Each section must follow the campaign-gold schema enforced by response_format.",
-    "",
-    "== MAPPING INSTRUCTIONS BY SECTION ==",
-    "",
-    "1) executive_summary:",
-    "- Use strategy_v2.story_spine.environment, case_for_action, how_we_win, success and next_steps as the backbone.",
-    "- Use buyer_logic.problems_raw[] as the clearest statements of buyer pain; you may tighten the wording but MUST keep the factual meaning.",
-    "- Use buyer_logic.operational_impacts[] and commercial_impacts[] to explain consequences of those problems.",
-    "- Use buyer_logic.urgency_factors[] to explain why this matters now.",
-    "- emotional_drivers[] should inform how you describe the human / personal side of risk and motivation.",
-    "- When you draw directly on a buyer_logic item with claim_ids, include [CLAIM_ID] inline (usually the first or most relevant id) and make sure that id appears in executive_summary.citations[].",
-    "",
-    "2) value_proposition:",
-    "- Use strategy_v2.value_proposition.moore_chain to populate the Moore structure:",
-    "  moore.for, moore.who, moore.the, moore.is_a, moore.that, moore.unlike, moore.we_provide.",
-    "- In value_proposition.narrative:",
-    "  - Frame problems using buyer_logic.problems_raw and buyer_logic.problems (from buyer_strategy).",
-    "  - Explain underlying drivers using root_causes[].",
-    "  - Describe business outcomes using operational_impacts[] and commercial_impacts[].",
-    "  - Reflect emotional_drivers[] where relevant to the buyer’s personal risk and motivation.",
-    "- competitive_position must stay consistent with strategy_v2.competitive_strategy and right_to_play (do not invent new competitor categories or claims).",
-    "- proof_points[] should reflect strategy_v2.proof_points and any clearly evidenced impacts from buyer_logic (again: no new metrics).",
-    "- Whenever you rely on a specific evidence-backed point, include [CLAIM_ID] inline and list the id in value_proposition.citations[].",
-    "",
-    "3) messaging_matrix:",
-    "- audiences[] from core persona plus any clear sub-audiences implied by buyer_logic.emotional_drivers and decision_drivers.",
-    "- pillars[] from recurring themes across:",
-    "  - buyer_logic.problems_raw and problems,",
-    "  - root_causes, and",
-    "  - value_proposition.pillar_outcomes and right_to_play.",
-    "- support_points[] from:",
-    "  - operational_impacts and commercial_impacts,",
-    "  - urgency_factors, and",
-    "  - the strongest proof_points.",
-    "- Do NOT introduce new pains or benefits that are not visible in strategy_v2, buyer_logic or evidence.",
-    "- Use [CLAIM_ID] where a support_point depends on specific evidence; put all such ids into messaging_matrix.citations[].",
-    "",
-    "4) sales_enablement:",
-    "- campaign_overview summarises story_spine and value_proposition in language a salesperson can use to explain what is happening, why it matters, and how we help.",
-    "- buyer_outcomes[] should describe positive outcomes that are the clear opposite of operational_impacts and commercial_impacts (e.g. fewer delays, protected margins).",
-    "- discovery_questions[] should help sales uncover:",
-    "  - problems and root_causes (\"Where are you seeing…?\"),",
-    "  - operational_impacts and commercial_impacts (\"What does that do to projects, cost, risk?\"),",
-    "  - urgency_factors (\"What deadlines, renewals or regulatory pressures are in play?\").",
-    "- competitive_battlecard must be grounded in strategy_v2.competitive_strategy (competitor_map, our_advantage, vulnerability_map); do not invent new competitor types or technical weaknesses/strengths.",
-    "- master_pitch is a single, coherent pitch from environment → problems → impacts → urgency → how we win → proof, using only strategy_v2, buyer_logic and evidence claims.",
-    "- Use [CLAIM_ID] whenever you state something sourced from a specific evidence claim and list all such ids in sales_enablement.citations[].",
-    "",
-    "5) go_to_market_plan:",
-    "- objective from gtm_strategy.success_target.narrative and commercial_focus, expressed in terms of reducing the problems and impacts identified in buyer_logic.",
-    "- target_market from gtm_strategy.pipeline_model.tiers, route_implications and CSV cohort data; do not invent new segments beyond those clearly implied.",
-    "- marketing_actions[] from route_implications, story_spine.next_steps and the highest priority problems + urgency_factors.",
-    "- sales_actions[] from gtm_strategy.pipeline_model.motions plus practical steps to surface buyer_logic problems, impacts and urgency in real accounts.",
-    "- pipeline_model from gtm_strategy.pipeline_model; you may describe tiers and motions qualitatively, and only use numeric ranges if they are clearly implied by cohort_size or strategy_v2 (no fabricated precise numbers).",
-    "- cta from story_spine.next_steps and what the supplier should concretely do next with this cohort.",
-    "- Any evidence-backed statement must carry [CLAIM_ID] and those ids must be listed in go_to_market_plan.citations[].",
-    "",
-    "6) risks_and_contingencies:",
-    "- risks[] from:",
-    "  - strategy_v2.competitive_strategy.vulnerability_map,",
-    "  - buyer_logic.root_causes that represent ongoing risk if left unaddressed,",
-    "  - GTM risks implied by route_implications and pipeline_model (e.g. dependency on partners, resource constraints).",
-    "- mitigations[] from:",
-    "  - right_to_play and our_advantage,",
-    "  - motions and next_steps that actively reduce the probability or impact of those risks.",
-    "- Do not invent new technical capabilities or guarantees.",
-    "",
-    "7) compliance_and_governance:",
-    "- notes should summarise any compliance / governance constraints implied by:",
-    "  - urgency_factors that refer to regulation, fines, mandated dates or security expectations, and",
-    "  - any regulator / compliance-related claims in the evidence block.",
-    "- Do not invent new regulatory frameworks or obligations; stay within what is implied.",
-    "- Where you rely on specific evidence, include [CLAIM_ID] and list all ids in compliance_and_governance.citations[].",
-    "",
-    "8) one_pager_summary:",
-    "- positioning: short statement of how the supplier is positioned in this campaign, consistent with value_proposition.competitive_position and right_to_play.",
-    "- core_message: a single line that captures environment → problem → how we win → outcome.",
-    "- quick_facts[]: 5–7 bullets that combine:",
-    "  - the clearest problems / problems_raw,",
-    "  - the most important operational_impacts, commercial_impacts and urgency_factors,",
-    "  - the strongest proof_points (with [CLAIM_ID] where relevant).",
-    "- Every quick_fact must be traceable to strategy_v2, buyer_logic or evidence; do not add new claims.",
-    "",
-    "INSTRUCTIONS:",
-    "- Populate all fields as completely as possible without inventing new keys.",
-    "- Do not invent claim_ids or competitors.",
-    "- If something is genuinely unknown or not supported by inputs, use qualitative language or 'TBD' instead of fabricating details.",
-    "- Do not invent extra tiers or motions beyond those provided in gtm_strategy.pipeline_model; you may summarise or clarify, but the underlying tier and motion structure must stay the same.",
-    "",
-    "Return a single JSON object ONLY, no markdown, matching the campaign-gold structure."
-  ].join("\n");
-}
-
-// ---- Main handler ----
-module.exports = async function (context, queueItem) {
-  const svc = blobSvc();
-  const container = svc.getContainerClient(CONTAINER);
-  await container.createIfNotExists();
-
-  if (!queueItem) {
-    context.log.error("[campaign-write] Empty queue message");
-    return;
-  }
-
-  const opRaw = queueItem.op || queueItem.type || "";
-  const op = String(opRaw).toLowerCase();
-  const runId = queueItem.runId || queueItem?.data?.runId || queueItem?.id;
-  if (!runId) {
-    context.log.error("[campaign-write] Missing runId");
-    return;
-  }
-
-  let prefix = normalizePrefix(queueItem.prefix) || `runs/${runId}/`;
-  if (!prefix) {
-    context.log.error("[campaign-write] Unable to resolve prefix");
-    return;
-  }
-
-  // --- Lightweight section handlers: NO MORE legacy sections/*.json writes ---
-  if (op === "write_section" || op === "section") {
-    let requested = String(queueItem.section || "").trim().toLowerCase();
-    const finalKey = FINAL_SECTION_KEYS.includes(requested)
-      ? requested
-      : SHORT_TO_FINAL[requested];
-
-    await patchStatus(container, prefix, "SectionWrites", {
-      runId,
-      writing: finalKey || null,
-      updatedAt: nowISO(),
-      op: "section",
-      note:
-        "Section-level writer deprecated; no sections/* blobs written. Final campaign.json is generated on 'assemble' only."
-    });
-
-    // NO putJson to sections/ -> this prevents legacy sections folder noise.
-    return;
-  }
-
-  // ---- Assemble: single-pass campaign-gold generation ----
-  if (op === "assemble") {
-    await patchStatus(container, prefix, "writer_working", {
-      runId,
-      assembleStartedAt: nowISO(),
-      op: "assemble"
-    });
-
-    // Common inputs (best-effort reads; tolerate missing artefacts except strategy_v2)
-    const [
-      evidenceObj,
-      evidenceLog,
-      csvCanon,
-      outline,
-      buyerLogic,
-      needsMap,
-      markdownPack,
-      competitorsFile,
-      productsMeta,
-      strategyV2File
-    ] = await Promise.all([
-      getJson(container, `${prefix}evidence.json`),
-      getJson(container, `${prefix}evidence_log.json`),
-      getJson(container, `${prefix}csv_normalized.json`),
-      getJson(container, `${prefix}outline.json`),
-      getJson(container, `${prefix}buyer_logic.json`),
-      getJson(container, `${prefix}needs_map.json`),
-      // markdown pack variants: try a combined pack first, then granular
-      (async () => {
-        const combined = await getJson(
-          container,
-          `${prefix}markdown_pack.json`
-        );
-        if (combined) return combined;
-        const supplierPack = await getJson(
-          container,
-          `${prefix}markdown_supplier.json`
-        );
-        const industryPack = await getJson(
-          container,
-          `${prefix}markdown_industry.json`
-        );
-        const generalPack = await getJson(
-          container,
-          `${prefix}markdown_general.json`
-        );
-        if (supplierPack || industryPack || generalPack) {
-          return {
-            supplier: supplierPack || null,
-            industry: industryPack || null,
-            general: generalPack || null
-          };
-        }
-        return null;
-      })(),
-      getJson(container, `${prefix}competitors.json`),
-      getJson(container, `${prefix}products_meta.json`),
-      getJson(container, `${prefix}strategy_v2/campaign_strategy.json`)
-    ]);
-
-    // Normalise strategy_v2 (MANDATORY; no legacy fallback)
-    let strategyV2 = null;
-    if (strategyV2File && typeof strategyV2File === "object") {
-      strategyV2 = strategyV2File.strategy_v2 || strategyV2File;
-    }
-
-    if (!strategyV2) {
-      context.log.error(
-        "[campaign-write] Missing strategy_v2/campaign_strategy.json – assemble aborted."
-      );
-      await patchStatus(container, prefix, "error", {
-        runId,
-        errorCode: "missing_strategy_v2",
-        errorMessage:
-          "strategy_v2/campaign_strategy.json not found – writer is strategy_v2-only.",
-        op: "assemble"
-      });
-      return;
-    }
-
-    const meta = deriveCoreMeta(runId, outline || {}, csvCanon || {});
-    const csvSummary = summariseCsvForPrompt(csvCanon || {});
-    const buyerLogicSummary = summariseBuyerLogicForPrompt(
-      buyerLogic || {},
-      (strategyV2 || {}).buyer_strategy || {}
-    );
-    const evidenceSummary = summariseEvidenceForPrompt(
-      evidenceObj,
-      evidenceLog
-    );
-    const strategySummary = summariseStrategyForPrompt(strategyV2 || {});
-    const productsAndCompetitors = summariseProductsAndCompetitors(
-      productsMeta || {},
-      competitorsFile || {},
-      strategyV2 || {},
-      outline || {}
-    );
-    const needsAndMarkdown = summariseNeedsAndMarkdown(
-      needsMap || null,
-      markdownPack || null
-    );
-
-    const systemPrompt = buildSystemPrompt(meta, evidenceSummary.claim_ids);
-    const userPrompt = buildUserPrompt({
-      meta,
-      strategySummary,
-      buyerLogicSummary,
-      csvSummary,
-      evidenceSummary,
-      productsAndCompetitors,
-      needsAndMarkdown
-    });
-
-    let campaign = null;
-    try {
-      campaign = await generateCampaign({
-        systemPrompt,
-        userPrompt,
-        schemaPath: DEFAULT_SCHEMA_PATH
-      });
-    } catch (err) {
-      const e = err instanceof Error ? err : new Error(String(err));
-      const code = e.code || "llm_error";
-      const details = e.details || null;
-      context.log.error(
-        "[campaign-write] LLM/harness error during assemble",
-        code,
-        String(e.message || e)
-      );
-
-      // Persist structured error for diagnostics
-      try {
-        const errorBlob = {
-          runId,
-          op: "assemble",
-          at: nowISO(),
-          code,
-          message: e.message || String(e),
-          details
-        };
-        await putJson(
-          container,
-          `${prefix}logs/campaign-write.error.json`,
-          errorBlob
-        );
-      } catch (logErr) {
-        context.log.warn(
-          "[campaign-write] Failed to write error log blob",
-          String(logErr?.message || logErr)
-        );
-      }
-
-      await patchStatus(container, prefix, "error", {
-        runId,
-        errorCode: code,
-        errorMessage: e.message || String(e),
-        errorDetails: details || null,
-        op: "assemble"
-      });
-      return;
-    }
-
-    // Final guard: ensure core meta populated even if model omitted or changed them
-    if (!campaign || typeof campaign !== "object" || Array.isArray(campaign)) {
-      context.log.error(
-        "[campaign-write] Invalid campaign object returned from harness"
-      );
-      await patchStatus(container, prefix, "error", {
-        runId,
-        errorCode: "invalid_campaign_object",
-        errorMessage:
-          "Prompt harness returned a non-object for campaign.json",
-        op: "assemble"
-      });
-      return;
-    }
-
-    campaign.runId = meta.runId;
-    if (!campaign.supplier || typeof campaign.supplier !== "string") {
-      campaign.supplier = meta.supplier;
-    }
-    if (!campaign.industry || typeof campaign.industry !== "string") {
-      campaign.industry = meta.industry;
-    }
-    if (!campaign.persona || typeof campaign.persona !== "string") {
-      campaign.persona = meta.persona;
-    }
-
-    // Patch _meta ONLY if schema already defines it (we assume campaign-gold allows this).
-    // We do not add any other top-level keys beyond the schema (additionalProperties: false).
-    if (campaign._meta && typeof campaign._meta === "object") {
-      if (!campaign._meta.version) {
-        campaign._meta.version = WRITER_VERSION;
-      }
-      if (!campaign._meta.strategy_engine) {
-        campaign._meta.strategy_engine = STRATEGY_ENGINE_VERSION;
-      }
-      if (!campaign._meta.generated_at) {
-        campaign._meta.generated_at = nowISO();
-      }
-    }
-
-    // Optional: embed lightweight input proof to aid debugging without altering schema
-    // (Note: campaign-gold has additionalProperties: false at top level,
-    //  so we MUST NOT add extra arbitrary keys to campaign.json itself.)
-    try {
-      const proof = {
-        outline_sha256: sha256OfJson(outline || {}),
-        evidence_sha256: sha256OfJson(evidenceObj || evidenceLog || {}),
-        csv_normalized_sha256: sha256OfJson(csvCanon || {}),
-        strategy_v2_sha256: sha256OfJson(strategyV2 || {}),
-        buyer_logic_sha256: sha256OfJson(buyerLogic || {}),
-        needs_map_sha256: sha256OfJson(needsMap || {}),
-        markdown_pack_sha256: sha256OfJson(markdownPack || {}),
-        products_meta_sha256: sha256OfJson(productsMeta || {}),
-        competitors_sha256: sha256OfJson(competitorsFile || {})
-      };
-      await putJson(container, `${prefix}input_proof.json`, proof);
-    } catch (proofErr) {
-      context.log.warn(
-        "[campaign-write] Failed to write input_proof.json",
-        String(proofErr?.message || proofErr)
-      );
-    }
-
-    // Write campaign.json
-    await putJson(container, `${prefix}campaign.json`, campaign);
-
-    await patchStatus(container, prefix, "assembled", {
-      runId,
-      assembledAt: nowISO(),
-      op: "assemble"
-    });
-
-    // ---- Notify orchestrator exactly once (anti-loop marker) ----
-    try {
-      const postStatus =
-        (await getJson(container, `${prefix}status.json`)) || {};
-      const alreadySent = !!postStatus?.markers?.afterassembleSent;
-      if (!alreadySent) {
-        const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
-        const qc = qs.getQueueClient(MAIN_QUEUE);
-        await qc.createIfNotExists();
-        const page =
-          (queueItem && (queueItem.page || queueItem?.data?.page)) ||
-          "campaign";
-        await qc.sendMessage(
-          JSON.stringify({ op: "afterassemble", runId, page, prefix })
-        );
-
-        postStatus.markers = postStatus.markers || {};
-        postStatus.markers.afterassembleSent = true;
-        await putJson(container, `${prefix}status.json`, postStatus);
-      }
-    } catch (notifyErr) {
-      context.log.warn(
-        "[campaign-write] notify afterassemble failed",
-        String(notifyErr?.message || notifyErr)
-      );
-    }
-    return;
-  }
-
-  throw new Error(
-    `Unknown job type "${op}". Use "section" / "write_section" or "assemble".`
+function describeRouteModel(routeImplications) {
+  const raw = (routeImplications || []).find((s) =>
+    String(s || "").startsWith("ROUTE_MODEL=")
   );
+  if (!raw) return null;
+  const code = String(raw).split("=").pop().trim();
+  if (code === "partner") {
+    return "The route to market is primarily partner-led, so the campaign must equip and motivate channel partners as well as your own sales team.";
+  }
+  if (code === "direct") {
+    return "The route to market is primarily direct, so the campaign is designed to support direct sales and account teams.";
+  }
+  if (code === "mixed") {
+    return "The route to market is mixed, so the campaign needs to work for both direct and partner motions without diluting the value story.";
+  }
+  return `The route to market is recorded as: ${code}.`;
+}
+
+function describeSuccessTarget(successTarget) {
+  if (!successTarget || typeof successTarget !== "object") return null;
+  const narrative = successTarget.narrative || "";
+  const leading = uniqNonEmpty(successTarget.leading_indicators || []);
+  const leadStr = leading.length
+    ? `Leading indicators to track include: ${leading.join("; ")}.`
+    : "";
+  if (!narrative && !leadStr) return null;
+  if (narrative && leadStr) return `${narrative} ${leadStr}`;
+  return narrative || leadStr;
+}
+
+function describeViabilityHeadline(viability) {
+  if (!viability || typeof viability !== "object") return null;
+  const grade = (viability.grade || "").toString().toLowerCase();
+  const mode = viability.mode || viability.viability_mode || null;
+  const modeStr = mode ? ` (mode: ${mode})` : "";
+  if (!grade) return null;
+  if (grade === "green") {
+    return `Overall campaign viability is GREEN${modeStr}: the available data supports running this campaign as designed.`;
+  }
+  if (grade === "amber") {
+    return `Overall campaign viability is AMBER${modeStr}: the campaign can proceed, but the flagged risks should be addressed before heavy investment.`;
+  }
+  if (grade === "red") {
+    return `Overall campaign viability is RED${modeStr}: the current targeting or assumptions mean this campaign is unlikely to succeed without significant changes.`;
+  }
+  return `Overall campaign viability is recorded as: ${viability.grade}${modeStr}.`;
+}
+
+function collectViabilityMessages(viability) {
+  if (!viability || typeof viability !== "object") return [];
+  const msgs = [];
+
+  const pushAll = (arr) => {
+    (arr || []).forEach((x) => {
+      if (!x) return;
+      if (typeof x === "string") msgs.push(x);
+      else if (x.message) msgs.push(String(x.message));
+      else if (x.description) msgs.push(String(x.description));
+    });
+  };
+
+  if (Array.isArray(viability.flags)) {
+    pushAll(viability.flags);
+  } else if (viability.flags && typeof viability.flags === "object") {
+    pushAll(viability.flags.red);
+    pushAll(viability.flags.amber);
+    pushAll(viability.flags.green);
+  }
+
+  return uniqNonEmpty(msgs).slice(0, 8);
+}
+
+// ---------------------- Contract builders ---------------------- //
+
+function buildExecutiveSummary({ strategy_v2, viability, campaignRequirement }) {
+  const spine = strategy_v2?.story_spine || {};
+  const buyerStrategy = strategy_v2?.buyer_strategy || {};
+  const valueProp = strategy_v2?.value_proposition || {};
+  const gtm = strategy_v2?.gtm_strategy || {};
+
+  // Environment
+  const envBullets = uniqNonEmpty(spine.environment || []);
+  const envText = envBullets.length
+    ? `Your buyers are operating in an environment where ${summariseBullets(envBullets, 4)}.`
+    : null;
+
+  // Case for action + buyer problems
+  const caseBullets = uniqNonEmpty(spine.case_for_action || []);
+  const problemBullets = uniqNonEmpty(buyerStrategy.problems || []);
+  const cfaText =
+    caseBullets.length || problemBullets.length
+      ? `They face the following pressures and business problems: ${summariseBullets(
+          caseBullets.concat(problemBullets),
+          6
+        )}.`
+      : null;
+
+  // How we win + right to play
+  const hwwBullets = uniqNonEmpty(spine.how_we_win || []);
+  const rtp = uniqNonEmpty(valueProp.product_fit || strategy_v2.right_to_play || []);
+  const winText =
+    hwwBullets.length || rtp.length
+      ? `This campaign is designed to help you win by ${summariseBullets(
+          hwwBullets.concat(rtp),
+          6
+        )}.`
+      : null;
+
+  // Success + TAM / route model
+  const successBullets = uniqNonEmpty(spine.success || []);
+  const successTargetText = describeSuccessTarget(gtm.success_target);
+  const successTextPieces = [];
+  if (successBullets.length) {
+    successTextPieces.push(
+      `Success is defined using the following outcome signals: ${summariseBullets(
+        successBullets,
+        4
+      )}.`
+    );
+  }
+  if (successTargetText) successTextPieces.push(successTargetText);
+  const successText = successTextPieces.length
+    ? successTextPieces.join(" ")
+    : null;
+
+  // Next steps
+  const nextStepsBullets = uniqNonEmpty(spine.next_steps || []);
+  const nextText = nextStepsBullets.length
+    ? `The next steps focus on ${summariseBullets(nextStepsBullets, 4)}.`
+    : null;
+
+  // Campaign aim (upsell / win-back / growth)
+  const aimNorm = normaliseCampaignRequirement(campaignRequirement);
+  const aimText = describeCampaignAim(aimNorm);
+
+  // Route model
+  const routeText = describeRouteModel(gtm.route_implications || []);
+
+  // Viability
+  const viabilityHeadline = describeViabilityHeadline(viability);
+  const viabilityMessages = collectViabilityMessages(viability);
+  const viabilityText = viabilityMessages.length
+    ? `${viabilityHeadline || "Viability checks have been run on this campaign."} Key points: ${summariseBullets(
+        viabilityMessages,
+        6
+      )}.`
+    : viabilityHeadline;
+
+  // Assemble ordered paragraphs for C-suite readability
+  const paragraphs = uniqNonEmpty([
+    envText,
+    cfaText,
+    aimText,
+    winText,
+    routeText,
+    successText,
+    nextText,
+    viabilityText
+  ]);
+
+  // Citations from any claim IDs in the story spine + buyer strategy + value_prop
+  const claimIdSets = [
+    extractClaimIdsFromArray(spine.environment),
+    extractClaimIdsFromArray(spine.case_for_action),
+    extractClaimIdsFromArray(spine.how_we_win),
+    extractClaimIdsFromArray(spine.success),
+    extractClaimIdsFromArray(buyerStrategy.problems),
+    extractClaimIdsFromArray(valueProp.business_value),
+    extractClaimIdsFromArray(valueProp.persona_value)
+  ];
+  const citations = uniqNonEmpty(
+    claimIdSets.reduce((all, set) => all.concat(Array.from(set)), [])
+  );
+
+  return {
+    title: "Executive summary",
+    paragraphs,
+    citations
+  };
+}
+
+function buildValueProposition({ strategy_v2 }) {
+  const vp = strategy_v2?.value_proposition || {};
+
+  // Narrative: light stitching of business + persona value
+  const business = uniqNonEmpty(vp.business_value || []);
+  const persona = uniqNonEmpty(vp.persona_value || []);
+  const pillars = uniqNonEmpty(vp.pillar_outcomes || []);
+  const productFit = uniqNonEmpty(vp.product_fit || []);
+
+  const narrativePieces = [];
+
+  if (business.length) {
+    narrativePieces.push(
+      `Commercially, the proposition focuses on delivering: ${summariseBullets(
+        business,
+        6
+      )}.`
+    );
+  }
+
+  if (persona.length) {
+    narrativePieces.push(
+      `For individual decision-makers, it addresses personal and professional drivers such as: ${summariseBullets(
+        persona,
+        6
+      )}.`
+    );
+  }
+
+  if (pillars.length) {
+    narrativePieces.push(
+      `The value story is organised around the following outcome pillars: ${summariseBullets(
+        pillars,
+        6
+      )}.`
+    );
+  }
+
+  if (productFit.length) {
+    narrativePieces.push(
+      `Your product and services are positioned to deliver this value because: ${summariseBullets(
+        productFit,
+        6
+      )}.`
+    );
+  }
+
+  const narrative = narrativePieces.join(" ");
+
+  return {
+    narrative: narrative || null,
+    moore: vp.moore_chain || null,
+    competitive_position: null, // can be extended later if you wish
+    proof_points: uniqNonEmpty(strategy_v2.proof_points || [])
+  };
+}
+
+function buildGoToMarketPlan({ strategy_v2 }) {
+  const gtm = strategy_v2?.gtm_strategy || {};
+  const buyerStrategy = strategy_v2?.buyer_strategy || {};
+
+  const objective = "Run a targeted, evidence-led campaign that converts the defined addressable cohort into qualified opportunities and revenue, aligned to the stated campaign aim.";
+  const targetMarket = {
+    problems: uniqNonEmpty(buyerStrategy.problems || []),
+    barriers: uniqNonEmpty(buyerStrategy.barriers || []),
+    urgency: uniqNonEmpty(buyerStrategy.urgency || []),
+    decision_drivers: uniqNonEmpty(buyerStrategy.decision_drivers || [])
+  };
+
+  const marketingActions = {
+    route_implications: uniqNonEmpty(gtm.route_implications || []),
+    motions: uniqNonEmpty(gtm.pipeline_model?.motions || []),
+    notes: "Channel, content, and cadence should be chosen to align with the recorded buyer problems, barriers, and urgency signals."
+  };
+
+  const salesActions = {
+    focus: "Use the buyer problems, decision drivers, and proof points as the basis of all sales conversations.",
+    guidance: [
+      "Lead with the business problem and outcomes, not the product features.",
+      "Use the discovery questions and buyer outcomes from the sales enablement pack to qualify and prioritise.",
+      "Align proposals explicitly to decision drivers and commercial impacts captured in the strategy."
+    ]
+  };
+
+  const pipelineModel = gtm.pipeline_model || {
+    tiers: ["PIPELINE_TIER_MODEL=3", "PIPELINE_TIER_CRITERIA=urgency_and_fit"],
+    motions: []
+  };
+
+  const cta =
+    "Define a single, clear primary call to action for this campaign (for example: 'book a 30-minute diagnostic' or 'request a benchmark review') and keep it consistent across all channels.";
+
+  const citations = []; // can be extended if needed later
+
+  return {
+    objective,
+    target_market: targetMarket,
+    marketing_actions: marketingActions,
+    sales_actions: salesActions,
+    pipeline_model: pipelineModel,
+    cta,
+    citations
+  };
+}
+
+function buildMessagingMatrix({ strategy_v2 }) {
+  const buyerStrategy = strategy_v2?.buyer_strategy || {};
+  const vp = strategy_v2?.value_proposition || {};
+
+  const audiences = uniqNonEmpty([
+    "Economic buyer",
+    "Operational / delivery owner",
+    "Technical / risk stakeholder"
+  ]);
+
+  const pillars = uniqNonEmpty(vp.pillar_outcomes || vp.business_value || []);
+
+  const supportPoints = uniqNonEmpty(
+    (vp.product_fit || []).concat(strategy_v2.proof_points || [])
+  );
+
+  // Citations from value_proposition + buyer_strategy
+  const claimIdSets = [
+    extractClaimIdsFromArray(vp.business_value),
+    extractClaimIdsFromArray(vp.persona_value),
+    extractClaimIdsFromArray(buyerStrategy.problems),
+    extractClaimIdsFromArray(buyerStrategy.decision_drivers)
+  ];
+  const citations = uniqNonEmpty(
+    claimIdSets.reduce((all, set) => all.concat(Array.from(set)), [])
+  );
+
+  return {
+    audiences,
+    pillars,
+    support_points: supportPoints,
+    citations
+  };
+}
+
+function buildSalesEnablement({ strategy_v2, campaignRequirement }) {
+  const buyerStrategy = strategy_v2?.buyer_strategy || {};
+  const vp = strategy_v2?.value_proposition || {};
+  const spine = strategy_v2?.story_spine || {};
+
+  const aimNorm = normaliseCampaignRequirement(campaignRequirement);
+  const aimText = describeCampaignAim(aimNorm);
+
+  const campaign_overview = [
+    aimText,
+    spine.environment && spine.environment.length
+      ? `Environment: ${summariseBullets(spine.environment, 4)}.`
+      : null,
+    spine.case_for_action && spine.case_for_action.length
+      ? `Case for action: ${summariseBullets(spine.case_for_action, 6)}.`
+      : null,
+    spine.how_we_win && spine.how_we_win.length
+      ? `How we win: ${summariseBullets(spine.how_we_win, 6)}.`
+      : null
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const buyer_outcomes = uniqNonEmpty(
+    (vp.business_value || []).concat(vp.persona_value || [])
+  );
+
+  const discovery_questions = uniqNonEmpty([
+    "What is currently making this problem a priority for you now?",
+    "How are you addressing this today, and what is not working as well as you need?",
+    "Who else is involved in making this decision and what do they care about most?",
+    "If we were successful together, what would good look like in 12–18 months?"
+  ]);
+
+  const master_pitch = [
+    "This campaign is designed to start a business conversation, not a product demo.",
+    "Lead with the specific problems and decision drivers captured in the buyer strategy, then link back to the value proposition and proof points.",
+    "Use the discovery questions to quantify the impact and qualify fit before moving to solution detail.",
+    "Always close with an agreed next step that aligns to the campaign call to action."
+  ].join(" ");
+
+  return {
+    campaign_overview: campaign_overview || null,
+    buyer_outcomes,
+    discovery_questions,
+    master_pitch
+  };
+}
+
+// ---------------------- Main Azure Function ---------------------- //
+
+module.exports = async function (context, queueItem) {
+  const log = context.log;
+  const msg = parseQueueItem(queueItem);
+  const prefix = computePrefix(msg);
+  const runId =
+    msg.runId ||
+    msg.run_id ||
+    (prefix.startsWith("runs/") ? prefix.split("/")[1] : "unknown");
+
+  log(`[*] Campaign Writer starting for runId=${runId}, prefix=${prefix}`);
+
+  const container = await getResultsContainer();
+
+  await updateStatus(
+    container,
+    prefix,
+    "writer_working",
+    "Campaign Writer started"
+  );
+
+  try {
+    // -------- Load inputs -------- //
+    const strategyWrap = await readJsonIfExists(
+      container,
+      `${prefix}strategy_v2/campaign_strategy.json`
+    );
+    const strategy_v2 = strategyWrap && strategyWrap.strategy_v2
+      ? strategyWrap.strategy_v2
+      : strategyWrap || null;
+
+    if (!strategy_v2 || typeof strategy_v2 !== "object") {
+      throw new Error(
+        "strategy_v2/campaign_strategy.json missing or invalid (strategy_v2 object not found)"
+      );
+    }
+
+    const viability = await readJsonIfExists(
+      container,
+      `${prefix}strategy_v3/viability.json`
+    );
+
+    const baseInput = await readJsonIfExists(container, `${prefix}input.json`);
+
+    const campaignRequirement =
+      msg.campaign_requirement ||
+      (baseInput && baseInput.campaign_requirement) ||
+      null;
+
+    // -------- Build contract -------- //
+    const executive_summary = buildExecutiveSummary({
+      strategy_v2,
+      viability,
+      campaignRequirement
+    });
+
+    const value_proposition = buildValueProposition({ strategy_v2 });
+
+    const go_to_market_plan = buildGoToMarketPlan({ strategy_v2 });
+
+    const messaging_matrix = buildMessagingMatrix({ strategy_v2 });
+
+    const sales_enablement = buildSalesEnablement({
+      strategy_v2,
+      campaignRequirement
+    });
+
+    const contract = {
+      schema: "campaign-gold-v2",
+      version: "2025-11-27",
+      run_id: runId,
+      source_prefix: prefix,
+      generated_at: new Date().toISOString(),
+      // Embedded engines
+      strategy_v2,
+      viability: viability || null,
+      // Gold sections (ES-C + supporting)
+      executive_summary,
+      value_proposition,
+      go_to_market_plan,
+      messaging_matrix,
+      sales_enablement
+      // Proof points are already inside strategy_v2.proof_points;
+      // UI proof-points tab reads strategy_v2.proof_points directly.
+    };
+
+    const outPath = `${prefix}campaign.json`;
+    await writeJson(container, outPath, contract);
+
+    await updateStatus(
+      container,
+      prefix,
+      "writer_ready",
+      "Campaign Writer completed successfully",
+      { campaign_path: outPath }
+    );
+
+    log("[*] Campaign Writer completed", {
+      runId,
+      campaignPath: outPath
+    });
+  } catch (err) {
+    log.error("[!] Campaign Writer failed", {
+      runId,
+      prefix,
+      error: String(err && err.message ? err.message : err)
+    });
+
+    try {
+      const errorPath = `${prefix}writer_error.json`;
+      await writeJson(container, errorPath, {
+        message: String(err && err.message ? err.message : err),
+        stack: err && err.stack ? String(err.stack) : null
+      });
+    } catch (e2) {
+      log.error("[!] Failed to write writer_error.json", String(e2));
+    }
+
+    await updateStatus(
+      container,
+      prefix,
+      "writer_error",
+      "Campaign Writer failed",
+      { error: String(err && err.message ? err.message : err) }
+    );
+
+    throw err;
+  }
 };

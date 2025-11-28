@@ -1,5 +1,4 @@
-// /api/campaign-worker/index.js
-// 26-11-2025 Strategy Engine v5 (clean deterministic, no LLM)
+// /api/campaign-worker/index.js 27-11-2025 Strategy Engine v7 
 //
 // Responsibility:
 //   - Read Phase 1 outputs (evidence, insights, buyer_logic, markdown_pack, csv_normalized, etc.).
@@ -12,6 +11,25 @@
 "use strict";
 
 const { BlobServiceClient } = require("@azure/storage-blob");
+// Viability engine (strategy_v2 quality + TAM/problem/diff/urgency warnings)
+let computeViability = null;
+try {
+  // Adjust the path if your lib folder is different, but this matches:
+  // /api/lib/strategy-viability.js
+  const mod = require("../lib/strategy-viability");
+
+  // Support any of:
+  //   module.exports = { computeViability }
+  //   module.exports = computeViability
+  //   module.exports.default = computeViability
+  computeViability =
+    mod.computeViability ||
+    mod.default ||
+    (typeof mod === "function" ? mod : null);
+} catch (e) {
+  // If the module isn’t available for some reason, worker still runs.
+  computeViability = null;
+}
 
 // ---------------------- Environment / blob helpers ---------------------- //
 
@@ -328,15 +346,15 @@ function buildStorySpine({
       : "",
     case_for_action.length
       ? `NEXT_STEP:prioritise_case_for_action_top=${Math.min(
-          case_for_action.length,
-          3
-        )}`
+        case_for_action.length,
+        3
+      )}`
       : "",
     how_we_win.length
       ? `NEXT_STEP:validate_how_we_win_points=${Math.min(
-          how_we_win.length,
-          3
-        )}`
+        how_we_win.length,
+        3
+      )}`
       : ""
   ]).slice(0, 4);
 
@@ -756,8 +774,9 @@ module.exports = async function (context, queueItem) {
     }
 
     const combinedEvidence = { claims };
-
-    // -------- Build strategy_v2 deterministically -------- //
+    //--------------------------------------------------------------------------//
+    //  Build strategy_v2 (deterministic, evidence-only)
+    //--------------------------------------------------------------------------//
     const strategy_v2 = buildStrategyV2({
       evidence: combinedEvidence,
       insights,
@@ -767,23 +786,127 @@ module.exports = async function (context, queueItem) {
       mergedInput
     });
 
-    const out = { strategy_v2 };
+    //--------------------------------------------------------------------------//
+    //  Compute strategy_v2 viability (Strategy Engine v2) – optional but recommended
+    //--------------------------------------------------------------------------//
+    let strategyV2Viability = null;
+
+    try {
+      // Load viability engine if available
+      const viabilityMod = require("../lib/strategy-viability");
+      const computeV2Viability =
+        viabilityMod.computeViability ||
+        viabilityMod.default ||
+        (typeof viabilityMod === "function" ? viabilityMod : null);
+
+      if (computeV2Viability) {
+        const viabilityMode =
+          (process.env.STRATEGY_VIABILITY_MODE || "conservative").toLowerCase();
+
+        strategyV2Viability = computeV2Viability({
+          evidence: combinedEvidence,
+          insights,
+          buyerLogic,
+          markdownPack,
+          csvNormalized: csvNormalized || {},
+          input: mergedInput,
+          strategy_v2,
+          mode: viabilityMode
+        });
+
+        log("[*] strategy_v2 viability computed successfully", {
+          runId,
+          viabilityMode
+        });
+      } else {
+        log("[*] computeViability not found – strategy_v2 viability skipped");
+      }
+    } catch (v2err) {
+      log.warn(
+        "[!] strategy_v2 viability computation failed (non-fatal)",
+        String(v2err && v2err.message ? v2err.message : v2err)
+      );
+    }
+
+    //--------------------------------------------------------------------------//
+    //  Compute strategy_v3 viability (stronger evaluator) – optional, non-blocking
+    //--------------------------------------------------------------------------//
+    try {
+      const evaluateStrategyViability = require("../lib/evaluateStrategyViability");
+
+      const claimsForViability =
+        Array.isArray(evidence?.claims)
+          ? evidence.claims
+          : Array.isArray(evidenceLog)
+            ? evidenceLog
+            : [];
+
+      const evidenceClaimsCount = claimsForViability.length;
+
+      const cohortSize =
+        (csvNormalized &&
+          csvNormalized.meta &&
+          Number(csvNormalized.meta.rows)) ||
+        null;
+
+      const viabilityMode =
+        (process.env.STRATEGY_VIABILITY_MODE || "conservative").toLowerCase();
+
+      const strategyV3Viability = evaluateStrategyViability({
+        strategyV2: strategy_v2,
+        buyerLogic: buyerLogic || {},
+        csvCanon: csvNormalized || {},
+        cohortSize,
+        evidenceClaimsCount,
+        mode: viabilityMode
+      });
+
+      const v3Path = `${prefix}strategy_v3/viability.json`;
+      await writeJson(container, v3Path, strategyV3Viability);
+
+      log("[*] strategy_v3 viability written", { runId, v3Path });
+    } catch (v3err) {
+      log.warn(
+        "[!] strategy_v3 viability generation failed (non-fatal)",
+        String(v3err && v3err.message ? v3err.message : v3err)
+      );
+    }
+
+    //--------------------------------------------------------------------------//
+    //  Persist the strategy_v2/campaign_strategy.json (primary writer input)
+    //--------------------------------------------------------------------------//
+    const combinedOut = strategyV2Viability
+      ? { strategy_v2, viability: strategyV2Viability }
+      : { strategy_v2 };
+
     const strategyPath = `${prefix}strategy_v2/campaign_strategy.json`;
+    await writeJson(container, strategyPath, combinedOut);
 
-    await writeJson(container, strategyPath, out);
+    log("[*] strategy_v2 written successfully", {
+      runId,
+      strategyPath,
+      viabilityAttached: !!strategyV2Viability
+    });
 
+    //--------------------------------------------------------------------------//
+    //  Mark state = strategy_ready
+    //--------------------------------------------------------------------------//
     await updateStatus(
       container,
       prefix,
       "strategy_ready",
       "Strategy Engine completed successfully",
-      { strategy_path: strategyPath }
+      {
+        strategy_path: strategyPath,
+        viability_mode: process.env.STRATEGY_VIABILITY_MODE || "conservative"
+      }
     );
 
     log("[*] Strategy Engine completed", {
       runId,
       strategyPath
     });
+
   } catch (err) {
     log.error("[!] Strategy Engine failed", {
       runId,

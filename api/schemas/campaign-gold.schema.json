@@ -1,413 +1,284 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://example.com/schemas/campaign-gold.schema.json",
-  "title": "Gold Campaign",
+  "title": "campaign_gold_v2",
   "type": "object",
   "additionalProperties": false,
-  "properties": {
-    "runId": {
-      "type": "string",
-      "description": "Unique identifier for the run (e.g. 'gold')."
-    },
-    "supplier": {
-      "type": "string",
-      "description": "Name of the supplier this campaign is for."
-    },
-    "industry": {
-      "type": "string",
-      "description": "Industry or sector focus for the campaign."
-    },
-    "persona": {
-      "type": "string",
-      "description": "Primary buyer persona targeted by this campaign."
-    },
-    "executive_summary": {
-      "type": "object",
-      "description": "Final consultant-grade executive summary narrative with inline [CLAIM_ID] tags and a citations array.",
-      "additionalProperties": false,
-      "properties": {
-        "title": {
-          "type": "string",
-          "description": "Headline title for the executive summary."
-        },
-        "paragraphs": {
-          "type": "array",
-          "description": "Ordered paragraphs forming the full executive summary narrative (typically 5–6: environment, case for action, how we win, success, next steps).",
-          "items": {
-            "type": "string",
-            "description": "Paragraph text with inline [CLAIM_ID] tags where appropriate."
-          }
-        },
-        "citations": {
-          "type": "array",
-          "description": "List of all claim_ids referenced in the executive summary paragraphs.",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "title",
-        "paragraphs",
-        "citations"
-      ]
-    },
-    "value_proposition": {
-      "type": "object",
-      "description": "Narrative value proposition derived from strategy_v2.value_proposition.",
-      "additionalProperties": false,
-      "properties": {
-        "narrative": {
-          "type": "string",
-          "description": "Multi-paragraph value proposition narrative with inline [CLAIM_ID] tags as needed."
-        },
-        "moore": {
-          "type": "object",
-          "description": "Moore positioning sentence components.",
-          "additionalProperties": false,
-          "properties": {
-            "for": {
-              "type": "string"
-            },
-            "who": {
-              "type": "string"
-            },
-            "the": {
-              "type": "string"
-            },
-            "is_a": {
-              "type": "string"
-            },
-            "that": {
-              "type": "string"
-            },
-            "unlike": {
-              "type": "string"
-            },
-            "we_provide": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "for",
-            "who",
-            "the",
-            "is_a",
-            "that",
-            "unlike",
-            "we_provide"
-          ]
-        },
-        "competitive_position": {
-          "type": "string",
-          "description": "Summary of how the supplier is positioned competitively, in buyer language."
-        },
-        "proof_points": {
-          "type": "array",
-          "description": "Key proof points, ideally with inline [CLAIM_ID] tags.",
-          "items": {
-            "type": "string"
-          }
-        },
-        "citations": {
-          "type": "array",
-          "description": "All claim_ids referenced in the value proposition narrative and proof points.",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "narrative",
-        "moore",
-        "competitive_position",
-        "proof_points",
-        "citations"
-      ]
-    },
-    "messaging_matrix": {
-      "type": "object",
-      "description": "High-level messaging matrix derived from strategy and buyer logic.",
-      "additionalProperties": false,
-      "properties": {
-        "audiences": {
-          "type": "array",
-          "description": "Key audience types or personas.",
-          "items": {
-            "type": "string"
-          }
-        },
-        "pillars": {
-          "type": "array",
-          "description": "Core messaging pillars.",
-          "items": {
-            "type": "string"
-          }
-        },
-        "support_points": {
-          "type": "array",
-          "description": "Supporting points under each pillar (may be written as a flat list, grouped in narrative form).",
-          "items": {
-            "type": "string"
-          }
-        },
-        "citations": {
-          "type": "array",
-          "description": "All claim_ids referenced in the messaging matrix.",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "audiences",
-        "pillars",
-        "support_points",
-        "citations"
-      ]
-    },
-    "sales_enablement": {
-      "type": "object",
-      "description": "Sales enablement content derived from strategy and buyer logic.",
-      "additionalProperties": false,
-      "properties": {
-        "campaign_overview": {
-          "type": "string",
-          "description": "Short narrative overview describing what the campaign is about and why it matters."
-        },
-        "buyer_outcomes": {
-          "type": "array",
-          "description": "List of outcomes the buyer can expect if they act.",
-          "items": {
-            "type": "string"
-          }
-        },
-        "discovery_questions": {
-          "type": "array",
-          "description": "Discovery questions for sales, ideally written with an implicit rationale behind each.",
-          "items": {
-            "type": "string"
-          }
-        },
-        "competitive_battlecard": {
-          "type": "object",
-          "description": "Structured notes for handling competitors in conversation.",
-          "additionalProperties": false,
-          "properties": {
-            "summary": {
-              "type": "string",
-              "description": "High-level narrative summary of how to handle competitors."
-            },
-            "competitor_notes": {
-              "type": "array",
-              "description": "Per-competitor notes (e.g. strengths, weaknesses, how we respond).",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "required": [
-            "summary",
-            "competitor_notes"
-          ]
-        },
-        "master_pitch": {
-          "type": "string",
-          "description": "A single, cohesive pitch sales can deliver, in natural language."
-        },
-        "citations": {
-          "type": "array",
-          "description": "All claim_ids referenced in the sales enablement content.",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "campaign_overview",
-        "buyer_outcomes",
-        "discovery_questions",
-        "competitive_battlecard",
-        "master_pitch",
-        "citations"
-      ]
-    },
-    "go_to_market_plan": {
-      "type": "object",
-      "description": "Go-to-market plan derived from gtm_strategy and cohort data.",
-      "additionalProperties": false,
-      "properties": {
-        "objective": {
-          "type": "string",
-          "description": "Clear, commercial objective for the campaign."
-        },
-        "target_market": {
-          "type": "object",
-          "description": "Description of the target market and cohorts.",
-          "additionalProperties": false,
-          "properties": {
-            "summary": {
-              "type": "string",
-              "description": "Narrative description of the target market."
-            },
-            "cohorts": {
-              "type": "array",
-              "description": "Named cohorts or segments within the target market.",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "required": [
-            "summary",
-            "cohorts"
-          ]
-        },
-        "marketing_actions": {
-          "type": "array",
-          "description": "Prioritised marketing actions (what marketing will do).",
-          "items": {
-            "type": "string"
-          }
-        },
-        "sales_actions": {
-          "type": "array",
-          "description": "Prioritised sales actions (what sales will do).",
-          "items": {
-            "type": "string"
-          }
-        },
-        "pipeline_model": {
-          "type": "object",
-          "description": "Summary of the pipeline model (tiers, motions, assumptions).",
-          "additionalProperties": false,
-          "properties": {
-            "summary": {
-              "type": "string",
-              "description": "Narrative summary of the pipeline model."
-            },
-            "assumptions": {
-              "type": "array",
-              "description": "Key numeric or qualitative assumptions used in the model.",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "required": [
-            "summary",
-            "assumptions"
-          ]
-        },
-        "cta": {
-          "type": "string",
-          "description": "The recommended call to action the supplier should take next with this cohort."
-        },
-        "citations": {
-          "type": "array",
-          "description": "All claim_ids referenced in the GTM plan.",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "objective",
-        "target_market",
-        "marketing_actions",
-        "sales_actions",
-        "pipeline_model",
-        "cta",
-        "citations"
-      ]
-    },
-    "risks_and_contingencies": {
-      "type": "object",
-      "description": "Key risks and mitigation strategies for this campaign.",
-      "additionalProperties": false,
-      "properties": {
-        "risks": {
-          "type": "array",
-          "description": "List of key risks.",
-          "items": {
-            "type": "string"
-          }
-        },
-        "mitigations": {
-          "type": "array",
-          "description": "Mitigation strategies corresponding to, or complementing, the risks.",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "risks",
-        "mitigations"
-      ]
-    },
-    "compliance_and_governance": {
-      "type": "object",
-      "description": "Notes on compliance, governance and constraints relevant to this campaign.",
-      "additionalProperties": false,
-      "properties": {
-        "notes": {
-          "type": "string",
-          "description": "Narrative description of compliance and governance considerations."
-        },
-        "citations": {
-          "type": "array",
-          "description": "All claim_ids referenced in this section.",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "notes",
-        "citations"
-      ]
-    },
-    "one_pager_summary": {
-      "type": "object",
-      "description": "Concise one-pager summary of the campaign.",
-      "additionalProperties": false,
-      "properties": {
-        "positioning": {
-          "type": "string",
-          "description": "Short statement of how the supplier is positioned in this campaign."
-        },
-        "core_message": {
-          "type": "string",
-          "description": "Single core message capturing the essence of the campaign."
-        },
-        "quick_facts": {
-          "type": "array",
-          "description": "Bullet list of quick facts or soundbites.",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "positioning",
-        "core_message",
-        "quick_facts"
-      ]
-    }
-  },
+
   "required": [
     "runId",
     "supplier",
     "industry",
     "persona",
-    "executive_summary",
-    "value_proposition",
-    "messaging_matrix",
-    "sales_enablement",
-    "go_to_market_plan",
-    "risks_and_contingencies",
-    "compliance_and_governance",
-    "one_pager_summary"
-  ]
+    "viability",
+    "sections"
+  ],
+
+  "properties": {
+    "runId": { "type": "string" },
+    "supplier": { "type": "string" },
+    "industry": { "type": "string" },
+    "persona": { "type": "string" },
+
+    "viability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grade", "dimensions"],
+      "properties": {
+        "grade": {
+          "type": "string",
+          "enum": ["viable", "borderline", "weak"]
+        },
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "TAM": {
+              "type": "object",
+              "required": ["value", "warning_code", "message"],
+              "properties": {
+                "value": { "type": "integer" },
+                "warning_code": { "type": "string" },
+                "message": { "type": "string" }
+              }
+            },
+            "problem_strength": {
+              "type": "object",
+              "required": ["score", "warning_code", "message"],
+              "properties": {
+                "score": { "type": "number" },
+                "warning_code": { "type": "string" },
+                "message": { "type": "string" }
+              }
+            },
+            "differentiation": {
+              "type": "object",
+              "required": ["score", "warning_code", "message"],
+              "properties": {
+                "score": { "type": "number" },
+                "warning_code": { "type": "string" },
+                "message": { "type": "string" }
+              }
+            },
+            "urgency": {
+              "type": "object",
+              "required": ["score", "warning_code", "message"],
+              "properties": {
+                "score": { "type": "number" },
+                "warning_code": { "type": "string" },
+                "message": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "sections": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executive_summary",
+        "go_to_market",
+        "offering",
+        "sales_enablement",
+        "proof_points"
+      ],
+
+      "properties": {
+        "executive_summary": {
+          "type": "object",
+          "required": [
+            "problem",
+            "why_this_playing_field",
+            "how_we_win",
+            "campaign_aim",
+            "evidence_case",
+            "key_warnings",
+            "citations"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "problem": { "type": "string" },
+            "why_this_playing_field": { "type": "string" },
+            "how_we_win": { "type": "string" },
+            "campaign_aim": {
+              "type": "string",
+              "enum": ["upsell", "win-back", "growth", "nurture"]
+            },
+            "evidence_case": { "type": "string" },
+            "key_warnings": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "citations": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+
+        "go_to_market": {
+          "type": "object",
+          "required": [
+            "objective",
+            "target_market",
+            "marketing_actions",
+            "sales_actions",
+            "pipeline_model",
+            "viability_notes",
+            "citations"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "objective": { "type": "string" },
+            "target_market": { "type": "string" },
+            "marketing_actions": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "sales_actions": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "pipeline_model": {
+              "type": "object",
+              "required": ["tiers", "motions"],
+              "additionalProperties": false,
+              "properties": {
+                "tiers": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "motions": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              }
+            },
+            "viability_notes": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "citations": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+
+        "offering": {
+          "type": "object",
+          "required": [
+            "business_value",
+            "human_value",
+            "solution_elements",
+            "fit_to_needs",
+            "citations"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "business_value": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "human_value": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "solution_elements": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "fit_to_needs": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "citations": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+
+        "sales_enablement": {
+          "type": "object",
+          "required": [
+            "buyer_problem",
+            "buyer_value",
+            "campaign_overview",
+            "discovery_questions",
+            "qualification_criteria",
+            "objection_handling",
+            "battlecard",
+            "master_pitch",
+            "citations"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "buyer_problem": { "type": "string" },
+            "buyer_value": {
+              "type": "object",
+              "required": ["business_value", "human_value"],
+              "properties": {
+                "business_value": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "human_value": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              }
+            },
+            "campaign_overview": { "type": "string" },
+            "discovery_questions": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "qualification_criteria": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "objection_handling": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "battlecard": { "type": "string" },
+            "master_pitch": { "type": "string" },
+            "citations": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+
+        "proof_points": {
+          "type": "object",
+          "required": ["points", "citations"],
+          "additionalProperties": false,
+          "properties": {
+            "points": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "citations": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "_meta": {
+      "type": "object",
+      "required": ["version", "strategy_engine", "generated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string" },
+        "strategy_engine": { "type": "string" },
+        "generated_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
 }
