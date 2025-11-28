@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 27-11-2025 Strategy Engine v7 
+// /api/campaign-worker/index.js 28-11-2025 Strategy Engine v8 
 //
 // Responsibility:
 //   - Read Phase 1 outputs (evidence, insights, buyer_logic, markdown_pack, csv_normalized, etc.).
@@ -109,25 +109,25 @@ function parseQueueItem(raw) {
 }
 
 function computePrefix(msg) {
-  // Prefer explicit prefix if present
-  let prefix = msg.prefix || msg.pathPrefix || msg.blobPrefix || "";
-  if (prefix && typeof prefix === "string") {
-    prefix = prefix.trim();
+  let runId =
+    msg.runId ||
+    msg.run_id ||
+    msg.id ||
+    msg.fileId ||
+    msg.file_id ||
+    null;
+
+  if (!runId) {
+    // Fallback: extract runId from a prefix if one was passed incorrectly
+    const raw = String(msg.prefix || msg.pathPrefix || msg.blobPrefix || "");
+    const parts = raw.split("/").filter(Boolean);
+    // Look for a 32–40 char hex-ish ID
+    const maybe = parts.find(p => /^[a-f0-9-]{20,40}$/i.test(p));
+    runId = maybe || "unknown";
   }
 
-  if (!prefix) {
-    const runId =
-      msg.runId ||
-      msg.run_id ||
-      msg.id ||
-      msg.fileId ||
-      msg.file_id ||
-      "unknown";
-    prefix = `runs/${String(runId).trim() || "unknown"}/`;
-  }
-
-  if (!prefix.endsWith("/")) prefix += "/";
-  if (!prefix.startsWith("runs/")) prefix = `runs/${prefix}`;
+  runId = String(runId).trim();
+  const prefix = `runs/${runId}/`;
   return prefix;
 }
 

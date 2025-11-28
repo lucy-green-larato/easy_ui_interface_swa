@@ -1208,158 +1208,158 @@ window.CampaignUI = window.CampaignUI || {};
   };
 
   // ---------------------------------------------------------------------------
-// Start → fetch → viability loader
-// ---------------------------------------------------------------------------
-async function startRunOrResume() {
-  UI.setBusy(true);
-  UI.setStatus("Preparing…", "run");
+  // Start → fetch → viability loader
+  // ---------------------------------------------------------------------------
+  async function startRunOrResume() {
+    UI.setBusy(true);
+    UI.setStatus("Preparing…", "run");
 
-  // UI inputs
-  const salesModel = ($("#salesModel")?.value || "").trim().toLowerCase() || null;
-  const notes = ($("#notes")?.value || "").trim() || null;
+    // UI inputs
+    const salesModel = ($("#salesModel")?.value || "").trim().toLowerCase() || null;
+    const notes = ($("#notes")?.value || "").trim() || null;
 
-  const supplier_company = ($("#companyName")?.value || "").trim();
-  const supplier_website = ($("#companyWebsite")?.value || "").trim();
-  const supplier_linkedin = ($("#companyLinkedIn")?.value || "").trim();
-  const supplier_products = (document.getElementById("supplier_products")?.value || "").trim();
+    const supplier_company = ($("#companyName")?.value || "").trim();
+    const supplier_website = ($("#companyWebsite")?.value || "").trim();
+    const supplier_linkedin = ($("#companyLinkedIn")?.value || "").trim();
+    const supplier_products = (document.getElementById("supplier_products")?.value || "").trim();
 
-  const uspsText = ($("#companyUsps")?.value || "").trim();
-  const supplier_usps = uspsText
-    ? uspsText.split(/\r?\n|;|,/).map(s => s.trim()).filter(Boolean)
-    : [];
+    const uspsText = ($("#companyUsps")?.value || "").trim();
+    const supplier_usps = uspsText
+      ? uspsText.split(/\r?\n|;|,/).map(s => s.trim()).filter(Boolean)
+      : [];
 
-  const compText = ($("#relevantCompetitors")?.value || "").trim();
-  const relevant_competitors = compText
-    ? compText.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 8)
-    : [];
+    const compText = ($("#relevantCompetitors")?.value || "").trim();
+    const relevant_competitors = compText
+      ? compText.split(/[,;\n]/).map(s => s.trim()).filter(Boolean).slice(0, 8)
+      : [];
 
-  const campaign_requirement_raw = ($("#campaignRequirement")?.value || "").trim().toLowerCase();
-  const campaign_requirement = ["upsell", "win-back", "growth"].includes(campaign_requirement_raw)
-    ? campaign_requirement_raw
-    : null;
+    const campaign_requirement_raw = ($("#campaignRequirement")?.value || "").trim().toLowerCase();
+    const campaign_requirement = ["upsell", "win-back", "growth"].includes(campaign_requirement_raw)
+      ? campaign_requirement_raw
+      : null;
 
-  const buyer_industry = ($("#buyerIndustry")?.value || "").trim() || null;
+    const buyer_industry = ($("#buyerIndustry")?.value || "").trim() || null;
 
-  // CSV presence?
-  const fileEl = $("#csvUpload");
-  const hasCsv = !!(fileEl?.files?.[0]);
+    // CSV presence?
+    const fileEl = $("#csvUpload");
+    const hasCsv = !!(fileEl?.files?.[0]);
 
-  // Recent run selected?
-  const recent = $("#runSelect");
-  const selectedRunId = (recent?.value || "").trim();
+    // Recent run selected?
+    const recent = $("#runSelect");
+    const selectedRunId = (recent?.value || "").trim();
 
-  // Resume if no new CSV
-  if (!hasCsv && selectedRunId) {
-    UI.log(`Resuming existing run: ${selectedRunId}`);
-    UI.setRun(selectedRunId);
-    return await fetchCompleteRun(selectedRunId, true);
-  }
-
-  // Otherwise start a new run
-  UI.setStatus("Submitting…", "run");
-  UI.log("Submitting job to /api/campaign-start");
-
-  let csvSummary = null;
-  let csvTextRaw = null;
-  let rowCount = null;
-
-  if (hasCsv) {
-    const text = await fileEl.files[0].text();
-    csvTextRaw = text;
-    const rows = csvToArray(text);
-    rowCount = rows.length;
-    csvSummary = buildCsvSummary(rows, buyer_industry || "");
-  }
-
-  const payload = {
-    page: "campaign",
-    salesModel,
-    notes,
-    rowCount,
-    csvText: csvTextRaw,
-    csvSummary,
-    csvFilename: fileEl?.files?.[0]?.name || null,
-    supplier_company,
-    supplier_website,
-    supplier_linkedin,
-    supplier_products,
-    supplier_usps,
-    campaign_industry: buyer_industry,
-    relevant_competitors,
-    campaign_requirement
-  };
-
-  const startResp = await http("POST", API.start(), { body: payload, timeoutMs: 25000 });
-  const runId = startResp?.runId;
-  if (!runId) throw new Error("No runId returned from /api/campaign-start");
-
-  UI.setRun(runId);
-  UI.log(`Run started: ${runId}`);
-  UI.setStatus("Queued", "run");
-
-  return await fetchCompleteRun(runId, true);
-}
-
-
-// ---------------------------------------------------------------------------
-// Fetch a run to completion (contract + evidence + strategy_v2 + viability)
-// ---------------------------------------------------------------------------
-async function fetchCompleteRun(runId, allowPoll) {
-  const contract = await pollToCompletion(runId, allowPoll);
-
-  // Load strategy_v2
-  try {
-    const strategyV2 = await http(
-      "GET",
-      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=strategy_v2`,
-      { timeoutMs: 20000 }
-    );
-    if (strategyV2 && typeof strategyV2 === "object") {
-      contract.strategy_v2 = strategyV2;
+    // Resume if no new CSV
+    if (!hasCsv && selectedRunId) {
+      UI.log(`Resuming existing run: ${selectedRunId}`);
+      UI.setRun(selectedRunId);
+      return await fetchCompleteRun(selectedRunId, true);
     }
-  } catch (e) {
-    UI.log("strategy_v2 fetch skipped: " + (e?.message || e));
-  }
 
-  // Load evidence
-  let evidenceItems = [];
-  try {
-    const evCanon = await http("GET", API.fetchEvidence(runId), { timeoutMs: 20000 });
-    if (evCanon && typeof evCanon === "object" && Array.isArray(evCanon.claims)) {
-      evidenceItems = evCanon.claims;
-    } else if (Array.isArray(evCanon)) {
-      evidenceItems = evCanon;
-    } else {
-      const evLegacy = await http("GET", API.fetchEvidenceLog(runId), { timeoutMs: 20000 });
-      if (Array.isArray(evLegacy)) evidenceItems = evLegacy;
+    // Otherwise start a new run
+    UI.setStatus("Submitting…", "run");
+    UI.log("Submitting job to /api/campaign-start");
+
+    let csvSummary = null;
+    let csvTextRaw = null;
+    let rowCount = null;
+
+    if (hasCsv) {
+      const text = await fileEl.files[0].text();
+      csvTextRaw = text;
+      const rows = csvToArray(text);
+      rowCount = rows.length;
+      csvSummary = buildCsvSummary(rows, buyer_industry || "");
     }
-  } catch (e) {
-    UI.log("Evidence fetch skipped: " + (e?.message || e));
+
+    const payload = {
+      page: "campaign",
+      salesModel,
+      notes,
+      rowCount,
+      csvText: csvTextRaw,
+      csvSummary,
+      csvFilename: fileEl?.files?.[0]?.name || null,
+      supplier_company,
+      supplier_website,
+      supplier_linkedin,
+      supplier_products,
+      supplier_usps,
+      campaign_industry: buyer_industry,
+      relevant_competitors,
+      campaign_requirement
+    };
+
+    const startResp = await http("POST", API.start(), { body: payload, timeoutMs: 25000 });
+    const runId = startResp?.runId;
+    if (!runId) throw new Error("No runId returned from /api/campaign-start");
+
+    UI.setRun(runId);
+    UI.log(`Run started: ${runId}`);
+    UI.setStatus("Queued", "run");
+
+    return await fetchCompleteRun(runId, true);
   }
 
-  // -----------------------------------------------------------------
-  // Load viability.json (NEW)
-  // -----------------------------------------------------------------
-  try {
-    let prefix =
-      contract?.prefix ||
-      (contract?.runId ? `runs/${contract.runId}/` : null) ||
-      (runId ? `runs/${runId}/` : null);
 
-    if (prefix && typeof loadViability === "function") {
-      await loadViability(prefix);
-      UI.log("[UI] viability loaded OK");
-    } else {
-      UI.log("[UI] viability skipped: no prefix or loader missing");
+  // ---------------------------------------------------------------------------
+  // Fetch a run to completion (contract + evidence + strategy_v2 + viability)
+  // ---------------------------------------------------------------------------
+  async function fetchCompleteRun(runId, allowPoll) {
+    const contract = await pollToCompletion(runId, allowPoll);
+
+    // Load strategy_v2
+    try {
+      const strategyV2 = await http(
+        "GET",
+        `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=strategy_v2`,
+        { timeoutMs: 20000 }
+      );
+      if (strategyV2 && typeof strategyV2 === "object") {
+        contract.strategy_v2 = strategyV2;
+      }
+    } catch (e) {
+      UI.log("strategy_v2 fetch skipped: " + (e?.message || e));
     }
-  } catch (err) {
-    UI.log("viability load failed: " + (err?.message || err));
-  }
 
-  window.CampaignUI?.setContract?.(contract, { evidence: evidenceItems });
-  UI.setStatus("Completed", "ok");
-  return contract;
-}
+    // Load evidence
+    let evidenceItems = [];
+    try {
+      const evCanon = await http("GET", API.fetchEvidence(runId), { timeoutMs: 20000 });
+      if (evCanon && typeof evCanon === "object" && Array.isArray(evCanon.claims)) {
+        evidenceItems = evCanon.claims;
+      } else if (Array.isArray(evCanon)) {
+        evidenceItems = evCanon;
+      } else {
+        const evLegacy = await http("GET", API.fetchEvidenceLog(runId), { timeoutMs: 20000 });
+        if (Array.isArray(evLegacy)) evidenceItems = evLegacy;
+      }
+    } catch (e) {
+      UI.log("Evidence fetch skipped: " + (e?.message || e));
+    }
+
+    // -----------------------------------------------------------------
+    // Load viability.json (NEW)
+    // -----------------------------------------------------------------
+    try {
+      let prefix =
+        contract?.prefix ||
+        (contract?.runId ? `runs/${contract.runId}/` : null) ||
+        (runId ? `runs/${runId}/` : null);
+
+      if (prefix && typeof loadViability === "function") {
+        await loadViability(prefix);
+        UI.log("[UI] viability loaded OK");
+      } else {
+        UI.log("[UI] viability skipped: no prefix or loader missing");
+      }
+    } catch (err) {
+      UI.log("viability load failed: " + (err?.message || err));
+    }
+
+    window.CampaignUI?.setContract?.(contract, { evidence: evidenceItems });
+    UI.setStatus("Completed", "ok");
+    return contract;
+  }
 
   async function pollToCompletion(runId, allowPoll = true) {
     // Normalise state names so "Completed" and "completed" behave identically
@@ -1376,10 +1376,8 @@ async function fetchCompleteRun(runId, allowPoll) {
 
     function isTerminalSuccess(statusObj) {
       const k = stateKey(statusObj?.state);
-      const markers = statusObj?.markers || {};
+      if (k === "writer_ready") return true;
       if (k === "completed") return true;
-      if (k === "assembled") return true;
-      if (markers.afterassembleSent === true) return true;
       return false;
     }
 

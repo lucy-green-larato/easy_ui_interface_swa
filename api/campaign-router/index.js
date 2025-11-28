@@ -16,11 +16,11 @@ const { getFlags } = require("../lib/featureFlags");
 const { getRunPrefix } = require("../lib/paths");
 
 // ---- ENV ----
-const STORAGE_CONN      = process.env.AzureWebJobsStorage;
+const STORAGE_CONN = process.env.AzureWebJobsStorage;
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
-const MAIN_QUEUE        = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
-const OUTLINE_QUEUE     = process.env.Q_CAMPAIGN_OUTLINE || "campaign-outline";
-const WRITE_QUEUE       = process.env.Q_CAMPAIGN_WRITE || "campaign-write";
+const MAIN_QUEUE = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
+const OUTLINE_QUEUE = process.env.Q_CAMPAIGN_OUTLINE || "campaign-outline";
+const WRITE_QUEUE = process.env.Q_CAMPAIGN_WRITE || "campaign-write";
 
 // ---- sections for writer fan-out (preserve names) ----
 const SECTION_KEYS = [
@@ -98,9 +98,9 @@ module.exports = async function (context, queueItem) {
     }
   }
 
-  const op    = (msg && msg.op)    || "";
+  const op = (msg && msg.op) || "";
   const runId = (msg && msg.runId) || "";
-  const page  = (msg && msg.page)  || "campaign";
+  const page = (msg && msg.page) || "campaign";
 
   // Use getRunPrefix for the default, then normalize
   const defaultPrefix = runId ? getRunPrefix(runId) : "";
@@ -128,12 +128,12 @@ module.exports = async function (context, queueItem) {
     return;
   }
 
-  const blobSvc   = BlobServiceClient.fromConnectionString(STORAGE_CONN);
+  const blobSvc = BlobServiceClient.fromConnectionString(STORAGE_CONN);
   const container = blobSvc.getContainerClient(RESULTS_CONTAINER);
 
-  const qs        = QueueServiceClient.fromConnectionString(STORAGE_CONN);
-  const outlineQ  = qs.getQueueClient(OUTLINE_QUEUE);
-  const writeQ    = qs.getQueueClient(WRITE_QUEUE);
+  const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
+  const outlineQ = qs.getQueueClient(OUTLINE_QUEUE);
+  const writeQ = qs.getQueueClient(WRITE_QUEUE);
 
   await outlineQ.createIfNotExists();
   await writeQ.createIfNotExists();
@@ -188,12 +188,12 @@ module.exports = async function (context, queueItem) {
       }
 
       // Strong guard: require evidence.json or evidence_log.json to exist
-      const evBlobName    = `${prefix}evidence.json`;
+      const evBlobName = `${prefix}evidence.json`;
       const evLogBlobName = `${prefix}evidence_log.json`;
-      const evBlob        = container.getBlockBlobClient(evBlobName);
-      const evLogBlob     = container.getBlockBlobClient(evLogBlobName);
+      const evBlob = container.getBlockBlobClient(evBlobName);
+      const evLogBlob = container.getBlockBlobClient(evLogBlobName);
 
-      const evExists    = await evBlob.exists();
+      const evExists = await evBlob.exists();
       const evLogExists = await evLogBlob.exists();
 
       // TRACE 4: evidence existence check
@@ -315,6 +315,24 @@ module.exports = async function (context, queueItem) {
           prefix
         });
       }
+      return;
+    }
+
+    if (op === "run_strategy") {
+      const msgOut = {
+        runId,
+        prefix,
+        input: baseInput || {},
+        op: "run_strategy"
+      };
+
+      context.log("[router] Enqueueing strategy worker job", {
+        queue: WORKER_QUEUE,
+        runId,
+        prefix
+      });
+
+      await context.bindings.queueOutput.push(msgOut);
       return;
     }
 

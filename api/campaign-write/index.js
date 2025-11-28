@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js // 27-11-2025 Gold Writer v2 (deterministic)
+// /api/campaign-write/index.js // 28-11-2025 Gold Writer v3
 //
 // Responsibility:
 //   - Read strategy_v2 (campaign_strategy.json) produced by campaign-worker.
@@ -316,9 +316,9 @@ function buildExecutiveSummary({ strategy_v2, viability, campaignRequirement }) 
   const cfaText =
     caseBullets.length || problemBullets.length
       ? `They face the following pressures and business problems: ${summariseBullets(
-          caseBullets.concat(problemBullets),
-          6
-        )}.`
+        caseBullets.concat(problemBullets),
+        6
+      )}.`
       : null;
 
   // How we win + right to play
@@ -327,9 +327,9 @@ function buildExecutiveSummary({ strategy_v2, viability, campaignRequirement }) 
   const winText =
     hwwBullets.length || rtp.length
       ? `This campaign is designed to help you win by ${summariseBullets(
-          hwwBullets.concat(rtp),
-          6
-        )}.`
+        hwwBullets.concat(rtp),
+        6
+      )}.`
       : null;
 
   // Success + TAM / route model
@@ -367,9 +367,9 @@ function buildExecutiveSummary({ strategy_v2, viability, campaignRequirement }) 
   const viabilityMessages = collectViabilityMessages(viability);
   const viabilityText = viabilityMessages.length
     ? `${viabilityHeadline || "Viability checks have been run on this campaign."} Key points: ${summariseBullets(
-        viabilityMessages,
-        6
-      )}.`
+      viabilityMessages,
+      6
+    )}.`
     : viabilityHeadline;
 
   // Assemble ordered paragraphs for C-suite readability
@@ -688,8 +688,15 @@ module.exports = async function (context, queueItem) {
       container,
       prefix,
       "writer_ready",
-      "Campaign Writer completed successfully",
-      { campaign_path: outPath }
+      "Campaign Writer completed successfully"
+    );
+
+    await updateStatus(
+      container,
+      prefix,
+      "Completed",
+      "Campaign successfully assembled",
+      { completed: true }
     );
 
     log("[*] Campaign Writer completed", {
