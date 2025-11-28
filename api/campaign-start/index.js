@@ -99,25 +99,6 @@ async function writeInitialStatus(containerClient, relPrefix, status) {
   await writeJson(containerClient, `${relPrefix}status.json`, status);
 }
 
-const { QueueServiceClient } = require("@azure/storage-queue");
-const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
-
-const workerQueueName = process.env.Q_CAMPAIGN_WORKER;
-if (!workerQueueName) {
-  throw new Error("Q_CAMPAIGN_WORKER env variable not set");
-}
-
-const workerMessage = {
-  op: "run-strategy",
-  runId,
-  prefix  
-};
-
-await workerQ.sendMessage(JSON.stringify(workerMessage));
-
-context.log(`[start] Worker job enqueued → ${workerQueueName}`, workerMessage);
-
-
 // Canonical seed for csv_normalized.json. Evidence phase may overwrite/extend this later, but all writers should preserve this shape.
 async function normalizeCsvAndPersist(containerClient, prefix, input) {
   const csv = input?.csvSummary || {};
