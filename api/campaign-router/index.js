@@ -1,8 +1,12 @@
-// /api/campaign-router/index.js 24-11-2025 v16 (with tracing)
-// Trigger: queue %CAMPAIGN_QUEUE_NAME%
+// /api/campaign-router/index.js 24-11-2025 v16+patch
+// Trigger: queue %CAMPAIGN_QUEUE_NAME% (resolved via %Q_CAMPAIGN_ROUTER% binding)
 // Routes:
-//   - { op:"afterevidence", runId, page, prefix }  → enqueue to %Q_CAMPAIGN_OUTLINE%
-//   - { op:"afteroutline",  runId, page, prefix }  → enqueue N section jobs + one {op:"assemble"} to %Q_CAMPAIGN_WRITE%
+//   - { op:"afterevidence", runId, page, prefix }
+//        → enqueue to %Q_CAMPAIGN_OUTLINE%
+//   - { op:"afteroutline",  runId, page, prefix }
+//        → enqueue N section jobs + one {op:"assemble"} to %Q_CAMPAIGN_WRITE%
+//   - { op:"run_strategy", runId, page, prefix, input? }
+//        → enqueue single worker job to %Q_CAMPAIGN_WORKER% (via queueOutput binding)
 //
 // Idempotence:
 //   - Uses status.json markers: outlineEnqueued, sectionsEnqueued, assembleEnqueued
@@ -21,6 +25,7 @@ const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const MAIN_QUEUE = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const OUTLINE_QUEUE = process.env.Q_CAMPAIGN_OUTLINE || "campaign-outline";
 const WRITE_QUEUE = process.env.Q_CAMPAIGN_WRITE || "campaign-write";
+const WORKER_QUEUE = process.env.Q_CAMPAIGN_WORKER || "campaign-worker-jobs";
 
 // ---- sections for writer fan-out (preserve names) ----
 const SECTION_KEYS = [
@@ -101,6 +106,7 @@ module.exports = async function (context, queueItem) {
   const op = (msg && msg.op) || "";
   const runId = (msg && msg.runId) || "";
   const page = (msg && msg.page) || "campaign";
+  const baseInput = (msg && msg.input) || {};
 
   // Use getRunPrefix for the default, then normalize
   const defaultPrefix = runId ? getRunPrefix(runId) : "";
@@ -115,7 +121,8 @@ module.exports = async function (context, queueItem) {
     defaultPrefix,
     MAIN_QUEUE,
     OUTLINE_QUEUE,
-    WRITE_QUEUE
+    WRITE_QUEUE,
+    WORKER_QUEUE
   });
 
   if (!op || !runId || !prefix) {
@@ -175,6 +182,9 @@ module.exports = async function (context, queueItem) {
   }
 
   try {
+    //
+    // ----------------- afterevidence → outline -----------------
+    //
     if (op === "afterevidence") {
       context.log("[router] handling afterevidence", { runId, prefix });
 
@@ -253,6 +263,9 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
+    //
+    // ----------------- afteroutline → sections + assemble -----------------
+    //
     if (op === "afteroutline") {
       context.log("[router] handling afteroutline", { runId, prefix });
 
@@ -260,7 +273,7 @@ module.exports = async function (context, queueItem) {
       if (!status0.markers.sectionsEnqueued) {
         for (const key of SECTION_KEYS) {
           const payload = { op: "section", runId, page, prefix, section: key };
-          outWorker.push(payload);
+          await writeQ.sendMessage(JSON.stringify(payload));
 
           // TRACE 6: per-section enqueue
           context.log("[router] enqueued section", {
@@ -270,6 +283,7 @@ module.exports = async function (context, queueItem) {
             queue: WRITE_QUEUE
           });
         }
+
         status0.markers.sectionsEnqueued = true;
         status0.history.push({
           at: nowISO(),
@@ -292,7 +306,7 @@ module.exports = async function (context, queueItem) {
       // Enqueue a single assemble once
       if (!status0.markers.assembleEnqueued) {
         const assemblePayload = { op: "assemble", runId, page, prefix };
-        outWriter.push(assemblePayload);
+        await writeQ.sendMessage(JSON.stringify(assemblePayload));
 
         // TRACE 7: assemble enqueue
         context.log("[router] enqueued assemble", {
@@ -318,6 +332,9 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
+    //
+    // ----------------- run_strategy → worker -----------------
+    //
     if (op === "run_strategy") {
       const msgOut = {
         runId,
@@ -332,11 +349,15 @@ module.exports = async function (context, queueItem) {
         prefix
       });
 
-      await context.bindings.queueOutput.push(msgOut);
+      // Use the queue output binding for the worker
+      // NOTE: function.json maps queueOutput → %Q_CAMPAIGN_WORKER%
+      context.bindings.queueOutput = msgOut;
       return;
     }
 
-    // Unknown op: log and drop (no loops)
+    //
+    // ----------------- unknown op -----------------
+    //
     context.log.warn("[router] unhandled op; dropping", { op, runId, prefix });
   } catch (err) {
     const msgText = String(err?.message || err);
