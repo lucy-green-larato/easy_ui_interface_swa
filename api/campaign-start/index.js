@@ -1,7 +1,6 @@
-// /api/campaign-start/index.js 28-11-2025 v20
+// /api/campaign-start/index.js 28-11-2025 v21
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign-start → writes status/input, enqueues kickoff to main queue + full job to evidence queue.
-
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { enqueueTo } = require("../lib/campaign-queue");
 const crypto = require("crypto");
@@ -107,9 +106,6 @@ const workerQueueName = process.env.Q_CAMPAIGN_WORKER;
 if (!workerQueueName) {
   throw new Error("Q_CAMPAIGN_WORKER env variable not set");
 }
-
-const workerQ = qs.getQueueClient(workerQueueName);
-await workerQ.createIfNotExists();
 
 const workerMessage = {
   op: "run-strategy",
