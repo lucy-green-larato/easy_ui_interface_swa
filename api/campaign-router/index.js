@@ -182,9 +182,6 @@ module.exports = async function (context, queueItem) {
   }
 
   try {
-    //
-    // ----------------- afterevidence → outline -----------------
-    //
     if (op === "afterevidence") {
       context.log("[router] handling afterevidence", { runId, prefix });
 
@@ -239,7 +236,7 @@ module.exports = async function (context, queueItem) {
       status0.markers.evidenceDigestCompleted =
         status0.markers.evidenceDigestCompleted === true ||
         status0.state === "EvidenceDigest";
-
+      // Enqueue outline once
       const msgPayload = { runId, page, prefix };
       await outlineQ.sendMessage(JSON.stringify(msgPayload));
 
@@ -258,8 +255,40 @@ module.exports = async function (context, queueItem) {
         page
       });
       status0.markers.outlineEnqueued = true;
-      await saveStatus();
 
+      // Enqueue strategy_v2 job once (immediately after evidence)
+      if (!status0.markers.strategyEnqueued) {
+        const strategyPayload = { op: "run_strategy", runId, page, prefix };
+
+        // Use worker queue output binding (queueOutput → %Q_CAMPAIGN_WORKER%)
+        const existing = context.bindings.queueOutput;
+        if (Array.isArray(existing)) {
+          existing.push(strategyPayload);
+          context.bindings.queueOutput = existing;
+        } else if (existing) {
+          context.bindings.queueOutput = [existing, strategyPayload];
+        } else {
+          context.bindings.queueOutput = [strategyPayload];
+        }
+
+        context.log("[router] enqueued strategy job", {
+          runId,
+          prefix,
+          queue: WORKER_QUEUE,
+          payload: strategyPayload
+        });
+
+        status0.history.push({
+          at: nowISO(),
+          phase: "Router",
+          op: "afterevidence→strategy",
+          page
+        });
+        status0.markers.strategyEnqueued = true;
+      }
+
+      // Persist updated status (outline + strategy markers)
+      await saveStatus();
       return;
     }
 
