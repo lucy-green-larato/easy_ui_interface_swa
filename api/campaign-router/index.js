@@ -260,7 +260,7 @@ module.exports = async function (context, queueItem) {
       if (!status0.markers.sectionsEnqueued) {
         for (const key of SECTION_KEYS) {
           const payload = { op: "section", runId, page, prefix, section: key };
-          await writeQ.sendMessage(JSON.stringify(payload));
+          outWorker.push(payload);
 
           // TRACE 6: per-section enqueue
           context.log("[router] enqueued section", {
@@ -292,7 +292,7 @@ module.exports = async function (context, queueItem) {
       // Enqueue a single assemble once
       if (!status0.markers.assembleEnqueued) {
         const assemblePayload = { op: "assemble", runId, page, prefix };
-        await writeQ.sendMessage(JSON.stringify(assemblePayload));
+        outWriter.push(assemblePayload);
 
         // TRACE 7: assemble enqueue
         context.log("[router] enqueued assemble", {

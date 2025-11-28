@@ -6,7 +6,22 @@
       "name": "queueItem",
       "queueName": "%Q_CAMPAIGN_ROUTER%",
       "connection": "AzureWebJobsStorage"
+    },
+    {
+      "type": "queue",
+      "direction": "out",
+      "name": "queueOutput",
+      "queueName": "%Q_CAMPAIGN_WORKER%",
+      "connection": "AzureWebJobsStorage"
+    },
+    {
+      "type": "queue",
+      "direction": "out",
+      "name": "queueOutputAlt",
+      "queueName": "%Q_CAMPAIGN_WRITE%",
+      "connection": "AzureWebJobsStorage"
     }
   ],
   "scriptFile": "index.js"
 }
+
