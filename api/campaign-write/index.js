@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js // 28-11-2025 Gold Writer v3
+// /api/campaign-write/index.js // 29-11-2025 Gold Writer v4
 //
 // Responsibility:
 //   - Read strategy_v2 (campaign_strategy.json) produced by campaign-worker.
@@ -98,23 +98,21 @@ function parseQueueItem(raw) {
 
 function computePrefix(msg) {
   let prefix = msg.prefix || msg.pathPrefix || msg.blobPrefix || "";
+
   if (prefix && typeof prefix === "string") prefix = prefix.trim();
 
   if (!prefix) {
-    const runId =
-      msg.runId ||
-      msg.run_id ||
-      msg.id ||
-      msg.fileId ||
-      msg.file_id ||
-      "unknown";
-    prefix = `runs/${String(runId).trim() || "unknown"}/`;
+    const runId = msg.runId || msg.run_id || "unknown";
+    return `runs/${runId}/`;
   }
-
+  if (prefix.startsWith("runs/")) {
+    if (!prefix.endsWith("/")) prefix += "/";
+    return prefix;
+  }
   if (!prefix.endsWith("/")) prefix += "/";
-  if (!prefix.startsWith("runs/")) prefix = `runs/${prefix}`;
-  return prefix;
+  return `runs/${prefix}`;
 }
+
 
 async function updateStatus(container, prefix, state, note, extra = {}) {
   const statusPath = `${prefix}status.json`;
