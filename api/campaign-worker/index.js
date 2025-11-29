@@ -109,25 +109,24 @@ function parseQueueItem(raw) {
 }
 
 function computePrefix(msg) {
-  let runId =
-    msg.runId ||
-    msg.run_id ||
-    msg.id ||
-    msg.fileId ||
-    msg.file_id ||
-    null;
+  let prefix = msg.prefix || msg.pathPrefix || msg.blobPrefix || "";
 
-  if (!runId) {
-    // Fallback: extract runId from a prefix if one was passed incorrectly
-    const raw = String(msg.prefix || msg.pathPrefix || msg.blobPrefix || "");
-    const parts = raw.split("/").filter(Boolean);
-    // Look for a 32–40 char hex-ish ID
-    const maybe = parts.find(p => /^[a-f0-9-]{20,40}$/i.test(p));
-    runId = maybe || "unknown";
+  if (prefix && typeof prefix === "string") prefix = prefix.trim();
+
+  if (!prefix) {
+    const runId =
+      msg.runId ||
+      msg.run_id ||
+      msg.id ||
+      msg.fileId ||
+      msg.file_id ||
+      "unknown";
+
+    // fallback to standard traceable prefix
+    return getRunPrefix(runId);
   }
 
-  runId = String(runId).trim();
-  const prefix = `runs/${runId}/`;
+  if (!prefix.endsWith("/")) prefix += "/";
   return prefix;
 }
 

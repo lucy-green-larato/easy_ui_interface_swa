@@ -1,4 +1,4 @@
-// /api/campaign-outline/index.js 25-11-2025 v10.3
+// /api/campaign-outline/index.js 29-11-2025 v10.4
 // Queue-triggered on %Q_CAMPAIGN_OUTLINE% (by router) to create <prefix>outline.json,
 // then posts a single {op:"afteroutline"} to %CAMPAIGN_QUEUE_NAME%.
 //
@@ -14,6 +14,7 @@
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { enqueueTo } = require("../lib/campaign-queue");
+const { getRunPrefix } = require("../lib/paths");
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
@@ -24,13 +25,37 @@ const CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 45000);
 const ROUTER_QUEUE_NAME = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
 
+function computePrefix(msg) {
+  // Try explicit prefix first
+  let prefix = msg.prefix || msg.pathPrefix || msg.blobPrefix || "";
+
+  if (prefix && typeof prefix === "string") prefix = prefix.trim();
+  if (!prefix) {
+    const runId =
+      msg.runId ||
+      msg.run_id ||
+      msg.id ||
+      msg.fileId ||
+      msg.file_id ||
+      "unknown";
+
+    return getRunPrefix(runId); // ALWAYS → "runs/<runId>/"
+  }
+  if (prefix.startsWith("runs/")) {
+    if (!prefix.endsWith("/")) prefix += "/";
+    return prefix;
+  }
+  if (!prefix.endsWith("/")) prefix += "/";
+  return `runs/${prefix}`;
+}
+
 // ---- Outline schema (prose-free; claim_ids only) ----
 const OUTLINE_SCHEMA = {
   $schema: "http://json-schema.org/draft-07/schema#",
   title: "campaign_outline",
   type: "object",
   additionalProperties: false,
-  required: ["meta","input_notes","sections"],
+  required: ["meta", "input_notes", "sections"],
   properties: {
     meta: {
       type: "object",
@@ -317,7 +342,7 @@ module.exports = async function (context, queueItem) {
     const svc = blobSvc();
     container = svc.getContainerClient(CONTAINER);
 
-    prefix = normalizePrefix(queueItem.prefix) || `runs/${runId}/`;
+    prefix = computePrefix(queueItem);
     const page = queueItem.page || queueItem?.data?.page || "campaign";
     const runConfig = queueItem.runConfig || {};
 
@@ -345,13 +370,13 @@ module.exports = async function (context, queueItem) {
     // ---- Load artifacts ----
     const evidenceRaw = await getJson(container, `${prefix}evidence_log.json`);
     let evidenceArr = [];
+
     try {
       const evCanon = await getJson(container, `${prefix}evidence.json`);
       if (evCanon && Array.isArray(evCanon.claims)) evidenceArr = evCanon.claims;
     } catch { /* non-fatal */ }
 
     if (!Array.isArray(evidenceArr) || !evidenceArr.length) {
-      const evidenceRaw = await getJson(container, `${prefix}evidence_log.json`);
       if (Array.isArray(evidenceRaw)) {
         evidenceArr = evidenceRaw;
       } else if (evidenceRaw && Array.isArray(evidenceRaw.evidence_log)) {
@@ -369,10 +394,6 @@ module.exports = async function (context, queueItem) {
     const evidenceForPrompt = evidenceLog.slice(0, 24);
 
     const csvNorm = await getJson(container, `${prefix}csv_normalized.json`);
-    const siteJson = (() => {
-      const v = fs; // avoid linter unused; actual load below
-      return v, null;
-    })();
     const siteArr = (() => {
       // prefer array; tolerate object or missing
       return getJson(container, `${prefix}site.json`);

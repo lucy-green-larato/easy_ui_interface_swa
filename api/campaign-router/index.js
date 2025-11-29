@@ -106,6 +106,7 @@ module.exports = async function (context, queueItem) {
   const page = msg.page || "campaign";
 
   const defaultPrefix = runId ? getRunPrefix(runId) : "";
+  if (!msg.prefix) msg.prefix = defaultPrefix;
   let prefix = normalizePrefix(msg.prefix || defaultPrefix);
 
   context.log("[router] parsed message", {

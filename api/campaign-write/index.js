@@ -101,18 +101,15 @@ function computePrefix(msg) {
 
   if (prefix && typeof prefix === "string") prefix = prefix.trim();
 
+  // fallback – use traceable prefix
   if (!prefix) {
     const runId = msg.runId || msg.run_id || "unknown";
-    return `runs/${runId}/`;
+    return getRunPrefix(runId);
   }
-  if (prefix.startsWith("runs/")) {
-    if (!prefix.endsWith("/")) prefix += "/";
-    return prefix;
-  }
-  if (!prefix.endsWith("/")) prefix += "/";
-  return `runs/${prefix}`;
-}
 
+  if (!prefix.endsWith("/")) prefix += "/";
+  return prefix;
+}
 
 async function updateStatus(container, prefix, state, note, extra = {}) {
   const statusPath = `${prefix}status.json`;
