@@ -110,12 +110,6 @@ function parseQueueItem(raw) {
   return { raw };
 }
 
-const prefix = canonicalPrefix({
-  userId: msg.userId || msg.user || "anonymous",
-  page: msg.page || "campaign",
-  runId
-});
-
 async function updateStatus(container, prefix, state, note, extra = {}) {
   const statusPath = `${prefix}status.json`;
   let status = (await readJsonIfExists(container, statusPath)) || {
@@ -677,11 +671,14 @@ function buildStrategyV2({
 module.exports = async function (context, queueItem) {
   const log = context.log;
   const msg = parseQueueItem(queueItem);
-  const prefix = computePrefix(msg);
   const runId =
     msg.runId ||
     msg.run_id ||
     (prefix.startsWith("runs/") ? prefix.split("/")[1] : "unknown");
+
+  const userId = msg.userId || msg.user || "anonymous";
+  const page = msg.page || "campaign";
+  const prefix = canonicalPrefix({ userId, page, runId });
 
   log(`[*] Strategy Engine starting for runId=${runId}, prefix=${prefix}`);
 
