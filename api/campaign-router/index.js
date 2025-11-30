@@ -1,23 +1,19 @@
-// /api/campaign-router/index.js — Option 1 unified queue client version
-// 29-11-2025 — Verified working build
-
+// /api/campaign-router/index.js — Unified canonical prefix version 30-11-2025 v 2
 "use strict";
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { QueueServiceClient } = require("@azure/storage-queue");
 const { getFlags } = require("../lib/featureFlags");
-const { getRunPrefix } = require("../lib/paths");
+const { canonicalPrefix } = require("../lib/prefix");
 
 // ---- ENV ----
 const STORAGE_CONN = process.env.AzureWebJobsStorage;
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
-
-const MAIN_QUEUE = process.env.CAMPAIGN_QUEUE_NAME || "campaign";
 const OUTLINE_QUEUE = process.env.Q_CAMPAIGN_OUTLINE || "campaign-outline";
 const WORKER_QUEUE = process.env.Q_CAMPAIGN_WORKER || "campaign-worker-jobs";
 const WRITE_QUEUE = process.env.Q_CAMPAIGN_WRITE || "campaign-write";
 
-// ---- Sections for writer fan-out ----
+// ---- Section keys for Writer (unchanged) ----
 const SECTION_KEYS = [
   "executive_summary",
   "positioning_and_differentiation",
@@ -31,18 +27,8 @@ const SECTION_KEYS = [
   "one_pager_summary"
 ];
 
-// ---- Helpers ----
-function normalizePrefix(p) {
-  let x = String(p || "").trim();
-  if (!x) return null;
-  if (x.startsWith(`${RESULTS_CONTAINER}/`)) {
-    x = x.slice(`${RESULTS_CONTAINER}/`.length);
-  }
-  x = x.replace(/^\/+/, "");
-  if (!x.endsWith("/")) x += "/";
-  return x;
-}
 
+// ---- Helpers ----
 async function streamToString(readable) {
   if (!readable) return "";
   const chunks = [];
@@ -55,20 +41,14 @@ async function getJson(container, rel) {
   if (!(await b.exists())) return null;
   const dl = await b.download();
   const txt = await streamToString(dl.readableStreamBody);
-  try {
-    return JSON.parse(txt);
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(txt); } catch { return null; }
 }
 
 async function putJson(container, rel, obj) {
   const bb = container.getBlockBlobClient(rel);
   const body = Buffer.from(JSON.stringify(obj, null, 2), "utf8");
   await bb.uploadData(body, {
-    blobHTTPHeaders: {
-      blobContentType: "application/json; charset=utf-8"
-    }
+    blobHTTPHeaders: { blobContentType: "application/json; charset=utf-8" }
   });
 }
 
@@ -76,57 +56,53 @@ function nowISO() {
   return new Date().toISOString();
 }
 
+
+
+// ======================================================================
+//                               ROUTER
+// ======================================================================
 module.exports = async function (context, queueItem) {
-  context.log("[router] trigger", {
-    type: typeof queueItem,
-    raw: typeof queueItem === "string" ? queueItem.slice(0, 500) : queueItem
-  });
 
-  if (!STORAGE_CONN) {
-    context.log.error("[router] AzureWebJobsStorage missing");
-    return;
-  }
-
-  // Parse message
-  let msg = queueItem;
-  if (typeof msg === "string") {
-    try {
-      msg = JSON.parse(msg);
-    } catch (e) {
-      context.log.error("[router] failed to parse queueItem JSON", {
-        error: String(e?.message || e),
-        raw: msg.slice(0, 500)
-      });
-      msg = {};
+  // ==========================================================================
+  // 1. Parse Queue Message
+  // ==========================================================================
+  if (typeof queueItem === "string") {
+    try { queueItem = JSON.parse(queueItem); }
+    catch {
+      context.log.error("[router] invalid JSON", queueItem);
+      return;
     }
   }
 
-  const op = msg.op || "";
-  const runId = msg.runId || "";
-  const page = msg.page || "campaign";
+  const op = queueItem.op || "";
+  const runId = queueItem.runId || queueItem.id;
+  const page = queueItem.page || "campaign";
+  const user = queueItem.userId || queueItem.user || "anonymous";
 
-  const defaultPrefix = runId ? getRunPrefix(runId) : "";
-  if (!msg.prefix) msg.prefix = defaultPrefix;
-  let prefix = normalizePrefix(msg.prefix || defaultPrefix);
-
-  context.log("[router] parsed message", {
-    op,
-    runId,
-    page,
-    prefix
-  });
-
-  if (!op || !runId || !prefix) {
-    context.log.warn("[router] invalid payload; dropping", {
-      reason: "missing_op_runId_or_prefix",
-      op,
-      runId,
-      prefix
-    });
+  if (!runId) {
+    context.log.error("[router] missing runId");
     return;
   }
 
-  // ---- Blob + Queue Clients ----
+  // ==========================================================================
+  // 2. Compute canonical prefix
+  // ==========================================================================
+  const prefix = canonicalPrefix({
+    runId,
+    userId: user,
+    page
+  });
+  context.log("[router] parsed", { op, runId, page, prefix });
+
+
+  // ==========================================================================
+  // 3. Blob + Queue Clients
+  // ==========================================================================
+  if (!STORAGE_CONN) {
+    context.log.error("[router] STORAGE_CONN missing");
+    return;
+  }
+
   const blobSvc = BlobServiceClient.fromConnectionString(STORAGE_CONN);
   const container = blobSvc.getContainerClient(RESULTS_CONTAINER);
 
@@ -139,164 +115,123 @@ module.exports = async function (context, queueItem) {
   await workerQ.createIfNotExists();
   await writeQ.createIfNotExists();
 
-  // ---- Load and normalise status ----
+
+  // ==========================================================================
+  // 4. Load + restore original status.json semantics
+  // ==========================================================================
   const statusPath = `${prefix}status.json`;
-  const status0 =
-    (await getJson(container, statusPath)) || { runId, history: [], markers: {} };
 
-  status0.history = Array.isArray(status0.history)
-    ? status0.history
-    : [];
+  let status0 =
+    (await getJson(container, statusPath)) || {
+      runId,
+      state: "Router",
+      history: [],
+      markers: {}
+    };
+
+  // ensure correct shapes
+  status0.history = Array.isArray(status0.history) ? status0.history : [];
   status0.markers = status0.markers || {};
+  status0.flags = getFlags(status0);
 
-  const flags = getFlags(status0);
-  status0.flags = flags;
-
-  context.log("[router] status snapshot", {
-    runId,
-    prefix,
-    op,
-    state: status0.state || null,
-    markers: status0.markers,
-    flags
-  });
-
-  async function saveStatus(patch = {}) {
-    const next = { ...status0, ...patch };
+  async function saveStatus(extra = {}) {
+    const next = { ...status0, ...extra };
     next.flags = getFlags(next);
     await putJson(container, statusPath, next);
-    context.log("[router] status saved", {
-      runId,
-      prefix,
-      state: next.state,
-      markers: next.markers
+    status0 = next;
+  }
+
+  function pushHistory(phase, note, error = null) {
+    status0.history.push({
+      at: nowISO(),
+      phase,
+      note,
+      error: error ? String(error) : undefined
     });
   }
 
-  // ------------------------------------------------------------------
-  //                        afterevidence
-  // ------------------------------------------------------------------
+
+
+  // ==========================================================================
+  // 5. ROUTING: afterevidence
+  // ==========================================================================
   if (op === "afterevidence") {
-    context.log("[router] handling afterevidence", { runId, prefix });
+    const phase = "Router.afterevidence";
 
     // Check evidence
-    const evBlobName = `${prefix}evidence.json`;
-    const evLogBlobName = `${prefix}evidence_log.json`;
+    const ev = await container.getBlockBlobClient(`${prefix}evidence.json`).exists();
+    const evLog = await container.getBlockBlobClient(`${prefix}evidence_log.json`).exists();
 
-    const evExists = await container.getBlockBlobClient(evBlobName).exists();
-    const evLogExists = await container.getBlockBlobClient(evLogBlobName).exists();
-
-    context.log("[router] evidence existence", {
-      evExists,
-      evLogExists
-    });
-
-    if (!evExists && !evLogExists) {
+    if (!ev && !evLog) {
       status0.markers.waitingForEvidence = true;
-      status0.history.push({
-        at: nowISO(),
-        phase: "Router",
-        op: "afterevidence",
-        note: "evidence_missing"
-      });
+      pushHistory(phase, "evidence_missing");
       await saveStatus();
       return;
     }
 
-    // ---- Enqueue outline once ----
+    // ---- Outline queue ----
     if (!status0.markers.outlineEnqueued) {
-      const outlinePayload = { runId, page, prefix };
-      await outlineQ.sendMessage(JSON.stringify(outlinePayload));
-
-      context.log("[router] enqueued outline", {
-        runId,
-        prefix,
-        queue: OUTLINE_QUEUE
-      });
-
+      await outlineQ.sendMessage(JSON.stringify({ runId, page, prefix }));
       status0.markers.outlineEnqueued = true;
-      status0.history.push({
-        at: nowISO(),
-        phase: "Router",
-        op: "afterevidence→outline"
-      });
+      pushHistory(phase, "outline_enqueued");
     }
 
-    // ---- Enqueue strategy once ----
+    // ---- Strategy queue ----
     if (!status0.markers.strategyEnqueued) {
-      const strategyPayload = { op: "run_strategy", runId, page, prefix };
-      await workerQ.sendMessage(JSON.stringify(strategyPayload));
-
-      context.log("[router] enqueued strategy", {
-        runId,
-        prefix,
-        queue: WORKER_QUEUE
-      });
-
+      await workerQ.sendMessage(JSON.stringify({ op: "run_strategy", runId, page, prefix }));
       status0.markers.strategyEnqueued = true;
-      status0.history.push({
-        at: nowISO(),
-        phase: "Router",
-        op: "afterevidence→strategy"
-      });
+      pushHistory(phase, "strategy_enqueued");
     }
 
-    await saveStatus();
+    await saveStatus({ state: "Router" });
     return;
   }
 
-  // ------------------------------------------------------------------
-  //                          afteroutline
-  // ------------------------------------------------------------------
-  if (op === "afteroutline") {
-    context.log("[router] handling afteroutline", { runId, prefix });
 
-    // ---- Fan out sections once ----
+
+  // ==========================================================================
+  // 6. ROUTING: afteroutline
+  // ==========================================================================
+  if (op === "afteroutline") {
+    const phase = "Router.afteroutline";
+
+    // ---- Section fan-out ----
     if (!status0.markers.sectionsEnqueued) {
       for (const key of SECTION_KEYS) {
-        const payload = { op: "section", runId, page, prefix, section: key };
-        await writeQ.sendMessage(JSON.stringify(payload));
-
-        context.log("[router] enqueued section", {
+        await writeQ.sendMessage(JSON.stringify({
+          op: "section",
           runId,
+          page,
           prefix,
           section: key
-        });
+        }));
       }
-
       status0.markers.sectionsEnqueued = true;
-      status0.history.push({
-        at: nowISO(),
-        phase: "Router",
-        op: "afteroutline→sections",
-        count: SECTION_KEYS.length
-      });
+      pushHistory(phase, "sections_enqueued");
     }
 
     // ---- Assemble once ----
     if (!status0.markers.assembleEnqueued) {
-      const assemblePayload = { op: "assemble", runId, page, prefix };
-      await writeQ.sendMessage(JSON.stringify(assemblePayload));
-
-      context.log("[router] enqueued assemble", {
+      await writeQ.sendMessage(JSON.stringify({
+        op: "assemble",
         runId,
+        page,
         prefix
-      });
-
+      }));
       status0.markers.assembleEnqueued = true;
-      status0.history.push({
-        at: nowISO(),
-        phase: "Router",
-        op: "afteroutline→assemble"
-      });
+      pushHistory(phase, "assemble_enqueued");
     }
 
-    await saveStatus();
+    await saveStatus({ state: "Router" });
     return;
   }
 
-  // ------------------------------------------------------------------
-  //                     Unknown op → drop
-  // ------------------------------------------------------------------
-  context.log.warn("[router] unhandled op; dropping", { op, runId, prefix });
+
+
+  // ==========================================================================
+  // 7. Unknown op → safe drop
+  // ==========================================================================
+  pushHistory("Router", `unknown_op:${op}`);
+  await saveStatus();
+  context.log.warn("[router] unhandled op → drop", { op });
 };

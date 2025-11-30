@@ -1,4 +1,4 @@
-// /api/campaign-outline/index.js 29-11-2025 v10.4
+// /api/campaign-outline/index.js 29-11-2025 v10.5
 // Queue-triggered on %Q_CAMPAIGN_OUTLINE% (by router) to create <prefix>outline.json,
 // then posts a single {op:"afteroutline"} to %CAMPAIGN_QUEUE_NAME%.
 //
@@ -14,7 +14,7 @@
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { enqueueTo } = require("../lib/campaign-queue");
-const { getRunPrefix } = require("../lib/paths");
+const { canonicalPrefix } = require("../lib/prefix");
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
@@ -25,29 +25,6 @@ const CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 45000);
 const ROUTER_QUEUE_NAME = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
 
-function computePrefix(msg) {
-  // Try explicit prefix first
-  let prefix = msg.prefix || msg.pathPrefix || msg.blobPrefix || "";
-
-  if (prefix && typeof prefix === "string") prefix = prefix.trim();
-  if (!prefix) {
-    const runId =
-      msg.runId ||
-      msg.run_id ||
-      msg.id ||
-      msg.fileId ||
-      msg.file_id ||
-      "unknown";
-
-    return getRunPrefix(runId); // ALWAYS → "runs/<runId>/"
-  }
-  if (prefix.startsWith("runs/")) {
-    if (!prefix.endsWith("/")) prefix += "/";
-    return prefix;
-  }
-  if (!prefix.endsWith("/")) prefix += "/";
-  return `runs/${prefix}`;
-}
 
 // ---- Outline schema (prose-free; claim_ids only) ----
 const OUTLINE_SCHEMA = {
@@ -342,7 +319,11 @@ module.exports = async function (context, queueItem) {
     const svc = blobSvc();
     container = svc.getContainerClient(CONTAINER);
 
-    prefix = computePrefix(queueItem);
+    const prefix = canonicalPrefix({
+      userId: queueItem.userId || queueItem.user || "anonymous",
+      page: queueItem.page || "campaign",
+      runId
+    });
     const page = queueItem.page || queueItem?.data?.page || "campaign";
     const runConfig = queueItem.runConfig || {};
 

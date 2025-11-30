@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 27-11-2025 v17
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 30-11-2025 v18
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, 
@@ -108,25 +108,41 @@ window.CampaignUI = window.CampaignUI || {};
 
   // === VIABILITY LOADER (top-level helper) ===
   async function loadViability(prefix) {
-    if (!prefix) return;
+    // 1. Canonical prefix MUST come from backend (router), not reconstructed
+    if (!prefix) {
+      console.warn("[UI] loadViability: missing prefix — viability skipped");
+      state.viability = null;
+      return;
+    }
 
     try {
+      // 2. Normalise trailing slash (canonicalPrefix always ends with '/')
       let p = String(prefix).trim();
-      if (p && !p.endsWith("/")) p += "/";
+      if (!p.endsWith("/")) p += "/";
 
+      // 3. ALWAYS use canonicalPrefix + correct blob-relative path
       const url = `${state.resultsBaseUrl || ""}${p}strategy_v3/viability.json`;
+
       const res = await fetch(url, { method: "GET" });
 
       if (!res.ok) {
-        console.warn("[UI] viability.json not found or not OK", res.status);
+        console.warn("[UI] viability.json not found or not OK", res.status, url);
         state.viability = null;
         return;
       }
 
-      const data = await res.json();
-      state.viability = data || null;
+      // 4. IMPORTANT: guard against text/html responses
+      const text = await res.text();
+      try {
+        state.viability = JSON.parse(text);
+      } catch (parseErr) {
+        console.warn("[UI] viability.json is not valid JSON", text.slice(0, 200));
+        state.viability = null;
+        return;
+      }
 
       console.log("[UI] Loaded viability", state.viability);
+
     } catch (err) {
       console.warn("[UI] Failed to load viability.json", err);
       state.viability = null;
@@ -1338,13 +1354,14 @@ window.CampaignUI = window.CampaignUI || {};
     }
 
     // -----------------------------------------------------------------
-    // Load viability.json (NEW)
+    // Load viability.json (canonical prefix ONLY)
     // -----------------------------------------------------------------
     try {
+      // Prefer server-trusted prefix; do NOT guess runs/<runId>/ locally.
       let prefix =
-        contract?.prefix ||
-        (contract?.runId ? `runs/${contract.runId}/` : null) ||
-        (runId ? `runs/${runId}/` : null);
+        contract?.source_prefix ||  // what the writer just wrote into contract
+        contract?.prefix ||         // optional fallback if you ever add it
+        null;
 
       if (prefix && typeof loadViability === "function") {
         await loadViability(prefix);
@@ -1355,7 +1372,6 @@ window.CampaignUI = window.CampaignUI || {};
     } catch (err) {
       UI.log("viability load failed: " + (err?.message || err));
     }
-
     window.CampaignUI?.setContract?.(contract, { evidence: evidenceItems });
     UI.setStatus("Completed", "ok");
     return contract;

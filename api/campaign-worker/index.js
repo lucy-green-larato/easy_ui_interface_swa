@@ -11,6 +11,8 @@
 "use strict";
 
 const { BlobServiceClient } = require("@azure/storage-blob");
+const { canonicalPrefix } = require("../lib/prefix");
+
 // Viability engine (strategy_v2 quality + TAM/problem/diff/urgency warnings)
 let computeViability = null;
 try {
@@ -108,27 +110,11 @@ function parseQueueItem(raw) {
   return { raw };
 }
 
-function computePrefix(msg) {
-  let prefix = msg.prefix || msg.pathPrefix || msg.blobPrefix || "";
-
-  if (prefix && typeof prefix === "string") prefix = prefix.trim();
-
-  if (!prefix) {
-    const runId =
-      msg.runId ||
-      msg.run_id ||
-      msg.id ||
-      msg.fileId ||
-      msg.file_id ||
-      "unknown";
-
-    // fallback to standard traceable prefix
-    return getRunPrefix(runId);
-  }
-
-  if (!prefix.endsWith("/")) prefix += "/";
-  return prefix;
-}
+const prefix = canonicalPrefix({
+  userId: msg.userId || msg.user || "anonymous",
+  page: msg.page || "campaign",
+  runId
+});
 
 async function updateStatus(container, prefix, state, note, extra = {}) {
   const statusPath = `${prefix}status.json`;

@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js // 29-11-2025 Gold Writer v4
+// /api/campaign-write/index.js // 30-11-2025 Gold Writer v5 (canonical prefix)
 //
 // Responsibility:
 //   - Read strategy_v2 (campaign_strategy.json) produced by campaign-worker.
@@ -12,13 +12,15 @@
 //        * sales_enablement
 //        * embedded strategy_v2
 //        * embedded viability (V-A)
-//   - Write: results/runs/<runId>/campaign.json
-//   - Update: status.json.state = "writer_working" / "writer_ready"
+//   - Write: results/<canonicalPrefix>/campaign.json
+//   - Update: status.json.state = "writer_working" / "writer_ready" / "writer_error" / "Completed"
 //   - No LLM calls, no legacy dependence – pure rendering.
+//   - Folders are derived ONLY via canonicalPrefix(userId,page,runId).
 
 "use strict";
 
 const { BlobServiceClient } = require("@azure/storage-blob");
+const { canonicalPrefix } = require("../lib/prefix");
 
 const RESULTS_CONTAINER =
   process.env.CAMPAIGN_RESULTS_CONTAINER ||
@@ -37,13 +39,6 @@ function getBlobServiceClient() {
     );
   }
   return BlobServiceClient.fromConnectionString(conn);
-}
-
-async function getResultsContainer() {
-  const service = getBlobServiceClient();
-  const container = service.getContainerClient(RESULTS_CONTAINER);
-  await container.createIfNotExists();
-  return container;
 }
 
 function streamToString(readable) {
@@ -81,35 +76,7 @@ async function writeJson(container, blobPath, obj) {
   });
 }
 
-// ---------------------- Status + queue helpers ---------------------- //
-
-function parseQueueItem(raw) {
-  if (!raw) return {};
-  if (typeof raw === "string") {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return { raw };
-    }
-  }
-  if (typeof raw === "object") return raw;
-  return { raw };
-}
-
-function computePrefix(msg) {
-  let prefix = msg.prefix || msg.pathPrefix || msg.blobPrefix || "";
-
-  if (prefix && typeof prefix === "string") prefix = prefix.trim();
-
-  // fallback – use traceable prefix
-  if (!prefix) {
-    const runId = msg.runId || msg.run_id || "unknown";
-    return getRunPrefix(runId);
-  }
-
-  if (!prefix.endsWith("/")) prefix += "/";
-  return prefix;
-}
+// ---------------------- Status helpers ---------------------- //
 
 async function updateStatus(container, prefix, state, note, extra = {}) {
   const statusPath = `${prefix}status.json`;
@@ -461,7 +428,8 @@ function buildGoToMarketPlan({ strategy_v2 }) {
   const gtm = strategy_v2?.gtm_strategy || {};
   const buyerStrategy = strategy_v2?.buyer_strategy || {};
 
-  const objective = "Run a targeted, evidence-led campaign that converts the defined addressable cohort into qualified opportunities and revenue, aligned to the stated campaign aim.";
+  const objective =
+    "Run a targeted, evidence-led campaign that converts the defined addressable cohort into qualified opportunities and revenue, aligned to the stated campaign aim.";
   const targetMarket = {
     problems: uniqNonEmpty(buyerStrategy.problems || []),
     barriers: uniqNonEmpty(buyerStrategy.barriers || []),
@@ -472,11 +440,13 @@ function buildGoToMarketPlan({ strategy_v2 }) {
   const marketingActions = {
     route_implications: uniqNonEmpty(gtm.route_implications || []),
     motions: uniqNonEmpty(gtm.pipeline_model?.motions || []),
-    notes: "Channel, content, and cadence should be chosen to align with the recorded buyer problems, barriers, and urgency signals."
+    notes:
+      "Channel, content, and cadence should be chosen to align with the recorded buyer problems, barriers, and urgency signals."
   };
 
   const salesActions = {
-    focus: "Use the buyer problems, decision drivers, and proof points as the basis of all sales conversations.",
+    focus:
+      "Use the buyer problems, decision drivers, and proof points as the basis of all sales conversations.",
     guidance: [
       "Lead with the business problem and outcomes, not the product features.",
       "Use the discovery questions and buyer outcomes from the sales enablement pack to qualify and prioritise.",
@@ -593,16 +563,40 @@ function buildSalesEnablement({ strategy_v2, campaignRequirement }) {
 
 module.exports = async function (context, queueItem) {
   const log = context.log;
-  const msg = parseQueueItem(queueItem);
-  const prefix = computePrefix(msg);
+
+  // Normalise queueItem (string → object)
+  let msg = queueItem;
+  if (typeof msg === "string") {
+    try {
+      msg = JSON.parse(msg);
+    } catch {
+      msg = { raw: msg };
+    }
+  }
+
   const runId =
     msg.runId ||
     msg.run_id ||
-    (prefix.startsWith("runs/") ? prefix.split("/")[1] : "unknown");
+    msg.id ||
+    msg.fileId ||
+    msg.file_id ||
+    "unknown";
 
-  log(`[*] Campaign Writer starting for runId=${runId}, prefix=${prefix}`);
+  const userId =
+    msg.userId ||
+    msg.user ||
+    "anonymous";
 
-  const container = await getResultsContainer();
+  const page = msg.page || "campaign";
+
+  const prefix = canonicalPrefix({ userId, page, runId });
+
+  log(`[*] Campaign Writer starting for runId=${runId}, userId=${userId}, page=${page}`);
+  log(`[*] Using canonical prefix: ${prefix}`);
+
+  const svc = getBlobServiceClient();
+  const container = svc.getContainerClient(RESULTS_CONTAINER);
+  await container.createIfNotExists();
 
   await updateStatus(
     container,
@@ -617,9 +611,10 @@ module.exports = async function (context, queueItem) {
       container,
       `${prefix}strategy_v2/campaign_strategy.json`
     );
-    const strategy_v2 = strategyWrap && strategyWrap.strategy_v2
-      ? strategyWrap.strategy_v2
-      : strategyWrap || null;
+    const strategy_v2 =
+      strategyWrap && strategyWrap.strategy_v2
+        ? strategyWrap.strategy_v2
+        : strategyWrap || null;
 
     if (!strategy_v2 || typeof strategy_v2 !== "object") {
       throw new Error(
@@ -660,12 +655,22 @@ module.exports = async function (context, queueItem) {
     const contract = {
       schema: "campaign-gold-v2",
       version: "2025-11-27",
+
+      // IDs
       run_id: runId,
+      user_id: userId,
+      page,
+
+      // Canonical location for this run (UI must use this)
+      prefix,
       source_prefix: prefix,
+
       generated_at: new Date().toISOString(),
+
       // Embedded engines
       strategy_v2,
       viability: viability || null,
+
       // Gold sections (ES-C + supporting)
       executive_summary,
       value_proposition,
@@ -691,7 +696,14 @@ module.exports = async function (context, queueItem) {
       prefix,
       "Completed",
       "Campaign successfully assembled",
-      { completed: true }
+      {
+        completed: true,
+        runId,
+        userId,
+        page,
+        prefix,
+        campaign_path: outPath
+      }
     );
 
     log("[*] Campaign Writer completed", {
