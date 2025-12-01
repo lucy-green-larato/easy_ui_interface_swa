@@ -108,7 +108,7 @@ window.CampaignUI = window.CampaignUI || {};
 
   // === VIABILITY LOADER (top-level helper) ===
   async function loadViability(prefix) {
-    // 1. Canonical prefix MUST come from backend (router), not reconstructed
+
     if (!prefix) {
       console.warn("[UI] loadViability: missing prefix — viability skipped");
       state.viability = null;
@@ -116,27 +116,32 @@ window.CampaignUI = window.CampaignUI || {};
     }
 
     try {
-      // 2. Normalise trailing slash (canonicalPrefix always ends with '/')
       let p = String(prefix).trim();
       if (!p.endsWith("/")) p += "/";
 
-      // 3. ALWAYS use canonicalPrefix + correct blob-relative path
-      const url = `${state.resultsBaseUrl || ""}${p}strategy_v3/viability.json`;
+      // Validate that resultsBaseUrl is absolute
+      const base = state.resultsBaseUrl || "";
+      if (!base.startsWith("http")) {
+        console.warn("[UI] resultsBaseUrl is not absolute:", base);
+      }
+
+      const url = `${base}${p}strategy_v3/viability.json`;
+
+      console.log("[UI] viability url:", url);
 
       const res = await fetch(url, { method: "GET" });
 
       if (!res.ok) {
-        console.warn("[UI] viability.json not found or not OK", res.status, url);
+        console.warn("[UI] viability.json not found or not OK:", res.status, url);
         state.viability = null;
         return;
       }
 
-      // 4. IMPORTANT: guard against text/html responses
       const text = await res.text();
       try {
         state.viability = JSON.parse(text);
-      } catch (parseErr) {
-        console.warn("[UI] viability.json is not valid JSON", text.slice(0, 200));
+      } catch (err) {
+        console.warn("[UI] viability.json invalid JSON:", text.slice(0, 200));
         state.viability = null;
         return;
       }
@@ -1334,7 +1339,7 @@ window.CampaignUI = window.CampaignUI || {};
     try {
       const strategyV2 = await http(
         "GET",
-         `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign_strategy.json`,
+        `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign_strategy.json`,
         { timeoutMs: 20000 }
       );
       if (strategyV2 && typeof strategyV2 === "object") {
