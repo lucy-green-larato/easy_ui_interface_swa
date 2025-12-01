@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 01-12-2025 v20.0
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 01-12-2025 v21
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, 
@@ -154,29 +154,29 @@ window.CampaignUI = window.CampaignUI || {};
     }
   }
 
+
   function buildCsvSummary(rows, buyerIndustryInput) {
-    const allIndustries = Array.from(new Set(rows.map(r => r.SimplifiedIndustry).filter(Boolean))).sort();
+    // No DOM access — pure data only
+    const allIndustries = Array.from(
+      new Set(rows.map(r => r.SimplifiedIndustry).filter(Boolean))
+    ).sort();
+
     const buyerIndustry = (buyerIndustryInput || "").trim();
     const rowsScoped = buyerIndustry
-      ? rows.filter(r => String(r.SimplifiedIndustry || "").toLowerCase() === buyerIndustry.toLowerCase())
+      ? rows.filter(
+        r => String(r.SimplifiedIndustry || "").toLowerCase() === buyerIndustry.toLowerCase()
+      )
       : rows;
 
-    // Fill datalist options for convenience (UI nicety; harmless if duplicates)
-    const dl = document.getElementById("industryOptions");
-    if (dl && !dl.childElementCount) {
-      allIndustries.forEach(ind => {
-        const opt = document.createElement("option");
-        opt.value = ind;
-        dl.appendChild(opt);
-      });
-    }
-
-    // Frequencies
+    // Pure frequency buckets
     const itSpend = freqFromCSV(rowsScoped.map(r => r.ITSpendPct));
     const blockers = freqFromCSV(rowsScoped.map(r => r.TopBlockers));
     const purchases = freqFromCSV(rowsScoped.map(r => r.TopPurchases));
     const needs = freqFromCSV(rowsScoped.map(r => r.TopNeedsSupplier));
-    const sampleCompanies = rowsScoped.slice(0, 10).map(r => r.CompanyName).filter(Boolean);
+    const sampleCompanies = rowsScoped
+      .slice(0, 10)
+      .map(r => r.CompanyName)
+      .filter(Boolean);
 
     return {
       schema: `csv-summary-v1:${buyerIndustry ? buyerIndustry.toLowerCase() : "all"}`,
@@ -184,11 +184,13 @@ window.CampaignUI = window.CampaignUI || {};
       industriesAvailable: allIndustries,
       rowCountAll: rows.length,
       rowCountScoped: rowsScoped.length,
-      itSpend, blockers, purchases, needs,
+      itSpend,
+      blockers,
+      purchases,
+      needs,
       sampleCompanies
     };
   }
-
   // -- helper: normalise Executive Summary shapes --
   function resolveExecutiveSummaryShapes(es, esLegacy) {
     // Prefer new object shape
@@ -1100,6 +1102,29 @@ window.CampaignUI = window.CampaignUI || {};
     setPanelContent(wrap);
   }
 
+  function renderViability() {
+    const wrap = document.createElement("div");
+
+    // No viability loaded
+    if (!state.viability) {
+      wrap.appendChild(makePre("No viability signals found."));
+      setPanelContent(wrap);
+      return;
+    }
+
+    // Title
+    const h = document.createElement("h3");
+    h.textContent = "Strategy viability (v3 evaluator)";
+    wrap.appendChild(h);
+
+    // Render every field in viability.json
+    for (const [key, val] of Object.entries(state.viability)) {
+      wrap.appendChild(renderField(key, val));
+    }
+
+    setPanelContent(wrap);
+  }
+
   function renderActive() {
     if (!state.tabsMounted || !$("#sectionTabs")?.children?.length) {
       mountTabs(true);
@@ -1225,12 +1250,19 @@ window.CampaignUI = window.CampaignUI || {};
 
     status: (runId) =>
       `/api/campaign-status?runId=${encodeURIComponent(runId)}`,
+
+    // Writer always writes:  runs/<runId>/campaign.json
     fetchContract: (runId) =>
       `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign.json`,
+
+    // Strategy engine always writes: runs/<runId>/strategy_v2/campaign_strategy.json
     fetchStrategyV2: (runId) =>
       `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=strategy_v2/campaign_strategy.json`,
+
+    // Evidence loader expects full file names
     fetchEvidence: (runId) =>
       `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence.json`,
+
     fetchEvidenceLog: (runId) =>
       `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence_log.json`,
   };
@@ -1333,15 +1365,20 @@ window.CampaignUI = window.CampaignUI || {};
   // Fetch a run to completion (contract + evidence + strategy_v2 + viability)
   // ---------------------------------------------------------------------------
   async function fetchCompleteRun(runId, allowPoll) {
+    // 1. Wait for run to complete (router → worker → writer)
     const contract = await pollToCompletion(runId, allowPoll);
 
-    // Load strategy_v2
+    // --------------------------------------------------------------------
+    // 2. Fetch strategy_v2 (correct path from backend writer)
+    // --------------------------------------------------------------------
     try {
+      // MUST match backend writer: prefix + "strategy_v2/campaign_strategy.json"
       const strategyV2 = await http(
         "GET",
-        `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign_strategy.json`,
+        `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=strategy_v2/campaign_strategy.json`,
         { timeoutMs: 20000 }
       );
+
       if (strategyV2 && typeof strategyV2 === "object") {
         contract.strategy_v2 = strategyV2;
       }
@@ -1349,10 +1386,13 @@ window.CampaignUI = window.CampaignUI || {};
       UI.log("strategy_v2 fetch skipped: " + (e?.message || e));
     }
 
-    // Load evidence
+    // --------------------------------------------------------------------
+    // 3. Fetch evidence (canonical → legacy fallback)
+    // --------------------------------------------------------------------
     let evidenceItems = [];
     try {
       const evCanon = await http("GET", API.fetchEvidence(runId), { timeoutMs: 20000 });
+
       if (evCanon && typeof evCanon === "object" && Array.isArray(evCanon.claims)) {
         evidenceItems = evCanon.claims;
       } else if (Array.isArray(evCanon)) {
@@ -1365,25 +1405,35 @@ window.CampaignUI = window.CampaignUI || {};
       UI.log("Evidence fetch skipped: " + (e?.message || e));
     }
 
-    // -----------------------------------------------------------------
-    // Load viability.json (canonical prefix ONLY)
-    // -----------------------------------------------------------------
+    // --------------------------------------------------------------------
+    // 4. Load viability.json (canonical prefix ONLY)
+    // --------------------------------------------------------------------
     try {
-      // Prefer server-trusted prefix; do NOT guess runs/<runId>/ locally.
+      // Never guess prefix — trust server
       let prefix =
-        contract?.source_prefix ||  // what the writer just wrote into contract
-        contract?.prefix ||         // optional fallback if you ever add it
+        contract?.source_prefix ||   // writer-installed canonical prefix
+        contract?.prefix ||          // fallback if added later
         null;
 
-      if (prefix && typeof loadViability === "function") {
+      if (!prefix) {
+        UI.log("[UI] viability skipped: no canonical prefix present");
+      } else if (typeof loadViability === "function") {
+
+        // prefix is safe → call loader
         await loadViability(prefix);
         UI.log("[UI] viability loaded OK");
+
       } else {
-        UI.log("[UI] viability skipped: no prefix or loader missing");
+        UI.log("[UI] viability loader missing");
       }
+
     } catch (err) {
       UI.log("viability load failed: " + (err?.message || err));
     }
+
+    // --------------------------------------------------------------------
+    // 5. Render contract (writer’s output)
+    // --------------------------------------------------------------------
     window.CampaignUI?.setContract?.(contract, { evidence: evidenceItems });
     UI.setStatus("Completed", "ok");
     return contract;
@@ -1484,6 +1534,11 @@ window.CampaignUI = window.CampaignUI || {};
 
   // ---------- Boot ----------
   document.addEventListener("DOMContentLoaded", () => {
+    state.resultsBaseUrl =
+      window.CONFIG?.resultsBaseUrl ||
+      "https://<YOUR-STORAGE-ACCOUNT>.blob.core.windows.net/results/";
+
+    console.log("[UI] resultsBaseUrl =", state.resultsBaseUrl);
     mountTabs();
     requestAnimationFrame(() => {
       if (!state.tabsMounted || !$("#sectionTabs")?.children?.length) mountTabs(true);
@@ -1562,6 +1617,14 @@ window.CampaignUI = window.CampaignUI || {};
       });
     }
   });
+  // --------------------------------------------------------------
+  // Set absolute resultsBaseUrl (Blob storage public endpoint)
+  // --------------------------------------------------------------
+  state.resultsBaseUrl =
+    window.CONFIG?.resultsBaseUrl ||
+    "https://<YOUR-STORAGE-ACCOUNT>.blob.core.windows.net/results/";
+
+  console.log("[UI] resultsBaseUrl =", state.resultsBaseUrl);
 
   const SECTIONS = [
     { id: "exec", label: "Executive summary", render: renderExecutiveSummary },
@@ -1570,7 +1633,8 @@ window.CampaignUI = window.CampaignUI || {};
     { id: "off", label: "Offering", render: renderPositioning },     // Portfolio & Capabilities
     { id: "se", label: "Sales enablement", render: renderSalesEnablement }, // Battle card
     { id: "pp", label: "Proof points", render: renderCaseLibrary },     // Case studies
-    { id: "elog", label: "Evidence log", render: renderEvidenceLog }
+    { id: "elog", label: "Evidence log", render: renderEvidenceLog },
+    { id: "viab", label: "Viability", render: renderViability }
   ];
 
   // === ROUTING MAP (backend → UI tabs) ===
@@ -1589,11 +1653,9 @@ window.CampaignUI = window.CampaignUI || {};
     "how_to_win": "gtm",
     "competitive_context": "gtm",
     "messaging_matrix": "msg",
-    "value_proposition": "off",
     "portfolio_and_tech": "off",
     "sales_enablement": "se",
     "case_studies": "pp",
-    "proof_points": "pp",
     "evidence_log": "elog"
   };
 })();
