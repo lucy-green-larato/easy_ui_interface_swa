@@ -1553,47 +1553,7 @@ window.CampaignUI = window.CampaignUI || {};
         }
       });
     }
-    // --- Populate buyerIndustrySelect from CSV --- //
-    (function updateIndustryUI() {
-      const sel = $("#buyerIndustrySelect");
-      const custom = $("#buyerIndustryCustom");
-
-      if (!sel || !custom) return;
-
-      // Reset UI
-      sel.innerHTML = "";
-      custom.style.display = "none";
-      custom.value = "";
-
-      const optAuto = document.createElement("option");
-      optAuto.value = "";
-      optAuto.textContent = "(auto-detect from CSV)";
-      sel.appendChild(optAuto);
-
-      const industries = csvSummary?.industriesAvailable || [];
-      industries.forEach(ind => {
-        const opt = document.createElement("option");
-        opt.value = ind;
-        opt.textContent = ind;
-        sel.appendChild(opt);
-      });
-
-      const optCustom = document.createElement("option");
-      optCustom.value = "__custom";
-      optCustom.textContent = "Custom…";
-      sel.appendChild(optCustom);
-
-      // Switch logic
-      sel.addEventListener("change", () => {
-        if (sel.value === "__custom") {
-          custom.style.display = "block";
-          custom.focus();
-        } else {
-          custom.style.display = "none";
-        }
-      });
-    })();
-
+    
     const payload = {
       page: "campaign",
       salesModel,
