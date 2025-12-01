@@ -1,4 +1,4 @@
-<!-- web/campaign/index.html 31-10-2025 v 4 -->
+<!-- web/campaign/index.html 01-12-2025 v 5 -->
 <!doctype html>
 <html lang="en">
 
@@ -59,6 +59,9 @@
   <main class="workboard">
     <!-- Left rail: inputs -->
     <aside class="panel left card rail" id="inputs" aria-label="Run inputs">
+      <div id="csvErrorBanner" class="alert error"
+        style="display:none; margin-bottom:12px; padding:8px; border-left:4px solid #d9534f; background:#f9d6d5; color:#7b1c1c;">
+      </div>
       <div class="group">
         <h3>Data source</h3>
         <label for="runSelect">Pick a recent Power BI run</label>
@@ -82,8 +85,16 @@
         <label for="companyLinkedIn" style="margin-top:8px">LinkedIn</label>
         <input id="companyLinkedIn" type="url" placeholder="https://www.linkedin.com/company/..." />
         <label for="buyerIndustry">Industry (optional)</label>
-        <input id="buyerIndustry" name="buyerIndustry" type="text" placeholder="e.g., Construction"
-          list="industryOptions" />
+        <label for="buyerIndustrySelect">Industry (optional)</label>
+        <!-- Main selector -->
+        <select id="buyerIndustrySelect">
+          <option value="">(auto-detect from CSV)</option>
+          <!-- CSV-driven options inserted dynamically -->
+          <option value="__custom">Custom…</option>
+        </select>
+        <!-- Shown only when user selects Custom… -->
+        <input id="buyerIndustryCustom" type="text" placeholder="Enter custom industry"
+          style="display:none; margin-top:6px;" />
         <datalist id="industryOptions"></datalist>
         <label for="supplier_products" class="block text-sm font-medium mb-1">Products / services to include (comma,
           semicolon, or newline separated)</label>
@@ -154,6 +165,16 @@
     <!-- Right rail: assist / tips -->
     <aside class="panel right card assist">
       <div class="section">
+        <div id="runErrorBanner" class="alert error"
+          style="display:none; margin:8px 0; padding:10px; border-left:4px solid #d9534f; background:#fce3e2; color:#7b1c1c;">
+        </div>
+        <button id="retryBtn" class="btn secondary small" type="button" style="display:none; margin-bottom:12px;">
+          Retry run
+        </button>
+        <button id="restartRunBtn" class="btn secondary small" type="button" style="display:none; margin-bottom:12px;">
+          Restart with same inputs
+        </button>
+
         <strong>Tips</strong>
         <ul class="list">
           <li>Upload a CSV, adjust options, then press <em>Go</em>.</li>
@@ -163,6 +184,12 @@
       <div class="section">
         <strong>Debug</strong>
         <div class="pre" id="debugLog" style="max-height:42vh; overflow:auto;"></div>
+      </div>
+      <div class="section">
+        <strong>Run timeline</strong>
+        <div id="runTimeline" class="pre" style="max-height:42vh; overflow:auto; font-size:12px; line-height:1.35;">
+          (no events yet)
+        </div>
       </div>
     </aside>
   </main>

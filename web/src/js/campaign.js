@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 01-12-2025 v21
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 01-12-2025 v23
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, 
@@ -19,7 +19,8 @@ window.CampaignUI = window.CampaignUI || {};
     evidence: [],
     active: "exec",
     tabsMounted: false,
-    viability: null
+    viability: null,
+    timeline: []
   };
 
   // ---------- Generic UI helpers ----------
@@ -1209,6 +1210,31 @@ window.CampaignUI = window.CampaignUI || {};
     }
   };
 
+  UI.pushTimeline = function (phase, note) {
+    if (!phase) return;
+
+    const at = new Date().toISOString();
+    const entry = { at, phase, note };
+
+    state.timeline.push(entry);
+
+    const box = document.getElementById("runTimeline");
+    if (!box) return;
+
+    const autoScroll = (box.scrollTop + box.clientHeight + 40) >= box.scrollHeight;
+
+    const line = `[${at}] ${phase}${note ? " — " + note : ""}\n`;
+    if (box.textContent.trim() === "(no events yet)") {
+      box.textContent = line;
+    } else {
+      box.textContent += line;
+    }
+
+    if (autoScroll) {
+      box.scrollTop = box.scrollHeight;
+    }
+  };
+
   function withTimeout(ms, signal) {
     const ctrl = new AbortController();
     const id = setTimeout(() => ctrl.abort("timeout"), ms);
@@ -1298,7 +1324,23 @@ window.CampaignUI = window.CampaignUI || {};
       ? campaign_requirement_raw
       : null;
 
-    const buyer_industry = ($("#buyerIndustry")?.value || "").trim() || null;
+    // ----------------------
+    // Industry selector logic (CSV-backed)
+    // ----------------------
+
+    // CASE A: User selects from dropdown
+    let buyer_industry = null;
+
+    const industrySelect = $("#buyerIndustrySelect");
+    const industryCustom = $("#buyerIndustryCustom");
+
+    if (industrySelect) {
+      if (industrySelect.value === "__custom") {
+        buyer_industry = (industryCustom?.value || "").trim() || null;
+      } else if (industrySelect.value) {
+        buyer_industry = industrySelect.value.trim();
+      }
+    }
 
     // CSV presence?
     const fileEl = $("#csvUpload");
@@ -1330,6 +1372,80 @@ window.CampaignUI = window.CampaignUI || {};
       rowCount = rows.length;
       csvSummary = buildCsvSummary(rows, buyer_industry || "");
     }
+    // Populate <select id="buyerIndustrySelect"> with sorted distinct industries
+    const sel = document.getElementById("buyerIndustrySelect");
+    const customField = document.getElementById("buyerIndustryCustom");
+
+    if (sel) {
+      // Remove all before rebuilding (avoid stale UI)
+      while (sel.firstChild) sel.removeChild(sel.firstChild);
+
+      const optAuto = document.createElement("option");
+      optAuto.value = "";
+      optAuto.textContent = "(auto-detect from CSV)";
+      sel.appendChild(optAuto);
+
+      allIndustries.forEach(ind => {
+        const opt = document.createElement("option");
+        opt.value = ind;
+        opt.textContent = ind;
+        sel.appendChild(opt);
+      });
+
+      const optCustom = document.createElement("option");
+      optCustom.value = "__custom";
+      optCustom.textContent = "Custom…";
+      sel.appendChild(optCustom);
+
+      // show/hide custom input
+      sel.addEventListener("change", () => {
+        if (sel.value === "__custom") {
+          if (customField) customField.style.display = "block";
+        } else {
+          if (customField) customField.style.display = "none";
+        }
+      });
+    }
+    // --- Populate buyerIndustrySelect from CSV --- //
+    (function updateIndustryUI() {
+      const sel = $("#buyerIndustrySelect");
+      const custom = $("#buyerIndustryCustom");
+
+      if (!sel || !custom) return;
+
+      // Reset UI
+      sel.innerHTML = "";
+      custom.style.display = "none";
+      custom.value = "";
+
+      const optAuto = document.createElement("option");
+      optAuto.value = "";
+      optAuto.textContent = "(auto-detect from CSV)";
+      sel.appendChild(optAuto);
+
+      const industries = csvSummary?.industriesAvailable || [];
+      industries.forEach(ind => {
+        const opt = document.createElement("option");
+        opt.value = ind;
+        opt.textContent = ind;
+        sel.appendChild(opt);
+      });
+
+      const optCustom = document.createElement("option");
+      optCustom.value = "__custom";
+      optCustom.textContent = "Custom…";
+      sel.appendChild(optCustom);
+
+      // Switch logic
+      sel.addEventListener("change", () => {
+        if (sel.value === "__custom") {
+          custom.style.display = "block";
+          custom.focus();
+        } else {
+          custom.style.display = "none";
+        }
+      });
+    })();
 
     const payload = {
       page: "campaign",
@@ -1356,10 +1472,12 @@ window.CampaignUI = window.CampaignUI || {};
     UI.setRun(runId);
     UI.log(`Run started: ${runId}`);
     UI.setStatus("Queued", "run");
+    state.timeline = [];
+    const tl = document.getElementById("runTimeline");
+    if (tl) tl.textContent = "(no events yet)";
 
     return await fetchCompleteRun(runId, true);
   }
-
 
   // ---------------------------------------------------------------------------
   // Fetch a run to completion (contract + evidence + strategy_v2 + viability)
@@ -1464,7 +1582,68 @@ window.CampaignUI = window.CampaignUI || {};
       const peek = await http("GET", API.status(runId), { timeoutMs: 12000 });
       const stateName = normState(peek?.state);
       UI.setStatus(stateName, stateName === "Failed" ? "err" : "run");
+
+      // ----- NEW: Failure Banner & Retry Button -----
+      const errorBanner = document.getElementById("runErrorBanner");
+      const retryBtn = document.getElementById("retryBtn");
+      const restartBtn = document.getElementById("restartRunBtn");
+      if (stateName.toLowerCase() === "failed") {
+        const msg =
+          st?.error?.message ||
+          st?.error ||
+          "This run failed. Please try again.";
+
+        // Show banner
+        if (errorBanner) {
+          errorBanner.textContent = "Run failed: " + msg;
+          errorBanner.style.display = "block";
+        }
+
+        // Show retry button (re-poll same run)
+        if (retryBtn) {
+          retryBtn.dataset.runId = runId;
+          retryBtn.style.display = "inline-block";
+        }
+
+        // Show restart button (start a NEW run from same inputs)
+        if (restartBtn) {
+          restartBtn.dataset.runId = runId;
+          restartBtn.style.display = "inline-block";
+        }
+      } else {
+        // Clear banner & buttons once we recover or start polling again
+        if (errorBanner) {
+          errorBanner.style.display = "none";
+        }
+        if (retryBtn) {
+          retryBtn.style.display = "none";
+          retryBtn.dataset.runId = "";
+        }
+        if (restartBtn) {
+          restartBtn.style.display = "none";
+          restartBtn.dataset.runId = "";
+        }
+      }
       UI.log(`Status: ${stateName}`);
+
+      // TIMELINE SYNC — history + live update
+      try {
+        const hist = Array.isArray(st?.history) ? st.history : [];
+
+        // replay items not yet seen
+        const known = new Set(state.timeline.map(e => e.at + "|" + e.phase + "|" + (e.note || "")));
+        for (const h of hist) {
+          const sig = (h.at || "") + "|" + (h.phase || "") + "|" + (h.note || "");
+          if (!known.has(sig)) {
+            UI.pushTimeline(h.phase || "?", h.note || "");
+          }
+        }
+
+        // also add the current stateName as a synthetic "status" event
+        UI.pushTimeline("status", stateName);
+      } catch (_) {
+        /* safe fail */
+      }
 
       if (isTerminalSuccess(peek)) {
         let lastErr;
@@ -1565,7 +1744,9 @@ window.CampaignUI = window.CampaignUI || {};
       if (!go) return;
       const hasCsv = !!(csv && csv.files && csv.files.length > 0);
       const hasRecent = !!(recent && recent.value && recent.value.trim() !== "");
-      go.disabled = isRunning || !(hasCsv || hasRecent);
+      const banner = document.getElementById("csvErrorBanner");
+      const csvInvalid = banner && banner.style.display !== "none";
+      go.disabled = isRunning || csvInvalid || !(hasCsv || hasRecent);
     }
 
     function formatBytes(n) {
@@ -1577,11 +1758,57 @@ window.CampaignUI = window.CampaignUI || {};
     }
 
     if (csv) {
-      csv.addEventListener("change", () => {
+      csv.addEventListener("change", async () => {
         const f = csv.files && csv.files[0];
-        if (csvBadge) {
-          csvBadge.textContent = f ? `${f.name} (${formatBytes(f.size)})` : "(no file)";
+        const banner = document.getElementById("csvErrorBanner");
+
+        // Reset UI defaults
+        banner.style.display = "none";
+        banner.textContent = "";
+
+        if (!f) {
+          csvBadge.textContent = "(no file)";
+          updateGo();
+          return;
         }
+
+        // Update badge
+        csvBadge.textContent = `${f.name} (${formatBytes(f.size)})`;
+
+        // --- VALIDATION RULES ---
+        try {
+          const raw = await f.text();
+
+          // 1) Must not be empty
+          if (!raw.trim()) throw new Error("CSV file is empty.");
+
+          const lines = raw.split(/\r?\n/).filter(Boolean);
+
+          if (lines.length < 2)
+            throw new Error("CSV must contain a header row and at least 1 data row.");
+
+          // 2) Must contain Company Name + Company Number
+          const header = lines[0].toLowerCase();
+
+          if (!header.includes("company") || !header.includes("number"))
+            throw new Error("CSV must include 'Company Name' and 'Company Number' columns.");
+
+          // 3) Max size check (protect your function)
+          if (lines.length > 50000)
+            throw new Error("CSV is too large. Please upload a file with fewer than 50,000 rows.");
+
+          // 4) No unreadable binary chars (common Excel corruption)
+          if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(raw))
+            throw new Error("CSV contains unreadable characters. Please re-export it.");
+
+          // SUCCESS → clear errors
+          banner.style.display = "none";
+        } catch (err) {
+          banner.textContent = "CSV error: " + (err.message || err);
+          banner.style.display = "block";
+          csvBadge.textContent = "(invalid CSV)";
+        }
+
         updateGo();
       });
     }
@@ -1604,6 +1831,35 @@ window.CampaignUI = window.CampaignUI || {};
           alert("Campaign run failed: " + (err?.message || err));
         } finally {
           setRunning(false);
+        }
+      });
+    }
+    // -------------------------
+    // RETRY BUTTON
+    // -------------------------
+    const retryBtn = document.getElementById("retryBtn");
+    if (retryBtn) {
+      retryBtn.addEventListener("click", async () => {
+        const runId = retryBtn.dataset.runId;
+        if (!runId) return;
+
+        UI.log(`Retrying run: ${runId}`);
+        UI.setStatus("Retrying…", "run");
+
+        // Hide banner
+        const banner = document.getElementById("runErrorBanner");
+        if (banner) banner.style.display = "none";
+        retryBtn.style.display = "none";
+
+        try {
+          await fetchCompleteRun(runId, true);
+        } catch (err) {
+          UI.log("Retry failed: " + (err?.message || err));
+          UI.setStatus("Failed", "err");
+          if (banner) {
+            banner.textContent = "Retry failed: " + (err?.message || err);
+            banner.style.display = "block";
+          }
         }
       });
     }
