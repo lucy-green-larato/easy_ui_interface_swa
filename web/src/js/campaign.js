@@ -1506,12 +1506,59 @@ window.CampaignUI = window.CampaignUI || {};
       csvTextRaw = text;
       const rows = csvToArray(text);
       rowCount = rows.length;
+
+      // Build CSV summary and store it
       csvSummary = buildCsvSummary(rows, buyer_industry || "");
       state.csvSummary = csvSummary;
+
+      // Rebuild the Industry dropdown from CSV + wire up Custom…
+      const sel = document.getElementById("buyerIndustrySelect");
+      const customField = document.getElementById("buyerIndustryCustom");
+
+      if (sel && customField) {
+        // Clear any existing options
+        sel.innerHTML = "";
+
+        // 1) Auto-detect option
+        const optAuto = document.createElement("option");
+        optAuto.value = "";
+        optAuto.textContent = "(auto-detect from CSV)";
+        sel.appendChild(optAuto);
+
+        // 2) CSV-driven industries
+        const industries = Array.isArray(csvSummary?.industriesAvailable)
+          ? csvSummary.industriesAvailable
+          : [];
+
+        industries.forEach(ind => {
+          const opt = document.createElement("option");
+          opt.value = ind;
+          opt.textContent = ind;
+          sel.appendChild(opt);
+        });
+
+        // 3) Custom option
+        const optCustom = document.createElement("option");
+        optCustom.value = "__custom";
+        optCustom.textContent = "Custom…";
+        sel.appendChild(optCustom);
+
+        // Reset custom field
+        customField.style.display = "none";
+        customField.value = "";
+
+        // Toggle custom input on selection
+        sel.addEventListener("change", () => {
+          if (sel.value === "__custom") {
+            customField.style.display = "block";
+            customField.focus();
+          } else {
+            customField.style.display = "none";
+          }
+        });
+      }
     }
-    if (csvSummary) {
-      state.csvSummary = csvSummary;
-    }
+
 
     // Populate <select id="buyerIndustrySelect"> with sorted distinct industries
     const sel = document.getElementById("buyerIndustrySelect");
@@ -1553,7 +1600,7 @@ window.CampaignUI = window.CampaignUI || {};
         }
       });
     }
-    
+
     const payload = {
       page: "campaign",
       salesModel,
