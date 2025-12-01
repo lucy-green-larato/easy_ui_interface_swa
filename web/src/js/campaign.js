@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 30-11-2025 v19
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 01-12-2025 v20.0
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, 
@@ -1217,10 +1217,17 @@ window.CampaignUI = window.CampaignUI || {};
 
   const API = {
     start: () => `/api/campaign-start`,
-    status: (runId) => `/api/campaign-status?runId=${encodeURIComponent(runId)}`,
-    fetchContract: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign`,
-    fetchEvidence: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence`,
-    fetchEvidenceLog: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence_log`,
+
+    status: (runId) =>
+      `/api/campaign-status?runId=${encodeURIComponent(runId)}`,
+    fetchContract: (runId) =>
+      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign.json`,
+    fetchStrategyV2: (runId) =>
+      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=strategy_v2/campaign_strategy.json`,
+    fetchEvidence: (runId) =>
+      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence.json`,
+    fetchEvidenceLog: (runId) =>
+      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence_log.json`,
   };
 
   // ---------------------------------------------------------------------------
@@ -1327,7 +1334,7 @@ window.CampaignUI = window.CampaignUI || {};
     try {
       const strategyV2 = await http(
         "GET",
-        `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=strategy_v2`,
+         `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign_strategy.json`,
         { timeoutMs: 20000 }
       );
       if (strategyV2 && typeof strategyV2 === "object") {
