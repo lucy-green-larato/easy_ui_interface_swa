@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 26-11-2025 — v34.0
+// /api/campaign-evidence/index.js 01-12-2025 — v35
 // Phase 1 canonical outputs:
 // - csv_normalized.json
 // - needs_map.json
@@ -178,12 +178,9 @@ function mdSection(markdown, headingPattern) {
       out.push(line);
       continue;
     }
-
-    if (inSection && /^\\s{0,3}#{1,6}\\s+/.test(line)) {
-      // next heading – section ends
+    if (inSection && /^\s{0,3}#{1,6}\s+/.test(line)) {
       break;
     }
-
     if (inSection) {
       out.push(line);
     }
@@ -364,16 +361,50 @@ module.exports = async function (context, job) {
     ? (() => { try { return JSON.parse(job); } catch { return {}; } })()
     : (job && typeof job === "object" ? job : {});
 
-  const runId = (msg.runId && String(msg.runId))
-    || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+  let runId = (msg.runId && String(msg.runId)) || null;
+
 
   // Canonical input object (allow legacy shapes but don't mutate msg directly)
   let input = msg.input || msg.inputs || msg || {};
   if (input == null || typeof input !== "object") input = {};
+  const userId = msg.userId || msg.user || "anonymous";
+  const page = msg.page || "campaign";
+  const explicitRunId = msg.runId || msg.run_id || runId;
+  if (!prefix) {
+    prefix = canonicalPrefix({ userId, page, runId: explicitRunId });
+    context.log.warn("campaign_evidence_missing_prefix_using_canonical", {
+      userId,
+      page,
+      runId: explicitRunId
+    });
+  }
 
-  // Prefix: trust message.prefix if present (from /campaign-start), otherwise fallback
-  let prefix = (msg.prefix && String(msg.prefix).trim()) || `runs/${runId}/`;
+  // If prefix is a fully-qualified blob URL, strip the container URL prefix.
+  if (prefix.startsWith(container.url + "/")) {
+    prefix = prefix.slice((container.url + "/").length);
+  }
 
+  // Normalise leading slashes
+  prefix = prefix.replace(/^\/+/, "");
+
+  // Ensure trailing slash
+  if (!prefix.endsWith("/")) {
+    prefix += "/";
+  }
+
+  // ---- Recover runId from prefix if it was slimmed away or not present on the message ----
+  if (!runId) {
+    if (typeof prefix === "string") {
+      const parts = prefix.split("/").filter(Boolean);
+      // expected layout: runs/<page>/<userId>/<YYYY>/<MM>/<DD>/<runId>
+      if (parts.length >= 7) {
+        runId = parts[parts.length - 1];
+      }
+    }
+    if (!runId) {
+      runId = "unknown";
+    }
+  }
   // Backfill slimmed queue payloads from saved input.json (idempotent)
   try {
     const persisted = await getJson(container, `${prefix}input.json`);
@@ -471,6 +502,8 @@ module.exports = async function (context, job) {
   await updateStatus(
     container,
     prefix,
+    "EvidenceDigest",
+    "start",
     {
       runId,
       state: "EvidenceDigest",
@@ -602,7 +635,7 @@ module.exports = async function (context, job) {
       // JSON-LD products (schema.org Product) on homepage
       try {
         if (site_home_text) {
-          const ldProducts = extractProductsFromLdJson(site_home_text);
+          const ldProducts = await extractProductsFromLdJson(site_home_text);
           for (const p of ldProducts) {
             const name = String(p?.title || "").trim();
             if (!name) continue;
@@ -640,16 +673,6 @@ module.exports = async function (context, job) {
         chosen = [...new Set(declaredList.map(s => String(s).trim()).filter(Boolean))].slice(0, 6);
         // note: don't touch 'evidence' (not defined); stamp later in productsMeta.notes
       }
-
-      // Persist diagnostics now (use putJson; writeJson/runPath don't exist here)
-      await putJson(container, `${prefix}products_meta.json`, {
-        declared: declaredList,
-        observed: observedList,
-        validated: validated.map(v => ({ name: v.name, score: Number(v.score.toFixed(3)), matches: v.matches })),
-        chosen,
-        problem_signals_sample: Array.isArray(problemSignals) ? problemSignals.slice(0, 25) : []
-      });
-      // ==== END fused validation ====
 
       // B) Site graph titles/snippets/nav (light heuristic: short name-like tokens)
       try {
@@ -1004,10 +1027,61 @@ module.exports = async function (context, job) {
     if (siteGraph.pages.length) {
       try {
         const host = siteGraph.pages[0].host || hostnameOf(supplierWebsite);
-        const candidateLinks = await collectCaseStudyLinks(siteGraph.pages, siteGraph.links, host);
-        pdfExtracts = await fetchCaseStudySummaries(candidateLinks);
+        const candidateLinks = await collectCaseStudyLinks(
+          siteGraph.pages,
+          siteGraph.links,
+          host
+        );
+
+        // ---- ISSUE 12 FIX: validate + normalise case-study URLs ----
+        let cleanedCaseLinks = [];
+        try {
+          const supplierHost = hostnameOf(supplierWebsite) || host || "";
+          const normalised = new Set();
+
+          for (const raw of candidateLinks || []) {
+            if (!raw) continue;
+
+            let u;
+            try {
+              // enforce https + parse
+              u = new URL(toHttps(String(raw).trim()));
+            } catch {
+              continue;                  // invalid URL → skip
+            }
+
+            // Must be https
+            if (u.protocol !== "https:") continue;
+
+            // Must match supplier/company domain to prevent cross-host collisions
+            if (!u.hostname || !supplierHost || u.hostname !== supplierHost) continue;
+
+            // Remove query + fragment
+            u.search = "";
+            u.hash = "";
+
+            // Normalise trailing slashes
+            const finalUrl = u.toString().replace(/\/+$/, "");
+            normalised.add(finalUrl);
+          }
+
+          cleanedCaseLinks = Array.from(normalised).slice(0, MAX_CASESTUDIES);
+        } catch (normErr) {
+          context.log.warn(
+            "[campaign-evidence] case study URL normalisation failed",
+            String(normErr?.message || normErr)
+          );
+          cleanedCaseLinks = [];
+        }
+
+        // ---- Safe fetch: no collisions, no invalid links ----
+        pdfExtracts = await fetchCaseStudySummaries(cleanedCaseLinks);
+
       } catch (e) {
-        context.log.warn("[campaign-evidence] case study discovery failed", String(e?.message || e));
+        context.log.warn(
+          "[campaign-evidence] case study discovery failed",
+          String(e?.message || e)
+        );
       }
     }
     await putJson(container, `${prefix}pdf_extracts.json`, pdfExtracts);
@@ -1482,8 +1556,12 @@ module.exports = async function (context, job) {
         }
       };
 
-      // 0) CSV summary at index 0 if present
-      pushIf((it, i) => i === 0);
+      // 0) CSV summary (detect by signature, not index)
+      pushIf(
+        (it) =>
+          String(it?.source_type || "").toLowerCase() === "csv" &&
+          /summary/i.test(String(it?.title || ""))
+      );
 
       // 1) CSV buyer signals
       pushIf((it) => /csv/i.test(String(it?.source_type || "")) && /signals|population|csv/i.test(String(it?.title || "")));
@@ -1655,17 +1733,20 @@ module.exports = async function (context, job) {
     // Build evidence_v2/markdown_pack.json, insights_v1/insights.json and buyer_logic.json
     try {
       const markdownPack = await buildMarkdownPack(container, prefix);
-      console.log("🧪 markdownPack keys:", Object.keys(markdownPack || {}));
-      console.log("🧪 sample persona_pressures:", markdownPack?.persona_pressures?.slice(0, 2));
+      context.log("[campaign-evidence] markdownPack snapshot", {
+        keys: Object.keys(markdownPack || {}),
+        samplePersonaPressures: Array.isArray(markdownPack?.persona_pressures)
+          ? markdownPack.persona_pressures.slice(0, 2)
+          : []
+      });
       const ev2Prefix = `${prefix}evidence_v2/`;
       await putJson(container, `${ev2Prefix}markdown_pack.json`, markdownPack);
     } catch (e) {
       context.log.warn(
-        "[campaign-evidence] markdown pack build failed (early snapshot) ",
+        "[campaign-evidence] markdown pack build failed (early snapshot)",
         String(e?.message || e)
       );
     }
-
     try {
       await buildInsights(container, prefix);
     } catch (e) {

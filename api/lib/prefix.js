@@ -1,46 +1,66 @@
-// /api/lib/prefix.js 29-11-2025 v8
-// Single source of truth for results blob prefixes
+// /api/lib/prefix.js — Unified Prefix Engine (v10, 29-11-2025)
+// EXACTLY matches campaign-start prefix logic.
 // Layout (container-relative):
 //   runs/<page>/<userId>/<YYYY>/<MM>/<DD>/<runId>/
 //
-//  - page   → logical tool or flow name ("campaign", etc.)
-//  - userId → user or "anonymous"
-//  - runId  → required; any unique string/UUID
-//  - date   → optional Date, defaults to now (UTC)
+// - page sanitisation matches sanitizePage() from campaign-start
+// - userId sanitisation matches campaign-start (allows . and @)
+// - runId is NOT sanitised (campaign-start behaviour)
+// - date handled in UTC
 
 "use strict";
 
 /**
- * Normalise a path segment into a safe, compact string.
- * - lowercases
- * - replaces non [a-z0-9_-] with "-"
- * - collapses multiple "-" into one
- * - uses fallback if empty
+ * Sanitize page segment.
+ * Matches campaign-start sanitizePage:
+ *   - lowercases
+ *   - keeps a-z 0-9 . _ -
+ *   - replaces everything else with "-"
+ *   - collapses multiple "-" into one
  */
-function sanitizeSegment(value, fallbackIfEmpty) {
+function sanitizePageSegment(value) {
   let s = value == null ? "" : String(value).trim();
-  if (!s && fallbackIfEmpty) s = String(fallbackIfEmpty);
-  if (!s) s = "unknown";
-
-  s = s
+  if (!s) s = "campaign";
+  return s
     .toLowerCase()
-    .replace(/[^a-z0-9_\-]/g, "-")
+    .replace(/[^a-z0-9._-]/g, "-")
     .replace(/-+/g, "-");
-
-  return s;
 }
 
 /**
- * Compute the canonical results prefix.
+ * Sanitize userId segment.
+ * MUST MATCH campaign-start userId sanitiser:
+ *   /[^a-z0-9_.@-]/g
+ * This allows dots and "@", which are legitimate Azure AD identifiers.
+ */
+function sanitizeUserSegment(value) {
+  let s = value == null ? "" : String(value).trim();
+  if (!s) s = "anonymous";
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9_.@-]/g, "-")
+    .replace(/-+/g, "-");
+}
+
+/**
+ * Sanitize runId segment.
+ * campaign-start does NOT sanitize runId — it is used verbatim.
+ * We only trim whitespace and default to "run" if missing.
+ */
+function sanitizeRunId(value) {
+  return value ? String(value).trim() : "run";
+}
+
+/**
+ * Compute canonical prefix — MUST MATCH campaign-start output EXACTLY.
  *
  * @param {Object} params
- * @param {string} params.userId  - logical user id (e.g. "anonymous" in tests)
- * @param {string} params.page    - logical page/flow key (e.g. "campaign")
- * @param {string} params.runId   - unique run identifier (UUID, etc.)
- * @param {Date}   [params.date]  - optional Date; defaults to now (UTC)
+ * @param {string} params.userId
+ * @param {string} params.page
+ * @param {string} params.runId
+ * @param {Date}   [params.date]
  *
- * @returns {string} container-relative prefix:
- *   "runs/<page>/<userId>/<YYYY>/<MM>/<DD>/<runId>/"
+ * @returns {string} "runs/<page>/<userId>/<YYYY>/<MM>/<DD>/<runId>/"
  */
 function canonicalPrefix({ userId, page, runId, date } = {}) {
   const d = date instanceof Date ? date : new Date();
@@ -49,51 +69,44 @@ function canonicalPrefix({ userId, page, runId, date } = {}) {
   const month = String(d.getUTCMonth() + 1).padStart(2, "0");
   const day   = String(d.getUTCDate()).padStart(2, "0");
 
-  const segUser = sanitizeSegment(userId, "anonymous");
-  const segPage = sanitizeSegment(page, "campaign");
-  const segRun  = sanitizeSegment(runId, "run");
+  const segPage = sanitizePageSegment(page);
+  const segUser = sanitizeUserSegment(userId);
+  const segRun  = sanitizeRunId(runId);
 
   return `runs/${segPage}/${segUser}/${year}/${month}/${day}/${segRun}/`;
 }
 
 /**
- * Backwards-compatible helper for call-sites that pass the
- * whole queue message instead of explicit fields.
- *
- * This is a THIN WRAPPER over canonicalPrefix and MUST NOT
- * introduce any different folder scheme.
- *
- * @param {Object} msg - queue message or similar
- * @returns {string} canonical prefix
+ * Compute prefix directly from a queue message or similar object.
+ * This MUST NOT introduce any new layout — it is a thin wrapper
+ * for backwards-compatibility.
  */
-function computePrefixFromMessage(msg) {
-  const m = msg || {};
-
+function computePrefixFromMessage(msg = {}) {
   const runId =
-    m.runId   ||
-    m.run_id  ||
-    m.id      ||
-    m.fileId  ||
-    m.file_id ||
+    msg.runId   ||
+    msg.run_id  ||
+    msg.id      ||
+    msg.fileId  ||
+    msg.file_id ||
     "unknown";
 
   const userId =
-    m.userId  ||
-    m.user    ||
-    m.ownerId ||
+    msg.userId  ||
+    msg.user    ||
+    msg.ownerId ||
     "anonymous";
 
   const page =
-    m.page ||
-    m.tool ||
-    m.flow ||
+    msg.page ||
+    msg.tool ||
+    msg.flow ||
     "campaign";
 
   let date;
-  if (m.date instanceof Date) {
-    date = m.date;
-  } else if (typeof m.date === "string") {
-    const parsed = new Date(m.date);
+  if (msg.date instanceof Date) {
+    date = msg.date;
+  } else if (typeof msg.date === "string") {
+    const parsed = new Date(msg.date);
     if (!Number.isNaN(parsed.getTime())) {
       date = parsed;
     }
@@ -102,7 +115,7 @@ function computePrefixFromMessage(msg) {
   return canonicalPrefix({ userId, page, runId, date });
 }
 
-// Alias for legacy imports: const { computePrefix } = require("../lib/prefix")
+// Legacy alias
 const computePrefix = computePrefixFromMessage;
 
 module.exports = {

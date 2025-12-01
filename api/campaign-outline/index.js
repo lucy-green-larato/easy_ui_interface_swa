@@ -1,4 +1,4 @@
-// /api/campaign-outline/index.js 29-11-2025 v10.5
+// /api/campaign-outline/index.js 01-12-2025 v11
 // Queue-triggered on %Q_CAMPAIGN_OUTLINE% (by router) to create <prefix>outline.json,
 // then posts a single {op:"afteroutline"} to %CAMPAIGN_QUEUE_NAME%.
 //
@@ -319,7 +319,7 @@ module.exports = async function (context, queueItem) {
     const svc = blobSvc();
     container = svc.getContainerClient(CONTAINER);
 
-    const prefix = canonicalPrefix({
+    prefix = canonicalPrefix({
       userId: queueItem.userId || queueItem.user || "anonymous",
       page: queueItem.page || "campaign",
       runId
@@ -369,17 +369,13 @@ module.exports = async function (context, queueItem) {
 
     // Keep only items that have a claim id, some text, and a URL
     let evidenceLog = (evidenceArr || []).filter(it =>
-      it && it.claim_id && (it.title || it.summary || it.quote) && (it.url || it.source_url)
+      it && it.claim_id && (it.title || it.summary || it.quote) && (it.url || it.source_url || it.text)
     );
 
     const evidenceForPrompt = evidenceLog.slice(0, 24);
 
     const csvNorm = await getJson(container, `${prefix}csv_normalized.json`);
-    const siteArr = (() => {
-      // prefer array; tolerate object or missing
-      return getJson(container, `${prefix}site.json`);
-    })();
-    const siteLoaded = await siteArr;
+    const siteLoaded = await getJson(container, `${prefix}site.json`);
     const site = Array.isArray(siteLoaded) ? siteLoaded : (siteLoaded ? [siteLoaded] : []);
     const productsFile = await getJson(container, `${prefix}products.json`);
     const input = await getJson(container, `${prefix}input.json`);
@@ -546,6 +542,13 @@ ${safeForPrompt(runConfig.relevant_competitors || [])}
       }
     });
 
+    // ---- Cleanup temp schema file (avoid accumulation in /tmp) ----
+try {
+  const schemaPath = path.join(os.tmpdir(), `outline_${runId}.schema.json`);
+  fs.unlinkSync(schemaPath);
+} catch { /* cleanup best-effort */ }
+
+
     if (typeof outline === "string") {
       try { outline = JSON.parse(outline); } catch { outline = tryParseOrRepair(outline); }
     }
@@ -570,7 +573,9 @@ ${safeForPrompt(runConfig.relevant_competitors || [])}
     if (!Array.isArray(inNotes.top_purchases)) inNotes.top_purchases = csvSignal.top_purchases;
     if (!Array.isArray(inNotes.product_mentions)) inNotes.product_mentions = Array.isArray(productNames) ? productNames.slice(0, 12) : [];
 
-    inNotes.supplier_company = inNotes.supplier_company || supplierBlock.supplier_company || "";
+    if (!("supplier_company" in inNotes)) {
+      inNotes.supplier_company = supplierBlock.supplier_company || "";
+    }
     inNotes.supplier_website = inNotes.supplier_website || supplierBlock.supplier_website || "";
     inNotes.supplier_linkedin = inNotes.supplier_linkedin || supplierBlock.supplier_linkedin || "";
     if (!Array.isArray(inNotes.supplier_usps)) inNotes.supplier_usps = supplierBlock.supplier_usps.slice(0, 12);
@@ -617,6 +622,7 @@ ${safeForPrompt(runConfig.relevant_competitors || [])}
 
     // Persist + single state flip (Outline)
     await putJson(container, `${prefix}outline.json`, outline);
+    await new Promise(r => setTimeout(r, 75));
 
     const stDone = await readStatus(container, prefix);
     stDone.state = "Outline";

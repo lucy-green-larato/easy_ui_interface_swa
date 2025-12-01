@@ -1,4 +1,4 @@
-// /api/campaign-start/index.js 28-11-2025 v21
+// /api/campaign-start/index.js 01-12-2025 v22
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign-start → writes status/input, enqueues kickoff to main queue + full job to evidence queue.
 const { BlobServiceClient } = require("@azure/storage-blob");
@@ -298,7 +298,7 @@ module.exports = async function (context, req) {
     const blobService = BlobServiceClient.fromConnectionString(STORAGE_CONN);
     const containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
     await containerClient.createIfNotExists();
-    
+
     // ---- runId / prefix / idempotency ----
     const clientRunKey = body.clientRunKey || readHeader(req, "x-idempotency-key") || null;
     const runId = clientRunKey
@@ -376,19 +376,30 @@ module.exports = async function (context, req) {
     await normalizeCsvAndPersist(containerClient, prefix, inputPayload);
 
     // ---- per-user recent index (bounded 50) ----
-    const userIdxClient = containerClient.getBlockBlobClient(`users/${userId}/recent.json`);
-    let idx = { userId, items: [] };
-    try {
-      const dl = await userIdxClient.download();
-      idx = JSON.parse((await streamToBuffer(dl.readableStreamBody)).toString("utf8"));
-      if (!idx || typeof idx !== "object") idx = { userId, items: [] };
-    } catch { /* create fresh */ }
-    idx.items = [
-      { runId, page, when: now.toISOString(), prefix, summary: { supplier_company, campaign_industry, rowCount: rowCount ?? null } },
-      ...(Array.isArray(idx.items) ? idx.items : [])
-    ].slice(0, 50);
-    await writeJson(containerClient, `users/${userId}/recent.json`, idx);
+    const isAnonymous = (userId === "anonymous");
 
+    if (!isAnonymous) {
+      const userIdxClient = containerClient.getBlockBlobClient(`users/${userId}/recent.json`);
+      let idx = { userId, items: [] };
+      try {
+        const dl = await userIdxClient.download();
+        idx = JSON.parse((await streamToBuffer(dl.readableStreamBody)).toString("utf8"));
+        if (!idx || typeof idx !== "object") idx = { userId, items: [] };
+      } catch { /* create fresh */ }
+
+      idx.items = [
+        {
+          runId,
+          page,
+          when: now.toISOString(),
+          prefix,
+          summary: { supplier_company, campaign_industry, rowCount: rowCount ?? null }
+        },
+        ...(Array.isArray(idx.items) ? idx.items : [])
+      ].slice(0, 50);
+
+      await writeJson(containerClient, `users/${userId}/recent.json`, idx);
+    }
     // ---- Build queue payload (canonical + mirrors) ----
     const msg = {
       op: "kickoff",
@@ -406,7 +417,6 @@ module.exports = async function (context, req) {
       },
       input: inputPayload,
       // mirrors for legacy workers
-      page_mirror: inputPayload.page,
       rowCount: inputPayload.rowCount,
       filters: inputPayload.filters,
       notes: inputPayload.notes,
@@ -443,19 +453,34 @@ module.exports = async function (context, req) {
     if (byteLen(payload) > MAX_BYTES) {
       const slim = { ...msg, input: { ...(msg.input || {}) } };
 
-      // drop biggest offenders first
+      // Drop CSV text in both places
       if (typeof slim.input.csvText === "string") slim.input.csvText = null;
-      if (byteLen(safeStringify(slim)) > MAX_BYTES) slim.input.csvSummary = null;
-      if (byteLen(safeStringify(slim)) > MAX_BYTES) slim.input.filters = null;
+      if (typeof slim.csvText === "string") slim.csvText = null;
 
-      // optional trims: unprotected keys only
+      if (byteLen(safeStringify(slim)) > MAX_BYTES) {
+        slim.input.csvSummary = null;
+        slim.csvSummary = null;
+      }
+
+      if (byteLen(safeStringify(slim)) > MAX_BYTES) {
+        slim.input.filters = null;
+        slim.filters = null;
+      }
+
       if (byteLen(safeStringify(slim)) > MAX_BYTES) {
         for (const k of Object.keys(slim.input)) {
           if (byteLen(safeStringify(slim)) <= MAX_BYTES) break;
           if (!PROTECT.has(k) && slim.input[k] != null) slim.input[k] = null;
         }
       }
+
       payload = safeStringify(slim);
+      if (byteLen(payload) > MAX_BYTES) {
+        // last-resort: strip any remaining non-essential top-level fields
+        const { op, runId, userId, page, prefix, container, correlationId, clientRunKey, runConfig, input } = slim;
+        payload = safeStringify({ op, runId, userId, page, prefix, container, correlationId, clientRunKey, runConfig, input });
+      }
+
       context.log.warn("campaign_start_payload_slimmed", { bytes: byteLen(payload) });
     }
 

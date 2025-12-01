@@ -1,4 +1,4 @@
-//  /api/shared/storage.js 26-11-2025 v6
+//  /api/shared/storage.js 01-12-2025 v7
 //
 // Shared Azure Storage helpers for the campaign pipeline.
 // Centralises container + connection config so functions stay lean.
@@ -27,7 +27,8 @@ function normaliseBlobPath(p) {
  *  - strip leading slashes
  */
 function normalisePrefix(prefix) {
-  return String(prefix || "").replace(/^\/+/, "");
+  const s = String(prefix || "").replace(/^\/+/, "").replace(/\/+$/, "");
+  return s ? `${s}/` : "";
 }
 
 // --- Core clients ---
@@ -40,10 +41,12 @@ function getBlobServiceClient() {
 /**
  * Generic container client. Defaults to RESULTS_CONTAINER.
  */
-function getContainerClient(containerName = RESULTS_CONTAINER) {
+async function getContainerClient(containerName = RESULTS_CONTAINER) {
   const name = String(containerName || RESULTS_CONTAINER).trim() || RESULTS_CONTAINER;
   const svc = getBlobServiceClient();
-  return svc.getContainerClient(name);
+  const c = svc.getContainerClient(name);
+  await c.createIfNotExists();    // safe no-op, but prevents 404
+  return c;
 }
 
 /**
@@ -67,7 +70,7 @@ async function streamToString(readable) {
   const chunks = [];
   // readable is an async iterable stream in Azure SDK v12
   for await (const chunk of readable) {
-    chunks.push(chunk);
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks).toString("utf8");
 }
@@ -140,8 +143,8 @@ async function listCsvUnderPrefix(containerClient, prefix) {
 module.exports = {
   getBlobServiceClient,
   getContainerClient,
-  getResultsContainerClient,   
-  getInputContainerClient,   
+  getResultsContainerClient,
+  getInputContainerClient,
   streamToString,
   getText,
   putText,
@@ -150,5 +153,5 @@ module.exports = {
   listBlobsUnderPrefix,
   listCsvUnderPrefix,
   RESULTS_CONTAINER,
-  INPUT_CONTAINER,    
+  INPUT_CONTAINER,
 };

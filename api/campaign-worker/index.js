@@ -1,5 +1,5 @@
-// /api/campaign-worker/index.js 28-11-2025 Strategy Engine v8 
-//
+// /api/campaign-worker/index.js 01-12-2025 Strategy Engine v9
+// 
 // Responsibility:
 //   - Read Phase 1 outputs (evidence, insights, buyer_logic, markdown_pack, csv_normalized, etc.).
 //   - Build a structured strategy_v2 object (story_spine, value_proposition, competitive_strategy,
@@ -16,7 +16,6 @@ const { canonicalPrefix } = require("../lib/prefix");
 // Viability engine (strategy_v2 quality + TAM/problem/diff/urgency warnings)
 let computeViability = null;
 try {
-  // Adjust the path if your lib folder is different, but this matches:
   // /api/lib/strategy-viability.js
   const mod = require("../lib/strategy-viability");
 
@@ -62,11 +61,22 @@ async function getResultsContainer() {
 function streamToString(readable) {
   return new Promise((resolve, reject) => {
     if (!readable) return resolve("");
+
     const chunks = [];
-    readable.on("data", (d) =>
-      chunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d))
-    );
-    readable.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    readable.on("data", (d) => {
+      try {
+        chunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d));
+      } catch (err) {
+        return reject(err);
+      }
+    });
+    readable.on("end", () => {
+      try {
+        resolve(Buffer.concat(chunks).toString("utf8"));
+      } catch (err) {
+        reject(err);
+      }
+    });
     readable.on("error", reject);
   });
 }
@@ -671,14 +681,36 @@ function buildStrategyV2({
 module.exports = async function (context, queueItem) {
   const log = context.log;
   const msg = parseQueueItem(queueItem);
-  const runId =
-    msg.runId ||
-    msg.run_id ||
-    (prefix.startsWith("runs/") ? prefix.split("/")[1] : "unknown");
 
+  const explicitRunId = msg.runId || msg.run_id || null;
   const userId = msg.userId || msg.user || "anonymous";
   const page = msg.page || "campaign";
-  const prefix = canonicalPrefix({ userId, page, runId });
+
+  // Prefer prefix from message (authoritative); fall back to canonical if missing
+  let prefix = msg.prefix || null;
+  if (!prefix) {
+    prefix = canonicalPrefix({
+      userId,
+      page,
+      runId: explicitRunId || "run"
+    });
+    log.warn("campaign_worker_missing_prefix_msg_using_canonical", {
+      userId,
+      page,
+      explicitRunId
+    });
+  }
+
+  // Recover runId from prefix if it was slimmed away
+  let runId = explicitRunId;
+  if (!runId && typeof prefix === "string") {
+    const parts = prefix.split("/").filter(Boolean);
+    // expected layout: runs/<page>/<userId>/<YYYY>/<MM>/<DD>/<runId>
+    if (parts.length >= 7) {
+      runId = parts[parts.length - 1];
+    }
+  }
+  if (!runId) runId = "unknown";
 
   log(`[*] Strategy Engine starting for runId=${runId}, prefix=${prefix}`);
 
@@ -746,6 +778,13 @@ module.exports = async function (context, queueItem) {
     };
 
     // Build a canonical evidence object: prefer evidence.claims; fallback to evidence array or evidenceLog array.
+    if (evidence && typeof evidence === "object" && !Array.isArray(evidence.claims)) {
+      log.warn("evidence_object_missing_claims_array", {
+        keys: Object.keys(evidence || {}),
+        prefix
+      });
+    }
+
     let claims = [];
     if (evidence && Array.isArray(evidence.claims)) {
       claims = evidence.claims;
@@ -756,6 +795,7 @@ module.exports = async function (context, queueItem) {
     }
 
     const combinedEvidence = { claims };
+
     //--------------------------------------------------------------------------//
     //  Build strategy_v2 (deterministic, evidence-only)
     //--------------------------------------------------------------------------//
@@ -769,23 +809,16 @@ module.exports = async function (context, queueItem) {
     });
 
     //--------------------------------------------------------------------------//
-    //  Compute strategy_v2 viability (Strategy Engine v2) – optional but recommended
+    //  Compute strategy_v2 viability (Strategy Engine v2) – optional, safe, non-blocking
     //--------------------------------------------------------------------------//
     let strategyV2Viability = null;
 
     try {
-      // Load viability engine if available
-      const viabilityMod = require("../lib/strategy-viability");
-      const computeV2Viability =
-        viabilityMod.computeViability ||
-        viabilityMod.default ||
-        (typeof viabilityMod === "function" ? viabilityMod : null);
-
-      if (computeV2Viability) {
+      if (computeViability) {
         const viabilityMode =
           (process.env.STRATEGY_VIABILITY_MODE || "conservative").toLowerCase();
 
-        strategyV2Viability = computeV2Viability({
+        strategyV2Viability = computeViability({
           evidence: combinedEvidence,
           insights,
           buyerLogic,
@@ -798,24 +831,33 @@ module.exports = async function (context, queueItem) {
 
         log("[*] strategy_v2 viability computed successfully", {
           runId,
-          viabilityMode
+          viabilityMode,
+          viabilityIncluded: strategyV2Viability ? true : false
         });
       } else {
-        log("[*] computeViability not found – strategy_v2 viability skipped");
+        log("[*] computeViability not available – strategy_v2 viability skipped");
       }
     } catch (v2err) {
       log.warn(
         "[!] strategy_v2 viability computation failed (non-fatal)",
-        String(v2err && v2err.message ? v2err.message : v2err)
+        {
+          runId,
+          error: String(v2err && v2err.message ? v2err.message : v2err)
+        }
       );
     }
 
     //--------------------------------------------------------------------------//
-    //  Compute strategy_v3 viability (stronger evaluator) – optional, non-blocking
+    //  Compute strategy_v3 viability (stronger evaluator) – safe, non-blocking
     //--------------------------------------------------------------------------//
     try {
       const evaluateStrategyViability = require("../lib/evaluateStrategyViability");
 
+      // ---- Canonicalise prefix (ensure it ends with "/") ----
+      let v3prefix = prefix || "";
+      if (!v3prefix.endsWith("/")) v3prefix = v3prefix + "/";
+
+      // ---- Extract evidence for viability scoring ----
       const claimsForViability =
         Array.isArray(evidence?.claims)
           ? evidence.claims
@@ -824,7 +866,6 @@ module.exports = async function (context, queueItem) {
             : [];
 
       const evidenceClaimsCount = claimsForViability.length;
-
       const cohortSize =
         (csvNormalized &&
           csvNormalized.meta &&
@@ -834,6 +875,7 @@ module.exports = async function (context, queueItem) {
       const viabilityMode =
         (process.env.STRATEGY_VIABILITY_MODE || "conservative").toLowerCase();
 
+      // ---- Run evaluator ----
       const strategyV3Viability = evaluateStrategyViability({
         strategyV2: strategy_v2,
         buyerLogic: buyerLogic || {},
@@ -843,10 +885,25 @@ module.exports = async function (context, queueItem) {
         mode: viabilityMode
       });
 
-      const v3Path = `${prefix}strategy_v3/viability.json`;
-      await writeJson(container, v3Path, strategyV3Viability);
+      // ---- Build full path ----
+      const v3Path = `${v3prefix}strategy_v3/viability.json`;
+      const v3Blob = container.getBlockBlobClient(v3Path);
 
-      log("[*] strategy_v3 viability written", { runId, v3Path });
+      // ---- Ensure Azure can write nested folder paths safely ----
+      const viabilityJson = Buffer.from(
+        JSON.stringify(strategyV3Viability, null, 2),
+        "utf8"
+      );
+
+      await v3Blob.uploadData(viabilityJson, {
+        blobHTTPHeaders: { blobContentType: "application/json" }
+      });
+
+      log("[*] strategy_v3 viability written successfully", {
+        runId,
+        v3Path
+      });
+
     } catch (v3err) {
       log.warn(
         "[!] strategy_v3 viability generation failed (non-fatal)",

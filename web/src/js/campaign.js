@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 01-12-2025 v23
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 01-12-2025 v24
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, 
@@ -20,7 +20,8 @@ window.CampaignUI = window.CampaignUI || {};
     active: "exec",
     tabsMounted: false,
     viability: null,
-    timeline: []
+    timeline: [],
+    csvSummary: null
   };
 
   // ---------- Generic UI helpers ----------
@@ -79,6 +80,13 @@ window.CampaignUI = window.CampaignUI || {};
     table.appendChild(thead);
     table.appendChild(tbody);
     return table;
+  }
+
+  function makeHeading(text, level = 3) {
+    const lvl = Number.isInteger(level) && level >= 1 && level <= 6 ? level : 3;
+    const h = document.createElement("h" + String(lvl));
+    h.textContent = String(text || "");
+    return h;
   }
 
   function csvToArray(text) {
@@ -155,34 +163,45 @@ window.CampaignUI = window.CampaignUI || {};
     }
   }
 
-
   function buildCsvSummary(rows, buyerIndustryInput) {
-    // No DOM access — pure data only
+    // Defensive guards
+    if (!Array.isArray(rows)) rows = [];
+
+    // Extract industries safely
     const allIndustries = Array.from(
-      new Set(rows.map(r => r.SimplifiedIndustry).filter(Boolean))
+      new Set(
+        rows
+          .map(r => (r?.SimplifiedIndustry || "").trim())
+          .filter(Boolean)
+      )
     ).sort();
 
+    // User-entered industry (may not exist in CSV)
     const buyerIndustry = (buyerIndustryInput || "").trim();
+
+    // Filter rows ONLY if an exact match exists
     const rowsScoped = buyerIndustry
-      ? rows.filter(
-        r => String(r.SimplifiedIndustry || "").toLowerCase() === buyerIndustry.toLowerCase()
+      ? rows.filter(r =>
+        String(r?.SimplifiedIndustry || "").trim().toLowerCase() ===
+        buyerIndustry.toLowerCase()
       )
       : rows;
 
-    // Pure frequency buckets
-    const itSpend = freqFromCSV(rowsScoped.map(r => r.ITSpendPct));
-    const blockers = freqFromCSV(rowsScoped.map(r => r.TopBlockers));
-    const purchases = freqFromCSV(rowsScoped.map(r => r.TopPurchases));
-    const needs = freqFromCSV(rowsScoped.map(r => r.TopNeedsSupplier));
+    // Frequency buckets (all pure)
+    const itSpend = freqFromCSV(rowsScoped.map(r => r?.ITSpendPct || ""));
+    const blockers = freqFromCSV(rowsScoped.map(r => r?.TopBlockers || ""));
+    const purchases = freqFromCSV(rowsScoped.map(r => r?.TopPurchases || ""));
+    const needs = freqFromCSV(rowsScoped.map(r => r?.TopNeedsSupplier || ""));
+
     const sampleCompanies = rowsScoped
       .slice(0, 10)
-      .map(r => r.CompanyName)
+      .map(r => r?.CompanyName || "")
       .filter(Boolean);
 
     return {
       schema: `csv-summary-v1:${buyerIndustry ? buyerIndustry.toLowerCase() : "all"}`,
       buyerIndustry: buyerIndustry || null,
-      industriesAvailable: allIndustries,
+      industriesAvailable: allIndustries,   // pure and safe
       rowCountAll: rows.length,
       rowCountScoped: rowsScoped.length,
       itSpend,
@@ -192,6 +211,7 @@ window.CampaignUI = window.CampaignUI || {};
       sampleCompanies
     };
   }
+
   // -- helper: normalise Executive Summary shapes --
   function resolveExecutiveSummaryShapes(es, esLegacy) {
     // Prefer new object shape
@@ -300,13 +320,42 @@ window.CampaignUI = window.CampaignUI || {};
     return wrap;
   }
 
+  function renderSuccessTarget(value) {
+    const wrap = document.createElement("div");
+    const h = document.createElement("h4");
+    h.textContent = "Success target";
+    h.style.marginTop = "1rem";
+    wrap.appendChild(h);
+
+    if (value == null) {
+      wrap.appendChild(makePre("(none)"));
+      return wrap;
+    }
+
+    // String mode
+    if (typeof value === "string") {
+      wrap.appendChild(renderValue(value));
+      return wrap;
+    }
+
+    // Object mode
+    if (typeof value === "object") {
+      wrap.appendChild(renderValue(value));
+      return wrap;
+    }
+
+    // Fallback
+    wrap.appendChild(renderValue(String(value)));
+    return wrap;
+  }
+
   // ---------- Renderers (Gold-aware) ----------
 
   function renderExecutiveSummary() {
     const wrap = document.createElement("div");
     const ss = state.contract?.strategy_v2?.story_spine;
     if (ss && typeof ss === "object") {
-      const wrap = document.createElement("div");
+      const wrap2 = document.createElement("div");
 
       if (ss.lead) {
         const p = document.createElement("p");
@@ -315,7 +364,12 @@ window.CampaignUI = window.CampaignUI || {};
       }
 
       if (Array.isArray(ss.bullets)) {
-        wrap.appendChild(makeList(ss.bullets));
+        wrap2.appendChild(makeList(ss.bullets.slice(0, 10)));
+      }
+
+      if (Array.isArray(ss.citations)) {
+        wrap2.appendChild(makeHeading("Citations", 4));
+        wrap2.appendChild(makeList(ss.citations));
       }
 
       setPanelContent(wrap);
@@ -659,6 +713,43 @@ window.CampaignUI = window.CampaignUI || {};
       return;
     }
 
+    // Modern case-study containers from writer (curated, website, verified)
+    const cs2 = state.contract?.strategy_v2?.case_studies;
+    if (cs2 && typeof cs2 === "object") {
+      const wrap = document.createElement("div");
+      wrap.appendChild(makeHeading("Case studies (v2)"));
+
+      const combined = [
+        ...(cs2.curated || []),
+        ...(cs2.website || []),
+        ...(cs2.verified || [])
+      ];
+
+      if (!combined.length) {
+        wrap.appendChild(makePre("No case studies available."));
+        setPanelContent(wrap);
+        return;
+      }
+
+      const rows = combined.map(k => {
+        const bullets = rowsOf(k?.bullets);
+        const href = k?.link || k?.url || "";
+        return [
+          k?.customer || "",
+          k?.industry || "",
+          k?.headline || "",
+          bullets,
+          href ? { __link: true, href, text: href } : "",
+          k?.source || ""
+        ];
+      });
+
+      const headers = ["Customer", "Industry", "Headline", "Bullets", "Link", "Source"];
+      wrap.appendChild(makeTable(headers, rows));
+      setPanelContent(wrap);
+      return;
+    }
+
     // Existing legacy / website case-study logic
     const listRaw =
       rowsOf(state.contract?.case_study_library).length
@@ -811,13 +902,20 @@ window.CampaignUI = window.CampaignUI || {};
       state.contract?.strategy?.value_proposition_moore;
 
     if (vpm && (vpm.paragraph || vpm.fields)) {
-      const pre = document.createElement("pre");
-      pre.textContent = String(vpm.paragraph || pos.value_prop || "");
-      wrap.appendChild(pre);
+      // Narrative paragraph (if present)
+      if (vpm.paragraph || pos.value_prop) {
+        const pre = document.createElement("pre");
+        pre.textContent = String(vpm.paragraph || pos.value_prop || "");
+        wrap.appendChild(pre);
+      }
 
-      const f = vpm.fields || {};
-      wrap.appendChild(renderField("Positioning (Moore)", moore));
+      // Structured fields from the Moore template
+      const fields = vpm.fields || null;
+      if (fields && typeof fields === "object") {
+        wrap.appendChild(renderField("Positioning (Moore)", fields));
+      }
     } else if (!vpn) {
+      // Fallback to simple value_prop string
       wrap.appendChild(makePre(pos.value_prop || ""));
     }
 
@@ -853,9 +951,15 @@ window.CampaignUI = window.CampaignUI || {};
       const h4 = document.createElement("h3");
       h4.textContent = "Competitor Set";
       wrap.appendChild(h4);
-      wrap.appendChild(renderField("Competitive battlecard", seGold?.competitive_battlecard));
-    }
 
+      // Prefer a dedicated competitive_battlecard if available in the contract
+      const battlecard =
+        state.contract?.sales_enablement?.competitive_battlecard ||
+        pos.competitive_battlecard ||
+        null;
+
+      wrap.appendChild(renderField("Competitive battlecard", battlecard || comp));
+    }
     setPanelContent(wrap);
   }
 
@@ -868,8 +972,27 @@ window.CampaignUI = window.CampaignUI || {};
     const bs2 = state.contract?.strategy_v2?.buyer_strategy;
     if (bs2 && typeof bs2 === "object") {
       wrap.appendChild(makeHeading("Buyer strategy (v2)"));
+      const order = [
+        "personas",
+        "priorities",
+        "value_drivers",
+        "triggers",
+        "objections",
+        "messages",
+        "segments"
+      ];
+
+      order.forEach(k => {
+        if (bs2[k] != null) {
+          wrap.appendChild(renderField(k, bs2[k]));
+        }
+      });
+
+      // render any extra fields
       Object.entries(bs2).forEach(([label, value]) => {
-        wrap.appendChild(renderField(label, value));
+        if (!order.includes(label)) {
+          wrap.appendChild(renderField(label, value));
+        }
       });
       setPanelContent(wrap);
       return;
@@ -954,6 +1077,15 @@ window.CampaignUI = window.CampaignUI || {};
       Object.entries(gtm2).forEach(([label, value]) => {
         wrap.appendChild(renderField(label, value));
       });
+      // ensure WTP/HTW fields appear even if backend uses new names
+      if (gtm2.where_to_play)
+        wrap.appendChild(renderField("Where to play", gtm2.where_to_play));
+
+      if (gtm2.how_to_win)
+        wrap.appendChild(renderField("How to win", gtm2.how_to_win));
+
+      if (gtm2.competitive_context)
+        wrap.appendChild(renderField("Competitive context", gtm2.competitive_context));
       setPanelContent(wrap);
       return;
     }
@@ -980,7 +1112,9 @@ window.CampaignUI = window.CampaignUI || {};
         wrap.appendChild(makeHeading("Citations"));
         wrap.appendChild(makeList(gtm.citations));
       }
-
+      if (gtm.success_target !== undefined) {
+        wrap.appendChild(renderSuccessTarget(gtm.success_target));
+      }
       setPanelContent(wrap);
       return;
     }
@@ -998,7 +1132,9 @@ window.CampaignUI = window.CampaignUI || {};
       ["Proof", rowsOf(lp.proof)],
       ["CTA", lp.cta || ""]
     ];
-    wrap.appendChild(makeTable(["Field", "Value"], rows));
+    if (offer.success_target !== undefined) {
+      wrap.appendChild(renderSuccessTarget(offer.success_target));
+    }
 
     if (Array.isArray(offer.assets_checklist)) {
       wrap.appendChild(makeHeading("Assets checklist"));
@@ -1371,7 +1507,12 @@ window.CampaignUI = window.CampaignUI || {};
       const rows = csvToArray(text);
       rowCount = rows.length;
       csvSummary = buildCsvSummary(rows, buyer_industry || "");
+      state.csvSummary = csvSummary;
     }
+    if (csvSummary) {
+      state.csvSummary = csvSummary;
+    }
+
     // Populate <select id="buyerIndustrySelect"> with sorted distinct industries
     const sel = document.getElementById("buyerIndustrySelect");
     const customField = document.getElementById("buyerIndustryCustom");
@@ -1385,7 +1526,13 @@ window.CampaignUI = window.CampaignUI || {};
       optAuto.textContent = "(auto-detect from CSV)";
       sel.appendChild(optAuto);
 
-      allIndustries.forEach(ind => {
+      const industries =
+        (state.csvSummary &&
+          Array.isArray(state.csvSummary.industriesAvailable))
+          ? state.csvSummary.industriesAvailable
+          : [];
+
+      industries.forEach(ind => {
         const opt = document.createElement("option");
         opt.value = ind;
         opt.textContent = ind;
@@ -1578,6 +1725,7 @@ window.CampaignUI = window.CampaignUI || {};
     }
 
     // First peek—if already completed, short-circuit
+    // First peek—if already completed, short-circuit
     try {
       const peek = await http("GET", API.status(runId), { timeoutMs: 12000 });
       const stateName = normState(peek?.state);
@@ -1587,10 +1735,11 @@ window.CampaignUI = window.CampaignUI || {};
       const errorBanner = document.getElementById("runErrorBanner");
       const retryBtn = document.getElementById("retryBtn");
       const restartBtn = document.getElementById("restartRunBtn");
+
       if (stateName.toLowerCase() === "failed") {
         const msg =
-          st?.error?.message ||
-          st?.error ||
+          peek?.error?.message ||
+          peek?.error ||
           "This run failed. Please try again.";
 
         // Show banner
@@ -1624,11 +1773,12 @@ window.CampaignUI = window.CampaignUI || {};
           restartBtn.dataset.runId = "";
         }
       }
+
       UI.log(`Status: ${stateName}`);
 
       // TIMELINE SYNC — history + live update
       try {
-        const hist = Array.isArray(st?.history) ? st.history : [];
+        const hist = Array.isArray(peek?.history) ? peek.history : [];
 
         // replay items not yet seen
         const known = new Set(state.timeline.map(e => e.at + "|" + e.phase + "|" + (e.note || "")));
@@ -1713,10 +1863,6 @@ window.CampaignUI = window.CampaignUI || {};
 
   // ---------- Boot ----------
   document.addEventListener("DOMContentLoaded", () => {
-    state.resultsBaseUrl =
-      window.CONFIG?.resultsBaseUrl ||
-      "https://<YOUR-STORAGE-ACCOUNT>.blob.core.windows.net/results/";
-
     console.log("[UI] resultsBaseUrl =", state.resultsBaseUrl);
     mountTabs();
     requestAnimationFrame(() => {
@@ -1895,23 +2041,33 @@ window.CampaignUI = window.CampaignUI || {};
 
   // === ROUTING MAP (backend → UI tabs) ===
   const TAB_FIELD_MAP = {
+    // Executive summary
     "executive_summary": "exec",
-    "strategy_v2": "exec",
     "story_spine": "exec",
-    "value_proposition": "off",
-    "competitive_strategy": "gtm",
-    "buyer_strategy": "msg",
+
+    // Go-to-market
     "gtm_strategy": "gtm",
-    "proof_points": "pp",
-    "right_to_play": "off",
-    "go_to_market_plan": "gtm",
     "where_to_play": "gtm",
     "how_to_win": "gtm",
     "competitive_context": "gtm",
+
+    // Messaging
+    "buyer_strategy": "msg",
     "messaging_matrix": "msg",
+
+    // Offer / Value Proposition
+    "value_proposition": "off",
+    "right_to_play": "off",
     "portfolio_and_tech": "off",
+
+    // Sales enablement
     "sales_enablement": "se",
+
+    // Proof points
+    "proof_points": "pp",
     "case_studies": "pp",
+
+    // Evidence
     "evidence_log": "elog"
   };
 })();

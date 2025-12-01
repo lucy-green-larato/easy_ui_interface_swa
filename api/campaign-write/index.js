@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js // 30-11-2025 Gold Writer v5 (canonical prefix)
+// /api/campaign-write/index.js // 01-12-2025 Gold Writer v6
 //
 // Responsibility:
 //   - Read strategy_v2 (campaign_strategy.json) produced by campaign-worker.
@@ -71,20 +71,24 @@ async function writeJson(container, blobPath, obj) {
   const block = container.getBlockBlobClient(blobPath);
   const json = JSON.stringify(obj, null, 2);
   const data = Buffer.from(json, "utf8");
-  await block.upload(data, data.length, {
+  await block.uploadData(data, {
     blobHTTPHeaders: { blobContentType: "application/json" }
   });
 }
 
 // ---------------------- Status helpers ---------------------- //
-
 async function updateStatus(container, prefix, state, note, extra = {}) {
   const statusPath = `${prefix}status.json`;
-  let status = (await readJsonIfExists(container, statusPath)) || {
-    state: "pending",
-    history: []
-  };
 
+  // Load existing status (state object, markers, flags, etc.)
+  const cur =
+    (await readJsonIfExists(container, statusPath)) || {
+      state: "pending",
+      history: [],
+      markers: {}
+    };
+
+  // Append new history entry
   const entry = {
     at: new Date().toISOString(),
     state,
@@ -92,12 +96,20 @@ async function updateStatus(container, prefix, state, note, extra = {}) {
     ...extra
   };
 
-  status.state = state;
-  status.history = Array.isArray(status.history)
-    ? [...status.history, entry]
-    : [entry];
+  const next = {
+    ...cur,                      // preserve all existing keys
+    state,                       // update new state
+    history: Array.isArray(cur.history)
+      ? [...cur.history, entry]
+      : [entry],
+    markers: {                   // merge markers, don't overwrite
+      ...(cur.markers || {}),
+      ...(extra.markers || {})
+    }
+  };
 
-  await writeJson(container, statusPath, status);
+  // Persist merged status
+  await writeJson(container, statusPath, next);
 }
 
 // ---------------------- Small helpers ---------------------- //
@@ -134,13 +146,26 @@ const CLAIM_ID_RE = /\[([A-Z0-9_:-]{4,})\]/g;
 function extractClaimIdsFromText(text) {
   const ids = new Set();
   if (!text) return ids;
+
   const s = String(text);
-  let m;
-  while ((m = CLAIM_ID_RE.exec(s))) {
-    if (m[1]) ids.add(m[1]);
+
+  // 1) Extract [ID] patterns (existing behaviour)
+  let match;
+  while ((match = CLAIM_ID_RE.exec(s))) {
+    if (match[1]) ids.add(match[1]);
   }
+
+  // 2) Extract bare IDs (e.g. ABC_123 or XYZ-9)
+  const BARE_ID_RE = /\b([A-Z0-9_:-]{4,})\b/g;
+  while ((match = BARE_ID_RE.exec(s))) {
+    const token = match[1];
+    // Avoid capturing HTML tags, words like HTTP, UUID fragments, etc:
+    if (/^[A-Z0-9_:-]+$/.test(token)) ids.add(token);
+  }
+
   return ids;
 }
+
 
 function extractClaimIdsFromArray(arr) {
   const ids = new Set();
@@ -596,7 +621,40 @@ module.exports = async function (context, queueItem) {
 
   const svc = getBlobServiceClient();
   const container = svc.getContainerClient(RESULTS_CONTAINER);
+
+// ---- Create-if-not-exists with proper diagnostic logging ----
+try {
   await container.createIfNotExists();
+} catch (cErr) {
+  log.error("[!] Failed to create-or-confirm results container", {
+    container: RESULTS_CONTAINER,
+    error: String(cErr?.message || cErr)
+  });
+
+  // Non-fatal: writer continues, but visibility is preserved
+  // (If container truly doesn't exist, next blob write will throw
+  // and be caught in the main writer try/catch.)
+}
+
+
+  // ---- Idempotency: skip if writer already completed ----
+  try {
+    const existingStatus = await readJsonIfExists(container, `${prefix}status.json`);
+    const campaignExists = await container.getBlockBlobClient(`${prefix}campaign.json`).exists();
+
+    if (
+      existingStatus &&
+      existingStatus.markers &&
+      existingStatus.markers.writerCompleted &&
+      campaignExists
+    ) {
+      log("[*] Writer detected completed output; skipping re-run", { runId, prefix });
+      return;
+    }
+  } catch (idemErr) {
+    // Non-fatal — continue normally
+    log.warn("[!] Writer idempotency check failed (continuing)", String(idemErr));
+  }
 
   await updateStatus(
     container,
@@ -687,22 +745,16 @@ module.exports = async function (context, queueItem) {
     await updateStatus(
       container,
       prefix,
-      "writer_ready",
-      "Campaign Writer completed successfully"
-    );
-
-    await updateStatus(
-      container,
-      prefix,
       "Completed",
-      "Campaign successfully assembled",
+      "Campaign Writer completed successfully",
       {
         completed: true,
         runId,
         userId,
         page,
         prefix,
-        campaign_path: outPath
+        campaign_path: outPath,
+        markers: { writerCompleted: true }
       }
     );
 

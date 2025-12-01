@@ -1,4 +1,4 @@
-// **** /api/lib/campaign-queue.js 24-11-2025 v1 ****
+//  /api/lib/campaign-queue.js 01-12-2025 v2
 // Canonical queue helper for Campaign apps.
 // - No manual Base64 encoding (SDK + Functions runtime handle that)
 // - Strict queue name validation
@@ -64,10 +64,10 @@ function normaliseQueueName(rawName) {
 }
 
 // Validated queue names (throws on misconfig at app start)
-const DEFAULT_QUEUE_NAME  = normaliseQueueName(DEFAULT_QUEUE_CANDIDATE);
+const DEFAULT_QUEUE_NAME = normaliseQueueName(DEFAULT_QUEUE_CANDIDATE);
 const EVIDENCE_QUEUE_NAME = normaliseQueueName(EVIDENCE_QUEUE_CANDIDATE);
-const OUTLINE_QUEUE_NAME  = normaliseQueueName(OUTLINE_QUEUE_CANDIDATE);
-const WRITE_QUEUE_NAME    = normaliseQueueName(WRITE_QUEUE_CANDIDATE);
+const OUTLINE_QUEUE_NAME = normaliseQueueName(OUTLINE_QUEUE_CANDIDATE);
+const WRITE_QUEUE_NAME = normaliseQueueName(WRITE_QUEUE_CANDIDATE);
 
 let _queueService;
 
@@ -100,9 +100,16 @@ function getQueueClient(queueName = DEFAULT_QUEUE_NAME) {
 /**
  * Ensure the queue exists and return its client.
  */
+const _createdQueues = new Set();
+
 async function ensureQueue(queueName = DEFAULT_QUEUE_NAME) {
   const q = getQueueClient(queueName);
-  await q.createIfNotExists();
+
+  if (!_createdQueues.has(queueName)) {
+    await q.createIfNotExists();
+    _createdQueues.add(queueName);
+  }
+
   return q;
 }
 
@@ -129,6 +136,16 @@ function serialiseMessage(message) {
 async function send(queueName, message, options = {}) {
   const q = await ensureQueue(queueName);
   const text = serialiseMessage(message);
+
+  const size = Buffer.byteLength(text, "utf8");
+  const MAX = 62 * 1024; // safety margin
+
+  if (size > MAX) {
+    throw new Error(
+      `Queue message exceeds safe limit (${size} bytes). Reduce payload before enqueue.`
+    );
+  }
+
   await q.sendMessage(text, options);
 }
 
@@ -145,7 +162,13 @@ async function enqueueStart(message, options = {}) {
  * Generic enqueue to any named queue.
  */
 async function enqueueTo(queueName, message, options = {}) {
-  const name = normaliseQueueName(queueName);
+  // If caller passes a validated name constant, avoid re-validating.
+  const name = (queueName === DEFAULT_QUEUE_NAME ||
+    queueName === EVIDENCE_QUEUE_NAME ||
+    queueName === OUTLINE_QUEUE_NAME ||
+    queueName === WRITE_QUEUE_NAME)
+    ? queueName
+    : normaliseQueueName(queueName);
   return send(name, message, options);
 }
 

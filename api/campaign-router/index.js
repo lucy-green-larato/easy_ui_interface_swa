@@ -1,4 +1,4 @@
-// /api/campaign-router/index.js — Unified canonical prefix version 30-11-2025 v 2
+// /api/campaign-router/index.js — Unified canonical prefix version 01-12-2025 v3
 "use strict";
 
 const { BlobServiceClient } = require("@azure/storage-blob");
@@ -13,20 +13,16 @@ const OUTLINE_QUEUE = process.env.Q_CAMPAIGN_OUTLINE || "campaign-outline";
 const WORKER_QUEUE = process.env.Q_CAMPAIGN_WORKER || "campaign-worker-jobs";
 const WRITE_QUEUE = process.env.Q_CAMPAIGN_WRITE || "campaign-write";
 
-// ---- Section keys for Writer (unchanged) ----
+// ---- Section keys for Writer (aligned to 7-tab UI)
 const SECTION_KEYS = [
   "executive_summary",
-  "positioning_and_differentiation",
-  "offer_strategy",
-  "messaging_matrix",
-  "channel_plan",
+  "go_to_market",
+  "messaging",
+  "offering",
   "sales_enablement",
-  "measurement_and_learning",
-  "risks_and_contingencies",
-  "compliance_and_governance",
-  "one_pager_summary"
+  "proof_points",
+  "evidence_log"
 ];
-
 
 // ---- Helpers ----
 async function streamToString(readable) {
@@ -56,6 +52,20 @@ function nowISO() {
   return new Date().toISOString();
 }
 
+// ---- Robust evidence existence check (Race-safe)
+async function waitForEvidence(prefix, container, attempts = 3, delayMs = 150) {
+  const evBlob = container.getBlockBlobClient(`${prefix}evidence.json`);
+  const logBlob = container.getBlockBlobClient(`${prefix}evidence_log.json`);
+
+  for (let i = 0; i < attempts; i++) {
+    const ev = await evBlob.exists();
+    const evLog = await logBlob.exists();
+    if (ev || evLog) return true;
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+  return false;
+}
+
 
 
 // ======================================================================
@@ -75,7 +85,13 @@ module.exports = async function (context, queueItem) {
   }
 
   const op = queueItem.op || "";
-  const runId = queueItem.runId || queueItem.id;
+  let runId;
+
+  if (queueItem.runId && queueItem.id && queueItem.runId !== queueItem.id) {
+    context.log.warn("[router] conflicting runId/id", queueItem);
+  }
+
+  runId = queueItem.runId || queueItem.id;
   const page = queueItem.page || "campaign";
   const user = queueItem.userId || queueItem.user || "anonymous";
 
@@ -105,6 +121,7 @@ module.exports = async function (context, queueItem) {
 
   const blobSvc = BlobServiceClient.fromConnectionString(STORAGE_CONN);
   const container = blobSvc.getContainerClient(RESULTS_CONTAINER);
+  await container.createIfNotExists();
 
   const qs = QueueServiceClient.fromConnectionString(STORAGE_CONN);
   const outlineQ = qs.getQueueClient(OUTLINE_QUEUE);
@@ -158,11 +175,9 @@ module.exports = async function (context, queueItem) {
   if (op === "afterevidence") {
     const phase = "Router.afterevidence";
 
-    // Check evidence
-    const ev = await container.getBlockBlobClient(`${prefix}evidence.json`).exists();
-    const evLog = await container.getBlockBlobClient(`${prefix}evidence_log.json`).exists();
-
-    if (!ev && !evLog) {
+    // ---- Robust, retry-aware check for evidence blobs ----
+    const evidenceReady = await waitForEvidence(prefix, container);
+    if (!evidenceReady) {
       status0.markers.waitingForEvidence = true;
       pushHistory(phase, "evidence_missing");
       await saveStatus();
@@ -178,7 +193,12 @@ module.exports = async function (context, queueItem) {
 
     // ---- Strategy queue ----
     if (!status0.markers.strategyEnqueued) {
-      await workerQ.sendMessage(JSON.stringify({ op: "run_strategy", runId, page, prefix }));
+      await workerQ.sendMessage(JSON.stringify({
+        op: "run_strategy",
+        runId,
+        page,
+        prefix
+      }));
       status0.markers.strategyEnqueued = true;
       pushHistory(phase, "strategy_enqueued");
     }
