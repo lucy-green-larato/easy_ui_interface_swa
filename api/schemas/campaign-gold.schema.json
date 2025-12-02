@@ -3,7 +3,6 @@
   "title": "campaign_gold_v2",
   "type": "object",
   "additionalProperties": false,
-
   "required": [
     "runId",
     "supplier",
@@ -12,21 +11,34 @@
     "viability",
     "sections"
   ],
-
   "properties": {
-    "runId": { "type": "string" },
-    "supplier": { "type": "string" },
-    "industry": { "type": "string" },
-    "persona": { "type": "string" },
-
+    "runId": {
+      "type": "string"
+    },
+    "supplier": {
+      "type": "string"
+    },
+    "industry": {
+      "type": "string"
+    },
+    "persona": {
+      "type": "string"
+    },
     "viability": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["grade", "dimensions"],
+      "required": [
+        "grade",
+        "dimensions"
+      ],
       "properties": {
         "grade": {
           "type": "string",
-          "enum": ["viable", "borderline", "weak"]
+          "enum": [
+            "viable",
+            "borderline",
+            "weak"
+          ]
         },
         "dimensions": {
           "type": "object",
@@ -34,45 +46,84 @@
           "properties": {
             "TAM": {
               "type": "object",
-              "required": ["value", "warning_code", "message"],
+              "required": [
+                "value",
+                "warning_code",
+                "message"
+              ],
               "properties": {
-                "value": { "type": "integer" },
-                "warning_code": { "type": "string" },
-                "message": { "type": "string" }
+                "value": {
+                  "type": "integer"
+                },
+                "warning_code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
               }
             },
             "problem_strength": {
               "type": "object",
-              "required": ["score", "warning_code", "message"],
+              "required": [
+                "score",
+                "warning_code",
+                "message"
+              ],
               "properties": {
-                "score": { "type": "number" },
-                "warning_code": { "type": "string" },
-                "message": { "type": "string" }
+                "score": {
+                  "type": "number"
+                },
+                "warning_code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
               }
             },
             "differentiation": {
               "type": "object",
-              "required": ["score", "warning_code", "message"],
+              "required": [
+                "score",
+                "warning_code",
+                "message"
+              ],
               "properties": {
-                "score": { "type": "number" },
-                "warning_code": { "type": "string" },
-                "message": { "type": "string" }
+                "score": {
+                  "type": "number"
+                },
+                "warning_code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
               }
             },
             "urgency": {
               "type": "object",
-              "required": ["score", "warning_code", "message"],
+              "required": [
+                "score",
+                "warning_code",
+                "message"
+              ],
               "properties": {
-                "score": { "type": "number" },
-                "warning_code": { "type": "string" },
-                "message": { "type": "string" }
+                "score": {
+                  "type": "number"
+                },
+                "warning_code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
               }
             }
           }
         }
       }
     },
-
     "sections": {
       "type": "object",
       "additionalProperties": false,
@@ -83,10 +134,10 @@
         "sales_enablement",
         "proof_points"
       ],
-
       "properties": {
         "executive_summary": {
           "type": "object",
+          "additionalProperties": false,
           "required": [
             "problem",
             "why_this_playing_field",
@@ -94,31 +145,58 @@
             "campaign_aim",
             "evidence_case",
             "key_warnings",
-            "citations"
+            "citations",
+            "viability_grade",
+            "viability_reasons_ids"
           ],
-          "additionalProperties": false,
           "properties": {
-            "problem": { "type": "string" },
-            "why_this_playing_field": { "type": "string" },
-            "how_we_win": { "type": "string" },
+            "problem": {
+              "type": "string"
+            },
+            "why_this_playing_field": {
+              "type": "string"
+            },
+            "how_we_win": {
+              "type": "string"
+            },
             "campaign_aim": {
               "type": "string",
-              "enum": ["upsell", "win-back", "growth", "nurture"]
+              "enum": [
+                "upsell",
+                "win-back",
+                "growth",
+                "nurture"
+              ]
             },
-            "evidence_case": { "type": "string" },
+            "evidence_case": {
+              "type": "string"
+            },
             "key_warnings": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "citations": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
+            },
+            "viability_grade": {
+              "type": "string"
+            },
+            "viability_reasons_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         },
-
         "go_to_market": {
           "type": "object",
+          "additionalProperties": false,
           "required": [
             "objective",
             "target_market",
@@ -126,48 +204,73 @@
             "sales_actions",
             "pipeline_model",
             "viability_notes",
-            "citations"
+            "citations",
+            "viability_reasons_ids"
           ],
-          "additionalProperties": false,
           "properties": {
-            "objective": { "type": "string" },
-            "target_market": { "type": "string" },
+            "objective": {
+              "type": "string"
+            },
+            "target_market": {
+              "type": "string"
+            },
             "marketing_actions": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "sales_actions": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "pipeline_model": {
               "type": "object",
-              "required": ["tiers", "motions"],
               "additionalProperties": false,
+              "required": [
+                "tiers",
+                "motions"
+              ],
               "properties": {
                 "tiers": {
                   "type": "array",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "motions": {
                   "type": "array",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 }
               }
             },
             "viability_notes": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
+            },
+            "viability_reasons_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "citations": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             }
           }
         },
-
         "offering": {
           "type": "object",
+          "additionalProperties": false,
           "required": [
             "business_value",
             "human_value",
@@ -175,33 +278,42 @@
             "fit_to_needs",
             "citations"
           ],
-          "additionalProperties": false,
           "properties": {
             "business_value": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "human_value": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "solution_elements": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "fit_to_needs": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "citations": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             }
           }
         },
-
         "sales_enablement": {
           "type": "object",
+          "additionalProperties": false,
           "required": [
             "buyer_problem",
             "buyer_value",
@@ -213,71 +325,109 @@
             "master_pitch",
             "citations"
           ],
-          "additionalProperties": false,
           "properties": {
-            "buyer_problem": { "type": "string" },
+            "buyer_problem": {
+              "type": "string"
+            },
             "buyer_value": {
               "type": "object",
-              "required": ["business_value", "human_value"],
+              "required": [
+                "business_value",
+                "human_value"
+              ],
               "properties": {
                 "business_value": {
                   "type": "array",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "human_value": {
                   "type": "array",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 }
               }
             },
-            "campaign_overview": { "type": "string" },
+            "campaign_overview": {
+              "type": "string"
+            },
             "discovery_questions": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "qualification_criteria": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "objection_handling": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
-            "battlecard": { "type": "string" },
-            "master_pitch": { "type": "string" },
+            "battlecard": {
+              "type": "string"
+            },
+            "master_pitch": {
+              "type": "string"
+            },
             "citations": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             }
           }
         },
-
         "proof_points": {
           "type": "object",
-          "required": ["points", "citations"],
           "additionalProperties": false,
+          "required": [
+            "points",
+            "citations"
+          ],
           "properties": {
             "points": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "citations": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             }
           }
         }
       }
     },
-
     "_meta": {
       "type": "object",
-      "required": ["version", "strategy_engine", "generated_at"],
       "additionalProperties": false,
+      "required": [
+        "version",
+        "strategy_engine",
+        "generated_at"
+      ],
       "properties": {
-        "version": { "type": "string" },
-        "strategy_engine": { "type": "string" },
-        "generated_at": { "type": "string", "format": "date-time" }
+        "version": {
+          "type": "string"
+        },
+        "strategy_engine": {
+          "type": "string"
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
       }
     }
   }

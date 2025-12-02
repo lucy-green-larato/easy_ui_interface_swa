@@ -1,4 +1,4 @@
-// /api/campaign-outline/index.js 02-12-2025 v12
+// /api/campaign-outline/index.js 02-12-2025 v13
 // Queue-triggered on %Q_CAMPAIGN_OUTLINE% (by router) to create <prefix>outline.json,
 // then posts a single {op:"afteroutline"} to %CAMPAIGN_QUEUE_NAME%.
 //
@@ -89,7 +89,14 @@ const OUTLINE_SCHEMA = {
           required: ["why_now_ids", "product_anchor_names"],
           properties: {
             why_now_ids: { type: "array", items: { type: "string" } },
-            product_anchor_names: { type: "array", items: { type: "string" } }
+            product_anchor_names: { type: "array", items: { type: "string" } },
+            viability_grade: {
+              type: "string"
+            },
+            viability_reason_ids: {
+              type: "array",
+              items: { type: "string" }
+            }
           }
         },
         positioning: {
@@ -97,7 +104,14 @@ const OUTLINE_SCHEMA = {
           additionalProperties: false,
           required: ["differentiator_ids"],
           properties: {
-            differentiator_ids: { type: "array", items: { type: "string" } }
+            differentiator_ids: { type: "array", items: { type: "string" } },
+            viability_grade: {
+              type: "string"
+            },
+            viability_reason_ids: {
+              type: "array",
+              items: { type: "string" }
+            }
           }
         },
         messaging: {
@@ -312,6 +326,25 @@ module.exports = async function (context, queueItem) {
 
   try {
     if (!queueItem) throw new Error("Queue message is empty");
+
+    // Normalise string payloads to JSON
+    if (typeof queueItem === "string") {
+      try {
+        queueItem = JSON.parse(queueItem);
+      } catch (e) {
+        throw new Error("Queue message must be valid JSON when sent as a string");
+      }
+    }
+
+    if (queueItem == null || typeof queueItem !== "object") {
+      throw new Error("Queue message must be an object");
+    }
+
+    // Support legacy or direct kickoff messages (safety only)
+    if (queueItem.op === "kickoff" && queueItem.prefix) {
+      queueItem.op = "afterevidence"; // treat as if evidence just completed
+    }
+
     runId = queueItem.runId || queueItem?.data?.runId || queueItem?.id;
     if (!runId) throw new Error("Missing runId");
 
@@ -353,7 +386,12 @@ module.exports = async function (context, queueItem) {
     }
 
     // Append phase start (history only; no state flip yet)
-    await patchStatus(container, prefix, { runId, markers: { ...(status0.markers || {}) } }, { phase: "Outline", note: "start" });
+    await patchStatus(
+      container,
+      prefix,
+      { runId, markers: { ...(status0.markers || {}) } },
+      { phase: "Outline", note: "start" }
+    );
 
     // ---- Load artifacts ----
     const evidenceRaw = await getJson(container, `${prefix}evidence_log.json`);
@@ -362,7 +400,9 @@ module.exports = async function (context, queueItem) {
     try {
       const evCanon = await getJson(container, `${prefix}evidence.json`);
       if (evCanon && Array.isArray(evCanon.claims)) evidenceArr = evCanon.claims;
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
 
     if (!Array.isArray(evidenceArr) || !evidenceArr.length) {
       if (Array.isArray(evidenceRaw)) {
@@ -463,6 +503,68 @@ Your job is to produce an evidence-only campaign that adds value to direct custo
       preferUserThenCfg,
       8
     );
+
+    // Load viability + map viability → claim_ids
+    const viability = await getJson(container, `${prefix}strategy_v3/viability.json`);
+
+    let viabilityGrade = null;
+    let viabilityReasonTexts = [];
+    let viabilityClaimIds = [];
+
+    if (viability && typeof viability === "object") {
+      // 1. grade
+      viabilityGrade = viability.grade || viability.grade_final || null;
+
+      // 2. collect messages (red + amber + dimensions)
+      const pushMsg = (x) => {
+        if (!x) return;
+        const s = String(x).trim();
+        if (s) viabilityReasonTexts.push(s);
+      };
+
+      // flags.red, flags.amber, flags.green
+      if (viability.flags) {
+        ["red", "amber", "green"].forEach(level => {
+          if (Array.isArray(viability.flags[level])) {
+            viability.flags[level].forEach(m => pushMsg(m?.message || m));
+          }
+        });
+      }
+
+      // dimensions.*.message
+      if (viability.dimensions && typeof viability.dimensions === "object") {
+        for (const dim of Object.values(viability.dimensions)) {
+          pushMsg(dim?.message);
+        }
+      }
+
+      // Deduplicate
+      viabilityReasonTexts = [...new Set(viabilityReasonTexts)];
+
+      // 3. Map messages → evidence claim_ids (keyword overlap)
+      const matchMsgToClaimIds = (msg) => {
+        if (!msg || !evidenceLog.length) return [];
+        const m = msg.toLowerCase();
+        const out = [];
+
+        for (const ev of evidenceLog) {
+          const hay = `${ev.title || ""} ${ev.summary || ""} ${ev.quote || ""}`.toLowerCase();
+          // simple overlap test: any shared meaningful word > 3 chars
+          const words = m.split(/\W+/).filter(w => w.length > 3);
+          if (!words.length) continue;
+          if (words.some(w => hay.includes(w))) {
+            if (ev.claim_id) out.push(ev.claim_id);
+          }
+        }
+        return out;
+      };
+
+      viabilityReasonTexts.forEach(vtxt => {
+        matchMsgToClaimIds(vtxt).forEach(cid => viabilityClaimIds.push(cid));
+      });
+
+      viabilityClaimIds = [...new Set(viabilityClaimIds)].slice(0, 12);
+    }
 
     // Industry resolution
     const SELECTED_INDUSTRY = (() => {
@@ -599,17 +701,34 @@ ${safeForPrompt(runConfig.relevant_competitors || [])}
 
     if (!outline.sections || typeof outline.sections !== "object") outline.sections = {};
     const reqObj = (n) => { if (!outline.sections[n] || typeof outline.sections[n] !== "object") outline.sections[n] = {}; return outline.sections[n]; };
-
     const exec = reqObj("exec");
     if (!Array.isArray(exec.why_now_ids)) exec.why_now_ids = [];
     if (!Array.isArray(exec.product_anchor_names)) exec.product_anchor_names = [];
+    if (viabilityGrade) {
+      exec.viability_grade = viabilityGrade;
+    }
+    if (Array.isArray(viabilityClaimIds) && viabilityClaimIds.length) {
+      exec.viability_reason_ids = viabilityClaimIds.slice(0, 12);
+    }
 
     const positioning = reqObj("positioning");
-    if (!Array.isArray(positioning.differentiator_ids)) positioning.differentiator_ids = [];
+    if (!Array.isArray(positioning.differentiator_ids)) {
+      positioning.differentiator_ids = [];
+    }
     if (Array.isArray(competitorClaimIds) && competitorClaimIds.length) {
-      const merged = new Set([...(positioning.differentiator_ids || []), ...competitorClaimIds]);
+      const merged = new Set([
+        ...(positioning.differentiator_ids || []),
+        ...competitorClaimIds
+      ]);
       positioning.differentiator_ids = Array.from(merged).slice(0, 12);
     }
+    if (viabilityGrade) {
+      positioning.viability_grade = viabilityGrade;
+    }
+    if (Array.isArray(viabilityClaimIds) && viabilityClaimIds.length) {
+      positioning.viability_reason_ids = viabilityClaimIds.slice(0, 12);
+    }
+
 
     if (!Array.isArray(outline.sections.messaging)) outline.sections.messaging = [];
     const offer = reqObj("offer");

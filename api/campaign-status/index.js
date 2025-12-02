@@ -1,4 +1,4 @@
-// /api/campaign-status/index.js 02-12-2025 v10.0
+// /api/campaign-status/index.js 02-12-2025 v10.1
 // GET /api/campaign-status?runId=... [&page=campaign]
 //
 // Canonical status resolver for Campaign runs.
@@ -179,6 +179,10 @@ module.exports = async function (context, req) {
 
     if (providedPrefix) {
       prefix = String(providedPrefix).trim();
+      if (prefix.startsWith(`${RESULTS_CONTAINER}/`)) {
+        prefix = prefix.slice(`${RESULTS_CONTAINER}/`.length);
+      }
+      prefix = prefix.replace(/^\/+/, "");
       if (!prefix.endsWith("/")) prefix += "/";
     } else {
       const userId = userIdFromReq(req);  // only used for fallback
@@ -199,7 +203,13 @@ module.exports = async function (context, req) {
           "x-correlation-id": correlationId,
           "Cache-Control": "no-cache",
         },
-        body: { state: "Unknown", runId, statusPath },
+        body: {
+          runId,
+          state: "Unknown",
+          error: "not_found",
+          message: `No status.json found at ${statusPath}`,
+          statusPath
+        },
       };
       return;
     }

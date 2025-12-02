@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 02-12-2025 Strategy Engine v11
+// /api/campaign-worker/index.js 02-12-2025 Strategy Engine v12
 // 
 // Responsibility:
 //   - Read Phase 1 outputs (evidence, insights, buyer_logic, markdown_pack, csv_normalized, etc.).
@@ -681,14 +681,16 @@ function buildStrategyV2({
 module.exports = async function (context, queueItem) {
   const log = context.log;
   const msg = parseQueueItem(queueItem);
-  if (msg.op && msg.op !== "kickoff") {
-    context.log(`[*] campaign-worker: ignoring non-kickoff op=${msg.op}`);
+  const op = msg.op || "kickoff";
+
+  if (op !== "kickoff" && op !== "run_strategy") {
+    log(`[*] campaign-worker: ignoring op=${op} (expected kickoff|run_strategy)`);
     return;
   }
+
   const explicitRunId = msg.runId || msg.run_id || null;
   const userId = msg.userId || msg.user || "anonymous";
   const page = msg.page || "campaign";
-
   // Prefer prefix from message (authoritative); fall back to canonical if missing
   let prefix = msg.prefix || null;
   if (!prefix) {
@@ -718,6 +720,18 @@ module.exports = async function (context, queueItem) {
   log(`[*] Strategy Engine starting for runId=${runId}, prefix=${prefix}`);
 
   const container = await getResultsContainer();
+  // ---- Idempotence guard: skip if strategy already finished ----
+  try {
+    const status = await readJsonIfExists(container, `${prefix}status.json`);
+    const state = status && status.state;
+
+    if (state === "strategy_ready" || state === "Completed") {
+      log("[*] Strategy already completed for this run; skipping", { runId, prefix, op });
+      return;
+    }
+  } catch (e) {
+    log("[*] strategy idempotence check failed (non-fatal)", String(e && e.message ? e.message : e));
+  }
 
   await updateStatus(
     container,
