@@ -1886,6 +1886,29 @@ window.CampaignUI = window.CampaignUI || {};
     const csvBadge = $("#csvBadge");
     const leftRail = $("#inputs");
 
+    // --- Industry selector: show/hide custom input on change (wired at boot) ---
+    const industrySelect = document.getElementById("buyerIndustrySelect");
+    const industryCustom = document.getElementById("buyerIndustryCustom");
+
+    if (industrySelect && industryCustom) {
+      // Initial state on page load
+      if (industrySelect.value === "__custom") {
+        industryCustom.style.display = "block";
+      } else {
+        industryCustom.style.display = "none";
+      }
+
+      industrySelect.addEventListener("change", () => {
+        if (industrySelect.value === "__custom") {
+          industryCustom.style.display = "block";
+          industryCustom.focus();
+        } else {
+          industryCustom.style.display = "none";
+          industryCustom.value = "";
+        }
+      });
+    }
+
     let isRunning = false;
     function setRunning(b) {
       isRunning = !!b;
