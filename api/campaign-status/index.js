@@ -1,23 +1,32 @@
-// /api/campaign-status/index.js 24-11-2025 v7 
-// // GET /api/campaign-status?runId=... [&prefix=containerOrRelativePrefix]
+// /api/campaign-status/index.js 02-12-2025 v9
+// GET /api/campaign-status?runId=... [&page=campaign]
 //
-// Resolves status.json in priority order:
-//   1) Explicit ?prefix=… (container-relative normalised; or absolute starting with <container>/)
-//   2) New layout via users/<userId>/recent.json → prefix
-//   3) Legacy fallback runs/<runId>/status.json
+// Canonical status resolver for Campaign runs.
+// - Single canonical layout based on canonicalPrefix({ runId, userId, page })
+// - No legacy runs/<runId>/status.json fallback
+// - CORS + conditional GET (ETag / Last-Modified)
+// - Safe flag normalisation using lib/featureFlags.getFlags
 //
 // Node 20 / Azure Functions v4 / CommonJS
 
-const { BlobServiceClient } = require("@azure/storage-blob");
+"use strict";
 
-// ---------- config ----------
-const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
+const { BlobServiceClient } = require("@azure/storage-blob");
+const { canonicalPrefix } = require("../lib/prefix");
+const { getFlags } = require("../lib/featureFlags");
+
+const STORAGE_CONN =
+  process.env.AzureWebJobsStorage || process.env.AZURE_STORAGE_CONNECTION_STRING;
+
+const RESULTS_CONTAINER =
+  process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 
 // ---------- CORS ----------
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Correlation-Id, Authorization, If-None-Match",
+  "Access-Control-Allow-Headers":
+    "Content-Type, X-Correlation-Id, Authorization, If-None-Match",
 };
 
 // ---------- utils ----------
@@ -28,7 +37,10 @@ function readHeader(req, name) {
 }
 
 function genId() {
-  const s = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).slice(1);
+  const s = () =>
+    Math.floor((1 + Math.random()) * 0x10000)
+      .toString(16)
+      .slice(1);
   return `${s()}${s()}-${s()}-${s()}-${s()}-${s()}${s()}${s()}`;
 }
 
@@ -37,23 +49,12 @@ function correlationIdFrom(req) {
 }
 
 async function streamToString(readable) {
-  if (!readable) return "";
   const chunks = [];
-  for await (const chunk of readable) chunks.push(chunk);
+  for await (const chunk of readable || []) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function normalizePrefix(p) {
-  let x = String(p || "").trim();
-  if (!x) return null;
-  // Allow "results/…"
-  if (x.startsWith(`${RESULTS_CONTAINER}/`)) x = x.slice(`${RESULTS_CONTAINER}/`.length);
-  x = x.replace(/^\/+/, "");
-  if (!x.endsWith("/")) x += "/";
-  return x;
-}
-
-// ---- SWA auth helpers (to locate users/<userId>/recent.json) ----
+// ---- SWA auth helpers (for canonicalPrefix userId) ----
 function decodeClientPrincipal(req) {
   const b64 = readHeader(req, "x-ms-client-principal");
   if (!b64) return null;
@@ -69,15 +70,25 @@ function userIdFromReq(req) {
   const cp = decodeClientPrincipal(req) || {};
   const claims = Array.isArray(cp.claims) ? cp.claims : [];
   const byType = Object.create(null);
-  for (const c of claims) byType[(c.typ || c.type || "").toLowerCase()] = c.val || c.value;
+  for (const c of claims) {
+    const key = (c.typ || c.type || "").toLowerCase();
+    byType[key] = c.val || c.value;
+  }
 
-  const oid = byType["http://schemas.microsoft.com/identity/claims/objectidentifier"]
-    || byType["oid"] || null;
+  const oid =
+    byType["http://schemas.microsoft.com/identity/claims/objectidentifier"] ||
+    byType["oid"] ||
+    null;
   const sub = byType["sub"] || null;
-  const email = (byType["emails"] || byType["email"] || cp.userDetails || "").toLowerCase();
+  const email =
+    (byType["emails"] || byType["email"] || cp.userDetails || "").toLowerCase();
 
   const chosen = oid || sub || email || "anonymous";
-  return String(chosen).trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, "-").replace(/-+/g, "-");
+  return String(chosen)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.@-]/g, "-")
+    .replace(/-+/g, "-");
 }
 
 module.exports = async function (context, req) {
@@ -94,8 +105,16 @@ module.exports = async function (context, req) {
   if (method !== "GET") {
     context.res = {
       status: 405,
-      headers: { ...CORS, "Content-Type": "application/json", "x-correlation-id": cid, "Allow": "GET, OPTIONS" },
-      body: { error: "method_not_allowed", message: "Only GET is supported" }
+      headers: {
+        ...CORS,
+        "Content-Type": "application/json",
+        "x-correlation-id": cid,
+        Allow: "GET, OPTIONS",
+      },
+      body: {
+        error: "method_not_allowed",
+        message: "Only GET is supported",
+      },
     };
     return;
   }
@@ -103,25 +122,37 @@ module.exports = async function (context, req) {
   const correlationId = cid;
 
   try {
-    if (!process.env.AzureWebJobsStorage) {
+    if (!STORAGE_CONN) {
       context.res = {
         status: 500,
-        headers: { ...CORS, "Content-Type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "config", message: "AzureWebJobsStorage app setting is missing" }
+        headers: {
+          ...CORS,
+          "Content-Type": "application/json",
+          "x-correlation-id": correlationId,
+        },
+        body: {
+          error: "config",
+          message: "AzureWebJobsStorage / storage connection is missing",
+        },
       };
       return;
     }
 
     const query = req.query || {};
-    const routeRunId = (req.params && req.params.runId) ? String(req.params.runId).trim() : "";
-    const queryRunId = query.runId ? String(query.runId).trim() : "";
+    const routeRunId =
+      (req.params && req.params.runId && String(req.params.runId).trim()) || "";
+    const queryRunId = (query.runId && String(query.runId).trim()) || "";
     const runId = routeRunId || queryRunId;
 
     if (!runId) {
       context.res = {
         status: 400,
-        headers: { ...CORS, "Content-Type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "bad_request", message: "Missing runId" }
+        headers: {
+          ...CORS,
+          "Content-Type": "application/json",
+          "x-correlation-id": correlationId,
+        },
+        body: { error: "bad_request", message: "Missing runId" },
       };
       return;
     }
@@ -131,87 +162,48 @@ module.exports = async function (context, req) {
     if (!RUNID_RE.test(runId)) {
       context.res = {
         status: 400,
-        headers: { ...CORS, "Content-Type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "bad_request", message: "Invalid runId format" }
+        headers: {
+          ...CORS,
+          "Content-Type": "application/json",
+          "x-correlation-id": correlationId,
+        },
+        body: { error: "bad_request", message: "Invalid runId format" },
       };
       return;
     }
 
-    const blobService = BlobServiceClient.fromConnectionString(process.env.AzureWebJobsStorage);
+    const page =
+      (query.page && String(query.page).trim().toLowerCase()) || "campaign";
+    const userId = userIdFromReq(req);
+
+    // Canonical prefix from shared helper
+    const prefix = canonicalPrefix({ runId, userId, page });
+    const statusPath = `${prefix}status.json`;
+
+    const blobService = BlobServiceClient.fromConnectionString(STORAGE_CONN);
     const container = blobService.getContainerClient(RESULTS_CONTAINER);
+    const client = container.getBlockBlobClient(statusPath);
 
-    // -------- Resolve prefix (explicit > recent.json > legacy). Prefix must point at run folder. --------
-    let resolvedPrefix = null;
-
-    // 1) Explicit ?prefix=...
-    if (typeof query.prefix === "string" && query.prefix.trim()) {
-      resolvedPrefix = normalizePrefix(query.prefix);
-    }
-
-    // 2) New layout via users/<userId>/recent.json (if no explicit prefix)
-    if (!resolvedPrefix) {
-      const userId = userIdFromReq(req);
-      const userIdxPath = `users/${userId}/recent.json`;
-      try {
-        const idxClient = container.getBlockBlobClient(userIdxPath);
-        if (await idxClient.exists()) {
-          const dl = await idxClient.download();
-          const txt = await streamToString(dl.readableStreamBody);
-          const idx = JSON.parse(txt);
-          const hit = (Array.isArray(idx?.items) ? idx.items : []).find(
-            x => String(x?.runId || "") === runId
-          );
-          if (hit && typeof hit.prefix === "string") {
-            const norm = normalizePrefix(hit.prefix);
-            if (norm) resolvedPrefix = norm;
-          }
-        }
-      } catch (e) {
-        context.log.warn("campaign-status: recent.json lookup failed", {
-          runId,
-          err: String(e?.message || e)
-        });
-      }
-    }
-
-    // 3) Legacy fallback
-    const candidates = [];
-    if (resolvedPrefix) candidates.push(`${resolvedPrefix}status.json`);
-    candidates.push(`runs/${runId}/status.json`);
-
-    // -------- Try candidates in order --------
-    let found = null;
-    for (const blobName of candidates) {
-      const client = container.getBlockBlobClient(blobName);
-      if (await client.exists()) {
-        found = client;
-        context.log({
-          event: "campaign_status_target",
-          blob: `${RESULTS_CONTAINER}/${blobName}`,
-          correlationId
-        });
-        break;
-      }
-    }
-
-    if (!found) {
+    if (!(await client.exists())) {
       context.res = {
         status: 404,
         headers: {
           ...CORS,
           "Content-Type": "application/json",
           "x-correlation-id": correlationId,
-          "Cache-Control": "no-cache"
+          "Cache-Control": "no-cache",
         },
-        body: { state: "Unknown", runId }
+        body: { state: "Unknown", runId, statusPath },
       };
       return;
     }
 
-    // Read properties for validators
-    const props = await found.getProperties();
+    // Properties for validators
+    const props = await client.getProperties();
     const etag = props.etag;
-    const lastModified = props.lastModified ? props.lastModified.toUTCString() : undefined;
+    const lastModified = props.lastModified
+      ? props.lastModified.toUTCString()
+      : undefined;
 
     // Conditional GET via If-None-Match
     const ifNoneMatch = readHeader(req, "if-none-match");
@@ -220,17 +212,17 @@ module.exports = async function (context, req) {
         status: 304,
         headers: {
           ...CORS,
-          "ETag": etag,
+          ETag: etag,
           ...(lastModified ? { "Last-Modified": lastModified } : {}),
           "Cache-Control": "no-cache",
-          "x-correlation-id": correlationId
-        }
+          "x-correlation-id": correlationId,
+        },
       };
       return;
     }
 
     // Download JSON text
-    const dl = await found.download();
+    const dl = await client.download();
     const bodyText = await streamToString(dl.readableStreamBody);
 
     // Validate + parse JSON (log but avoid leaking payload)
@@ -240,45 +232,53 @@ module.exports = async function (context, req) {
     } catch (e) {
       context.log.warn("[campaign-status] status.json is not valid JSON", {
         runId,
-        error: String(e?.message || e)
+        statusPath,
+        error: String(e?.message || e),
       });
       context.res = {
         status: 502,
         headers: {
           ...CORS,
           "Content-Type": "application/json",
-          "x-correlation-id": correlationId
+          "x-correlation-id": correlationId,
         },
         body: {
           error: "bad_status_payload",
-          message: "status.json is not valid JSON"
-        }
+          message: "status.json is not valid JSON",
+        },
       };
       return;
     }
 
-    // ---- Flag normalisation only (no derived 'strategy-only' completion) ----
+    // ---- Feature-flag normalisation (using lib/featureFlags) ----
     try {
-      const topFlags =
-        statusPayload && typeof statusPayload === "object" && statusPayload.flags
-          ? statusPayload.flags
-          : {};
       const inputFlags =
         statusPayload &&
         typeof statusPayload === "object" &&
         statusPayload.input &&
-        statusPayload.input.flags
+        typeof statusPayload.input.flags === "object"
           ? statusPayload.input.flags
           : {};
 
-      const mergedFlags = { ...inputFlags, ...topFlags };
-      if (Object.keys(mergedFlags).length > 0) {
-        statusPayload.flags = mergedFlags;
+      const topFlags =
+        statusPayload &&
+        typeof statusPayload === "object" &&
+        typeof statusPayload.flags === "object"
+          ? statusPayload.flags
+          : {};
+
+      // Merge input.flags (earlier) and top-level flags (override) then normalise
+      const merged = { ...inputFlags, ...topFlags };
+      const normalised = getFlags({ flags: merged });
+
+      if (normalised && Object.keys(normalised).length > 0) {
+        statusPayload.flags = normalised;
       }
     } catch (e) {
       context.log.warn("[campaign-status] flag normalisation failed", {
         runId,
-        error: String(e?.message || e)
+        statusPath,
+        error: String(e?.message || e),
       });
     }
 
@@ -289,19 +289,19 @@ module.exports = async function (context, req) {
       headers: {
         ...CORS,
         "Content-Type": "application/json",
-        "ETag": etag,
+        ETag: etag,
         ...(lastModified ? { "Last-Modified": lastModified } : {}),
         "Cache-Control": "no-cache",
-        "x-correlation-id": correlationId
+        "x-correlation-id": correlationId,
       },
-      body: responseText
+      body: responseText,
     };
   } catch (err) {
     context.log.error(
       JSON.stringify({
         event: "campaign_status_error",
         correlationId,
-        error: String(err?.message || err)
+        error: String(err?.message || err),
       })
     );
     context.res = {
@@ -309,9 +309,9 @@ module.exports = async function (context, req) {
       headers: {
         ...CORS,
         "Content-Type": "application/json",
-        "x-correlation-id": correlationId
+        "x-correlation-id": correlationId,
       },
-      body: { error: "internal", message: "Unexpected error" }
+      body: { error: "internal", message: "Unexpected error" },
     };
   }
 };
