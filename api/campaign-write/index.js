@@ -614,7 +614,9 @@ module.exports = async function (context, queueItem) {
 
   const page = msg.page || "campaign";
 
-  const prefix = canonicalPrefix({ userId, page, runId });
+  const prefix = msg.prefix
+  ? String(msg.prefix).replace(/^\/+/, "").replace(/\/+$/, "") + "/"
+  : canonicalPrefix({ userId, page, runId });
 
   log(`[*] Campaign Writer starting for runId=${runId}, userId=${userId}, page=${page}`);
   log(`[*] Using canonical prefix: ${prefix}`);

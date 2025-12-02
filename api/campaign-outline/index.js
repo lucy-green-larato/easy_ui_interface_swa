@@ -1,4 +1,4 @@
-// /api/campaign-outline/index.js 01-12-2025 v11
+// /api/campaign-outline/index.js 02-12-2025 v12
 // Queue-triggered on %Q_CAMPAIGN_OUTLINE% (by router) to create <prefix>outline.json,
 // then posts a single {op:"afteroutline"} to %CAMPAIGN_QUEUE_NAME%.
 //
@@ -319,11 +319,18 @@ module.exports = async function (context, queueItem) {
     const svc = blobSvc();
     container = svc.getContainerClient(CONTAINER);
 
-    prefix = canonicalPrefix({
-      userId: queueItem.userId || queueItem.user || "anonymous",
-      page: queueItem.page || "campaign",
-      runId
-    });
+    // ---- PREFIX AUTHORITY  ----
+    if (queueItem.prefix) {
+      // queue-provided prefix is always canonical, must be used as-is
+      prefix = normalizePrefix(queueItem.prefix);
+    } else {
+      // fallback ONLY if prefix was not provided by router
+      prefix = canonicalPrefix({
+        userId: queueItem.userId || queueItem.user || "anonymous",
+        page: queueItem.page || "campaign",
+        runId
+      });
+    }
     const page = queueItem.page || queueItem?.data?.page || "campaign";
     const runConfig = queueItem.runConfig || {};
 
@@ -543,10 +550,10 @@ ${safeForPrompt(runConfig.relevant_competitors || [])}
     });
 
     // ---- Cleanup temp schema file (avoid accumulation in /tmp) ----
-try {
-  const schemaPath = path.join(os.tmpdir(), `outline_${runId}.schema.json`);
-  fs.unlinkSync(schemaPath);
-} catch { /* cleanup best-effort */ }
+    try {
+      const schemaPath = path.join(os.tmpdir(), `outline_${runId}.schema.json`);
+      fs.unlinkSync(schemaPath);
+    } catch { /* cleanup best-effort */ }
 
 
     if (typeof outline === "string") {

@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 02-12-2025 v25
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 02-12-2025 v26
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, 
@@ -1414,8 +1414,8 @@ window.CampaignUI = window.CampaignUI || {};
       `/api/campaign-status?runId=${encodeURIComponent(runId)}`,
 
     // Writer always writes:  runs/<runId>/campaign.json
-    fetchContract: (runId) =>
-      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign.json`,
+   fetchContract: (runId) =>
+  `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign`,
 
     // Strategy engine always writes: runs/<runId>/strategy_v2/campaign_strategy.json
     fetchStrategyV2: (runId) =>

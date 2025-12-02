@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 01-12-2025 Strategy Engine v9
+// /api/campaign-worker/index.js 02-12-2025 Strategy Engine v10.0
 // 
 // Responsibility:
 //   - Read Phase 1 outputs (evidence, insights, buyer_logic, markdown_pack, csv_normalized, etc.).
@@ -681,7 +681,10 @@ function buildStrategyV2({
 module.exports = async function (context, queueItem) {
   const log = context.log;
   const msg = parseQueueItem(queueItem);
-
+  if (msg.op && msg.op !== "kickoff") {
+  context.log(`[*] campaign-worker: ignoring non-kickoff op=${msg.op}`);
+  return;
+}
   const explicitRunId = msg.runId || msg.run_id || null;
   const userId = msg.userId || msg.user || "anonymous";
   const page = msg.page || "campaign";

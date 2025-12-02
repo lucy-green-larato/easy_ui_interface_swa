@@ -1,4 +1,4 @@
-// /api/campaign-status/index.js 02-12-2025 v9
+// /api/campaign-status/index.js 02-12-2025 v10.0
 // GET /api/campaign-status?runId=... [&page=campaign]
 //
 // Canonical status resolver for Campaign runs.
@@ -174,10 +174,16 @@ module.exports = async function (context, req) {
 
     const page =
       (query.page && String(query.page).trim().toLowerCase()) || "campaign";
-    const userId = userIdFromReq(req);
+    let prefix;
+    const providedPrefix = query.prefix || (req.body && req.body.prefix);
 
-    // Canonical prefix from shared helper
-    const prefix = canonicalPrefix({ runId, userId, page });
+    if (providedPrefix) {
+      prefix = String(providedPrefix).trim();
+      if (!prefix.endsWith("/")) prefix += "/";
+    } else {
+      const userId = userIdFromReq(req);  // only used for fallback
+      prefix = canonicalPrefix({ runId, userId, page });
+    }
     const statusPath = `${prefix}status.json`;
 
     const blobService = BlobServiceClient.fromConnectionString(STORAGE_CONN);
@@ -254,16 +260,16 @@ module.exports = async function (context, req) {
     try {
       const inputFlags =
         statusPayload &&
-        typeof statusPayload === "object" &&
-        statusPayload.input &&
-        typeof statusPayload.input.flags === "object"
+          typeof statusPayload === "object" &&
+          statusPayload.input &&
+          typeof statusPayload.input.flags === "object"
           ? statusPayload.input.flags
           : {};
 
       const topFlags =
         statusPayload &&
-        typeof statusPayload === "object" &&
-        typeof statusPayload.flags === "object"
+          typeof statusPayload === "object" &&
+          typeof statusPayload.flags === "object"
           ? statusPayload.flags
           : {};
 

@@ -1,4 +1,4 @@
-// /api/campaign-fetch/index.js 22-11-2025 v16
+// /api/campaign-fetch/index.js 02-12-2025 v17
 // GET /api/campaign-fetch?runId=<id>&file=<campaign|evidence_log|csv|status|outline|sections|section>&name=<sectionName?>
 // Optional: &prefix=<container-relative override>
 
@@ -59,47 +59,6 @@ const SECTION_KEYS = [
   "compliance_and_governance",
   "one_pager_summary"
 ];
-
-// ---------- prefix helpers ----------
-function normalizePrefix(p) {
-  let x = String(p || "").trim();
-  if (!x) return null;
-  if (x.startsWith(`${RESULTS_CONTAINER}/`)) x = x.slice(`${RESULTS_CONTAINER}/`.length);
-  if (x.startsWith("/")) x = x.replace(/^\/+/, "");
-  if (!x.endsWith("/")) x += "/";
-  return x;
-}
-
-async function resolvePrefix(container, runId, userIdHint) {
-  // Try fast path: per-user recent index
-  if (userIdHint) {
-    try {
-      const idx = container.getBlockBlobClient(`users/${userIdHint}/recent.json`);
-      const obj = await jsonIfExists(idx);
-      const hit = (obj?.items || []).find((x) => String(x?.runId) === runId && typeof x?.prefix === "string");
-      if (hit?.prefix && hit.prefix.endsWith("/")) return hit.prefix;
-    } catch { /* noop */ }
-  }
-
-  // Bounded scan under runs/ for status.json that contains this runId
-  let seen = 0;
-  for await (const it of container.listBlobsFlat({ prefix: "runs/" })) {
-    // Keep the list tight – only status.json objects
-    if (!it.name.toLowerCase().endsWith("/status.json")) continue;
-    if (++seen > 800) break; // hard bound for safety
-    try {
-      const bb = container.getBlockBlobClient(it.name);
-      const dl = await bb.download();
-      const txt = await streamToString(dl.readableStreamBody);
-      // cheap check without full JSON parse
-      if (txt && txt.includes(`"runId":"${runId}"`)) {
-        return it.name.slice(0, -"status.json".length);
-      }
-    } catch { /* keep scanning */ }
-  }
-  // Fallback (container-relative)
-  return `runs/${runId}/`;
-}
 
 // ---------- handler ----------
 module.exports = async function (context, req) {
@@ -177,7 +136,25 @@ module.exports = async function (context, req) {
     }
   } catch { /* noop */ }
 
-  const base = prefixOverride || await resolvePrefix(container, runId, userIdHint);
+  let base;
+
+  if (prefixOverride) {
+    // Caller knows the exact prefix → trust it 100%
+    base = prefixOverride;
+  } else {
+    // Fallback: reconstruct canonical prefix using *same logic as campaign-start*
+    // Using userIdHint is acceptable as a fallback because the correct userId
+    // will be present when UI calls fetch (UI reads prefix from status.json).
+    const { canonicalPrefix } = require("../lib/prefix");
+
+    const page = String(req.query?.page || "campaign").trim().toLowerCase();
+    const userId = userIdHint || "anonymous";
+
+    base = canonicalPrefix({ userId, page, runId });
+
+    // Ensure trailing slash
+    if (!base.endsWith("/")) base = base + "/";
+  }
 
   // ---- single artifacts ----
   if (fileKey !== "sections" && fileKey !== "section") {
@@ -242,7 +219,7 @@ module.exports = async function (context, req) {
       }
       return counts;
     }
-       // campaign/evidence/outline may appear moments after status flips → tiny retry
+    // campaign/evidence/outline may appear moments after status flips → tiny retry
     const shouldRetry = fileKey === "campaign" || fileKey === "evidence_log" || fileKey === "outline";
     const ok = await existsWithTinyRetry(blob, shouldRetry);
 

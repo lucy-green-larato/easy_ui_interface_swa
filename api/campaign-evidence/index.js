@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 01-12-2025 — v35
+// /api/campaign-evidence/index.js 02-12-2025 — v36
 // Phase 1 canonical outputs:
 // - csv_normalized.json
 // - needs_map.json
@@ -367,6 +367,7 @@ module.exports = async function (context, job) {
   // Canonical input object (allow legacy shapes but don't mutate msg directly)
   let input = msg.input || msg.inputs || msg || {};
   if (input == null || typeof input !== "object") input = {};
+  let prefix = msg.prefix || null;
   const userId = msg.userId || msg.user || "anonymous";
   const page = msg.page || "campaign";
   const explicitRunId = msg.runId || msg.run_id || runId;
