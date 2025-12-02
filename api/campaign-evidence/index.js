@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 02-12-2025 — v36
+// /api/campaign-evidence/index.js 02-12-2025 — v37
 // Phase 1 canonical outputs:
 // - csv_normalized.json
 // - needs_map.json
@@ -503,11 +503,10 @@ module.exports = async function (context, job) {
   await updateStatus(
     container,
     prefix,
-    "EvidenceDigest",
-    "start",
     {
-      runId,
       state: "EvidenceDigest",
+      phase: "start",
+      updatedAt: nowIso(),
       input: {
         page: input.page || null,
         rowCount: Number(input.rowCount || 0),
@@ -517,13 +516,20 @@ module.exports = async function (context, job) {
         supplier_usps: Array.isArray(input.supplier_usps)
           ? input.supplier_usps
           : (input.supplier_usps
-            ? String(input.supplier_usps).split(/[;,\n]/).map(s => s.trim()).filter(Boolean)
+            ? String(input.supplier_usps)
+              .split(/[;,\n]/)
+              .map(s => s.trim())
+              .filter(Boolean)
             : []),
         selected_industry:
-          (input.selected_industry || input.campaign_industry || input.company_industry || input.industry || "")
-            .trim().toLowerCase() || null
-      },
-      updatedAt: nowIso()
+          (input.selected_industry ||
+            input.campaign_industry ||
+            input.company_industry ||
+            input.industry ||
+            "")
+            .trim()
+            .toLowerCase() || null
+      }
     },
     { phase: "EvidenceDigest", note: "start" }
   );
@@ -1790,6 +1796,7 @@ module.exports = async function (context, job) {
       cur.markers.evidenceDigestCompleted = true;
       await putJson(container, statusPath, cur);
     } catch { /* non-fatal */ }
+
     await updateStatus(
       container,
       prefix,
@@ -1811,7 +1818,7 @@ module.exports = async function (context, job) {
           items_total: evidenceLog.length
         }
       },
-      { phase: "EvidenceDigest", note: "completed", count: evidenceLog.length }
+      { phase: "EvidenceDigest", note: "completed" }
     );
 
     context.log("[campaign-evidence] completed", { runId, prefix });
