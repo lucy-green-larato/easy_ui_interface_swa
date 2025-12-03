@@ -1,4 +1,4 @@
-// /api/campaign-outline/index.js 02-12-2025 v13
+// /api/campaign-outline/index.js 03-12-2025 v14
 // Queue-triggered on %Q_CAMPAIGN_OUTLINE% (by router) to create <prefix>outline.json,
 // then posts a single {op:"afteroutline"} to %CAMPAIGN_QUEUE_NAME%.
 //
@@ -361,7 +361,8 @@ module.exports = async function (context, queueItem) {
       prefix = canonicalPrefix({
         userId: queueItem.userId || queueItem.user || "anonymous",
         page: queueItem.page || "campaign",
-        runId
+        runId,
+        date: queueItem.date ? new Date(queueItem.date) : undefined
       });
     }
     const page = queueItem.page || queueItem?.data?.page || "campaign";
@@ -442,6 +443,8 @@ module.exports = async function (context, queueItem) {
               const val = m[1].trim();
               if (
                 val &&
+                !/[<>{}]/.test(val) &&
+                val.split(/\s+/).length <= 6 &&
                 !/^(home|about|contact|login|support|learn|blog|cookie|privacy|terms|partners|resources)$/i.test(val) &&
                 !/^(read more|learn more)$/i.test(val)
               ) out.add(val);

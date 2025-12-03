@@ -456,9 +456,9 @@ function buildExecutiveSummarySection({ strategy_v2, outline, viability, campaig
   const problemSentence =
     caseBullets.length || problemBullets.length
       ? `They face the following pressures and business problems: ${summariseBullets(
-          caseBullets.concat(problemBullets),
-          6
-        )}.`
+        caseBullets.concat(problemBullets),
+        6
+      )}.`
       : null;
 
   // How we win + right to play
@@ -480,11 +480,11 @@ function buildExecutiveSummarySection({ strategy_v2, outline, viability, campaig
   const howWeWinSentence =
     hwwBullets.length || rtp.length || productAnchors.length
       ? `This campaign is designed to help you win by ${summariseBullets(
-          hwwBullets
-            .concat(rtp)
-            .concat(productAnchors),
-          6
-        )}.`
+        hwwBullets
+          .concat(rtp)
+          .concat(productAnchors),
+        6
+      )}.`
       : null;
 
   // Campaign aim (enum-friendly + sentence)
@@ -502,9 +502,9 @@ function buildExecutiveSummarySection({ strategy_v2, outline, viability, campaig
   const evidenceSentence =
     businessValue.length || personaValue.length || proofPoints.length
       ? `The evidence base combines market and buyer signals with proof points such as: ${summariseBullets(
-          businessValue.concat(personaValue).concat(proofPoints),
-          6
-        )}.`
+        businessValue.concat(personaValue).concat(proofPoints),
+        6
+      )}.`
       : "";
 
   // Viability overlays
@@ -603,12 +603,12 @@ function buildGoToMarketSection({ strategy_v2, outline, viability }) {
   // Channel themes from outline
   const emailThemes =
     Array.isArray(outlineChannel.email_themes) &&
-    outlineChannel.email_themes.length
+      outlineChannel.email_themes.length
       ? outlineChannel.email_themes.map((t) => t.theme).filter(Boolean)
       : [];
   const linkedinThemes =
     Array.isArray(outlineChannel.linkedin_themes) &&
-    outlineChannel.linkedin_themes.length
+      outlineChannel.linkedin_themes.length
       ? outlineChannel.linkedin_themes.map((t) => t.theme).filter(Boolean)
       : [];
 
@@ -682,8 +682,8 @@ function buildGoToMarketSection({ strategy_v2, outline, viability }) {
   const viability_notes = viabilityNotes.length
     ? viabilityNotes
     : (viabilityHeadlineParts.length
-        ? [viabilityHeadlineParts.join(" ")]
-        : []);
+      ? [viabilityHeadlineParts.join(" ")]
+      : []);
 
   // Citations from channel + risks + compliance
   const channelClaimIds = [];
@@ -820,13 +820,13 @@ function buildSalesEnablementSection({ strategy_v2, outline, campaignRequirement
 
   const qualification_criteria = uniqNonEmpty(
     se.qualification_criteria ||
-      buyerStrategy.qualification_criteria ||
-      [
-        "There is a clearly acknowledged problem or opportunity linked to our value story.",
-        "Budget or investment appetite exists within a realistic timeframe.",
-        "Key stakeholders are identified and engaged.",
-        "There is a defined next step that aligns with the campaign call to action."
-      ]
+    buyerStrategy.qualification_criteria ||
+    [
+      "There is a clearly acknowledged problem or opportunity linked to our value story.",
+      "Budget or investment appetite exists within a realistic timeframe.",
+      "Key stakeholders are identified and engaged.",
+      "There is a defined next step that aligns with the campaign call to action."
+    ]
   );
 
   const objection_handling = uniqNonEmpty(
@@ -948,14 +948,21 @@ module.exports = async function (context, queueItem) {
 
   const userId = msg.userId || msg.user || "anonymous";
   const page = msg.page || "campaign";
+  let prefix;
 
-  const prefix = msg.prefix
-    ? String(msg.prefix).replace(/^\/+/, "").replace(/\/+$/, "") + "/"
-    : canonicalPrefix({ userId, page, runId });
+  if (msg.prefix) {
+    prefix = String(msg.prefix).trim();
+    prefix = prefix.replace(/^\/+/, "");
+    if (prefix.toLowerCase().startsWith(`${RESULTS_CONTAINER.toLowerCase()}/`)) {
+      prefix = prefix.slice(RESULTS_CONTAINER.length + 1);
+    }
+    if (!prefix.endsWith("/")) prefix += "/";
+  } else {
+    prefix = canonicalPrefix({ userId, page, runId });
+  }
+  prefix = prefix.replace(/^\/+/, "");
+  if (!prefix.endsWith("/")) prefix += "/";
 
-  log(
-    `[*] Campaign Writer (Gold v8) starting for runId=${runId}, userId=${userId}, page=${page}`
-  );
   log(`[*] Using canonical prefix: ${prefix}`);
 
   const svc = getBlobServiceClient();

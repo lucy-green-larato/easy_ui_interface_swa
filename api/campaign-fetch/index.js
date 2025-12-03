@@ -27,6 +27,23 @@ async function existsWithTinyRetry(bc, doRetry = false) {
   return ok;
 }
 
+function normalizePrefix(p) {
+  if (!p) return null;
+  let x = String(p).trim();
+  if (!x) return null;
+
+  // Remove leading slashes
+  x = x.replace(/^\/+/, "");
+
+  // Remove container prefix if present
+  x = x.replace(/^results\//, "");
+
+  // Ensure trailing slash
+  if (!x.endsWith("/")) x += "/";
+
+  return x;
+}
+
 // ---------- optional auth (correlation id; tolerant if lib missing) ----------
 let requireAuth;
 try { ({ requireAuth } = require("../lib/auth")); }
@@ -139,21 +156,25 @@ module.exports = async function (context, req) {
   let base;
 
   if (prefixOverride) {
-    // Caller knows the exact prefix → trust it 100%
+    // Caller supplied an explicit container-relative prefix → trust it
     base = prefixOverride;
   } else {
-    // Fallback: reconstruct canonical prefix using *same logic as campaign-start*
-    // Using userIdHint is acceptable as a fallback because the correct userId
-    // will be present when UI calls fetch (UI reads prefix from status.json).
+    // Fallback: reconstruct using canonicalPrefix (may not match historical runs,
+    // but keeps legacy flows working)
     const { canonicalPrefix } = require("../lib/prefix");
-
     const page = String(req.query?.page || "campaign").trim().toLowerCase();
     const userId = userIdHint || "anonymous";
 
     base = canonicalPrefix({ userId, page, runId });
+  }
 
-    // Ensure trailing slash
-    if (!base.endsWith("/")) base = base + "/";
+  // Ensure base is container-relative and well-formed
+  if (base.startsWith(`${RESULTS_CONTAINER}/`)) {
+    base = base.slice(`${RESULTS_CONTAINER}/`.length);
+  }
+  base = base.replace(/^\/+/, "");
+  if (!base.endsWith("/")) {
+    base += "/";
   }
 
   // ---- single artifacts ----

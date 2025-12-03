@@ -93,7 +93,8 @@ module.exports = async function (context, queueItem) {
   const prefix = canonicalPrefix({
     runId,
     userId: user,
-    page
+    page,
+    date: queueItem.date ? new Date(queueItem.date) : undefined
   });
   context.log("[router] parsed", { op, runId, page, prefix });
 

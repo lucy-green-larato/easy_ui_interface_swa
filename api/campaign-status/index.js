@@ -1,4 +1,4 @@
-// /api/campaign-status/index.js 02-12-2025 v10.1
+// /api/campaign-status/index.js 03-12-2025 v10.2
 // GET /api/campaign-status?runId=... [&page=campaign]
 //
 // Canonical status resolver for Campaign runs.
@@ -174,22 +174,32 @@ module.exports = async function (context, req) {
 
     const page =
       (query.page && String(query.page).trim().toLowerCase()) || "campaign";
+
     let prefix;
     const providedPrefix = query.prefix || (req.body && req.body.prefix);
 
     if (providedPrefix) {
+      // Caller supplied an explicit prefix → trust it but normalise shape
       prefix = String(providedPrefix).trim();
-      if (prefix.startsWith(`${RESULTS_CONTAINER}/`)) {
-        prefix = prefix.slice(`${RESULTS_CONTAINER}/`.length);
-      }
-      prefix = prefix.replace(/^\/+/, "");
-      if (!prefix.endsWith("/")) prefix += "/";
     } else {
-      const userId = userIdFromReq(req);  // only used for fallback
+      // Fallback: reconstruct using canonicalPrefix
+      const userId = userIdFromReq(req); // only used for fallback
       prefix = canonicalPrefix({ runId, userId, page });
     }
-    const statusPath = `${prefix}status.json`;
 
+    // Final normalisation for ALL prefixes:
+    // - strip container name if present
+    // - strip leading slashes
+    // - strip leading "results/" if present
+    // - ensure trailing slash
+    if (prefix.toLowerCase().startsWith(`${RESULTS_CONTAINER}/`)) {
+      prefix = prefix.slice(`${RESULTS_CONTAINER}/`.length);
+    }
+    prefix = prefix.replace(/^\/+/, "");
+    prefix = prefix.replace(/^results\//i, "");
+    if (!prefix.endsWith("/")) prefix += "/";
+
+    const statusPath = `${prefix}status.json`;
     const blobService = BlobServiceClient.fromConnectionString(STORAGE_CONN);
     const container = blobService.getContainerClient(RESULTS_CONTAINER);
     const client = container.getBlockBlobClient(statusPath);

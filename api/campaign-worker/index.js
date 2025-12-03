@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 03-12-2025 Strategy Engine v13
+// /api/campaign-worker/index.js 03-12-2025 Strategy Engine v14
 // 
 // Responsibility:
 //   - Read Phase 1 outputs (evidence, insights, buyer_logic, markdown_pack, csv_normalized, etc.).
@@ -691,22 +691,14 @@ module.exports = async function (context, queueItem) {
   const explicitRunId = msg.runId || msg.run_id || null;
   const userId = msg.userId || msg.user || "anonymous";
   const page = msg.page || "campaign";
-  // Prefer prefix from message (authoritative); fall back to canonical if missing
-  let prefix = msg.prefix || null;
-  if (!prefix) {
-    prefix = canonicalPrefix({
-      userId,
-      page,
-      runId: explicitRunId || "run"
-    });
-    log.warn("campaign_worker_missing_prefix_msg_using_canonical", {
-      userId,
-      page,
-      explicitRunId
-    });
-  }
-
-  // Recover runId from prefix if it was slimmed away
+  const date = msg.date ? new Date(msg.date) : undefined;
+  let prefix = canonicalPrefix({
+    userId,
+    page,
+    runId: explicitRunId,
+    date
+  });
+  if (!prefix.endsWith("/")) prefix += "/";
   let runId = explicitRunId;
   if (!runId && typeof prefix === "string") {
     const parts = prefix.split("/").filter(Boolean);

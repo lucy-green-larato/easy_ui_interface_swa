@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 02-12-2025 — v37
+// /api/campaign-evidence/index.js 03-12-2025 — v38
 // Phase 1 canonical outputs:
 // - csv_normalized.json
 // - needs_map.json
@@ -355,7 +355,6 @@ module.exports = async function (context, job) {
     type: typeof job
   });
   const container = getContainerClient(RESULTS_CONTAINER);
-  // ---- Normalise incoming queue payload (object or string) ----
   const msg = (typeof job === "string")
     ? (() => { try { return JSON.parse(job); } catch { return {}; } })()
     : (job && typeof job === "object" ? job : {});
@@ -363,36 +362,25 @@ module.exports = async function (context, job) {
   let runId = (msg.runId && String(msg.runId)) || null;
 
 
-  // Canonical input object (allow legacy shapes but don't mutate msg directly)
   let input = msg.input || msg.inputs || msg || {};
   if (input == null || typeof input !== "object") input = {};
-  let prefix = msg.prefix || null;
+  if (!runId) {
+    runId = msg.runId || msg.run_id || null;
+  }
+  if (!runId) {
+    try {
+      const maybePrefix = msg.prefix || "";
+      const parts = String(maybePrefix).split("/").filter(Boolean);
+      if (parts.length >= 7) runId = parts[parts.length - 1];
+    } catch { }
+  }
+  if (!runId) runId = "unknown";
+
   const userId = msg.userId || msg.user || "anonymous";
   const page = msg.page || "campaign";
-  const explicitRunId = msg.runId || msg.run_id || runId;
-  if (!prefix) {
-    prefix = canonicalPrefix({ userId, page, runId: explicitRunId });
-    context.log.warn("campaign_evidence_missing_prefix_using_canonical", {
-      userId,
-      page,
-      runId: explicitRunId
-    });
-  }
-
-  // If prefix is a fully-qualified blob URL, strip the container URL prefix.
-  if (prefix.startsWith(container.url + "/")) {
-    prefix = prefix.slice((container.url + "/").length);
-  }
-
-  // Normalise leading slashes
-  prefix = prefix.replace(/^\/+/, "");
-
-  // Ensure trailing slash
-  if (!prefix.endsWith("/")) {
-    prefix += "/";
-  }
-
-  // ---- Recover runId from prefix if it was slimmed away or not present on the message ----
+  const date = msg.date ? new Date(msg.date) : undefined;
+  let prefix = canonicalPrefix({ userId, page, runId, date });
+  if (!prefix.endsWith("/")) prefix += "/";
   if (!runId) {
     if (typeof prefix === "string") {
       const parts = prefix.split("/").filter(Boolean);
@@ -405,7 +393,6 @@ module.exports = async function (context, job) {
       runId = "unknown";
     }
   }
-  // Backfill slimmed queue payloads from saved input.json (idempotent)
   try {
     const persisted = await getJson(container, `${prefix}input.json`);
     if (persisted && typeof persisted === "object") {

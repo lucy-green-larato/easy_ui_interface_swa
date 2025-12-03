@@ -1,4 +1,4 @@
-// /api/campaign-start/index.js 01-12-2025 v22
+// /api/campaign-start/index.js 03-12-2025 v23
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign-start → writes status/input, enqueues kickoff to main queue + full job to evidence queue.
 const { BlobServiceClient } = require("@azure/storage-blob");
@@ -403,7 +403,6 @@ module.exports = async function (context, req) {
       page,
       date: now.toISOString(),
       enqueuedAt,
-      prefix,                    // container-relative
       container: RESULTS_CONTAINER,
       correlationId,
       clientRunKey: clientRunKey ?? null,
