@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 02-12-2025 v26
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 03-12-2025 v27
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, 
@@ -1414,8 +1414,8 @@ window.CampaignUI = window.CampaignUI || {};
       `/api/campaign-status?runId=${encodeURIComponent(runId)}`,
 
     // Writer always writes:  runs/<runId>/campaign.json
-   fetchContract: (runId) =>
-  `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign`,
+    fetchContract: (runId) =>
+      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign.json`,
 
     // Strategy engine always writes: runs/<runId>/strategy_v2/campaign_strategy.json
     fetchStrategyV2: (runId) =>
@@ -1664,17 +1664,18 @@ window.CampaignUI = window.CampaignUI || {};
     let evidenceItems = [];
     try {
       const evCanon = await http("GET", API.fetchEvidence(runId), { timeoutMs: 20000 });
-
-      if (evCanon && typeof evCanon === "object" && Array.isArray(evCanon.claims)) {
+      if (evCanon && Array.isArray(evCanon.claims)) {
         evidenceItems = evCanon.claims;
       } else if (Array.isArray(evCanon)) {
         evidenceItems = evCanon;
-      } else {
+      }
+    } catch (e1) {
+      try {
         const evLegacy = await http("GET", API.fetchEvidenceLog(runId), { timeoutMs: 20000 });
         if (Array.isArray(evLegacy)) evidenceItems = evLegacy;
+      } catch (e2) {
+        UI.log("Evidence load failed completely: " + (e2?.message || e2));
       }
-    } catch (e) {
-      UI.log("Evidence fetch skipped: " + (e?.message || e));
     }
 
     // --------------------------------------------------------------------

@@ -1,5 +1,4 @@
-// /api/campaign-write/index.js // 03-12-2025 Gold Writer v8 (with outline integration)
-//
+// /api/campaign-write/index.js // 03-12-2025 Gold Writer v8.1
 // Responsibility:
 //   - Read strategy_v2 (campaign_strategy.json) produced by campaign-worker.
 //   - Read viability (strategy_v3/viability.json), if present.
@@ -1116,6 +1115,7 @@ module.exports = async function (context, queueItem) {
     };
 
     const outPath = `${prefix}campaign.json`;
+    contract.source_prefix = prefix;
     await writeJson(container, outPath, contract);
 
     await updateStatus(
