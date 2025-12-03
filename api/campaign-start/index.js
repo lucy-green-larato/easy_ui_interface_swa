@@ -4,6 +4,7 @@
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { enqueueTo } = require("../lib/campaign-queue");
 const crypto = require("crypto");
+const { canonicalPrefix } = require("../lib/prefix");
 
 // ---- Config ----
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
@@ -71,17 +72,6 @@ function getUserIdFromReq(req) {
   const email = (byType["emails"] || byType["email"] || cp.userDetails || "").toLowerCase();
   const chosen = oid || sub || email || "anonymous";
   return String(chosen).trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, "-").replace(/-+/g, "-");
-}
-
-// container-relative prefix (user-scoped, date-bucketed)
-function computePrefix({ page = "campaign", runId, userId, now = new Date() }) {
-  if (!runId || typeof runId !== "string") throw new Error("computePrefix: runId required");
-  const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(now.getUTCDate()).padStart(2, "0");
-  const segPage = sanitizePage(page);
-  const segUser = String(userId || "anonymous").trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, "-").replace(/-+/g, "-");
-  return `runs/${segPage}/${segUser}/${y}/${m}/${d}/${runId}/`;
 }
 
 // Blob helpers
@@ -304,7 +294,12 @@ module.exports = async function (context, req) {
     const runId = clientRunKey
       ? crypto.createHash("sha1").update(String(clientRunKey)).digest("hex")
       : (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`);
-    const prefix = computePrefix({ page, runId, userId, now });
+    const prefix = canonicalPrefix({
+      page,
+      userId,
+      runId,
+      date: now
+    });
 
     // ---- initial status ----
     const enqueuedAt = now.toISOString();
@@ -406,6 +401,7 @@ module.exports = async function (context, req) {
       runId,
       userId,
       page,
+      date: now.toISOString(),
       enqueuedAt,
       prefix,                    // container-relative
       container: RESULTS_CONTAINER,
