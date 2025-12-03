@@ -1413,20 +1413,17 @@ window.CampaignUI = window.CampaignUI || {};
     status: (runId) =>
       `/api/campaign-status?runId=${encodeURIComponent(runId)}`,
 
-    // Writer always writes:  runs/<runId>/campaign.json
     fetchContract: (runId) =>
-      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign.json`,
+      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign`,
 
-    // Strategy engine always writes: runs/<runId>/strategy_v2/campaign_strategy.json
     fetchStrategyV2: (runId) =>
-      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=strategy_v2/campaign_strategy.json`,
+      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=strategy`,
 
-    // Evidence loader expects full file names
     fetchEvidence: (runId) =>
-      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence.json`,
+      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence`,
 
     fetchEvidenceLog: (runId) =>
-      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence_log.json`,
+      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence_log`,
   };
 
   // ---------------------------------------------------------------------------
