@@ -1,8 +1,9 @@
-// /api/campaign-write/index.js // 02-12-2025 Gold Writer v7
+// /api/campaign-write/index.js // 03-12-2025 Gold Writer v8 (with outline integration)
 //
 // Responsibility:
 //   - Read strategy_v2 (campaign_strategy.json) produced by campaign-worker.
 //   - Read viability (strategy_v3/viability.json), if present.
+//   - Read outline.json (campaign-outline) as evidence/competitor intelligence.
 //   - Read input.json to recover campaign_requirement and supplier context.
 //   - Build a Gold Campaign contract JSON that matches campaign_gold_v2 schema:
 //        * top-level: runId, supplier, industry, persona, viability, sections, _meta
@@ -10,7 +11,7 @@
 //        * sections.go_to_market: viability_notes + viability_reasons_ids
 //   - Write: results/<canonicalPrefix>/campaign.json
 //   - Update: status.json.state = "writer_working" / "writer_error" / "Completed"
-//   - No LLM calls, no legacy dependence – pure rendering.
+//   - No LLM calls – pure deterministic rendering.
 //
 // IMPORTANT: Root object conforms to campaign_gold_v2 schema:
 //   - additionalProperties: false → no extra top-level keys.
@@ -175,7 +176,7 @@ function normaliseCampaignRequirement(reqRaw) {
   if (s.includes("growth") || s.includes("new logo") || s.includes("acquisition"))
     return "growth";
   if (s.includes("nurture")) return "nurture";
-  return s; // fall back to free-text (still valid for schema)
+  return s;
 }
 
 function describeCampaignAimSentence(normalised) {
@@ -224,6 +225,95 @@ function describeSuccessTarget(successTarget) {
   return narrative || leadStr;
 }
 
+// ---- Top-level field helpers ----
+
+function deriveSupplier(baseInput, strategy_v2) {
+  const s =
+    baseInput?.supplier_company ||
+    baseInput?.company_name ||
+    baseInput?.prospect_company ||
+    strategy_v2?.supplier?.name ||
+    "";
+  return String(s).trim() || "Unknown supplier";
+}
+
+function deriveIndustry(baseInput, strategy_v2) {
+  const fromInput =
+    baseInput?.selected_industry ||
+    baseInput?.campaign_industry ||
+    baseInput?.company_industry ||
+    "";
+  if (fromInput && String(fromInput).trim()) {
+    return String(fromInput).trim();
+  }
+  const fromStrategy = strategy_v2?.buyer_strategy?.industry || "";
+  return String(fromStrategy || "General").trim();
+}
+
+function derivePersona(baseInput, strategy_v2) {
+  const salesModel = String(
+    baseInput?.sales_model ||
+    baseInput?.salesModel ||
+    baseInput?.call_type ||
+    strategy_v2?.gtm_strategy?.route_model ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
+
+  if (salesModel.includes("partner")) {
+    return "Economic buyer in partner channel";
+  }
+  if (salesModel.includes("direct")) {
+    return "Economic buyer (direct)";
+  }
+  if (salesModel.includes("mixed")) {
+    return "Economic buyer across direct and partner routes";
+  }
+  if (!salesModel) return "Economic buyer";
+  return `Economic buyer (${salesModel})`;
+}
+
+// ---- Evidence helpers (for proof_points) ----
+
+async function loadEvidenceClaims(container, prefix) {
+  // 1) Canonical evidence.json
+  try {
+    const evCanon = await readJsonIfExists(container, `${prefix}evidence.json`);
+    if (evCanon && Array.isArray(evCanon.claims)) {
+      return evCanon.claims;
+    }
+  } catch {
+    // non-fatal
+  }
+
+  // 2) Fallback: evidence_log.json
+  try {
+    const evRaw = await readJsonIfExists(
+      container,
+      `${prefix}evidence_log.json`
+    );
+    if (Array.isArray(evRaw)) return evRaw;
+    if (evRaw && Array.isArray(evRaw.evidence_log)) return evRaw.evidence_log;
+  } catch {
+    // non-fatal
+  }
+
+  return [];
+}
+
+function sourceTypeToLabel(sourceType) {
+  const t = String(sourceType || "").toLowerCase();
+  if (!t) return "Evidence";
+  if (t.includes("linkedin")) return "LinkedIn";
+  if (t.includes("site") || t.includes("web")) return "Website";
+  if (t.includes("pdf")) return "PDF";
+  if (t.includes("ixbrl")) return "iXBRL";
+  if (t.includes("csv")) return "CSV";
+  if (t.includes("directory")) return "Directory";
+  return "Evidence";
+}
+
 // ---- Viability helpers ----
 
 function mapViabilityGrade(viability) {
@@ -231,15 +321,13 @@ function mapViabilityGrade(viability) {
   const raw = String(viability.grade || "").toLowerCase().trim();
   if (!raw) return null;
 
-  // Map common traffic-light semantics into schema enum
+  // Map traffic-light semantics into schema enum
   if (raw === "green") return "viable";
   if (raw === "amber" || raw === "yellow") return "borderline";
   if (raw === "red") return "weak";
 
-  // If already in schema terms, pass-through
   if (["viable", "borderline", "weak"].includes(raw)) return raw;
 
-  // Fallback – still schema-valid but less expressive
   return "borderline";
 }
 
@@ -324,9 +412,10 @@ function buildGoldViability(viabilityRaw) {
   const mkDim = (label) => ({
     score: 0,
     warning_code: "",
-    message: msgs.find((m) =>
-      String(m || "").toLowerCase().includes(label)
-    ) || (msgs[0] || "")
+    message:
+      msgs.find((m) =>
+        String(m || "").toLowerCase().includes(label)
+      ) || (msgs[0] || "")
   });
 
   return {
@@ -349,11 +438,12 @@ function buildGoldViability(viabilityRaw) {
 
 // ---------------------- Contract builders (Gold sections) ---------------------- //
 
-function buildExecutiveSummarySection({ strategy_v2, viability, campaignRequirement }) {
+function buildExecutiveSummarySection({ strategy_v2, outline, viability, campaignRequirement }) {
   const spine = strategy_v2?.story_spine || {};
   const buyerStrategy = strategy_v2?.buyer_strategy || {};
   const valueProp = strategy_v2?.value_proposition || {};
-  const gtm = strategy_v2?.gtm_strategy || {};
+  const outlineSections = outline?.sections || {};
+  const outlineExec = outlineSections.exec || {};
 
   // Environment + problems
   const envBullets = uniqNonEmpty(spine.environment || []);
@@ -376,17 +466,34 @@ function buildExecutiveSummarySection({ strategy_v2, viability, campaignRequirem
   const rtp = uniqNonEmpty(
     valueProp.product_fit || strategy_v2.right_to_play || []
   );
+
+  // Product anchors from outline (e.g. key offerings)
+  const productAnchors = uniqNonEmpty(
+    Array.isArray(outlineExec.product_anchor_names)
+      ? outlineExec.product_anchor_names
+      : []
+  );
+  const anchorSentence = productAnchors.length
+    ? `The campaign anchors on offerings such as ${summariseBullets(productAnchors, 4)}.`
+    : null;
+
   const howWeWinSentence =
-    hwwBullets.length || rtp.length
+    hwwBullets.length || rtp.length || productAnchors.length
       ? `This campaign is designed to help you win by ${summariseBullets(
-          hwwBullets.concat(rtp),
+          hwwBullets
+            .concat(rtp)
+            .concat(productAnchors),
           6
         )}.`
       : null;
 
   // Campaign aim (enum-friendly + sentence)
   const aimNorm = normaliseCampaignRequirement(campaignRequirement);
-  const aimSentence = describeCampaignAimSentence(aimNorm);
+  const campaignAimEnum = ["upsell", "win-back", "growth", "nurture"].includes(
+    aimNorm
+  )
+    ? aimNorm
+    : "growth";
 
   // Evidence case (from value prop + proof points)
   const businessValue = uniqNonEmpty(valueProp.business_value || []);
@@ -407,7 +514,7 @@ function buildExecutiveSummarySection({ strategy_v2, viability, campaignRequirem
 
   const keyWarnings = viabilityMsgs.length ? viabilityMsgs : [];
 
-  // Citations from story spine + buyer strategy + value prop
+  // Citations from story spine + buyer strategy + value prop + outline exec
   const claimIdSets = [
     extractClaimIdsFromArray(spine.environment),
     extractClaimIdsFromArray(spine.case_for_action),
@@ -415,10 +522,15 @@ function buildExecutiveSummarySection({ strategy_v2, viability, campaignRequirem
     extractClaimIdsFromArray(spine.success),
     extractClaimIdsFromArray(buyerStrategy.problems),
     extractClaimIdsFromArray(valueProp.business_value),
-    extractClaimIdsFromArray(valueProp.persona_value)
+    extractClaimIdsFromArray(valueProp.persona_value),
+    new Set(
+      Array.isArray(outlineExec.why_now_ids)
+        ? outlineExec.why_now_ids
+        : []
+    )
   ];
   const citations = uniqNonEmpty(
-    claimIdSets.reduce((all, set) => all.concat(Array.from(set)), [])
+    claimIdSets.reduce((all, set) => all.concat(Array.from(set || [])), [])
   );
 
   return {
@@ -432,8 +544,10 @@ function buildExecutiveSummarySection({ strategy_v2, viability, campaignRequirem
     how_we_win:
       howWeWinSentence ||
       "The campaign sets out a clear, outcome-led way for you to win relevant opportunities.",
-    campaign_aim: aimNorm || "growth",
-    evidence_case: evidenceSentence || "The campaign is grounded in the combined evidence across buyers, market context, and your proof points.",
+    campaign_aim: campaignAimEnum,
+    evidence_case:
+      evidenceSentence ||
+      "The campaign is grounded in the combined evidence across buyers, market context, and your proof points.",
     key_warnings: keyWarnings,
     citations,
     viability_grade: viabilityGrade,
@@ -441,9 +555,13 @@ function buildExecutiveSummarySection({ strategy_v2, viability, campaignRequirem
   };
 }
 
-function buildGoToMarketSection({ strategy_v2, viability }) {
+function buildGoToMarketSection({ strategy_v2, outline, viability }) {
   const gtm = strategy_v2?.gtm_strategy || {};
   const buyerStrategy = strategy_v2?.buyer_strategy || {};
+  const outlineSections = outline?.sections || {};
+  const outlineChannel = outlineSections.channel || {};
+  const outlineRisks = outlineSections.risks || {};
+  const outlineCompliance = outlineSections.compliance || {};
 
   const objective =
     "Run a targeted, evidence-led campaign that converts the defined addressable cohort into qualified opportunities and revenue.";
@@ -481,6 +599,19 @@ function buildGoToMarketSection({ strategy_v2, viability }) {
 
   const routeImplications = uniqNonEmpty(gtm.route_implications || []);
   const motions = uniqNonEmpty(gtm.pipeline_model?.motions || []);
+
+  // Channel themes from outline
+  const emailThemes =
+    Array.isArray(outlineChannel.email_themes) &&
+    outlineChannel.email_themes.length
+      ? outlineChannel.email_themes.map((t) => t.theme).filter(Boolean)
+      : [];
+  const linkedinThemes =
+    Array.isArray(outlineChannel.linkedin_themes) &&
+    outlineChannel.linkedin_themes.length
+      ? outlineChannel.linkedin_themes.map((t) => t.theme).filter(Boolean)
+      : [];
+
   const marketing_actions = [];
 
   if (routeImplications.length) {
@@ -491,6 +622,16 @@ function buildGoToMarketSection({ strategy_v2, viability }) {
   if (motions.length) {
     marketing_actions.push(
       `Recommended motions: ${summariseBullets(motions, 6)}.`
+    );
+  }
+  if (emailThemes.length) {
+    marketing_actions.push(
+      `Email campaigns should focus on themes such as: ${summariseBullets(emailThemes, 4)}.`
+    );
+  }
+  if (linkedinThemes.length) {
+    marketing_actions.push(
+      `LinkedIn activity should explore themes such as: ${summariseBullets(linkedinThemes, 4)}.`
     );
   }
   marketing_actions.push(
@@ -517,16 +658,48 @@ function buildGoToMarketSection({ strategy_v2, viability }) {
   const routeText = describeRouteModel(gtm.route_implications || []);
   const successText = describeSuccessTarget(gtm.success_target);
 
+  const riskIds = Array.isArray(outlineRisks.claim_ids)
+    ? outlineRisks.claim_ids
+    : [];
+  const complianceIds = Array.isArray(outlineCompliance.checklist_ids)
+    ? outlineCompliance.checklist_ids
+    : [];
+
   const viabilityHeadlineParts = [];
   if (routeText) viabilityHeadlineParts.push(routeText);
   if (successText) viabilityHeadlineParts.push(successText);
+  if (riskIds.length) {
+    viabilityHeadlineParts.push(
+      "Key execution risks are recorded and must be actively managed using the risk checklist tied to the evidence log."
+    );
+  }
+  if (complianceIds.length) {
+    viabilityHeadlineParts.push(
+      "Compliance considerations are captured and should be reviewed as part of every campaign launch."
+    );
+  }
+
   const viability_notes = viabilityNotes.length
     ? viabilityNotes
     : (viabilityHeadlineParts.length
         ? [viabilityHeadlineParts.join(" ")]
         : []);
 
-  const citations = []; // extend later if you want claim-id tracking here
+  // Citations from channel + risks + compliance
+  const channelClaimIds = [];
+  (outlineChannel.email_themes || []).forEach((t) => {
+    (t && t.claim_ids || []).forEach((id) => channelClaimIds.push(id));
+  });
+  (outlineChannel.linkedin_themes || []).forEach((t) => {
+    (t && t.claim_ids || []).forEach((id) => channelClaimIds.push(id));
+  });
+
+  const citations = uniqNonEmpty(
+    []
+      .concat(channelClaimIds)
+      .concat(riskIds)
+      .concat(complianceIds)
+  );
 
   return {
     objective,
@@ -540,24 +713,49 @@ function buildGoToMarketSection({ strategy_v2, viability }) {
   };
 }
 
-function buildOfferingSection({ strategy_v2 }) {
+function buildOfferingSection({ strategy_v2, outline }) {
   const vp = strategy_v2?.value_proposition || {};
+  const outlineSections = outline?.sections || {};
+  const outlineOffer = outlineSections.offer || {};
 
   const business_value = uniqNonEmpty(vp.business_value || []);
   const human_value = uniqNonEmpty(vp.persona_value || []);
-  const solution_elements = uniqNonEmpty(vp.pillar_outcomes || vp.solution_elements || []);
+
+  const solution_elements = uniqNonEmpty(
+    (vp.pillar_outcomes || vp.solution_elements || []).concat(
+      Array.isArray(outlineOffer.what_you_get_from_csv)
+        ? outlineOffer.what_you_get_from_csv
+        : []
+    )
+  );
+
   const fit_to_needs = uniqNonEmpty(
-    (vp.product_fit || []).concat(vp.fit_to_needs || [])
+    (vp.product_fit || [])
+      .concat(vp.fit_to_needs || [])
   );
 
   const claimSets = [
     extractClaimIdsFromArray(business_value),
     extractClaimIdsFromArray(human_value),
     extractClaimIdsFromArray(solution_elements),
-    extractClaimIdsFromArray(fit_to_needs)
+    extractClaimIdsFromArray(fit_to_needs),
+    new Set(
+      []
+        .concat(
+          Array.isArray(outlineOffer.proof_ids)
+            ? outlineOffer.proof_ids
+            : []
+        )
+        .concat(
+          Array.isArray(outlineOffer.outcome_ids)
+            ? outlineOffer.outcome_ids
+            : []
+        )
+    )
   ];
+
   const citations = uniqNonEmpty(
-    claimSets.reduce((all, set) => all.concat(Array.from(set)), [])
+    claimSets.reduce((all, set) => all.concat(Array.from(set || [])), [])
   );
 
   return {
@@ -569,11 +767,15 @@ function buildOfferingSection({ strategy_v2 }) {
   };
 }
 
-function buildSalesEnablementSection({ strategy_v2, campaignRequirement }) {
+function buildSalesEnablementSection({ strategy_v2, outline, campaignRequirement }) {
   const buyerStrategy = strategy_v2?.buyer_strategy || {};
   const vp = strategy_v2?.value_proposition || {};
   const spine = strategy_v2?.story_spine || {};
   const se = strategy_v2?.sales_enablement || {};
+  const outlineSections = outline?.sections || {};
+  const outlineMessaging = Array.isArray(outlineSections.messaging)
+    ? outlineSections.messaging
+    : [];
 
   const aimNorm = normaliseCampaignRequirement(campaignRequirement);
   const aimSentence = describeCampaignAimSentence(aimNorm);
@@ -593,7 +795,15 @@ function buildSalesEnablementSection({ strategy_v2, campaignRequirement }) {
     .filter(Boolean)
     .join(" ");
 
-  const buyerProblems = uniqNonEmpty(buyerStrategy.problems || []);
+  const buyerProblems = uniqNonEmpty(
+    (buyerStrategy.problems || []).concat(
+      outlineMessaging
+        .flatMap((m) =>
+          Array.isArray(m.pain_points_from_csv) ? m.pain_points_from_csv : []
+        )
+    )
+  );
+
   const buyer_problem = buyerProblems.length
     ? summariseBullets(buyerProblems, 4)
     : "The campaign addresses specific, evidence-based problems experienced by your buyers.";
@@ -639,13 +849,20 @@ function buildSalesEnablementSection({ strategy_v2, campaignRequirement }) {
     "Always close with an agreed next step that aligns to the campaign call to action."
   ].join(" ");
 
+  // Citations: buyer problems, value, and outline messaging claim_ids
+  const messagingClaimIds = [];
+  outlineMessaging.forEach((m) => {
+    (m && m.claim_ids || []).forEach((id) => messagingClaimIds.push(id));
+  });
+
   const claimSets = [
     extractClaimIdsFromArray(buyerProblems),
     extractClaimIdsFromArray(buyer_business_value),
-    extractClaimIdsFromArray(buyer_human_value)
+    extractClaimIdsFromArray(buyer_human_value),
+    new Set(messagingClaimIds)
   ];
   const citations = uniqNonEmpty(
-    claimSets.reduce((all, set) => all.concat(Array.from(set)), [])
+    claimSets.reduce((all, set) => all.concat(Array.from(set || [])), [])
   );
 
   return {
@@ -664,55 +881,46 @@ function buildSalesEnablementSection({ strategy_v2, campaignRequirement }) {
   };
 }
 
-function buildProofPointsSection({ strategy_v2 }) {
-  const points = uniqNonEmpty(strategy_v2.proof_points || []);
-  const citations = uniqNonEmpty(
-    Array.from(extractClaimIdsFromArray(points))
-  );
+async function buildProofPointsSection({ strategy_v2, outline, container, prefix }) {
+  const outlineSections = outline?.sections || {};
+  const outlineOffer = outlineSections.offer || {};
+
+  // 1. Load evidence catalog
+  const evidenceClaims = await loadEvidenceClaims(container, prefix);
+
+  const points = [];
+  const citationsSet = new Set();
+
+  for (const c of evidenceClaims || []) {
+    if (!c) continue;
+    const claimId = c.claim_id || c.id || null;
+    if (claimId) citationsSet.add(String(claimId));
+
+    const label = sourceTypeToLabel(c.source_type);
+    const headline = (c.title || c.summary || c.quote || "").toString().trim();
+    const bullet = headline ? `${label}: ${headline}` : label;
+    points.push(bullet);
+  }
+
+  // 2. Supplement with strategy_v2 proof_points
+  const strategyPoints = uniqNonEmpty(strategy_v2.proof_points || []);
+  for (const sp of strategyPoints) {
+    points.push(sp);
+    extractClaimIdsFromText(sp).forEach((id) => citationsSet.add(id));
+  }
+
+  // 3. Ensure outline offer-level IDs are present in citations
+  (outlineOffer.proof_ids || []).forEach((id) => {
+    if (id) citationsSet.add(String(id));
+  });
+  (outlineOffer.outcome_ids || []).forEach((id) => {
+    if (id) citationsSet.add(String(id));
+  });
 
   return {
-    points,
-    citations
+    points: uniqNonEmpty(points),
+    citations: uniqNonEmpty(Array.from(citationsSet))
   };
-}
-
-// ---- Top-level field derivation (runId / supplier / industry / persona) ----
-
-function deriveSupplier(baseInput, strategy_v2) {
-  return (
-    (baseInput && baseInput.supplier_company) ||
-    (baseInput && baseInput.company_name) ||
-    (baseInput && baseInput.prospect_company) ||
-    strategy_v2?.supplier?.name ||
-    "Unknown supplier"
-  );
-}
-
-function deriveIndustry(baseInput, strategy_v2) {
-  return (
-    (baseInput && baseInput.selected_industry) ||
-    (baseInput && baseInput.campaign_industry) ||
-    (baseInput && baseInput.company_industry) ||
-    strategy_v2?.buyer_strategy?.industry ||
-    "General"
-  );
-}
-
-function derivePersona(baseInput, strategy_v2) {
-  const salesModel = String(
-    baseInput?.sales_model ||
-      baseInput?.salesModel ||
-      baseInput?.call_type ||
-      strategy_v2?.gtm_strategy?.route_model ||
-      ""
-  )
-    .trim()
-    .toLowerCase();
-
-  if (salesModel.includes("partner")) return "partner";
-  if (salesModel.includes("direct")) return "direct";
-  if (salesModel.includes("mixed")) return "mixed";
-  return salesModel || "unspecified";
 }
 
 // ---------------------- Main Azure Function ---------------------- //
@@ -746,7 +954,7 @@ module.exports = async function (context, queueItem) {
     : canonicalPrefix({ userId, page, runId });
 
   log(
-    `[*] Campaign Writer (Gold v7) starting for runId=${runId}, userId=${userId}, page=${page}`
+    `[*] Campaign Writer (Gold v8) starting for runId=${runId}, userId=${userId}, page=${page}`
   );
   log(`[*] Using canonical prefix: ${prefix}`);
 
@@ -825,6 +1033,16 @@ module.exports = async function (context, queueItem) {
       container,
       `${prefix}input.json`
     );
+    const outline = await readJsonIfExists(
+      container,
+      `${prefix}outline.json`
+    );
+
+    if (!outline || typeof outline !== "object") {
+      log.warn(
+        "[*] Writer: outline.json missing or invalid – proceeding with strategy_v2-only intelligence"
+      );
+    }
 
     const campaignRequirement =
       msg.campaign_requirement ||
@@ -837,23 +1055,31 @@ module.exports = async function (context, queueItem) {
     // -------- Build Gold sections -------- //
     const executive_summary = buildExecutiveSummarySection({
       strategy_v2,
+      outline,
       viability: viabilityRaw || {},
       campaignRequirement
     });
 
     const go_to_market = buildGoToMarketSection({
       strategy_v2,
+      outline,
       viability: viabilityRaw || {}
     });
 
-    const offering = buildOfferingSection({ strategy_v2 });
+    const offering = buildOfferingSection({ strategy_v2, outline });
 
     const sales_enablement = buildSalesEnablementSection({
       strategy_v2,
+      outline,
       campaignRequirement
     });
 
-    const proof_points = buildProofPointsSection({ strategy_v2 });
+    const proof_points = await buildProofPointsSection({
+      strategy_v2,
+      outline,
+      container,
+      prefix
+    });
 
     const sections = {
       executive_summary,
@@ -876,7 +1102,7 @@ module.exports = async function (context, queueItem) {
       viability: goldViability,
       sections,
       _meta: {
-        version: "2025-12-02",
+        version: "2025-12-03",
         strategy_engine: strategy_v2.engine || "strategy_v2",
         generated_at: new Date().toISOString()
       }
@@ -901,7 +1127,7 @@ module.exports = async function (context, queueItem) {
       }
     );
 
-    log("[*] Campaign Writer completed (Gold v7)", {
+    log("[*] Campaign Writer completed (Gold v8)", {
       runId,
       campaignPath: outPath
     });

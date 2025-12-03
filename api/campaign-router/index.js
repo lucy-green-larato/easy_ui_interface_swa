@@ -1,4 +1,4 @@
-// /api/campaign-router/index.js — Unified canonical prefix version 01-12-2025 v3
+// /api/campaign-router/index.js — Gold v7.1 canonical prefix router 03-12-2025
 "use strict";
 
 const { BlobServiceClient } = require("@azure/storage-blob");
@@ -12,17 +12,6 @@ const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const OUTLINE_QUEUE = process.env.Q_CAMPAIGN_OUTLINE || "campaign-outline";
 const WORKER_QUEUE = process.env.Q_CAMPAIGN_WORKER || "campaign-worker-jobs";
 const WRITE_QUEUE = process.env.Q_CAMPAIGN_WRITE || "campaign-write";
-
-// ---- Section keys for Writer (aligned to 7-tab UI)
-const SECTION_KEYS = [
-  "executive_summary",
-  "go_to_market",
-  "messaging",
-  "offering",
-  "sales_enablement",
-  "proof_points",
-  "evidence_log"
-];
 
 // ---- Helpers ----
 async function streamToString(readable) {
@@ -52,7 +41,7 @@ function nowISO() {
   return new Date().toISOString();
 }
 
-// ---- Robust evidence existence check (Race-safe)
+// ---- Robust evidence existence check (race-safe) ----
 async function waitForEvidence(prefix, container, attempts = 3, delayMs = 150) {
   const evBlob = container.getBlockBlobClient(`${prefix}evidence.json`);
   const logBlob = container.getBlockBlobClient(`${prefix}evidence_log.json`);
@@ -66,19 +55,17 @@ async function waitForEvidence(prefix, container, attempts = 3, delayMs = 150) {
   return false;
 }
 
-
-
 // ======================================================================
 //                               ROUTER
 // ======================================================================
 module.exports = async function (context, queueItem) {
-
-  // ==========================================================================
+  // ==================================================================
   // 1. Parse Queue Message
-  // ==========================================================================
+  // ==================================================================
   if (typeof queueItem === "string") {
-    try { queueItem = JSON.parse(queueItem); }
-    catch {
+    try {
+      queueItem = JSON.parse(queueItem);
+    } catch {
       context.log.error("[router] invalid JSON", queueItem);
       return;
     }
@@ -100,9 +87,9 @@ module.exports = async function (context, queueItem) {
     return;
   }
 
-  // ==========================================================================
+  // ==================================================================
   // 2. Compute canonical prefix
-  // ==========================================================================
+  // ==================================================================
   const prefix = canonicalPrefix({
     runId,
     userId: user,
@@ -110,10 +97,9 @@ module.exports = async function (context, queueItem) {
   });
   context.log("[router] parsed", { op, runId, page, prefix });
 
-
-  // ==========================================================================
+  // ==================================================================
   // 3. Blob + Queue Clients
-  // ==========================================================================
+  // ==================================================================
   if (!STORAGE_CONN) {
     context.log.error("[router] STORAGE_CONN missing");
     return;
@@ -132,10 +118,9 @@ module.exports = async function (context, queueItem) {
   await workerQ.createIfNotExists();
   await writeQ.createIfNotExists();
 
-
-  // ==========================================================================
-  // 4. Load + restore original status.json semantics
-  // ==========================================================================
+  // ==================================================================
+  // 4. Load + restore status.json semantics
+  // ==================================================================
   const statusPath = `${prefix}status.json`;
 
   let status0 =
@@ -167,38 +152,77 @@ module.exports = async function (context, queueItem) {
     });
   }
 
+  // ==================================================================
+  // 5. Writer gating: enqueue once strategy_v2 exists
+  // ==================================================================
+  async function attemptEnqueueWriter(phaseLabel) {
+    // Check strategy_v2/campaign_strategy.json presence
+    const strategyBlob = container.getBlockBlobClient(
+      `${prefix}strategy_v2/campaign_strategy.json`
+    );
+    const hasStrategy = await strategyBlob.exists();
 
+    if (!hasStrategy) {
+      pushHistory(phaseLabel, "writer_not_ready_missing_strategy_v2");
+      await saveStatus({ state: "Router" });
+      return false;
+    }
 
-  // ==========================================================================
-  // 5. ROUTING: afterevidence
-  // ==========================================================================
+    if (status0.markers.writerEnqueued) {
+      pushHistory(phaseLabel, "writer_already_enqueued");
+      await saveStatus({ state: "Router" });
+      return false;
+    }
+
+    // Single-shot enqueue to writer queue
+    await writeQ.sendMessage(
+      JSON.stringify({
+        op: "write",
+        runId,
+        page,
+        prefix
+      })
+    );
+
+    status0.markers.writerEnqueued = true;
+    pushHistory(phaseLabel, "writer_enqueued");
+    await saveStatus({ state: "Router" });
+    context.log("[router] writer_enqueued", { runId, prefix });
+    return true;
+  }
+
+  // ==================================================================
+  // 6. ROUTING: afterevidence
+  // ==================================================================
   if (op === "afterevidence") {
     const phase = "Router.afterevidence";
 
-    // ---- Robust, retry-aware check for evidence blobs ----
+    // Robust, retry-aware check for evidence blobs
     const evidenceReady = await waitForEvidence(prefix, container);
     if (!evidenceReady) {
       status0.markers.waitingForEvidence = true;
       pushHistory(phase, "evidence_missing");
-      await saveStatus();
+      await saveStatus({ state: "Router" });
       return;
     }
 
-    // ---- Outline queue ----
+    // Outline queue (kick off outline once)
     if (!status0.markers.outlineEnqueued) {
       await outlineQ.sendMessage(JSON.stringify({ runId, page, prefix }));
       status0.markers.outlineEnqueued = true;
       pushHistory(phase, "outline_enqueued");
     }
 
-    // ---- Strategy queue ----
+    // Strategy/viability worker queue (once)
     if (!status0.markers.strategyEnqueued) {
-      await workerQ.sendMessage(JSON.stringify({
-        op: "run_strategy",
-        runId,
-        page,
-        prefix
-      }));
+      await workerQ.sendMessage(
+        JSON.stringify({
+          op: "run_strategy",
+          runId,
+          page,
+          prefix
+        })
+      );
       status0.markers.strategyEnqueued = true;
       pushHistory(phase, "strategy_enqueued");
     }
@@ -207,51 +231,37 @@ module.exports = async function (context, queueItem) {
     return;
   }
 
-
-
-  // ==========================================================================
-  // 6. ROUTING: afteroutline
-  // ==========================================================================
+  // ==================================================================
+  // 7. ROUTING: afteroutline
+  // ==================================================================
   if (op === "afteroutline") {
     const phase = "Router.afteroutline";
 
-    // ---- Section fan-out ----
-    if (!status0.markers.sectionsEnqueued) {
-      for (const key of SECTION_KEYS) {
-        await writeQ.sendMessage(JSON.stringify({
-          op: "section",
-          runId,
-          page,
-          prefix,
-          section: key
-        }));
-      }
-      status0.markers.sectionsEnqueued = true;
-      pushHistory(phase, "sections_enqueued");
-    }
-
-    // ---- Assemble once ----
-    if (!status0.markers.assembleEnqueued) {
-      await writeQ.sendMessage(JSON.stringify({
-        op: "assemble",
-        runId,
-        page,
-        prefix
-      }));
-      status0.markers.assembleEnqueued = true;
-      pushHistory(phase, "assemble_enqueued");
-    }
-
+    // Outline has completed; record and attempt writer enqueue
+    pushHistory(phase, "outline_completed_signal");
     await saveStatus({ state: "Router" });
+
+    await attemptEnqueueWriter(phase);
     return;
   }
 
+  // ==================================================================
+  // 8. Any other op → best-effort writer gating + safe drop
+  //    (e.g. future 'afterstrategy', 'afterviability', etc.)
+  // ==================================================================
+  const phase = `Router.${op || "unknown"}`;
+  pushHistory("Router", `op:${op || "none"}`);
+  await saveStatus({ state: "Router" });
 
+  // Opportunistically try to enqueue writer if strategy_v2 is ready
+  await attemptEnqueueWriter(phase);
 
-  // ==========================================================================
-  // 7. Unknown op → safe drop
-  // ==========================================================================
-  pushHistory("Router", `unknown_op:${op}`);
-  await saveStatus();
-  context.log.warn("[router] unhandled op → drop", { op });
+  if (!op) {
+    context.log.warn("[router] no op on message → treated as generic signal", {
+      runId,
+      prefix
+    });
+  } else {
+    context.log.warn("[router] unhandled op (no special routing)", { op });
+  }
 };

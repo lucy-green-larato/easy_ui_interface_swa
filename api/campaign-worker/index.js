@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 02-12-2025 Strategy Engine v12
+// /api/campaign-worker/index.js 03-12-2025 Strategy Engine v13
 // 
 // Responsibility:
 //   - Read Phase 1 outputs (evidence, insights, buyer_logic, markdown_pack, csv_normalized, etc.).
@@ -943,6 +943,30 @@ module.exports = async function (context, queueItem) {
       strategyPath,
       viabilityAttached: !!strategyV2Viability
     });
+    //---------------------------------------------------------------------
+    // Write strategy_v3/viability.json (required by Gold Writer)
+    //---------------------------------------------------------------------
+    try {
+      const viabilityPath = `${prefix}strategy_v3/viability.json`;
+
+      // If your worker already computed viability, use that object.
+      // Otherwise write a safe empty structure so Writer can proceed.
+      const viabilityObj = viability || {
+        grade: "borderline",
+        flags: { red: [], amber: [], green: [] },
+        dimensions: {
+          TAM: { value: 0, warning_code: "", message: "" },
+          problem_strength: { score: 0, warning_code: "", message: "" },
+          differentiation: { score: 0, warning_code: "", message: "" },
+          urgency: { score: 0, warning_code: "", message: "" }
+        }
+      };
+
+      await putJson(container, viabilityPath, viabilityObj);
+      context.log("[worker] wrote viability.json");
+    } catch (e) {
+      context.log.error("[worker] failed to write viability.json", String(e));
+    }
 
     //--------------------------------------------------------------------------//
     //  Mark state = strategy_ready
