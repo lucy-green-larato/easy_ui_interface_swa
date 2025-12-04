@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 03-12-2025 v28
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 04-12-2025 v29
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, 
@@ -1633,13 +1633,18 @@ window.CampaignUI = window.CampaignUI || {};
   // ---------------------------------------------------------------------------
   // Fetch a run to completion (contract + evidence + strategy_v2 + viability)
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Fetch a run to completion (contract + evidence + strategy_v2 + viability)
+  // ---------------------------------------------------------------------------
   async function fetchCompleteRun(runId, allowPoll) {
     // 1. Wait for run to complete (router → worker → writer)
     const contract = await pollToCompletion(runId, allowPoll);
+
+    // 2. Fetch strategy_v2 (if present) and attach to contract
     try {
       const strategyV2 = await http(
         "GET",
-        `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign_strategy`,
+        API.fetchStrategyV2(runId),
         { timeoutMs: 20000 }
       );
 
@@ -1649,6 +1654,8 @@ window.CampaignUI = window.CampaignUI || {};
     } catch (e) {
       UI.log("strategy_v2 fetch skipped: " + (e?.message || e));
     }
+
+    // 3. Evidence (canonical evidence.json with legacy fallbacks)
     let evidenceItems = [];
     try {
       const evCanon = await http("GET", API.fetchEvidence(runId), { timeoutMs: 20000 });
@@ -1666,11 +1673,8 @@ window.CampaignUI = window.CampaignUI || {};
       }
     }
 
-    // --------------------------------------------------------------------
     // 4. Load viability.json (canonical prefix ONLY)
-    // --------------------------------------------------------------------
     try {
-      // Never guess prefix — trust server
       let prefix =
         contract?.source_prefix ||   // writer-installed canonical prefix
         contract?.prefix ||          // fallback if added later
@@ -1679,22 +1683,16 @@ window.CampaignUI = window.CampaignUI || {};
       if (!prefix) {
         UI.log("[UI] viability skipped: no canonical prefix present");
       } else if (typeof loadViability === "function") {
-
-        // prefix is safe → call loader
         await loadViability(prefix);
         UI.log("[UI] viability loaded OK");
-
       } else {
         UI.log("[UI] viability loader missing");
       }
-
     } catch (err) {
       UI.log("viability load failed: " + (err?.message || err));
     }
 
-    // --------------------------------------------------------------------
     // 5. Render contract (writer’s output)
-    // --------------------------------------------------------------------
     window.CampaignUI?.setContract?.(contract, { evidence: evidenceItems });
     UI.setStatus("Completed", "ok");
     return contract;
