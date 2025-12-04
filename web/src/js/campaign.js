@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 03-12-2025 v27
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 03-12-2025 v28
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, 
@@ -1417,7 +1417,7 @@ window.CampaignUI = window.CampaignUI || {};
       `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign`,
 
     fetchStrategyV2: (runId) =>
-      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=strategy`,
+      `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign_strategy`,
 
     fetchEvidence: (runId) =>
       `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence`,
@@ -1636,15 +1636,10 @@ window.CampaignUI = window.CampaignUI || {};
   async function fetchCompleteRun(runId, allowPoll) {
     // 1. Wait for run to complete (router → worker → writer)
     const contract = await pollToCompletion(runId, allowPoll);
-
-    // --------------------------------------------------------------------
-    // 2. Fetch strategy_v2 (correct path from backend writer)
-    // --------------------------------------------------------------------
     try {
-      // MUST match backend writer: prefix + "strategy_v2/campaign_strategy.json"
       const strategyV2 = await http(
         "GET",
-        `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=strategy_v2/campaign_strategy.json`,
+        `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=campaign_strategy`,
         { timeoutMs: 20000 }
       );
 
@@ -1654,10 +1649,6 @@ window.CampaignUI = window.CampaignUI || {};
     } catch (e) {
       UI.log("strategy_v2 fetch skipped: " + (e?.message || e));
     }
-
-    // --------------------------------------------------------------------
-    // 3. Fetch evidence (canonical → legacy fallback)
-    // --------------------------------------------------------------------
     let evidenceItems = [];
     try {
       const evCanon = await http("GET", API.fetchEvidence(runId), { timeoutMs: 20000 });

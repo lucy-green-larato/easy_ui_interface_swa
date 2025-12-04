@@ -1,4 +1,4 @@
-// /api/campaign-fetch/index.js 02-12-2025 v17
+// /api/campaign-fetch/index.js 03-12-2025 v18
 // GET /api/campaign-fetch?runId=<id>&file=<campaign|evidence_log|csv|status|outline|sections|section>&name=<sectionName?>
 // Optional: &prefix=<container-relative override>
 
@@ -56,25 +56,26 @@ const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 // ---------- valid keys ----------
 const VALID_MAP = Object.freeze({
   campaign: "campaign.json",
+  campaign_strategy: "strategy_v2/campaign_strategy.json",
+  "strategy_v2/campaign_strategy.json": "strategy_v2/campaign_strategy.json", // legacy UI safety
   evidence: "evidence.json",
   evidence_log: "evidence_log.json",
   csv: "csv_normalized.json",
+  csv_normalized: "csv_normalized.json",
   status: "status.json",
   outline: "outline.json",
+  viability: "strategy_v3/viability.json",
+  buyer_logic: "insights_v1/buyer_logic.json",
+  insights: "insights_v1/insights.json",
   products_meta: "products_meta.json"
 });
 
 const SECTION_KEYS = [
   "executive_summary",
-  "positioning_and_differentiation",
-  "offer_strategy",
-  "messaging_matrix",
-  "channel_plan",
+  "go_to_market",
+  "offering",
   "sales_enablement",
-  "measurement_and_learning",
-  "risks_and_contingencies",
-  "compliance_and_governance",
-  "one_pager_summary"
+  "proof_points"
 ];
 
 // ---------- handler ----------
