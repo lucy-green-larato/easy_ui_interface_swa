@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 03-12-2025 — v38
+// /api/campaign-evidence/index.js 04-12-2025 — v39
 // Phase 1 canonical outputs:
 // - csv_normalized.json
 // - needs_map.json
@@ -10,6 +10,7 @@
 // - insights.json
 
 const { validateAndWarn } = require("../shared/schemaValidators");
+const { canonicalPrefix } = require("../lib/prefix");
 const { enqueueTo } = require("../lib/campaign-queue");
 const { nowIso } = require("../shared/utils");
 const ROUTER_QUEUE_NAME = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";

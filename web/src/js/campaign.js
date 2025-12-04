@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 04-12-2025 v29
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 04-12-2025 v30
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, 
@@ -1630,32 +1630,108 @@ window.CampaignUI = window.CampaignUI || {};
     return await fetchCompleteRun(runId, true);
   }
 
-  // ---------------------------------------------------------------------------
-  // Fetch a run to completion (contract + evidence + strategy_v2 + viability)
-  // ---------------------------------------------------------------------------
-  // ---------------------------------------------------------------------------
-  // Fetch a run to completion (contract + evidence + strategy_v2 + viability)
-  // ---------------------------------------------------------------------------
-  async function fetchCompleteRun(runId, allowPoll) {
-    // 1. Wait for run to complete (router → worker → writer)
-    const contract = await pollToCompletion(runId, allowPoll);
+  function normaliseStrategyV2(raw) {
+    if (!raw || typeof raw !== "object") return raw;
+    const out = { ...raw };
 
-    // 2. Fetch strategy_v2 (if present) and attach to contract
+    // Writer still emits legacy names — map them to stable fields
+    if (raw.where_to_play) out.gtm_strategy = { ...(out.gtm_strategy || {}), where_to_play: raw.where_to_play };
+    if (raw.how_to_win) out.gtm_strategy = { ...(out.gtm_strategy || {}), how_to_win: raw.how_to_win };
+    if (raw.competitive_context) out.gtm_strategy = { ...(out.gtm_strategy || {}), competitive_context: raw.competitive_context };
+
+    // Legacy VP shapes → value_proposition
+    if (raw.value_prop_moore && !out.value_proposition) {
+      out.value_proposition = { moore: raw.value_prop_moore };
+    }
+    if (raw.positioning_and_differentiation && !out.value_proposition) {
+      out.value_proposition = raw.positioning_and_differentiation.value_proposition || null;
+    }
+
+    // Messaging legacy → buyer_strategy
+    if (raw.messaging_matrix && !out.buyer_strategy) {
+      out.buyer_strategy = { matrix: raw.messaging_matrix };
+    }
+
+    // Legacy case-studies block → proof_points section
+    if (raw.case_studies && !out.proof_points) {
+      out.proof_points = raw.case_studies;
+    }
+
+    // Canonicalise fields expressed under a nested "sections"
+    if (raw.sections && typeof raw.sections === "object") {
+      const sec = raw.sections;
+
+      if (sec.buyer_strategy && !out.buyer_strategy)
+        out.buyer_strategy = sec.buyer_strategy;
+
+      if (sec.value_proposition && !out.value_proposition)
+        out.value_proposition = sec.value_proposition;
+
+      if (sec.messages && !out.buyer_strategy)
+        out.buyer_strategy = { messages: sec.messages };
+
+      if (sec.gtm && !out.gtm_strategy)
+        out.gtm_strategy = sec.gtm;
+    }
+
+    return out;
+  }
+
+  function detectPreferredTab(contract) {
+    if (!contract || typeof contract !== "object") return null;
+
+    const sv2 = contract.strategy_v2 || {};
+
+    // 1. Executive summary (story spine)
+    if (sv2.story_spine) return "exec";
+
+    // 2. GTM strategy (primary Gold block)
+    if (sv2.gtm_strategy ||
+      sv2.where_to_play ||
+      sv2.how_to_win ||
+      sv2.competitive_context) {
+      return "gtm";
+    }
+
+    // 3. Buyer strategy / messaging
+    if (sv2.buyer_strategy || sv2.personas || sv2.messages) {
+      return "msg";
+    }
+
+    // 4. Value proposition / differentiation
+    if (sv2.value_proposition ||
+      sv2.value_prop_moore ||
+      sv2.right_to_play) {
+      return "off";
+    }
+
+    // 5. Case studies / proof points
+    if (sv2.proof_points || sv2.case_studies) {
+      return "pp";
+    }
+
+    // 6. Sales enablement updates
+    if (contract.sales_enablement) {
+      return "se";
+    }
+
+    return null; // fall back to default ("exec")
+  }
+
+  async function fetchCompleteRun(runId, allowPoll) {
+    const contract = await pollToCompletion(runId, allowPoll);
     try {
       const strategyV2 = await http(
         "GET",
         API.fetchStrategyV2(runId),
         { timeoutMs: 20000 }
       );
-
       if (strategyV2 && typeof strategyV2 === "object") {
-        contract.strategy_v2 = strategyV2;
+        contract.strategy_v2 = normaliseStrategyV2(strategyV2);
       }
     } catch (e) {
       UI.log("strategy_v2 fetch skipped: " + (e?.message || e));
     }
-
-    // 3. Evidence (canonical evidence.json with legacy fallbacks)
     let evidenceItems = [];
     try {
       const evCanon = await http("GET", API.fetchEvidence(runId), { timeoutMs: 20000 });
@@ -1672,12 +1748,10 @@ window.CampaignUI = window.CampaignUI || {};
         UI.log("Evidence load failed completely: " + (e2?.message || e2));
       }
     }
-
-    // 4. Load viability.json (canonical prefix ONLY)
     try {
       let prefix =
-        contract?.source_prefix ||   // writer-installed canonical prefix
-        contract?.prefix ||          // fallback if added later
+        contract?.source_prefix ||
+        contract?.prefix ||
         null;
 
       if (!prefix) {
@@ -1692,14 +1766,25 @@ window.CampaignUI = window.CampaignUI || {};
       UI.log("viability load failed: " + (err?.message || err));
     }
 
-    // 5. Render contract (writer’s output)
+
     window.CampaignUI?.setContract?.(contract, { evidence: evidenceItems });
+    try {
+      const preferred = detectPreferredTab(contract);
+      if (preferred) {
+        state.active = preferred;
+        mountTabs(true);
+        renderActive();
+        UI.log(`[UI] Auto-selected tab: ${preferred}`);
+      }
+    } catch (e) {
+      UI.log("Tab auto-select failed: " + (e?.message || e));
+    }
+
     UI.setStatus("Completed", "ok");
     return contract;
   }
 
   async function pollToCompletion(runId, allowPoll = true) {
-    // Normalise state names so "Completed" and "completed" behave identically
     const normState = (s) => String(s || "Unknown");
     const stateKey = (s) => normState(s).toLowerCase();
 
@@ -1718,8 +1803,6 @@ window.CampaignUI = window.CampaignUI || {};
       return false;
     }
 
-    // First peek—if already completed, short-circuit
-    // First peek—if already completed, short-circuit
     try {
       const peek = await http("GET", API.status(runId), { timeoutMs: 12000 });
       const stateName = normState(peek?.state);

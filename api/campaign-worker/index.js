@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 03-12-2025 Strategy Engine v14
+// /api/campaign-worker/index.js 04-12-2025 Strategy Engine v15
 // 
 // Responsibility:
 //   - Read Phase 1 outputs (evidence, insights, buyer_logic, markdown_pack, csv_normalized, etc.).
@@ -56,6 +56,24 @@ async function getResultsContainer() {
   const container = service.getContainerClient(RESULTS_CONTAINER);
   await container.createIfNotExists();
   return container;
+}
+
+const evidence = await readJsonIfExists(container, `${prefix}evidence.json`);
+const evidenceLog = await readJsonIfExists(container, `${prefix}evidence_log.json`);
+
+const hasClaims =
+  (evidence && Array.isArray(evidence.claims) && evidence.claims.length > 0) ||
+  (Array.isArray(evidenceLog) && evidenceLog.length > 0);
+
+if (!hasClaims) {
+  log("[*] Strategy Engine: no evidence yet; deferring run", { runId, prefix });
+  await updateStatus(
+    container,
+    prefix,
+    "waiting_evidence",
+    "Strategy Engine deferred – evidence artefacts not ready"
+  );
+  return;
 }
 
 function streamToString(readable) {
@@ -935,30 +953,6 @@ module.exports = async function (context, queueItem) {
       strategyPath,
       viabilityAttached: !!strategyV2Viability
     });
-    //---------------------------------------------------------------------
-    // Write strategy_v3/viability.json (required by Gold Writer)
-    //---------------------------------------------------------------------
-    try {
-      const viabilityPath = `${prefix}strategy_v3/viability.json`;
-
-      // If your worker already computed viability, use that object.
-      // Otherwise write a safe empty structure so Writer can proceed.
-      const viabilityObj = viability || {
-        grade: "borderline",
-        flags: { red: [], amber: [], green: [] },
-        dimensions: {
-          TAM: { value: 0, warning_code: "", message: "" },
-          problem_strength: { score: 0, warning_code: "", message: "" },
-          differentiation: { score: 0, warning_code: "", message: "" },
-          urgency: { score: 0, warning_code: "", message: "" }
-        }
-      };
-
-      await putJson(container, viabilityPath, viabilityObj);
-      context.log("[worker] wrote viability.json");
-    } catch (e) {
-      context.log.error("[worker] failed to write viability.json", String(e));
-    }
 
     //--------------------------------------------------------------------------//
     //  Mark state = strategy_ready

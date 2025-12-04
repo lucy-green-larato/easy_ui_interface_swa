@@ -1,4 +1,4 @@
-// /api/campaign-start/index.js 03-12-2025 v23
+// /api/campaign-start/index.js 04-12-2025 v24
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign-start → writes status/input, enqueues kickoff to main queue + full job to evidence queue.
 const { BlobServiceClient } = require("@azure/storage-blob");
@@ -479,10 +479,43 @@ module.exports = async function (context, req) {
       context.log.warn("campaign_start_payload_slimmed", { bytes: byteLen(payload) });
     }
 
-    // ---- Enqueue once to main + evidence ----
     const parsed = JSON.parse(payload);
-    const r1 = await enqueueTo(WORKER_QUEUE, parsed);
-    const r2 = await enqueueTo(EVIDENCE_QUEUE, parsed);
+    let shouldEnqueueWorker = false;
+
+    try {
+      const hasEvidence = await containerClient
+        .getBlockBlobClient(`${prefix}evidence.json`)
+        .exists();
+
+      const hasCsv = await containerClient
+        .getBlockBlobClient(`${prefix}csv_normalized.json`)
+        .exists();
+
+      // If evidence AND CSV normalisation already exist, worker can run immediately.
+      // Otherwise, router will trigger worker in afterevidence.
+      if (hasEvidence && hasCsv) {
+        shouldEnqueueWorker = true;
+      }
+    } catch (e) {
+      context.log.warn("[campaign-start] conditional worker check failed", String(e));
+      // Fall back to routing-based activation only
+      shouldEnqueueWorker = false;
+    }
+
+    // Enqueue worker ONLY IF artefacts already exist
+    let rWorker = null;
+    if (shouldEnqueueWorker) {
+      rWorker = await enqueueTo(WORKER_QUEUE, parsed);
+      context.log("[campaign-start] worker enqueued immediately (artefacts detected)", {
+        runId,
+        prefix
+      });
+    } else {
+      context.log("[campaign-start] worker NOT enqueued immediately — waiting on evidence phase", {
+        runId,
+        prefix
+      });
+    }
 
     context.log({
       event: "campaign_start_enqueued",
