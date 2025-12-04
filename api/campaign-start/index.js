@@ -480,50 +480,12 @@ module.exports = async function (context, req) {
     }
 
     const parsed = JSON.parse(payload);
-    let shouldEnqueueWorker = false;
+    const rEvidence = await enqueueTo(EVIDENCE_QUEUE, parsed);
 
-    try {
-      const hasEvidence = await containerClient
-        .getBlockBlobClient(`${prefix}evidence.json`)
-        .exists();
-
-      const hasCsv = await containerClient
-        .getBlockBlobClient(`${prefix}csv_normalized.json`)
-        .exists();
-
-      // If evidence AND CSV normalisation already exist, worker can run immediately.
-      // Otherwise, router will trigger worker in afterevidence.
-      if (hasEvidence && hasCsv) {
-        shouldEnqueueWorker = true;
-      }
-    } catch (e) {
-      context.log.warn("[campaign-start] conditional worker check failed", String(e));
-      // Fall back to routing-based activation only
-      shouldEnqueueWorker = false;
-    }
-
-    // Enqueue worker ONLY IF artefacts already exist
-    let rWorker = null;
-    if (shouldEnqueueWorker) {
-      rWorker = await enqueueTo(WORKER_QUEUE, parsed);
-      context.log("[campaign-start] worker enqueued immediately (artefacts detected)", {
-        runId,
-        prefix
-      });
-    } else {
-      context.log("[campaign-start] worker NOT enqueued immediately — waiting on evidence phase", {
-        runId,
-        prefix
-      });
-    }
-
-    context.log({
-      event: "campaign_start_enqueued",
+    context.log("campaign_start_enqueued", {
       runId,
-      workerQueue: WORKER_QUEUE,
       evidenceQueue: EVIDENCE_QUEUE,
-      mainMsgId: r1?.messageId,
-      evidMsgId: r2?.messageId,
+      evidMsgId: rEvidence?.messageId,
       correlationId
     });
 
