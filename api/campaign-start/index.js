@@ -166,6 +166,9 @@ module.exports = async function (context, req) {
   }
 
   try {
+     // 🔍 DEBUG: what does this running instance actually see?
+    context.log("DEBUG_Q_CAMPAIGN_EVIDENCE", process.env.Q_CAMPAIGN_EVIDENCE);
+    context.log("DEBUG_AzureWebJobsStorage_set", !!process.env.AzureWebJobsStorage);
     if (!STORAGE_CONN) {
       context.res = {
         status: 500,
