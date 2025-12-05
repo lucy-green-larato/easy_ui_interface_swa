@@ -1,7 +1,7 @@
-// /api/shared/status.js 01-12-2025 v3
+// /api/shared/status.js 05-12-2025 v4
 // / Shared status.json updater with optional history node.
 
-const { getJson, putJson } = require("./storage");
+const { getJson, putJson } = require("../shared/storage");
 const { nowIso } = require("./utils");
 const { canonicalPrefix, computePrefixFromMessage } = require("../lib/prefix");
 
