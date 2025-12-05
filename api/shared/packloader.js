@@ -1,186 +1,158 @@
-// /api/shared/packloader.js 17-11-2025 v6
-// Returns: packs (plain object) — never throws on load/parse failures.
+// /api/shared/packloader.js — 05-12-2025 Azure-Safe v7
+// Loads packs.json / packs.js without throwing. Prefers CJS (Azure default).
+// Guarantees: returns {} on failure, never throws, never blocks pipeline.
 
 const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
 
 const ROOT = __dirname;
-let __memoPacks; // simple in-process memoization of the packs object
+let __memoPacks = null;
 
-// ---- tiny utils ----
+// ---------------------------------------------------------------------------
+// Utility helpers
+// ---------------------------------------------------------------------------
 function isPlainObject(v) {
-  return v != null && typeof v === "object" && !Array.isArray(v);
-}
-
-/**
- * Normalise any module/JSON shape into a plain "packs" object.
- * Accepts:
- *   - { packs: {...} }
- *   - default export object
- *   - bare packs object
- * Anything else → {}.
- */
-function coercePacksShape(v) {
-  // v might be:
-  //   - the raw JSON object
-  //   - a CJS module export
-  //   - an ESM module namespace object ({ default: ... })
-  if (!isPlainObject(v)) return {};
-
-  // Prefer an explicit .packs property if present
-  if (isPlainObject(v.packs)) return v.packs;
-
-  // If this looks like an ESM namespace with a default export,
-  // and that default is a plain object, use it.
-  if (isPlainObject(v.default)) {
-    const dv = v.default;
-    if (isPlainObject(dv.packs)) return dv.packs;
-    if (isPlainObject(dv)) return dv;
-  }
-
-  // Otherwise treat v itself as the packs object
-  return isPlainObject(v) ? v : {};
+  return v && typeof v === "object" && !Array.isArray(v);
 }
 
 function logWarn(msg, extra) {
   try {
     console.warn(`[packloader] ${msg}`, extra ? { extra } : "");
-  } catch {
-    // ignore logging failures
-  }
+  } catch {}
 }
 
-// Allow JSONC (strip // and /* */ comments) and trailing commas
-function parseJsonLenient(s) {
+/**
+ * Normalise a module shape into a plain packs object:
+ *   - { packs: {...} }
+ *   - { default: { packs: {...} } }
+ *   - { default: {...} }
+ *   - {...}
+ */
+function coercePacksShape(v) {
+  if (!isPlainObject(v)) return {};
+
+  if (isPlainObject(v.packs)) return v.packs;
+  if (isPlainObject(v.default)) {
+    const d = v.default;
+    if (isPlainObject(d.packs)) return d.packs;
+    if (isPlainObject(d)) return d;
+  }
+
+  return v;
+}
+
+/**
+ * JSON-with-comments / trailing-comma tolerant parser
+ */
+function parseJsonLenient(text) {
   try {
-    const noComments = String(s)
+    const noComments = String(text)
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/(^|[^:])\/\/.*$/gm, "$1");
-    const noTrailingCommas = noComments.replace(/,\s*([}\]])/g, "$1");
-    return JSON.parse(noTrailingCommas);
-  } catch (e) {
-    logWarn("JSON parse failed; returning {}", String(e?.message || e));
+
+    const noTrailing = noComments.replace(/,\s*([}\]])/g, "$1");
+
+    return JSON.parse(noTrailing);
+  } catch (err) {
+    logWarn("JSON parse failed; using {} fallback", err?.message);
     return {};
   }
 }
 
+// ---------------------------------------------------------------------------
+// Candidate resolution
+// ---------------------------------------------------------------------------
 function resolveCandidates() {
-  // Priority:
-  // 1) PACKS_PATH (file or directory)
-  // 2) PACKS_BASENAME (e.g. packs-prod.{json,js,mjs}) under ROOT
-  // 3) Default packs.{json,js,mjs} under ROOT (legacy)
+  const candidates = [];
+
   const envPath = process.env.PACKS_PATH && String(process.env.PACKS_PATH).trim();
   const envBase =
     (process.env.PACKS_BASENAME && String(process.env.PACKS_BASENAME).trim()) ||
     "packs";
 
-  const candidates = [];
-
   if (envPath) {
     const p = path.isAbsolute(envPath) ? envPath : path.join(ROOT, envPath);
+
     if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
       candidates.push(path.join(p, `${envBase}.json`));
       candidates.push(path.join(p, `${envBase}.js`));
-      candidates.push(path.join(p, `${envBase}.mjs`));
     } else {
-      // Treat as explicit file path
       candidates.push(p);
     }
   }
 
-  // Preferred names under ROOT
+  // Preferred
   candidates.push(path.join(ROOT, `${envBase}.json`));
   candidates.push(path.join(ROOT, `${envBase}.js`));
-  candidates.push(path.join(ROOT, `${envBase}.mjs`));
 
-  // Legacy defaults
+  // Legacy fallbacks
   candidates.push(path.join(ROOT, "packs.json"));
   candidates.push(path.join(ROOT, "packs.js"));
-  candidates.push(path.join(ROOT, "packs.mjs"));
 
-  // Deduplicate while keeping order
   return [...new Set(candidates)];
 }
 
-// ---- core loader ----
+// ---------------------------------------------------------------------------
+// Loader: tries JSON → JS (CJS) → JS (ESM), in that order
+// ---------------------------------------------------------------------------
 async function loadPacks() {
   if (__memoPacks) return __memoPacks;
 
-  const paths = resolveCandidates();
+  const files = resolveCandidates();
 
-  for (const p of paths) {
-    try {
-      if (!fs.existsSync(p)) continue;
+  for (const file of files) {
+    if (!fs.existsSync(file)) continue;
 
-      const ext = path.extname(p).toLowerCase();
+    const ext = path.extname(file).toLowerCase();
 
-      // 1) JSON (preferred)
-      if (ext === ".json") {
-        const raw = fs.readFileSync(p, "utf8");
-        const obj = parseJsonLenient(raw);
-        const packs = coercePacksShape(obj);
-        __memoPacks = isPlainObject(packs) ? packs : {};
+    // JSON first
+    if (ext === ".json") {
+      try {
+        const raw = fs.readFileSync(file, "utf8");
+        const json = parseJsonLenient(raw);
+        __memoPacks = coercePacksShape(json);
         return __memoPacks;
+      } catch (e) {
+        logWarn("Failed to parse packs.json", e?.message);
+        continue;
       }
+    }
 
-      // 2) JS: attempt CJS require first, then ESM import fallback
-      if (ext === ".js") {
+    // JS (prefer CJS)
+    if (ext === ".js") {
+      try {
+        const mod = require(file);
+        __memoPacks = coercePacksShape(mod);
+        return __memoPacks;
+      } catch (cjsErr) {
+        // CJS failed — maybe file is ESM
         try {
-          // eslint-disable-next-line import/no-dynamic-require, global-require
-          const mod = require(p);
-          const packs = coercePacksShape(mod);
-          __memoPacks = isPlainObject(packs) ? packs : {};
+          const esm = await import(pathToFileURL(file).href);
+          __memoPacks = coercePacksShape(esm);
           return __memoPacks;
-        } catch (eCjs) {
-          try {
-            const esm = await import(pathToFileURL(p).href);
-            const packs = coercePacksShape(esm);
-            __memoPacks = isPlainObject(packs) ? packs : {};
-            return __memoPacks;
-          } catch (eEsm) {
-            logWarn("Failed to load packs.js as CJS or ESM", {
-              cjs: String(eCjs?.message || eCjs),
-              esm: String(eEsm?.message || eEsm)
-            });
-            continue;
-          }
-        }
-      }
-
-      // 3) MJS: ESM only
-      if (ext === ".mjs") {
-        try {
-          const esm = await import(pathToFileURL(p).href);
-          const packs = coercePacksShape(esm);
-          __memoPacks = isPlainObject(packs) ? packs : {};
-          return __memoPacks;
-        } catch (e) {
-          logWarn("Failed to import packs.mjs", String(e?.message || e));
+        } catch (esmErr) {
+          logWarn("Failed to load packs.js as CJS or ESM", {
+            cjs: cjsErr?.message,
+            esm: esmErr?.message
+          });
           continue;
         }
       }
-    } catch (err) {
-      logWarn("Unhandled packs load error (continuing to next candidate)", {
-        file: p,
-        err: String(err?.message || err)
-      });
-      // keep trying next candidate
     }
   }
 
-  // Nothing usable → empty packs object
+  // Nothing worked
   __memoPacks = {};
   return __memoPacks;
 }
 
-/**
- * Convenience helper: return packs as a plain object.
- * Always resolves; never throws.
- */
+// ---------------------------------------------------------------------------
+// Public getter
+// ---------------------------------------------------------------------------
 async function getPacks() {
-  const packs = await loadPacks();
-  return isPlainObject(packs) ? packs : {};
+  const pk = await loadPacks();
+  return isPlainObject(pk) ? pk : {};
 }
 
 module.exports = {
