@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 04-12-2025 — v39
+// /api/campaign-evidence/index.js 05-12-2025 — v40
 // Phase 1 canonical outputs:
 // - csv_normalized.json
 // - needs_map.json
@@ -14,7 +14,10 @@ const { canonicalPrefix } = require("../lib/prefix");
 const { enqueueTo } = require("../lib/campaign-queue");
 const { nowIso } = require("../shared/utils");
 const ROUTER_QUEUE_NAME = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
-
+const RESULTS_CONTAINER =
+  process.env.CAMPAIGN_RESULTS_CONTAINER ||
+  process.env.RESULTS_CONTAINER ||
+  "results";
 
 const {
   makeClaimIdFactory,
