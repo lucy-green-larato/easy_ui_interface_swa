@@ -10,6 +10,7 @@ const { canonicalPrefix } = require("../lib/prefix");
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 const WORKER_QUEUE = process.env.Q_CAMPAIGN_WORKER || "campaign-worker-jobs";
 const EVIDENCE_QUEUE = process.env.Q_CAMPAIGN_EVIDENCE || "campaign-evidence-jobs";
+const ROUTER_QUEUE = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-events";
 const STORAGE_CONN = process.env.AzureWebJobsStorage;
 
 const MAX_BYTES_DEFAULT = 48 * 1024; // safe headroom under Azure Queue ~64KB limit
@@ -479,11 +480,28 @@ module.exports = async function (context, req) {
       context.log.warn("campaign_start_payload_slimmed", { bytes: byteLen(payload) });
     }
 
-        const parsed = JSON.parse(payload);
+    const parsed = JSON.parse(payload);
 
-    // Enqueue BOTH worker and evidence, like the original working behaviour
-    const rWorker = await enqueueTo(WORKER_QUEUE, parsed);   // kickoff main pipeline
-    const rEvidence = await enqueueTo(EVIDENCE_QUEUE, parsed); // evidence phase
+    // 1. ALWAYS enqueue evidence first
+    const rEvidence = await enqueueTo(EVIDENCE_QUEUE, parsed);
+
+    // 2. ALWAYS notify router that start phase completed
+    const rRouter = await enqueueTo(ROUTER_QUEUE, {
+      op: "afterstart",
+      runId,
+      prefix,
+      page
+    });
+
+    // 3. Safe log (no undefined vars)
+    context.log("campaign_start_enqueued", {
+      runId,
+      evidenceQueue: EVIDENCE_QUEUE,
+      routerQueue: ROUTER_QUEUE,
+      evidMsgId: rEvidence?.messageId,
+      routerMsgId: rRouter?.messageId,
+      correlationId
+    });
 
     context.log("campaign_start_enqueued", {
       runId,
