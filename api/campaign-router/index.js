@@ -1,85 +1,33 @@
-// /api/campaign-router/index.js — Gold v7.3 canonical prefix router 05-12-2025
+// /api/campaign-router/index.js — Gold v8.0 canonical prefix router (Option B)
+// Responsibility:
+//   - Listen on campaign-router-jobs
+//   - Route between stages using queue ops:
+//       * afterstart     → (no-op; start already enqueued evidence)
+//       * afterevidence  → enqueue campaign-outline
+//       * afteroutline   → enqueue campaign-write
+//       * afterwrite     → mark pipeline Completed
+//
+//   - No direct calls to campaign-worker.
+//   - Idempotent via status.json.markers flags.
+
 "use strict";
 
-const { BlobServiceClient } = require("@azure/storage-blob");
-const { enqueueTo } = require("../lib/campaign-queue");   // ✅ use shared queue helper
-const { canonicalPrefix } = require("../lib/prefix");     // (not strictly needed but harmless)
+const { enqueueTo } = require("../lib/campaign-queue");
+const {
+  getResultsContainerClient,
+  getJson,
+  putJson
+} = require("../shared/storage");
 
-// ---- ENV ----
-const STORAGE_CONN = process.env.AzureWebJobsStorage;
 const RESULTS_CONTAINER =
   process.env.CAMPAIGN_RESULTS_CONTAINER ||
   process.env.RESULTS_CONTAINER ||
   "results";
 
-// These are only used for logging / defaults; the real enqueue uses env again
-const OUTLINE_QUEUE = process.env.Q_CAMPAIGN_OUTLINE || "campaign-outline";
-const WORKER_QUEUE = process.env.Q_CAMPAIGN_WORKER || "campaign-worker-jobs";
-const WRITE_QUEUE = process.env.Q_CAMPAIGN_WRITE || "campaign-write";
-
-// ---- Blob helpers ----
-function getResultsContainerClient() {
-  if (!STORAGE_CONN) {
-    throw new Error(
-      "AzureWebJobsStorage not configured for campaign-router"
-    );
-  }
-  const service = BlobServiceClient.fromConnectionString(STORAGE_CONN);
-  return service.getContainerClient(RESULTS_CONTAINER);
-}
-
-async function streamToString(readable) {
-  if (!readable) return "";
-  const chunks = [];
-  for await (const c of readable) {
-    chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
-async function getJson(container, rel) {
-  const b = container.getBlockBlobClient(rel);
-  const exists = await b.exists();
-  if (!exists) return null;
-  const dl = await b.download();
-  const text = await streamToString(dl.readableStreamBody);
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-async function putJson(container, rel, obj) {
-  const bb = container.getBlockBlobClient(rel);
-  const body = Buffer.from(JSON.stringify(obj, null, 2), "utf8");
-  await bb.uploadData(body, {
-    blobHTTPHeaders: { blobContentType: "application/json; charset=utf-8" }
-  });
-}
-
-// ---- Optional: race-safe existence check (currently not used) ----
-async function waitForEvidence(prefix, container, attempts = 3, delayMs = 150) {
-  const evBlob = container.getBlockBlobClient(`${prefix}evidence.json`);
-  const logBlob = container.getBlockBlobClient(`${prefix}evidence_log.json`);
-
-  for (let i = 0; i < attempts; i++) {
-    const ev = await evBlob.exists();
-    const evLog = await logBlob.exists();
-    if (ev || evLog) return true;
-    await new Promise((r) => setTimeout(r, delayMs));
-  }
-  return false;
-}
-
-// ======================================================================
-//                               ROUTER
-// ======================================================================
-
 module.exports = async function (context, queueItem) {
   const log = context.log;
 
-  // Parse message safely (string or object)
+  // -------- Parse message safely --------
   const msg =
     typeof queueItem === "string"
       ? (() => {
@@ -93,82 +41,126 @@ module.exports = async function (context, queueItem) {
       ? queueItem
       : {};
 
-  const op = msg.op || "afterevidence";
-  let runId = msg.runId || msg.run_id || "unknown";
-  let prefix = msg.prefix || "";
+  const op = msg.op || "";
+  const runId = msg.runId || msg.run_id || "unknown";
   const page = msg.page || "campaign";
+  let prefix = msg.prefix || "";
 
-  log("[campaign-router] starting", { op, runId, prefix, page });
+  log("[campaign-router] received", { op, runId, prefix, page });
 
-  // Only handle after-evidence style messages
-  if (op !== "afterevidence" && op !== "route" && op !== "reroute") {
-    log("[campaign-router] unsupported op; skipping", { op });
-    return;
-  }
-
+  // -------- Require prefix for all routing --------
   if (!prefix) {
     log("[campaign-router] missing prefix; cannot route", { runId });
     return;
   }
 
-  // Normalise prefix to container-relative, ensure trailing slash
+  // Normalise prefix: strip container name if present, strip leading slash, ensure trailing slash
   if (prefix.startsWith(`${RESULTS_CONTAINER}/`)) {
     prefix = prefix.slice(`${RESULTS_CONTAINER}/`.length);
   }
-  prefix = prefix.replace(/^\/+/, "");
-  if (!prefix.endsWith("/")) prefix = `${prefix}/`;
+  prefix = String(prefix).replace(/^\/+/, "");
+  if (!prefix.endsWith("/")) prefix += "/";
 
-  const container = getResultsContainerClient();
-
-  // Artefact blobs
-  const evidenceBlob = container.getBlockBlobClient(`${prefix}evidence.json`);
-  const csvBlob = container.getBlockBlobClient(`${prefix}csv_normalized.json`);
-
-  const hasEvidence = await evidenceBlob.exists();
-  const hasCsv = await csvBlob.exists();
-
-  // SAFETY CHECK — only run worker when both artefacts exist
-  if (!hasEvidence || !hasCsv) {
-    log("[campaign-router] evidence not ready; deferring worker", {
-      runId,
-      hasEvidence,
-      hasCsv,
-      prefix
-    });
-    return;
-  }
-
-  // STATE CHECK — Prevent duplicate worker runs
+  const container = await getResultsContainerClient();
   const statusPath = `${prefix}status.json`;
-  const status = (await getJson(container, statusPath)) || {};
-  const markers = status.markers || {};
 
-  if (markers.workerStarted) {
-    log("[campaign-router] worker already started — skipping enqueue", {
+  // Load current status (or skeleton)
+  const status =
+    (await getJson(container, statusPath)) || { runId, history: [], markers: {} };
+  status.markers = status.markers || {};
+
+  // =====================================================================
+  // 1. afterstart → no-op (start already enqueued evidence)
+  // =====================================================================
+  if (op === "afterstart") {
+    log("[campaign-router] afterstart → no-op (evidence already queued by start)", {
       runId,
       prefix
     });
     return;
   }
 
-  // ENQUEUE WORKER (single-time, idempotent)
-  const workerQueueName =
-    process.env.Q_CAMPAIGN_WORKER || WORKER_QUEUE || "campaign-worker-jobs";
+  // =====================================================================
+  // 2. afterevidence → enqueue outline (once)
+  // =====================================================================
+  if (op === "afterevidence") {
+    if (status.markers.outlineEnqueued) {
+      log(
+        "[campaign-router] afterevidence: outline already enqueued; skipping",
+        { runId, prefix }
+      );
+      return;
+    }
 
-  await enqueueTo(workerQueueName, {
-    op: "run_strategy",
-    runId,
-    page,
-    prefix
-  });
+    const outlineQueue = process.env.Q_CAMPAIGN_OUTLINE || "campaign-outline";
 
-  // Mark so router does not double-trigger
-  status.markers = { ...markers, workerStarted: true };
-  await putJson(container, statusPath, status);
+    await enqueueTo(outlineQueue, {
+      op: "run_outline",
+      runId,
+      page,
+      prefix
+    });
 
-  log("[campaign-router] worker enqueued successfully", {
-    runId,
-    prefix,
-    workerQueueName
-  });
+    status.markers.outlineEnqueued = true;
+    await putJson(container, statusPath, status);
+
+    log("[campaign-router] afterevidence → enqueued outline", {
+      runId,
+      prefix,
+      outlineQueue
+    });
+    return;
+  }
+
+  // =====================================================================
+  // 3. afteroutline → enqueue writer (once)
+  // =====================================================================
+  if (op === "afteroutline") {
+    if (status.markers.writerEnqueued) {
+      log(
+        "[campaign-router] afteroutline: writer already enqueued; skipping",
+        { runId, prefix }
+      );
+      return;
+    }
+
+    const writerQueue = process.env.Q_CAMPAIGN_WRITE || "campaign-write";
+
+    await enqueueTo(writerQueue, {
+      op: "run_writer",
+      runId,
+      page,
+      prefix
+    });
+
+    status.markers.writerEnqueued = true;
+    await putJson(container, statusPath, status);
+
+    log("[campaign-router] afteroutline → enqueued writer", {
+      runId,
+      prefix,
+      writerQueue
+    });
+    return;
+  }
+
+  // =====================================================================
+  // 4. afterwrite → mark Completed
+  // =====================================================================
+  if (op === "afterwrite") {
+    status.state = "Completed";
+    status.markers.pipelineCompleted = true;
+    await putJson(container, statusPath, status);
+
+    log("[campaign-router] afterwrite → marked pipeline Completed", {
+      runId,
+      prefix
+    });
+    return;
+  }
+
+  // =====================================================================
+  // 5. Unsupported ops → log + return
+  // =====================================================================
+  log("[campaign-router] unsupported op; skipping", { op, runId, prefix });
 };
