@@ -479,12 +479,17 @@ module.exports = async function (context, req) {
       context.log.warn("campaign_start_payload_slimmed", { bytes: byteLen(payload) });
     }
 
-    const parsed = JSON.parse(payload);
-    const rEvidence = await enqueueTo(EVIDENCE_QUEUE, parsed);
+        const parsed = JSON.parse(payload);
+
+    // Enqueue BOTH worker and evidence, like the original working behaviour
+    const rWorker = await enqueueTo(WORKER_QUEUE, parsed);   // kickoff main pipeline
+    const rEvidence = await enqueueTo(EVIDENCE_QUEUE, parsed); // evidence phase
 
     context.log("campaign_start_enqueued", {
       runId,
+      workerQueue: WORKER_QUEUE,
       evidenceQueue: EVIDENCE_QUEUE,
+      mainMsgId: rWorker?.messageId,
       evidMsgId: rEvidence?.messageId,
       correlationId
     });
@@ -500,6 +505,7 @@ module.exports = async function (context, req) {
         inputUrl: `${containerClient.url}/${prefix}input.json`
       }
     };
+
   } catch (e) {
     context.log.error("campaign_start_failed", { error: String(e?.message || e), correlationId });
     context.res = {
