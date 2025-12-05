@@ -1,4 +1,4 @@
-// /api/campaign-worker/index.js 04-12-2025 Strategy Engine v15
+// /api/campaign-worker/index.js 05-12-2025 Strategy Engine v16
 // 
 // Responsibility:
 //   - Read Phase 1 outputs (evidence, insights, buyer_logic, markdown_pack, csv_normalized, etc.).
@@ -56,24 +56,6 @@ async function getResultsContainer() {
   const container = service.getContainerClient(RESULTS_CONTAINER);
   await container.createIfNotExists();
   return container;
-}
-
-const evidence = await readJsonIfExists(container, `${prefix}evidence.json`);
-const evidenceLog = await readJsonIfExists(container, `${prefix}evidence_log.json`);
-
-const hasClaims =
-  (evidence && Array.isArray(evidence.claims) && evidence.claims.length > 0) ||
-  (Array.isArray(evidenceLog) && evidenceLog.length > 0);
-
-if (!hasClaims) {
-  log("[*] Strategy Engine: no evidence yet; deferring run", { runId, prefix });
-  await updateStatus(
-    container,
-    prefix,
-    "waiting_evidence",
-    "Strategy Engine deferred – evidence artefacts not ready"
-  );
-  return;
 }
 
 function streamToString(readable) {
@@ -730,6 +712,22 @@ module.exports = async function (context, queueItem) {
   log(`[*] Strategy Engine starting for runId=${runId}, prefix=${prefix}`);
 
   const container = await getResultsContainer();
+  const evidence = await readJsonIfExists(container, `${prefix}evidence.json`);
+  const evidenceLog = await readJsonIfExists(container, `${prefix}evidence_log.json`);
+  const hasClaims =
+    (evidence && Array.isArray(evidence.claims) && evidence.claims.length > 0) ||
+    (Array.isArray(evidenceLog) && evidenceLog.length > 0);
+  if (!hasClaims) {
+    log("[*] Strategy Engine: no evidence yet; deferring run", { runId, prefix });
+    await updateStatus(
+      container,
+      prefix,
+      "waiting_evidence",
+      "Strategy Engine deferred – evidence artefacts not ready"
+    );
+    return;
+  }
+
   // ---- Idempotence guard: skip if strategy already finished ----
   try {
     const status = await readJsonIfExists(container, `${prefix}status.json`);
