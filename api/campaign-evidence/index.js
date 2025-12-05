@@ -350,6 +350,8 @@ function linkedinSearchEvidence({ url, title }) {
 }
 
 module.exports = async function (context, job) {
+  context.log("EVIDENCE_DEBUG_Q_CAMPAIGN_EVIDENCE", process.env.Q_CAMPAIGN_EVIDENCE);
+  context.log("EVIDENCE_DEBUG_AzureWebJobsStorage_set", !!process.env.AzureWebJobsStorage);
   context.log("[campaign-evidence] v29 starting", {
     hasJob: !!job,
     type: typeof job
