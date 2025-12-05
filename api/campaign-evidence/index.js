@@ -29,13 +29,12 @@ const {
 const nextClaimId = makeClaimIdFactory();
 
 const {
-  getContainerClient,
+  getResultsContainerClient,
   getText,
   putText,
   getJson,
   putJson,
-  listCsvUnderPrefix,
-  RESULTS_CONTAINER
+  listCsvUnderPrefix
 } = require("../shared/storage");
 
 const {
@@ -355,7 +354,7 @@ module.exports = async function (context, job) {
     hasJob: !!job,
     type: typeof job
   });
-  const container = getContainerClient(RESULTS_CONTAINER);
+  const container = await getResultsContainerClient();
   const msg = (typeof job === "string")
     ? (() => { try { return JSON.parse(job); } catch { return {}; } })()
     : (job && typeof job === "object" ? job : {});
