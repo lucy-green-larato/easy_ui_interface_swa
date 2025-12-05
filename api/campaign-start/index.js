@@ -507,7 +507,6 @@ module.exports = async function (context, req) {
       runId,
       workerQueue: WORKER_QUEUE,
       evidenceQueue: EVIDENCE_QUEUE,
-      mainMsgId: rWorker?.messageId,
       evidMsgId: rEvidence?.messageId,
       correlationId
     });
