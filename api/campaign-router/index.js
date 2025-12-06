@@ -1,4 +1,5 @@
-// /api/campaign-router/index.js — Gold v8.3 canonical prefix router 06-12-2025
+// /api/campaign-router/index.js — Gold v8.4 canonical prefix router (06-12-2025)
+
 "use strict";
 
 const { enqueueTo } = require("../lib/campaign-queue");
@@ -25,17 +26,18 @@ module.exports = async function (context, queueItem) {
   const page = msg.page || "campaign";
   let prefix = msg.prefix || "";
 
-  log("[campaign-router] received", { op, runId, prefix });
+  log("[router] received", { op, runId, prefix });
 
   // ---------- Validate & normalise prefix ----------
   if (!prefix) {
-    log("[campaign-router] missing prefix; cannot route");
+    log("[router] missing prefix; cannot route");
     return;
   }
 
   if (prefix.startsWith(`${RESULTS_CONTAINER}/`)) {
     prefix = prefix.slice(`${RESULTS_CONTAINER}/`.length);
   }
+
   prefix = prefix.replace(/^\/+/, "");
   if (!prefix.endsWith("/")) prefix += "/";
 
@@ -44,13 +46,15 @@ module.exports = async function (context, queueItem) {
 
   let status =
     (await getJson(container, statusPath)) || { runId, markers: {}, history: [] };
-  status.markers = status.markers || {};
+
+  if (!Array.isArray(status.history)) status.history = [];
+  if (!status.markers) status.markers = {};
 
   // ==============================================================
   // 1. afterstart → no-op
   // ==============================================================
   if (op === "afterstart") {
-    log("[router] afterstart → no-op");
+    log("[router] afterstart → no-op (evidence already enqueued)");
     return;
   }
 
@@ -73,6 +77,7 @@ module.exports = async function (context, queueItem) {
     });
 
     status.markers.outlineEnqueued = true;
+    status.state = "outline_queued";
     await putJson(container, statusPath, status);
 
     log("[router] afterevidence → enqueued outline", { runId, prefix });
@@ -80,26 +85,25 @@ module.exports = async function (context, queueItem) {
   }
 
   // ==============================================================
-  // 3. afteroutline → enqueue WORKER (strategy engine)
+  // 3. afteroutline → enqueue strategy WORKER ONCE
   // ==============================================================
-
   if (op === "afteroutline") {
     if (status.markers.workerEnqueued) {
       log("[router] afteroutline: worker already enqueued; skipping");
       return;
     }
 
-    const workerQueue =
-      process.env.Q_CAMPAIGN_WORKER || "campaign-worker-jobs";
+    const workerQueue = process.env.Q_CAMPAIGN_WORKER || "campaign-worker-jobs";
 
     await enqueueTo(workerQueue, {
-      op: "run_strategy",   // This triggers strategy_v2 + viability generation
+      op: "run_strategy",
       runId,
       page,
       prefix
     });
 
     status.markers.workerEnqueued = true;
+    status.state = "worker_queued";
     await putJson(container, statusPath, status);
 
     log("[router] afteroutline → enqueued worker", { runId, prefix });
@@ -107,9 +111,8 @@ module.exports = async function (context, queueItem) {
   }
 
   // ==============================================================
-  // 4. afterworker → enqueue writer
+  // 4. afterworker → enqueue writer ONCE
   // ==============================================================
-
   if (op === "afterworker") {
     if (status.markers.writerEnqueued) {
       log("[router] afterworker: writer already enqueued; skipping");
@@ -126,6 +129,7 @@ module.exports = async function (context, queueItem) {
     });
 
     status.markers.writerEnqueued = true;
+    status.state = "writer_queued";
     await putJson(container, statusPath, status);
 
     log("[router] afterworker → enqueued writer", { runId, prefix });
@@ -133,22 +137,21 @@ module.exports = async function (context, queueItem) {
   }
 
   // ==============================================================
-  // 5. afterwrite → mark Completed
+  // 5. afterwrite → mark pipeline Completed
   // ==============================================================
-
   if (op === "afterwrite") {
     status.state = "Completed";
     status.markers.pipelineCompleted = true;
 
     await putJson(container, statusPath, status);
 
-    log("[router] afterwrite → Completed", { runId, prefix });
+    log("[router] afterwrite → pipeline Completed", { runId, prefix });
     return;
   }
 
   // ==============================================================
-  // 6. Fallback → unsupported op
+  // 6. Unsupported ops → log + ignore
   // ==============================================================
-
   log("[router] unsupported op; skipping", { op, runId, prefix });
 };
+
