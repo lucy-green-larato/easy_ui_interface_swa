@@ -1,5 +1,5 @@
 // /api/campaign-outline/index.js
-// Clean rewrite 06-12-2025 — fully aligned with shared storage + shared status + router logic. V2
+// Clean rewrite 06-12-2025 — fully aligned with shared storage + shared status + router logic. V3
 
 const { enqueueTo } = require("../lib/campaign-queue");
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
@@ -102,22 +102,51 @@ const OUTLINE_SCHEMA = {
         exec: {
           type: "object",
           additionalProperties: false,
-          required: ["why_now_ids", "product_anchor_names"],
+          required: [
+            "why_now_ids",
+            "product_anchor_names",
+            "viability_grade",
+            "viability_reason_ids"
+          ],
           properties: {
             why_now_ids: { type: "array", items: { type: "string" } },
             product_anchor_names: { type: "array", items: { type: "string" } },
-            viability_grade: { type: "string" },
-            viability_reason_ids: { type: "array", items: { type: "string" } }
+
+            viability_grade: {
+              type: ["string", "null"],
+              nullable: true
+            },
+
+            viability_reason_ids: {
+              type: "array",
+              items: { type: "string" },
+              nullable: true
+            }
           }
         },
         positioning: {
           type: "object",
           additionalProperties: false,
-          required: ["differentiator_ids"],
+
+          required: [
+            "differentiator_ids",
+            "viability_grade",
+            "viability_reason_ids"
+          ],
+
           properties: {
             differentiator_ids: { type: "array", items: { type: "string" } },
-            viability_grade: { type: "string" },
-            viability_reason_ids: { type: "array", items: { type: "string" } }
+
+            viability_grade: {
+              type: ["string", "null"],
+              nullable: true
+            },
+
+            viability_reason_ids: {
+              type: "array",
+              items: { type: "string" },
+              nullable: true
+            }
           }
         },
         messaging: {
@@ -359,6 +388,7 @@ module.exports = async function (context, queueItem) {
 ${PERSONA}
 Return STRICTLY valid JSON that conforms to the provided outline schema.
 Use ONLY existing claim_ids.
+All arrays must use ONLY values already provided in Evidence, CSV signals, Site products, Supplier, or Competitors.
 No prose.
 `.trim();
 
