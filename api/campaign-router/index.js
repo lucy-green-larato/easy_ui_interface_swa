@@ -1,23 +1,8 @@
-// /api/campaign-router/index.js — Gold v8.0 canonical prefix router (Option B)
-// Responsibility:
-//   - Listen on campaign-router-jobs
-//   - Route between stages using queue ops:
-//       * afterstart     → (no-op; start already enqueued evidence)
-//       * afterevidence  → enqueue campaign-outline
-//       * afteroutline   → enqueue campaign-write
-//       * afterwrite     → mark pipeline Completed
-//
-//   - No direct calls to campaign-worker.
-//   - Idempotent via status.json.markers flags.
-
+// /api/campaign-router/index.js — Gold v8.3 canonical prefix router 06-12-2025
 "use strict";
 
 const { enqueueTo } = require("../lib/campaign-queue");
-const {
-  getResultsContainerClient,
-  getJson,
-  putJson
-} = require("../shared/storage");
+const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
 
 const RESULTS_CONTAINER =
   process.env.CAMPAIGN_RESULTS_CONTAINER ||
@@ -27,16 +12,10 @@ const RESULTS_CONTAINER =
 module.exports = async function (context, queueItem) {
   const log = context.log;
 
-  // -------- Parse message safely --------
+  // ---------- Parse incoming message ----------
   const msg =
     typeof queueItem === "string"
-      ? (() => {
-          try {
-            return JSON.parse(queueItem);
-          } catch {
-            return {};
-          }
-        })()
+      ? (() => { try { return JSON.parse(queueItem); } catch { return {}; } })()
       : queueItem && typeof queueItem === "object"
       ? queueItem
       : {};
@@ -46,49 +25,41 @@ module.exports = async function (context, queueItem) {
   const page = msg.page || "campaign";
   let prefix = msg.prefix || "";
 
-  log("[campaign-router] received", { op, runId, prefix, page });
+  log("[campaign-router] received", { op, runId, prefix });
 
-  // -------- Require prefix for all routing --------
+  // ---------- Validate & normalise prefix ----------
   if (!prefix) {
-    log("[campaign-router] missing prefix; cannot route", { runId });
+    log("[campaign-router] missing prefix; cannot route");
     return;
   }
 
-  // Normalise prefix: strip container name if present, strip leading slash, ensure trailing slash
   if (prefix.startsWith(`${RESULTS_CONTAINER}/`)) {
     prefix = prefix.slice(`${RESULTS_CONTAINER}/`.length);
   }
-  prefix = String(prefix).replace(/^\/+/, "");
+  prefix = prefix.replace(/^\/+/, "");
   if (!prefix.endsWith("/")) prefix += "/";
 
   const container = await getResultsContainerClient();
   const statusPath = `${prefix}status.json`;
 
-  // Load current status (or skeleton)
-  const status =
-    (await getJson(container, statusPath)) || { runId, history: [], markers: {} };
+  let status =
+    (await getJson(container, statusPath)) || { runId, markers: {}, history: [] };
   status.markers = status.markers || {};
 
-  // =====================================================================
-  // 1. afterstart → no-op (start already enqueued evidence)
-  // =====================================================================
+  // ==============================================================
+  // 1. afterstart → no-op
+  // ==============================================================
   if (op === "afterstart") {
-    log("[campaign-router] afterstart → no-op (evidence already queued by start)", {
-      runId,
-      prefix
-    });
+    log("[router] afterstart → no-op");
     return;
   }
 
-  // =====================================================================
-  // 2. afterevidence → enqueue outline (once)
-  // =====================================================================
+  // ==============================================================
+  // 2. afterevidence → enqueue outline ONCE
+  // ==============================================================
   if (op === "afterevidence") {
     if (status.markers.outlineEnqueued) {
-      log(
-        "[campaign-router] afterevidence: outline already enqueued; skipping",
-        { runId, prefix }
-      );
+      log("[router] afterevidence: outline already enqueued; skipping");
       return;
     }
 
@@ -104,23 +75,44 @@ module.exports = async function (context, queueItem) {
     status.markers.outlineEnqueued = true;
     await putJson(container, statusPath, status);
 
-    log("[campaign-router] afterevidence → enqueued outline", {
-      runId,
-      prefix,
-      outlineQueue
-    });
+    log("[router] afterevidence → enqueued outline", { runId, prefix });
     return;
   }
 
-  // =====================================================================
-  // 3. afteroutline → enqueue writer (once)
-  // =====================================================================
+  // ==============================================================
+  // 3. afteroutline → enqueue WORKER (strategy engine)
+  // ==============================================================
+
   if (op === "afteroutline") {
+    if (status.markers.workerEnqueued) {
+      log("[router] afteroutline: worker already enqueued; skipping");
+      return;
+    }
+
+    const workerQueue =
+      process.env.Q_CAMPAIGN_WORKER || "campaign-worker-jobs";
+
+    await enqueueTo(workerQueue, {
+      op: "run_strategy",   // This triggers strategy_v2 + viability generation
+      runId,
+      page,
+      prefix
+    });
+
+    status.markers.workerEnqueued = true;
+    await putJson(container, statusPath, status);
+
+    log("[router] afteroutline → enqueued worker", { runId, prefix });
+    return;
+  }
+
+  // ==============================================================
+  // 4. afterworker → enqueue writer
+  // ==============================================================
+
+  if (op === "afterworker") {
     if (status.markers.writerEnqueued) {
-      log(
-        "[campaign-router] afteroutline: writer already enqueued; skipping",
-        { runId, prefix }
-      );
+      log("[router] afterworker: writer already enqueued; skipping");
       return;
     }
 
@@ -136,31 +128,27 @@ module.exports = async function (context, queueItem) {
     status.markers.writerEnqueued = true;
     await putJson(container, statusPath, status);
 
-    log("[campaign-router] afteroutline → enqueued writer", {
-      runId,
-      prefix,
-      writerQueue
-    });
+    log("[router] afterworker → enqueued writer", { runId, prefix });
     return;
   }
 
-  // =====================================================================
-  // 4. afterwrite → mark Completed
-  // =====================================================================
+  // ==============================================================
+  // 5. afterwrite → mark Completed
+  // ==============================================================
+
   if (op === "afterwrite") {
     status.state = "Completed";
     status.markers.pipelineCompleted = true;
+
     await putJson(container, statusPath, status);
 
-    log("[campaign-router] afterwrite → marked pipeline Completed", {
-      runId,
-      prefix
-    });
+    log("[router] afterwrite → Completed", { runId, prefix });
     return;
   }
 
-  // =====================================================================
-  // 5. Unsupported ops → log + return
-  // =====================================================================
-  log("[campaign-router] unsupported op; skipping", { op, runId, prefix });
+  // ==============================================================
+  // 6. Fallback → unsupported op
+  // ==============================================================
+
+  log("[router] unsupported op; skipping", { op, runId, prefix });
 };
