@@ -146,33 +146,46 @@ function bulletFromClaim(c) {
 
 // ------------------ Main Function ------------------
 
-module.exports = async function (context, queueItem) {
+module.exports = async function (context, job) {
   const log = context.log;
 
-  // --- Parse message ---
-  let msg = queueItem;
-  if (typeof msg === "string") {
-    try { msg = JSON.parse(msg); } catch { msg = {}; }
+  // --- Parse the queue message safely ---
+  let msg;
+  if (typeof job === "string") {
+    try {
+      msg = JSON.parse(job);
+    } catch {
+      msg = {};
+    }
+  } else if (job && typeof job === "object") {
+    msg = job;
+  } else {
+    msg = {};
   }
 
   const op = msg.op || "";
+
+  // Worker only runs for explicit operations
   if (op !== "run_strategy" && op !== "kickoff") {
-    log("[worker] ignoring op", op);
+    log("[worker] ignoring op:", op);
     return;
   }
 
-  const prefix = (() => {
-    if (msg.prefix) {
-      let p = String(msg.prefix).replace(/^\/+/, "");
-      return p.endsWith("/") ? p : p + "/";
-    }
+  // --- Require prefix (router must provide it) ---
+  if (!msg.prefix) {
     throw new Error("Worker invoked without prefix – router must supply prefix");
-  })();
+  }
 
+  let prefix = String(msg.prefix).replace(/^\/+/, "");
+  if (!prefix.endsWith("/")) prefix += "/";
+
+  // --- Resolve runId ---
   const runId =
     msg.runId ||
     msg.run_id ||
     prefix.split("/").filter(Boolean).pop();
+
+  log("[worker] starting", { op, runId, prefix });
 
   const page = msg.page || "campaign";
 
