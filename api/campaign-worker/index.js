@@ -1,5 +1,5 @@
-// /api/campaign-worker/index.js
-// Strategy Engine v19 — Fully deterministic, router-driven (Option B)
+// /api/campaign-worker/index.js 06-12-2025
+// Strategy Engine v20 — Fully deterministic, router-driven (Option B)
 // ---------------------------------------------------------------
 // Responsibilities:
 //   • Listen ONLY for queue op: "run_strategy"
@@ -10,20 +10,19 @@
 //   • Notify router via afterworker event
 //
 // No viability. No routing logic inside worker. No LLM.
-//
 // ---------------------------------------------------------------
 
 "use strict";
 
-const { BlobServiceClient } = require("@azure/storage-blob");
 const { enqueueTo } = require("../lib/campaign-queue");
-const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
+const {
+  getResultsContainerClient,
+  getJson,
+  putJson
+} = require("../shared/storage");
 
-const ROUTER_QUEUE = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
-const RESULTS_CONTAINER =
-  process.env.CAMPAIGN_RESULTS_CONTAINER ||
-  process.env.RESULTS_CONTAINER ||
-  "results";
+const ROUTER_QUEUE =
+  process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
 
 // ---------------------------------------------------------------
 // UTILITIES
@@ -32,9 +31,13 @@ const RESULTS_CONTAINER =
 function parseQueueItem(queueItem) {
   if (!queueItem) return {};
   if (typeof queueItem === "string") {
-    try { return JSON.parse(queueItem); } catch { return {}; }
+    try {
+      return JSON.parse(queueItem);
+    } catch {
+      return {};
+    }
   }
-  return (typeof queueItem === "object") ? queueItem : {};
+  return typeof queueItem === "object" ? queueItem : {};
 }
 
 function uniqNonEmpty(arr) {
@@ -99,30 +102,59 @@ function indexClaimsByTag(evidence) {
 // STRATEGY BUILDERS (v18 logic preserved, viability removed)
 // ---------------------------------------------------------------
 
-function buildStorySpine({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }) {
+function buildStorySpine({
+  evidence,
+  insights,
+  buyerLogic,
+  markdownPack,
+  csvNormalized,
+  mergedInput
+}) {
   const byTag = indexClaimsByTag(evidence);
 
   const environment = uniqNonEmpty(
     (byTag.environment || []).map(bulletFromClaim)
       .concat((byTag.buyer_priority || []).map(bulletFromClaim))
-      .concat((safeGet(insights, "industry_drivers", []) || []).map(x => x.text || ""))
+      // IMPORTANT: use markdownPack.industry_drivers (as in your original v18)
+      .concat(
+        (safeGet(markdownPack, "industry_drivers", []) || []).map(
+          (d) => d.text || ""
+        )
+      )
   ).slice(0, 4);
 
   const case_for_action = uniqNonEmpty(
-    (safeGet(insights, "adoption_barriers", []) || []).map(x => x.label || "")
-      .concat((safeGet(insights, "risk_landscape", []) || []).map(x =>
-        withEvidenceTag(x.text, x.claim_id ? [x.claim_id] : [])
-      ))
-      .concat((safeGet(insights, "timing_drivers", []) || []).map(x => x.text || ""))
-      .concat((safeGet(buyerLogic, "commercial_impacts", []) || []).map(ci =>
-        withEvidenceTag(ci.label, safeGet(ci, "origin.related_claim_ids", []))
-      ))
+    (safeGet(insights, "adoption_barriers", []) || []).map(
+      (x) => x.label || ""
+    )
+      .concat(
+        (safeGet(insights, "risk_landscape", []) || []).map((x) =>
+          withEvidenceTag(x.text, x.claim_id ? [x.claim_id] : [])
+        )
+      )
+      .concat(
+        (safeGet(insights, "timing_drivers", []) || []).map(
+          (x) => x.text || ""
+        )
+      )
+      .concat(
+        (safeGet(buyerLogic, "commercial_impacts", []) || []).map((ci) =>
+          withEvidenceTag(
+            ci.label,
+            safeGet(ci, "origin.related_claim_ids", [])
+          )
+        )
+      )
   ).slice(0, 6);
 
   const how_we_win = uniqNonEmpty(
     (byTag.supplier_capability || []).map(bulletFromClaim)
       .concat((byTag.differentiator || []).map(bulletFromClaim))
-      .concat((safeGet(markdownPack, "content_pillars", []) || []).map(p => p.text || ""))
+      .concat(
+        (safeGet(markdownPack, "content_pillars", []) || []).map(
+          (p) => p.text || ""
+        )
+      )
   ).slice(0, 6);
 
   const n = safeGet(csvNormalized, "meta.rows", 0);
@@ -145,20 +177,35 @@ function buildStorySpine({ evidence, insights, buyerLogic, markdownPack, csvNorm
 
   const success = uniqNonEmpty([
     deriveOutcome(n, routeHint),
-    ...(safeGet(insights, "success_signals", []) || []).map(x => x.text || "")
+    ...(safeGet(insights, "success_signals", []) || []).map(
+      (x) => x.text || ""
+    )
   ]).slice(0, 4);
 
   const next_steps = uniqNonEmpty([
     n ? `NEXT_STEP:target_cohort_size=${n}` : "",
-    environment.length ? `NEXT_STEP:align_to_environment_signals=${environment.length}` : "",
-    case_for_action.length ? `NEXT_STEP:prioritise_case_for_action=${case_for_action.length}` : "",
-    how_we_win.length ? `NEXT_STEP:validate_how_we_win=${how_we_win.length}` : ""
+    environment.length
+      ? `NEXT_STEP:align_to_environment_signals=${environment.length}`
+      : "",
+    case_for_action.length
+      ? `NEXT_STEP:prioritise_case_for_action=${case_for_action.length}`
+      : "",
+    how_we_win.length
+      ? `NEXT_STEP:validate_how_we_win=${how_we_win.length}`
+      : ""
   ]).slice(0, 4);
 
   return { environment, case_for_action, how_we_win, success, next_steps };
 }
 
-function buildValueProposition({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }) {
+function buildValueProposition({
+  evidence,
+  insights,
+  buyerLogic,
+  markdownPack,
+  csvNormalized,
+  mergedInput
+}) {
   const industry = mergedInput.selected_industry || "input_group";
   const buyers = mergedInput.buyer_type || "personas";
 
@@ -176,7 +223,8 @@ function buildValueProposition({ evidence, insights, buyerLogic, markdownPack, c
     ? bulletFromClaim(capClaim).replace(/\s*\[[^\]]+\]\s*$/, "")
     : "";
 
-  const outcomeCore = safeGet(buyerLogic, "commercial_impacts.0.label") || "";
+  const outcomeCore =
+    safeGet(buyerLogic, "commercial_impacts.0.label") || "";
   const unlikeCore =
     safeGet(markdownPack, "competitor_profiles.0.summary") || "";
 
@@ -197,8 +245,9 @@ function buildCompetitiveStrategy({ evidence, markdownPack }) {
   const byTag = indexClaimsByTag(evidence);
 
   const competitor_map = uniqNonEmpty(
-    (safeGet(markdownPack, "competitor_profiles", []) || [])
-      .map(c => c.summary || "")
+    (safeGet(markdownPack, "competitor_profiles", []) || []).map(
+      (c) => c.summary || ""
+    )
   );
 
   const diffs = []
@@ -207,12 +256,12 @@ function buildCompetitiveStrategy({ evidence, markdownPack }) {
     .map(bulletFromClaim);
 
   const angles = (evidence.claims || [])
-    .filter(c => c.tag === "buyer_blocker" || c.tag === "timing")
+    .filter((c) => c.tag === "buyer_blocker" || c.tag === "timing")
     .map(bulletFromClaim);
 
   const vulnerability_map = uniqNonEmpty(
     (evidence.claims || [])
-      .filter(c => c.tag === "risk" || c.tag === "buyer_blocker")
+      .filter((c) => c.tag === "risk" || c.tag === "buyer_blocker")
       .map(bulletFromClaim)
   ).slice(0, 6);
 
@@ -228,25 +277,38 @@ function buildCompetitiveStrategy({ evidence, markdownPack }) {
 function buildBuyerStrategy({ buyerLogic, insights, evidence }) {
   return {
     problems: uniqNonEmpty(
-      (safeGet(buyerLogic, "problems", []) || []).map(p =>
-        withEvidenceTag(p.label, safeGet(p, "origin.related_claim_ids", []))
+      (safeGet(buyerLogic, "problems", []) || []).map((p) =>
+        withEvidenceTag(
+          p.label,
+          safeGet(p, "origin.related_claim_ids", [])
+        )
       )
     ).slice(0, 8),
 
     barriers: uniqNonEmpty(
-      (safeGet(insights, "adoption_barriers", []) || []).map(x => x.label || "")
+      (safeGet(insights, "adoption_barriers", []) || []).map(
+        (x) => x.label || ""
+      )
         .concat(
-          (safeGet(buyerLogic, "risk_tolerances", []) || []).map(r =>
-            withEvidenceTag(r.label, safeGet(r, "origin.related_claim_ids", []))
+          (safeGet(buyerLogic, "risk_tolerances", []) || []).map((r) =>
+            withEvidenceTag(
+              r.label,
+              safeGet(r, "origin.related_claim_ids", [])
+            )
           )
         )
     ).slice(0, 8),
 
     urgency: uniqNonEmpty(
-      (safeGet(insights, "timing_drivers", []) || []).map(x => x.text || "")
+      (safeGet(insights, "timing_drivers", []) || []).map(
+        (x) => x.text || ""
+      )
         .concat(
-          (safeGet(buyerLogic, "urgency_factors", []) || []).map(u =>
-            withEvidenceTag(u.label, safeGet(u, "origin.related_claim_ids", []))
+          (safeGet(buyerLogic, "urgency_factors", []) || []).map((u) =>
+            withEvidenceTag(
+              u.label,
+              safeGet(u, "origin.related_claim_ids", [])
+            )
           )
         )
     ).slice(0, 6)
@@ -286,10 +348,31 @@ function buildRightToPlay({ evidence }) {
   ).slice(0, 6);
 }
 
-function buildStrategyV2({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }) {
+function buildStrategyV2({
+  evidence,
+  insights,
+  buyerLogic,
+  markdownPack,
+  csvNormalized,
+  mergedInput
+}) {
   return {
-    story_spine: buildStorySpine({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }),
-    value_proposition: buildValueProposition({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }).value_proposition,
+    story_spine: buildStorySpine({
+      evidence,
+      insights,
+      buyerLogic,
+      markdownPack,
+      csvNormalized,
+      mergedInput
+    }),
+    value_proposition: buildValueProposition({
+      evidence,
+      insights,
+      buyerLogic,
+      markdownPack,
+      csvNormalized,
+      mergedInput
+    }).value_proposition,
     competitive_strategy: buildCompetitiveStrategy({ evidence, markdownPack }),
     buyer_strategy: buildBuyerStrategy({ buyerLogic, insights, evidence }),
     gtm_strategy: buildGtmStrategy({ csvNormalized, mergedInput }),
@@ -313,7 +396,6 @@ module.exports = async function (context, queueItem) {
     return;
   }
 
-  // Router MUST supply prefix
   if (!msg.prefix) {
     log("[worker] ERROR: No prefix supplied");
     return;
@@ -357,14 +439,12 @@ module.exports = async function (context, queueItem) {
     {};
 
   const csvNormalized =
-    (await getJson(container, `${prefix}csv_normalized.json`)) ||
-    {};
+    (await getJson(container, `${prefix}csv_normalized.json`)) || {};
 
   const mergedInput =
-    (await getJson(container, `${prefix}input.json`)) ||
-    {};
+    (await getJson(container, `${prefix}input.json`)) || {};
 
-  // -------- Build deterministic strategy_v2 --------
+  // Build deterministic strategy_v2
   const strategy_v2 = buildStrategyV2({
     evidence: combinedEvidence,
     insights,
@@ -374,18 +454,18 @@ module.exports = async function (context, queueItem) {
     mergedInput
   });
 
-  // -------- Write output --------
+  // Write output
   const outPath = `${prefix}strategy_v2/campaign_strategy.json`;
   await putJson(container, outPath, { strategy_v2 });
 
-  // -------- Update status --------
+  // Update status
   const status = (await getJson(container, `${prefix}status.json`)) || {};
   status.state = "strategy_ready";
   status.markers = status.markers || {};
   status.markers.strategyCompleted = true;
   await putJson(container, `${prefix}status.json`, status);
 
-  // -------- Notify router (afterworker) --------
+  // Notify router
   await enqueueTo(ROUTER_QUEUE, {
     op: "afterworker",
     runId,
