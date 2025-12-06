@@ -1,5 +1,5 @@
 // /api/campaign-outline/index.js
-// Clean rewrite 05-12-2025 — fully aligned with shared storage + shared status + router logic. V1
+// Clean rewrite 06-12-2025 — fully aligned with shared storage + shared status + router logic. V2
 
 const { enqueueTo } = require("../lib/campaign-queue");
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
@@ -106,13 +106,8 @@ const OUTLINE_SCHEMA = {
           properties: {
             why_now_ids: { type: "array", items: { type: "string" } },
             product_anchor_names: { type: "array", items: { type: "string" } },
-            viability_grade: {
-              type: "string"
-            },
-            viability_reason_ids: {
-              type: "array",
-              items: { type: "string" }
-            }
+            viability_grade: { type: "string" },
+            viability_reason_ids: { type: "array", items: { type: "string" } }
           }
         },
         positioning: {
@@ -121,13 +116,8 @@ const OUTLINE_SCHEMA = {
           required: ["differentiator_ids"],
           properties: {
             differentiator_ids: { type: "array", items: { type: "string" } },
-            viability_grade: {
-              type: "string"
-            },
-            viability_reason_ids: {
-              type: "array",
-              items: { type: "string" }
-            }
+            viability_grade: { type: "string" },
+            viability_reason_ids: { type: "array", items: { type: "string" } }
           }
         },
         messaging: {
@@ -220,6 +210,7 @@ function safeForPrompt(v, max = 300000) {
 // ---- MAIN FUNCTION ----
 module.exports = async function (context, queueItem) {
   const startedAt = nowIso();
+  let prefix = ""; // make visible to catch
 
   try {
     if (!queueItem) throw new Error("Queue message empty");
@@ -234,7 +225,7 @@ module.exports = async function (context, queueItem) {
 
     const runId = queueItem.runId;
     const page = queueItem.page || "campaign";
-    let prefix = queueItem.prefix;
+    prefix = queueItem.prefix;
 
     if (!runId) throw new Error("Missing runId");
     if (!prefix) throw new Error("Missing prefix from router");
@@ -246,7 +237,7 @@ module.exports = async function (context, queueItem) {
     // Open container
     const container = await getResultsContainerClient();
 
-    // ---- IDPOTENCY GUARD ----
+    // ---- IDEMPOTENCY GUARD ----
     // If outline was already completed, only resend router notification once.
     const status0 = await getJson(container, `${prefix}status.json`);
     if (status0?.markers?.outlineCompleted) {
@@ -352,63 +343,20 @@ module.exports = async function (context, queueItem) {
       .filter(Boolean)
       .slice(0, 12);
 
-    // ---- Viability → extract messages → map back to evidence claim_ids ----
-    let viabilityClaimIds = [];
-
-    if (viability) {
-      viabilityGrade = viability.grade || viability.grade_final || null;
-
-      const reasonTexts = new Set();
-
-      // Collect messages
-      if (viability.flags) {
-        ["red", "amber", "green"].forEach(level => {
-          (viability.flags[level] || []).forEach(m =>
-            reasonTexts.add(m?.message || m)
-          );
-        });
-      }
-
-      if (viability.dimensions) {
-        Object.values(viability.dimensions).forEach(d => {
-          if (d?.message) reasonTexts.add(d.message);
-        });
-      }
-
-      // Map messages → evidence claim IDs
-      const mapMsg = (msg) => {
-        const lower = msg.toLowerCase();
-        const words = lower.split(/\W+/).filter(w => w.length > 3);
-        const hits = [];
-        for (const ev of evidenceArr) {
-          const hay = `${ev.title} ${ev.summary} ${ev.quote}`.toLowerCase();
-          if (words.some(w => hay.includes(w))) {
-            if (ev.claim_id) hits.push(ev.claim_id);
-          }
-        }
-        return hits;
-      };
-
-      reasonTexts.forEach(t => {
-        mapMsg(t).forEach(id => viabilityClaimIds.push(id));
-      });
-
-      viabilityClaimIds = [...new Set(viabilityClaimIds)].slice(0, 12);
-    }
-
     // ---- SELECTED INDUSTRY ----
     const SELECTED_INDUSTRY =
       input?.selected_industry ||
       input?.campaign_industry ||
       (modeSpecific ? selectedIndustryCsv : "General");
 
-    // ---- Construct SYSTEM + USER messages as before ----
+    // ---- Construct SYSTEM + USER messages ----
     const salesModel = String(input?.sales_model || "").toLowerCase();
     const PERSONA = (salesModel === "partner")
-      ? "You are a UK B2B channel strategist. Produce claim-ID-only outline…"
-      : "You are a UK B2B tech strategist. Produce claim-ID-only outline…";
+      ? "You are a UK B2B channel strategist. Produce claim-ID-only outline."
+      : "You are a UK B2B tech strategist. Produce claim-ID-only outline.";
 
     const SYSTEM = `
+${PERSONA}
 Return STRICTLY valid JSON that conforms to the provided outline schema.
 Use ONLY existing claim_ids.
 No prose.
@@ -498,14 +446,14 @@ ${safeForPrompt(competitors)}
       });
     }
 
-    context.log("[outline] success", { runId });
+    context.log("[outline] success", { runId, startedAt, completedAt: nowIso() });
 
   } catch (err) {
     context.log.error("[outline] failure", String(err?.message || err));
     // Minimal fail-safe update
     try {
       const container = await getResultsContainerClient();
-      const status = await getJson(container, `${prefix}status.json`) || {};
+      const status = (await getJson(container, `${prefix}status.json`)) || {};
       status.state = "Failed";
       status.error = String(err?.message || err);
       status.failedAt = nowIso();
