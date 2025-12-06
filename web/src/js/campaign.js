@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 04-12-2025 v30
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 06-12-2025 v31
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, 
@@ -1895,13 +1895,25 @@ window.CampaignUI = window.CampaignUI || {};
     const MAX_MS = 8 * 60 * 1000; // 8 minutes
     let attempt = 0;
     let consecutiveErrors = 0;
-
     const okDuring = new Set([
-      "Queued", "ValidatingInput", "PacksLoad", "ingest", "DraftCampaign",
-      "EvidenceDigest", "Outline",
-      "StrategySynthesis", "strategy_working", "strategy_ready",
-      "SectionWrites", "writer_working", "Assemble", "assembled",
-      "Completed"
+      "queued",
+      "validatinginput",
+      "packsload",
+      "ingest",
+      "draftcampaign",
+      "evidencedigest",
+      "outline",
+      "outline_queued",
+      "worker_queued",
+      "writer_queued",
+      "strategysynthesis",
+      "strategy_working",
+      "strategy_ready",
+      "sectionwrites",
+      "writer_working",
+      "assemble",
+      "assembled",
+      "completed"
     ].map(s => s.toLowerCase()));
 
     while (true) {
