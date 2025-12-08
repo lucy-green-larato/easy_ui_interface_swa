@@ -1,6 +1,6 @@
 // /api/shared/evidenceUtils.js
 // Canonical evidence utilities for the campaign engine
-// Consolidated 2025-12-09 v4
+// Consolidated 2025-12-08 v5
 "use strict";
 
 const path = require("path");
@@ -196,14 +196,23 @@ function cleanText(html = "") {
     .trim();
 }
 
-function extractSentences(text = "") {
-  const s = String(text).trim();
-  if (!s) return [];
+function extractSentences(block) {
+  const cleaned = cleanText(block);
+  if (!cleaned) return [];
 
-  return s
+  const sents = cleaned
     .split(/(?<=[.!?])\s+/)
-    .map(v => v.trim())
-    .filter(v => v.length > 20 && v.length < 320);
+    .map(s => s.trim())
+    .filter(s => {
+      if (s.length < 30) return false;               // too short
+      if (s.split(" ").length < 6) return false;     // micro-fluff
+      if (/^(home|about|contact|services)$/i.test(s)) return false;
+      if (/cookies|privacy|terms|copyright|subscribe|login/i.test(s)) return false;
+      if (/©|all rights reserved/i.test(s)) return false;
+      return true;
+    });
+
+  return sents.slice(0, 5);
 }
 
 function tagSentence(sentence) {

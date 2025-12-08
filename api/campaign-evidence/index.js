@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 08-12-2025 — v42
+// /api/campaign-evidence/index.js 08-12-2025 — v43
 // Phase 1 canonical outputs:
 // - csv_normalized.json
 // - needs_map.json
@@ -1394,67 +1394,65 @@ module.exports = async function (context, job) {
       titles: evidenceLog.map(x => x.title).slice(0, 12)
     });
 
-    // PATCH EV-RANK-1: competitor relevance (product overlap) + industry precedence + source scoring
-    try {
-      // 1) Load supplier products for overlap check
-      const pm = (await getJson(container, `${prefix}products_meta.json`)) || {};
+    // --- TIER-BASED EVIDENCE SORTING AND PRUNING (NEW V3 ENGINE) ---
 
-      const declared = Array.isArray(pm?.declared) ? pm.declared : [];
-      const validated = Array.isArray(pm?.validated)
-        ? pm.validated
-          .map(x => (typeof x === "string" ? x : x?.name))
-          .filter(Boolean)
-        : [];
+    function evidenceTier(ev) {
+      const st = String(ev.source_type || "").toLowerCase();
+      const tag = String(ev.tag || "").toLowerCase();
+      const title = String(ev.title || "").toLowerCase();
 
-      const chosen = Array.isArray(pm?.chosen) ? pm.chosen : [];
+      // --- TIER 1: Always keep, absolute highest value ---
+      if (st.includes("csv")) return 1;
+      if (tag === "markdown_pack") return 1;
+      if (st.includes("customer profile")) return 1;
+      if (st.includes("profile_competitor")) return 1;
 
-      // Prefer validated → chosen → declared as the basis for competitor relevance
-      const productBasis = (validated.length ? validated : (chosen.length ? chosen : declared))
-        .map(x => String(x || "").toLowerCase());
+      // --- TIER 2: High-value context ---
+      if (st === "company site" && /case study/.test(title)) return 2;
+      if (st === "company site" && tag === "product") return 2;
+      if (st === "directory" && /coverage/.test(title)) return 2;
+      if (title.includes("homepage")) return 2;
 
-      // 3) Filter competitor claims by product overlap (keep only relevant competitors)
-      const hasOverlap = (txt) => {
-        const s = String(txt || "").toLowerCase();
-        return productBasis.some(p => p && s.includes(p));
-      };
-      const filtered = [];
-      for (const it of evidenceLog) {
-        if (it?.source_type === "profile_competitor" || it?.source_type === "competitor") {
-          const basis = `${it.title || ""} ${it.summary || ""}`;
-          if (!hasOverlap(basis)) continue; // drop irrelevant competitor claim
-        }
-        filtered.push(it);
-      }
-      // Inside PATCH EV-RANK-1 block:
+      // --- TIER 3: Medium value (keep if space) ---
+      if (st === "company site") return 3;
+      if (st === "linkedin") return 3;
+      if (tag === "fact" || tag === "capability" || tag === "service") return 3;
 
-      // 4) Score claims for stable precedence
-      function score(it) {
-        return scoreIndustryEvidence(
-          it,
-          input?.selected_industry ??
-          input?.campaign_industry ??
-          input?.buyer_industry ??
-          ""
-        );
-      }
-
-      filtered.sort((a, b) => score(b) - score(a));
-      const cap =
-        Number.isFinite(MAX_EVIDENCE_ITEMS) && MAX_EVIDENCE_ITEMS > 0
-          ? MAX_EVIDENCE_ITEMS
-          : 24; // sane fallback
-      const finalLog = filtered.length > cap ? filtered.slice(0, cap) : filtered;
-      // Replace in-place for downstream write
-      evidenceLog = finalLog;
-    } catch {
-      if (Array.isArray(evidenceLog)) {
-        const cap =
-          Number.isFinite(MAX_EVIDENCE_ITEMS) && MAX_EVIDENCE_ITEMS > 0
-            ? MAX_EVIDENCE_ITEMS
-            : 24;
-        if (evidenceLog.length > cap) evidenceLog = evidenceLog.slice(0, cap);
-      }/* non-fatal; keep original order */
+      // --- TIER 4: Lowest-value fallback ---
+      return 4;
     }
+
+    // STEP 1: Annotate each item with its tier
+    let tiered = evidenceLog.map(ev => ({ ev, tier: evidenceTier(ev) }));
+
+    // STEP 2: Global tier-first sort
+    tiered.sort((a, b) => a.tier - b.tier);
+
+    // STEP 3: Reassemble
+    const reordered = tiered.map(x => x.ev);
+
+    // STEP 4: Partition by tier
+    const t1 = reordered.filter(ev => evidenceTier(ev) === 1);
+    const t2 = reordered.filter(ev => evidenceTier(ev) === 2);
+    const t3 = reordered.filter(ev => evidenceTier(ev) === 3);
+    const t4 = reordered.filter(ev => evidenceTier(ev) === 4);
+
+    // STEP 5: Build final capped list
+    const CAP = MAX_EVIDENCE_ITEMS;
+    let finalLog = [...t1, ...t2];
+
+    // Fill with tier 3 if space remains
+    if (finalLog.length < CAP) {
+      finalLog.push(...t3.slice(0, CAP - finalLog.length));
+    }
+
+    // Fill tier 4 last
+    if (finalLog.length < CAP) {
+      finalLog.push(...t4.slice(0, CAP - finalLog.length));
+    }
+
+    // Replace evidenceLog
+    evidenceLog = finalLog;
 
     // Deterministic renumbering AFTER final ranking & capping
     if (Array.isArray(evidenceLog)) {
