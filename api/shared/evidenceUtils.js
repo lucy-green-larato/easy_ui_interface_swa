@@ -1,276 +1,410 @@
-// /api/shared/evidenceUtils.js 23-11-2025 v3
-//
-// Responsibilities:
-//  - Claim ID generation (CLM-001 style)
-//  - Evidence array helpers (push with caps, de-duplication)
-//  - Placeholder / junk evidence detection
-//  - Simple citation formatting
-//  - Source-type classification
-//  - Summary counts for evidence bundles
-//
-// This module is PURE: no Azure, no storage, no logging.
-//
+// /api/shared/evidenceUtils.js
+// Canonical evidence utilities for the campaign engine
+// Consolidated 2025-12-09 v4
+"use strict";
 
-// ---------- Claim ID helpers ----------
+const path = require("path");
 
-/**
- * Sequential CLM-### generator (001..999).
- *
- * Usage:
- *   const nextClaimId = makeClaimIdFactory();
- *   const id = nextClaimId(); // "CLM-001"
- */
+/* ============================================================
+   CLAIM ID GENERATOR
+   ============================================================ */
 
-const { nowIso } = require("./utils");
-
-function makeClaimIdFactory(startAt = 0) {
-  let n = Number.isFinite(startAt) && startAt >= 0 ? startAt : 0;
-  return function nextId() {
-    n = Math.min(999, n + 1);
-    return `CLM-${String(n).padStart(3, "0")}`;
+function makeClaimIdFactory(prefix = "CLM") {
+  let n = 1;
+  return function nextClaimId() {
+    const id = `${prefix}-${String(n).padStart(3, "0")}`;
+    n += 1;
+    return id;
   };
 }
 
-// ---------- Evidence array helpers ----------
+/* ============================================================
+   CITATIONS
+   ============================================================ */
 
-/**
- * Push an item into an array if there is room.
- * Does NOT do any validation.
- */
-function pushIfRoom(arr, item, cap) {
-  if (!Array.isArray(arr) || !item) return;
-  const limit = Number.isFinite(cap) && cap > 0 ? cap : Infinity;
-  if (arr.length < limit) arr.push(item);
+function addCitation(text, sourceLabel) {
+  const s = String(text || "").trim();
+  const label = String(sourceLabel || "").trim();
+
+  if (!s) return "";
+  if (!label) return s;
+
+  const lower = s.toLowerCase();
+  const marker = `[${label.toLowerCase()}]`;
+
+  // Avoid double-tagging
+  if (lower.includes(marker) || lower.includes("(source:")) {
+    return s;
+  }
+
+  return `${s} [${label}]`;
 }
 
-/**
- * Central placeholder filter: returns true if an evidence item
- * is too weak / junk to be useful.
- *
- * Rules:
- *  1) Reject items with no title, no summary, and no URL.
- *  2) Allow "Customer profile" / "profile_competitor" / "competitor profile"
- *     to be URL-less IF they have some text.
- *  3) Reject weak scaffold titles (e.g. "Product", "Products", "Placeholder").
- *  4) For everything else, URL must be https:// and not obviously fake/test.
- */
-function isPlaceholderEvidence(it) {
-  if (!it) return true;
+/* ============================================================
+   ARRAY PUSH + PLACEHOLDER FILTERING
+   ============================================================ */
 
-  const src = String(it.source_type || "").trim();
-  const url = String(it.url || "").trim();
-  const title = String(it.title || "").trim();
-  const summary = String(it.summary || "").trim();
-  const srcLower = src.toLowerCase();
+function safePushIfRoom(list, item, max) {
+  if (!Array.isArray(list)) return;
+  if (!item || typeof item !== "object") return;
 
-  // 1) No substance at all
-  if (!title && !summary && !url) return true;
+  const cap = Number.isFinite(max) && max > 0 ? max : 24;
+  if (list.length >= cap) return;
 
-  // 2) Special allowance: Customer / competitor profile items may omit URL
-  if (
-    srcLower === "customer profile" ||
-    srcLower === "profile_competitor" ||
-    srcLower === "competitor profile" ||
-    srcLower === "competitor_profile"
-  ) {
-    // Require at least some meaningful text
-    return !(title || summary);
-  }
+  list.push(item);
+}
 
-  // 3) Weak scaffold titles
-  if (/^(?:products|product|placeholder|lorem ipsum)$/i.test(title)) return true;
+function isPlaceholderEvidence(ev) {
+  if (!ev || typeof ev !== "object") return true;
 
-  // 4) URL hygiene for everything else: must be https and non-junk hostnames
-  if (!/^https:\/\//i.test(url)) return true;
+  const title = String(ev.title || "").trim().toLowerCase();
+  const summary = String(ev.summary || "").trim().toLowerCase();
+  const quote = String(ev.quote || "").trim().toLowerCase();
 
-  const u = url.toLowerCase();
-  if (u.startsWith("about:")) return true;
-  if (u.includes("example.com")) return true;
-  if (
-    /\b(companywebsite\.com|companyx\.com|competitor\d+\.com|vendora\.com|vendorb\.com|vendorc\.com|vendord\.com|vendore\.com|test\.(com|net)|localhost|127\.0\.0\.1)\b/i.test(
-      u
-    )
-  ) {
-    return true;
-  }
+  const body = `${title} ${summary} ${quote}`;
+
+  if (!body.trim()) return true;
+  if (body.includes("lorem ipsum")) return true;
+  if (body.includes("placeholder")) return true;
+
+  // Very short = junk
+  if (body.length < 12) return true;
 
   return false;
 }
 
-/**
- * Push an evidence item into an array if:
- *  - The item is non-null
- *  - It is NOT a placeholder/junk item
- *  - There is room under the cap
- */
-function safePushIfRoom(arr, item, cap) {
-  if (!item) return;
-  if (isPlaceholderEvidence(item)) return;
-  pushIfRoom(arr, item, cap);
+/* ============================================================
+   DEDUPLICATION + SUMMARIES
+   ============================================================ */
+
+function _norm(v) {
+  return String(v || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .slice(0, 160);
 }
 
-/**
- * Deduplicate evidence by (title|url|source_type).
- * Preserves first occurrence; stable.
- */
 function dedupeEvidence(list) {
-  if (!Array.isArray(list)) return [];
+  if (!Array.isArray(list) || list.length === 0) return [];
+
   const seen = new Set();
   const out = [];
-  for (const it of list) {
-    if (!it) continue;
-    const title = String(it.title || "").toLowerCase();
-    const url = String(it.url || "").toLowerCase();
-    const src = String(it.source_type || "").toLowerCase();
-    const key = `${title}|${url}|${src}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(it);
+
+  for (const raw of list) {
+    const ev = raw || {};
+    const k = `${_norm(ev.title)}||${_norm(ev.url)}||${_norm(ev.summary || ev.quote)}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(ev);
   }
+
   return out;
 }
 
-// ---------- Citations & source type ----------
+function summarizeClaims(claims) {
+  if (!Array.isArray(claims) || claims.length === 0) {
+    return { total: 0, by_source_type: {}, by_tag: {} };
+  }
 
-/**
- * Add a trailing citation tag in brackets unless one already exists.
- *
- * Example:
- *   addCitation("Some stat about SMEs.", "Ofcom")
- *   → "Some stat about SMEs. (Ofcom)"
- */
-function addCitation(text, tag) {
-  const t = String(text || "").trim();
-  const label = String(tag || "").trim() || "source";
-  if (!t) return `(${label})`;
+  const bySource = {};
+  const byTag = {};
 
-  // If there is already a "(...)" at the end, leave it alone
-  return /\([^()]{2,}\)\.?$/.test(t) ? t : `${t} (${label})`;
+  for (const c of claims) {
+    const st = String(c.source_type || c.source || "Unknown").trim() || "Unknown";
+    const tag = String(c.tag || c.source_tag || "untagged").trim() || "untagged";
+
+    bySource[st] = (bySource[st] || 0) + 1;
+    byTag[tag] = (byTag[tag] || 0) + 1;
+  }
+
+  return {
+    total: claims.length,
+    by_source_type: bySource,
+    by_tag: byTag
+  };
 }
 
-/**
- * Coarse source-type classification from URL.
- * Used to normalise e.g. Ofcom/ONS/DSIT, LinkedIn, PDFs, directories, etc.
- */
+/* ============================================================
+   SOURCE TYPE CLASSIFICATION
+   ============================================================ */
+
 function classifySourceType(url) {
-  const u = String(url || "").toLowerCase();
-  if (u.includes("linkedin.com")) return "LinkedIn";
-  if (u.includes("ofcom")) return "Ofcom";
-  if (u.includes("ons.gov")) return "ONS";
-  if (u.includes("dsit.gov") || (u.includes("gov.uk") && u.includes("dsit"))) return "DSIT";
-  if (u.endsWith(".pdf")) return "PDF extract";
-  if (u.includes("google.")) return "Directory";
+  const raw = String(url || "").trim().toLowerCase();
+  if (!raw) return "Unknown";
+
+  const ext = path.extname(raw);
+  if (ext === ".pdf") return "PDF extract";
+
+  if (raw.includes("linkedin.com")) return "LinkedIn";
+  if (/\.gov\.uk\b/.test(raw)) return "Official";
+  if (raw.includes("ofcom")) return "Official";
+  if (raw.includes("ons.gov")) return "Official";
+
+  if (raw.includes("commsbusiness") || raw.includes("techradar") || raw.includes("computerweekly")) {
+    return "Press";
+  }
+
   return "Company site";
 }
 
-// ---------- Evidence bundle summary ----------
+/* ============================================================
+   INDUSTRY RELEVANCE SCORING
+   ============================================================ */
 
-/**
- * Summarise evidence bundle counts by broad source_type family.
- *
- * Returns:
- *  {
- *    website: n,
- *    linkedin: n,
- *    pdf: n,
- *    directories: n,
- *    ixbrl: n,
- *    csv: n
- *  }
- */
-function summarizeClaims(all) {
-  const list = Array.isArray(all) ? all : [];
-  const counts = {
-    website: 0,
-    linkedin: 0,
-    pdf: 0,
-    directories: 0,
-    ixbrl: 0,
-    csv: 0
-  };
+function scoreIndustryEvidence(ev, industry) {
+  if (!ev || typeof ev !== "object") return 0;
 
-  for (const it of list) {
-    const t = String(it?.source_type || "").toLowerCase();
-    if (t.includes("site") || t.includes("website") || t.includes("company site")) {
-      counts.website++;
-    } else if (t.includes("linkedin")) {
-      counts.linkedin++;
-    } else if (t.includes("pdf")) {
-      counts.pdf++;
-    } else if (t.includes("directory")) {
-      counts.directories++;
-    } else if (t.includes("ixbrl")) {
-      counts.ixbrl++;
-    } else if (t.includes("csv")) {
-      counts.csv++;
+  const text = `${ev.title || ""} ${ev.summary || ""} ${ev.quote || ""}`.toLowerCase();
+  const src = String(ev.source_type || "").toLowerCase();
+  const tag = String(ev.tag || "").toLowerCase();
+  const ind = String(industry || "").trim().toLowerCase();
+
+  let score = 1.0;
+
+  // Source-type weights
+  if (src.includes("pdf")) score += 0.5;
+  if (src.includes("linkedin")) score += 0.3;
+  if (src.includes("official")) score += 0.4;
+
+  // Tag-based weights
+  if (tag.includes("buyer_blocker")) score += 0.4;
+  if (tag.includes("differentiator")) score += 0.4;
+  if (tag.includes("capability")) score += 0.3;
+
+  // Industry keyword hits
+  if (ind) {
+    const toks = ind.split(/[^a-z0-9]+/).filter(Boolean);
+    for (const t of toks) {
+      if (t.length >= 3 && text.includes(t)) score += 0.35;
     }
   }
 
-  return counts;
+  return score;
 }
 
-// Score a pack evidence item, favouring:
-// - Customer/supplier and competitor profiles
-// - Company site / website items
-// - Regulator / official stats (Ofcom, ONS, DSIT, gov.uk)
-// - Exact industry mentions
-// - Clean https URLs
-function scoreIndustryEvidence(pe, selectedIndustry) {
-  if (!pe) return 0;
+/* ============================================================
+   MICROCLAIM EXTRACTION (formerly in /lib/evidence-utils.js)
+   ============================================================ */
 
-  const title = String(pe.title || "");
-  const summary = String(pe.summary || "");
-  const t = `${title} ${summary}`.toLowerCase();
+function cleanText(html = "") {
+  return String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  const src = String(pe.source_type || "").toLowerCase();
-  const ind = String(selectedIndustry || "").toLowerCase();
+function extractSentences(text = "") {
+  const s = String(text).trim();
+  if (!s) return [];
 
-  let s = 0;
+  return s
+    .split(/(?<=[.!?])\s+/)
+    .map(v => v.trim())
+    .filter(v => v.length > 20 && v.length < 320);
+}
 
-  // Supplier/customer profile items are top-tier
-  if (src.includes("customer profile")) s += 50;
+function tagSentence(sentence) {
+  const s = sentence.toLowerCase();
 
-  // Competitor profiles are also strong but slightly lower
-  if (src.includes("competitor profile") || src.includes("profile_competitor")) {
-    s += 40;
+  if (/customers?|clients?/.test(s)) return "customer_value";
+  if (/partner|reseller|distributor/.test(s)) return "route_to_market";
+  if (/ai|machine learning|automation/.test(s)) return "technology";
+  if (/cost|save|roi/.test(s)) return "benefit_financial";
+
+  return "general";
+}
+
+function extractStructuredClaims({ html, url, sourceType, addCitation }) {
+  const text = cleanText(html);
+  const sents = extractSentences(text);
+
+  return sents.map(sent => ({
+    title: sent.slice(0, 60),
+    summary: addCitation(sent, sourceType),
+    url,
+    quote: sent,
+    tag: tagSentence(sent),
+    source_type: sourceType
+  }));
+}
+
+/* ============================================================
+   SITE + LINKEDIN EVIDENCE HELPERS
+   (Moved from campaign-evidence/index.js to central utilities)
+   ============================================================ */
+
+function siteProductsEvidence(products, website, containerUrl, prefix, nextClaimId) {
+  const arr = Array.isArray(products) ? products : [];
+  const names = Array.from(
+    new Set(
+      arr
+        .slice(0, 24)
+        .map(p => (typeof p === "string" ? p : p?.name || p?.title || ""))
+        .map(s => String(s || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  if (!names.length) return null;
+
+  let rawUrl = (website || "").trim();
+  if (!rawUrl && containerUrl && prefix) {
+    const root = String(containerUrl).replace(/\/+$/, "");
+    const pfx = String(prefix).replace(/^\/+/, "");
+    rawUrl = `${root}/${pfx}products.json`;
   }
 
-  // Company site / website strong signal
-  if (src.includes("company site") || src.includes("website")) s += 35;
+  if (!rawUrl) return null;
+  if (!/^https:\/\//i.test(rawUrl)) return null;
 
-  // Regulator / official sources (Ofcom, ONS, DSIT, gov.uk)
-  if (/(ofcom|ons|dsit|gov\.uk)/.test(t) || /(ofcom|ons|dsit|gov\.uk)/.test(src)) s += 30;
+  const summaryList = names.slice(0, 8).join(", ");
 
-  // Exact industry match in title/summary
-  if (ind && t.includes(ind)) s += 20;
-
-  // HTTPS hygiene
-  if (pe.url && /^https:\/\//.test(String(pe.url))) s += 2;
-
-  // Non-generic source_type preferred
-  if (src && src !== "source") s += 1;
-
-  return s;
+  return {
+    claim_id: nextClaimId(),
+    source_type: "Company site",
+    title: "Products",
+    url: rawUrl,
+    summary: addCitation(summaryList, "Company site"),
+    quote: ""
+  };
 }
 
+function linkedinEvidence(linkedin, nextClaimId) {
+  if (!linkedin) return null;
+  const raw = String(linkedin).trim();
+  if (!raw) return null;
+  if (!/^https:\/\//i.test(raw)) return null;
+
+  return {
+    claim_id: nextClaimId(),
+    source_type: "LinkedIn",
+    title: "Supplier LinkedIn (reference)",
+    url: raw,
+    summary: addCitation(
+      "Company LinkedIn profile reference for employer facts and recent posts.",
+      "LinkedIn"
+    ),
+    quote: ""
+  };
+}
+
+function liCompanySearch(company) {
+  const n = String(company || "").trim();
+  if (!n) return null;
+  return `https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(n)}&origin=GLOBAL_SEARCH_HEADER`;
+}
+
+function liProductSearch(name, company) {
+  const n = String(name || "").trim();
+  const c = String(company || "").trim();
+  const parts = [c, n].filter(Boolean);
+  if (!parts.length) return null;
+
+  return `https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(
+    parts.join(" ")
+  )}&origin=GLOBAL_SEARCH_HEADER`;
+}
+
+function liCompetitorSearch(name) {
+  const n = String(name || "").trim();
+  if (!n) return null;
+
+  return `https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(
+    n
+  )}&origin=GLOBAL_SEARCH_HEADER`;
+}
+
+function linkedinSearchEvidence({ url, title }, nextClaimId) {
+  const u = String(url || "").trim();
+  const t = String(title || "").trim();
+  if (!u || !t) return null;
+  if (!/^https:\/\//i.test(u)) return null;
+
+  return {
+    claim_id: nextClaimId(),
+    source_type: "LinkedIn",
+    title: t,
+    url: u,
+    summary: addCitation(`${t} — relevance scan link.`, "LinkedIn"),
+    quote: ""
+  };
+}
+
+// ============================================================
+// Dynamic load of lib/evidence (CJS → ESM fallback)
+// ============================================================
+
+let _evidenceLibCache = null;
+
+async function loadEvidenceLib() {
+  if (_evidenceLibCache) return _evidenceLibCache;
+
+  let firstError;
+
+  // Try CommonJS (lib/evidence.js exporting buildEvidence)
+  try {
+    // eslint-disable-next-line global-require
+    const mod = require("../lib/evidence");
+    const buildEvidence = mod.buildEvidence ?? mod.default ?? mod;
+
+    if (typeof buildEvidence !== "function") {
+      throw new Error("lib/evidence: buildEvidence missing (CJS)");
+    }
+
+    _evidenceLibCache = { buildEvidence };
+    return _evidenceLibCache;
+  } catch (e1) {
+    firstError = e1;
+  }
+
+  // Try ESM fallback
+  try {
+    const { pathToFileURL } = require("url");
+    const esm = await import(pathToFileURL(require.resolve("../lib/evidence.js")).href);
+
+    const buildEvidence = esm.buildEvidence ?? esm.default ?? esm;
+    if (typeof buildEvidence !== "function") {
+      throw new Error("lib/evidence: buildEvidence missing (ESM)");
+    }
+
+    _evidenceLibCache = { buildEvidence };
+    return _evidenceLibCache;
+  } catch (e2) {
+    throw new Error(
+      `evidence lib load failed: ${firstError?.message || firstError} | ${e2?.message || e2}`
+    );
+  }
+}
+
+
+
+/* ============================================================
+   EXPORTS
+   ============================================================ */
+
 module.exports = {
-   // time helpers
-  nowIso, 
-
-  // IDs
   makeClaimIdFactory,
-
-  // array helpers
-  pushIfRoom,
+  addCitation,
   safePushIfRoom,
   isPlaceholderEvidence,
   dedupeEvidence,
-
-  // text/source helpers
-  addCitation,
   classifySourceType,
-
-  // summaries
   summarizeClaims,
-  scoreIndustryEvidence
+  scoreIndustryEvidence,
+
+  extractStructuredClaims,
+  cleanText,
+  extractSentences,
+  tagSentence,
+
+  siteProductsEvidence,
+  linkedinEvidence,
+  liCompanySearch,
+  liProductSearch,
+  liCompetitorSearch,
+  linkedinSearchEvidence,
+  loadEvidenceLib
 };

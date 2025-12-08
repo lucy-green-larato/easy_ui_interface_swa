@@ -1,4 +1,4 @@
-// /api/campaign-evidence/buyerLogic.js 2025-11-21 v3
+// /api/campaign-evidence/buyerLogic.js 2025-12-08 v4
 // Builds: <prefix>insights_v1/buyer_logic.json
 // Inputs:
 //   - evidence.json
@@ -15,7 +15,6 @@
 // - Output feeds strategy_v2 but does not contain strategy
 
 const { getJson, putJson } = require("../shared/storage");
-const { tokenize } = require("../shared/products"); // already available in your shared layer
 const { validateAndWarn } = require("../shared/schemaValidators");
 
 

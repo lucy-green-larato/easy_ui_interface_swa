@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 05-12-2025 — v40
+// /api/campaign-evidence/index.js 08-12-2025 — v42
 // Phase 1 canonical outputs:
 // - csv_normalized.json
 // - needs_map.json
@@ -25,9 +25,19 @@ const {
   safePushIfRoom,
   isPlaceholderEvidence,
   dedupeEvidence,
-  summarizeClaims,
   classifySourceType,
-  scoreIndustryEvidence
+  summarizeClaims,
+  scoreIndustryEvidence,
+
+  extractStructuredClaims,
+
+  siteProductsEvidence,
+  linkedinEvidence,
+  liCompanySearch,
+  liProductSearch,
+  liCompetitorSearch,
+  linkedinSearchEvidence,
+  loadEvidenceLib
 } = require("../shared/evidenceUtils");
 const nextClaimId = makeClaimIdFactory();
 
@@ -49,7 +59,6 @@ const {
 
   // product extraction
   extractProductsFromSite,
-  parseProductClaims,
   collectProductNames,
 
   // needs mapping
@@ -82,11 +91,11 @@ const {
 } = require("../shared/csvSignals");
 
 const { loadPacks } = require("../shared/packloader");
-const { pathToFileURL } = require("url");
 const { updateStatus } = require("../shared/status");
 const { buildMarkdownPack } = require("./markdownPack");
 const { buildInsights } = require("./insights");
 const { buildBuyerLogic } = require("./buyerLogic");
+const { mdSection, bullets } = require("../lib/markdown");
 
 const FETCH_TIMEOUT_MS = Number(process.env.HTTP_FETCH_TIMEOUT_MS || 8000);
 const MAX_SITE_PAGES = 8;                  // crawl budget (homepage + up to 7 pages)
@@ -95,42 +104,7 @@ let MAX_EVIDENCE_ITEMS = parseInt(process.env.MAX_EVIDENCE_ITEMS || "24", 10);
 if (!Number.isFinite(MAX_EVIDENCE_ITEMS) || MAX_EVIDENCE_ITEMS <= 0) MAX_EVIDENCE_ITEMS = 24;
 if (MAX_EVIDENCE_ITEMS > 128) MAX_EVIDENCE_ITEMS = 128;
 
-let _evidenceLib;
 
-async function loadEvidenceLib() {
-  if (_evidenceLib) return _evidenceLib;
-
-  let firstError;
-
-  // --- CJS fast path: ../lib/evidence as CommonJS ---
-  try {
-    // eslint-disable-next-line import/no-dynamic-require, global-require
-    const mod = require("../lib/evidence");
-    const buildEvidence = mod.buildEvidence ?? mod.default ?? mod;
-    if (typeof buildEvidence !== "function") {
-      throw new Error("lib/evidence: buildEvidence missing (CJS)");
-    }
-    _evidenceLib = { buildEvidence };
-    return _evidenceLib;
-  } catch (e1) {
-    firstError = e1;
-  }
-
-  // --- ESM fallback: ../lib/evidence.js as ESM ---
-  try {
-    const esm = await import(pathToFileURL(require.resolve("../lib/evidence.js")).href);
-    const buildEvidence = esm.buildEvidence ?? esm.default ?? esm;
-    if (typeof buildEvidence !== "function") {
-      throw new Error("lib/evidence: buildEvidence missing (ESM)");
-    }
-    _evidenceLib = { buildEvidence };
-    return _evidenceLib;
-  } catch (e2) {
-    throw new Error(
-      `evidence lib load failed: ${firstError?.message || firstError} | ${e2?.message || e2}`
-    );
-  }
-}
 // Local helper: use schema validation as a warning, never as a hard stop
 async function safeValidate(label, schemaKey, payload, log, statusUpdater) {
   try {
@@ -159,51 +133,6 @@ async function patchStatus(container, prefix, patch) {
   const cur = (await getJson(container, statusPath)) || {};
   cur.validation = { ...(cur.validation || {}), ...patch };
   await putJson(container, statusPath, cur);
-}
-
-// --- Minimal Markdown helpers: local to campaign-evidence ---
-// Extract a section of markdown starting at the first heading whose text
-// matches a regexp pattern, up to (but not including) the next heading.
-function mdSection(markdown, headingPattern) {
-  const text = String(markdown || "");
-  if (!text.trim()) return "";
-
-  const re = new RegExp(`^\\s{0,3}#{1,6}\\s+(${headingPattern})\\s*$`, "i");
-  const lines = text.split(/\r?\n/);
-
-  let inSection = false;
-  const out = [];
-
-  for (const line of lines) {
-    if (re.test(line)) {
-      inSection = true;
-      out.push(line);
-      continue;
-    }
-    if (inSection && /^\s{0,3}#{1,6}\s+/.test(line)) {
-      break;
-    }
-    if (inSection) {
-      out.push(line);
-    }
-  }
-
-  return out.join("\n").trim();
-}
-
-// Return bullet lines (text only) from a markdown section
-function bullets(sectionText) {
-  const lines = String(sectionText || "").split(/\r?\n/);
-  const out = [];
-
-  for (let line of lines) {
-    const m = /^\s*([-*•]|\d+\.)\s+(.*)$/.exec(line);
-    if (m && m[2]) {
-      out.push(m[2].trim());
-    }
-  }
-
-  return out;
 }
 
 function supplierIdentityEvidence(company, website, artifactUrl) {
@@ -235,119 +164,6 @@ function supplierIdentityEvidence(company, website, artifactUrl) {
     title: "Supplier identity",
     url,
     summary: addCitation(summary, "Company site"),
-    quote: ""
-  };
-}
-
-function siteProductsEvidence(products, website, containerUrl, prefix) {
-  const list = Array.isArray(products) ? products : [];
-
-  // Normalise and dedupe product names
-  const names = Array.from(
-    new Set(
-      list
-        .slice(0, 24)
-        .map(p =>
-          typeof p === "string"
-            ? p
-            : (p && (p.name || p.title || "")) || ""
-        )
-        .map(s => String(s || "").trim())
-        .filter(Boolean)
-    )
-  );
-
-  if (!names.length) return null;
-
-  // Prefer real website; fall back to products.json artifact
-  let rawUrl = (website || "").trim();
-  if (!rawUrl && containerUrl && prefix) {
-    const root = String(containerUrl).replace(/\/+$/, "");
-    const pfx = String(prefix).replace(/^\/+/, "");
-    rawUrl = `${root}/${pfx}products.json`;
-  }
-
-  // If we still have nothing credible, don’t emit an evidence item
-  if (!rawUrl) return null;
-
-  const url = toHttps(rawUrl);
-  if (!/^https:\/\//i.test(url)) return null;
-
-  const summaryList = names.slice(0, 8).join(", ");
-  const summaryText = summaryList || "Products derived from supplier materials.";
-
-  return {
-    claim_id: nextClaimId(),
-    source_type: "Company site",
-    title: "Products",
-    url,
-    summary: addCitation(summaryText, "Company site"),
-    quote: ""
-  };
-}
-
-function linkedinEvidence(linkedin) {
-  if (!linkedin) return null;
-
-  const raw = String(linkedin).trim();
-  if (!raw) return null;
-
-  const url = toHttps(raw);
-  // Enforce https and basic shape so it survives placeholder filtering
-  if (!/^https:\/\//i.test(url)) return null;
-
-  return {
-    claim_id: nextClaimId(),
-    source_type: "LinkedIn",
-    title: "Supplier LinkedIn (reference)",
-    url,
-    summary: addCitation(
-      "Company LinkedIn profile reference for employer facts and recent posts.",
-      "LinkedIn"
-    ),
-    quote: ""
-  };
-}
-
-// --- LinkedIn relevance helpers (search URLs; no scraping) ---
-function liCompanySearch(company) {
-  const name = String(company || "").trim();
-  if (!name) return null;
-  const q = encodeURIComponent(name);
-  return `https://www.linkedin.com/search/results/content/?keywords=${q}&origin=GLOBAL_SEARCH_HEADER`;
-}
-
-function liProductSearch(name, company) {
-  const n = String(name || "").trim();
-  const c = String(company || "").trim();
-  const parts = [c, n].filter(Boolean);
-  if (!parts.length) return null;
-  const q = encodeURIComponent(parts.join(" "));
-  return `https://www.linkedin.com/search/results/content/?keywords=${q}&origin=GLOBAL_SEARCH_HEADER`;
-}
-
-function liCompetitorSearch(name) {
-  const n = String(name || "").trim();
-  if (!n) return null;
-  const q = encodeURIComponent(n);
-  return `https://www.linkedin.com/search/results/content/?keywords=${q}&origin=GLOBAL_SEARCH_HEADER`;
-}
-
-function linkedinSearchEvidence({ url, title }) {
-  const rawUrl = String(url || "").trim();
-  const rawTitle = String(title || "").trim();
-
-  if (!rawUrl || !rawTitle) return null;
-
-  const httpsUrl = toHttps(rawUrl);
-  if (!/^https:\/\//i.test(httpsUrl)) return null;
-
-  return {
-    claim_id: nextClaimId(),
-    source_type: "LinkedIn",
-    title: rawTitle,
-    url: httpsUrl,
-    summary: addCitation(`${rawTitle} — relevance scan link.`, "LinkedIn"),
     quote: ""
   };
 }
@@ -551,17 +367,13 @@ module.exports = async function (context, job) {
       const pages = Array.isArray(siteGraph?.pages) ? siteGraph.pages : [];
       for (const p of pages) {
         const html = String(p?.snippet || "");
-        const claims = parseProductClaims(html);
-        for (const c of claims.slice(0, 12)) {
-          productPageEvidence.push({
-            claim_id: nextClaimId(),
-            source_type: "Company site",
-            title: c.length > 120 ? `${c.slice(0, 117)}…` : c,
-            url: toHttps(p?.url || (input?.supplier_website || "")),
-            summary: addCitation(c, "Company site"),
-            quote: ""
-          });
-        }
+        const micro = extractStructuredClaims({
+          html,
+          url: p.url,
+          sourceType: "Company site",
+          addCitation
+        });
+        productPageEvidence.push(...micro);
       }
     } catch (e) {
       context.log.warn("[campaign-evidence] productPageEvidence build skipped", String(e?.message || e));
@@ -1226,35 +1038,6 @@ module.exports = async function (context, job) {
       /* non-fatal */
     }
 
-    // PATCH EV-SITE-SEEDS-1: deterministic supplier-site claims (idempotent)
-    (function seedSupplierSiteClaims() {
-      try {
-        const siteUrl =
-          String(input?.supplier_website || input?.company_website || input?.prospect_website || "").trim();
-        if (siteUrl) {
-          const homepageClaim = {
-            source_type: "website",
-            url: siteUrl,
-            title: "Supplier homepage",
-            summary: "Primary company site used for proposition, offers, and trust signals.",
-            topic: "site_overview",
-            weight: 1
-          };
-          safePushIfRoom(evidenceLog, homepageClaim, MAX_EVIDENCE_ITEMS);
-
-          const salesModelClaim = {
-            source_type: "website",
-            url: siteUrl,
-            title: "Sales model context",
-            summary: "Route-to-market signals (direct/partner/reseller pages, contact/sales pages).",
-            topic: "sales_model",
-            weight: 1
-          };
-          safePushIfRoom(evidenceLog, salesModelClaim, MAX_EVIDENCE_ITEMS);
-        }
-      } catch { /* no-op */ }
-    })();
-
     // 6.0 PACK evidence (added first so CSV summary appears near the top but we still include industry sources)
     for (const pe of packEvidence) {
       safePushIfRoom(evidenceLog, {
@@ -1425,14 +1208,14 @@ module.exports = async function (context, job) {
     {
       try {
         const productsObj = await getJson(container, `${prefix}products.json`);
-        const prodItem = siteProductsEvidence(productsObj?.products || [], supplierWebsite, container.url, prefix);
+        const prodItem = siteProductsEvidence(productsObj?.products || [], supplierWebsite, container.url, prefix, nextClaimId);
         if (prodItem) safePushIfRoom(evidenceLog, prodItem, MAX_EVIDENCE_ITEMS);
       } catch { /* no-op */ }
     }
 
     // 6.6 LinkedIn reference
     if (supplierLinkedIn) {
-      const liItem = linkedinEvidence(supplierLinkedIn);
+      const liItem = linkedinEvidence(supplierLinkedIn, nextClaimId);
       if (liItem) {
         safePushIfRoom(evidenceLog, liItem, MAX_EVIDENCE_ITEMS);
       }
@@ -1443,57 +1226,82 @@ module.exports = async function (context, job) {
       try {
         const liHooks = [];
 
-        // Supplier/company posts
+        //
+        // A) Supplier/company posts
+        //
         const liCompanyUrl = liCompanySearch(supplierCompany || hostnameOf(supplierWebsite || ""));
         if (liCompanyUrl) {
-          const hook = linkedinSearchEvidence({
-            url: liCompanyUrl,
-            title: "LinkedIn — supplier/company posts"
-          });
-          if (liHooks.length < 12) liHooks.push(hook);
+          const hook = linkedinSearchEvidence(
+            {
+              url: liCompanyUrl,
+              title: "LinkedIn — supplier/company posts"
+            },
+            nextClaimId
+          );
+          if (hook && liHooks.length < 12) {
+            liHooks.push(hook);
+          }
         }
 
-        // Product/service mentions (from detected products list if any)
+        //
+        // B) Product/service mentions
+        //
         let productNames = [];
         try {
           const productsObj = await getJson(container, `${prefix}products.json`);
-          productNames = Array.isArray(productsObj?.products) ? productsObj.products.slice(0, 5) : [];
-        } catch {
-          /* no-op */
-        }
+          productNames = Array.isArray(productsObj?.products)
+            ? productsObj.products.slice(0, 5)
+            : [];
+        } catch { /* ignore */ }
 
         for (const pName of productNames) {
           const u = liProductSearch(pName, supplierCompany);
           if (!u) continue;
-          const hook = linkedinSearchEvidence({
-            url: u,
-            title: `LinkedIn — "${pName}" mentions`
-          });
+
+          const hook = linkedinSearchEvidence(
+            {
+              url: u,
+              title: `LinkedIn — "${pName}" mentions`
+            },
+            nextClaimId
+          );
+
           if (hook) {
             safePushIfRoom(liHooks, hook, MAX_EVIDENCE_ITEMS);
           }
         }
 
-        // Competitor content (only if provided by user)
-        const competitors = Array.isArray(input?.relevant_competitors) ? input.relevant_competitors : [];
+        //
+        // C) Competitor content
+        //
+        const competitors = Array.isArray(input?.relevant_competitors)
+          ? input.relevant_competitors
+          : [];
+
         for (const cName of competitors.slice(0, 6)) {
           const u = liCompetitorSearch(cName);
           if (!u) continue;
-          const hook = linkedinSearchEvidence({
-            url: u,
-            title: `LinkedIn — competitor: ${cName}`
-          });
+
+          const hook = linkedinSearchEvidence(
+            {
+              url: u,
+              title: `LinkedIn — competitor: ${cName}`
+            },
+            nextClaimId
+          );
+
           if (hook) {
             safePushIfRoom(liHooks, hook, MAX_EVIDENCE_ITEMS);
           }
         }
 
-        // Only push non-null hooks into evidenceLog
+        //
+        // Commit hooks into evidenceLog
+        //
         for (const item of liHooks) {
-          if (item) {
-            safePushIfRoom(evidenceLog, item, MAX_EVIDENCE_ITEMS);
-          }
+          if (item) safePushIfRoom(evidenceLog, item, MAX_EVIDENCE_ITEMS);
         }
+
       } catch {
         /* ignore LI hook failures */
       }
@@ -1542,7 +1350,7 @@ module.exports = async function (context, job) {
     evidenceLog = evidenceLog.filter(it => !isPlaceholderEvidence(it));
     evidenceLog = dedupeEvidence(evidenceLog);
     // Capacity trim with priority: CSV summary → CSV insights → supplier/site → LinkedIn → everything else (original order)
-    const EFFECTIVE_CAP = Math.max(12, MAX_EVIDENCE_ITEMS);
+    const EFFECTIVE_CAP = Math.max(4, MAX_EVIDENCE_ITEMS);
     if (evidenceLog.length > EFFECTIVE_CAP) {
       const keep = [];
       const seen = new Set();
@@ -1661,10 +1469,21 @@ module.exports = async function (context, job) {
 
       const seen = new Set();
       const claims = [];
+
       for (const raw of list) {
         const c = raw || {};
 
-        const id = String(c.claim_id || c.id || c.url || c.title || "").trim();
+        //
+        // ---------- 1. STABLE ID + DEDUP LOGIC ----------
+        //
+        const id = String(
+          c.claim_id ||
+          c.id ||
+          c.url ||
+          c.title ||
+          ""
+        ).trim();
+
         const key = (
           String(c.title || "").trim() +
           "||" +
@@ -1672,7 +1491,9 @@ module.exports = async function (context, job) {
         ).toLowerCase();
 
         if (id) {
-          if (seen.has(id) || (key && seen.has(key))) continue;
+          if (seen.has(id) || (key && seen.has(key))) {
+            continue;
+          }
           seen.add(id);
           if (key) seen.add(key);
         } else if (key) {
@@ -1680,12 +1501,22 @@ module.exports = async function (context, job) {
           seen.add(key);
         }
 
+        //
+        // ---------- 2. NORMALISE TEXT FIELDS ONLY ----------
+        //
         const rawSummary = String(c.summary || "").trim();
         const rawQuote = String(c.quote || "").trim();
         const summary = rawSummary || rawQuote;
 
-        claims.push({
-          claim_id: id || undefined,
+        //
+        // ---------- 3. PRESERVE FULL METADATA ----------
+        //
+        const normalised = {
+          // 🔥 Keep ALL upstream metadata:
+          ...c,
+
+          // 🔒 Overwrite only canonicalised core fields:
+          claim_id: id || c.claim_id || undefined,
           title: String(c.title || "").trim(),
           summary,
           quote: rawQuote,
@@ -1693,10 +1524,14 @@ module.exports = async function (context, job) {
           url: String(c.url || "").trim(),
           tag: String(c.tag || c.source_tag || "").trim(),
           date: c.date || c.published_at || null
-        });
+        };
+
+        claims.push(normalised);
       }
 
-      // Validate, but never allow validation to block writing
+      //
+      // ---------- 4. SCHEMA VALIDATION (NON-BLOCKING) ----------
+      //
       await safeValidate(
         "evidence_log",
         "evidence_log",
@@ -1705,8 +1540,14 @@ module.exports = async function (context, job) {
         (patch) => patchStatus(container, prefix, patch)
       );
 
+      //
+      // ---------- 5. WRITE evidence_log.json ----------
+      //
       await putJson(container, `${prefix}evidence_log.json`, claims);
 
+      //
+      // ---------- 6. BUNDLE WRAPPER FOR evidence.json ----------
+      //
       const evidenceBundle = {
         claims,
         counts: summarizeClaims(claims)
@@ -1720,7 +1561,11 @@ module.exports = async function (context, job) {
         (patch) => patchStatus(container, prefix, patch)
       );
 
+      //
+      // ---------- 7. WRITE evidence.json ----------
+      //
       await putJson(container, `${prefix}evidence.json`, evidenceBundle);
+
     } catch (e) {
       context.log.warn(
         "[evidence] failed to write evidence bundle (unexpected error)",
