@@ -1632,46 +1632,86 @@ window.CampaignUI = window.CampaignUI || {};
 
   function normaliseStrategyV2(raw) {
     if (!raw || typeof raw !== "object") return raw;
-    const out = { ...raw };
 
-    // Writer still emits legacy names — map them to stable fields
-    if (raw.where_to_play) out.gtm_strategy = { ...(out.gtm_strategy || {}), where_to_play: raw.where_to_play };
-    if (raw.how_to_win) out.gtm_strategy = { ...(out.gtm_strategy || {}), how_to_win: raw.how_to_win };
-    if (raw.competitive_context) out.gtm_strategy = { ...(out.gtm_strategy || {}), competitive_context: raw.competitive_context };
+    // 1) Unwrap common wrappers so we get to the real core object
+    //    - current worker: { strategy_v2: { story_spine, ... } }
+    //    - older shapes might use campaign_strategy or data
+    let core = raw;
+    if (core.strategy_v2 && typeof core.strategy_v2 === "object") {
+      core = core.strategy_v2;
+    } else if (core.campaign_strategy && typeof core.campaign_strategy === "object") {
+      core = core.campaign_strategy;
+    } else if (core.data && typeof core.data === "object") {
+      core = core.data;
+    }
+
+    const out = { ...core };
+
+    // 2) Writer/legacy fields → canonical Gold fields
+
+    // Legacy “flat” GTM fields → nested gtm_strategy
+    if (core.where_to_play) {
+      out.gtm_strategy = {
+        ...(out.gtm_strategy || {}),
+        where_to_play: core.where_to_play
+      };
+    }
+
+    if (core.how_to_win) {
+      out.gtm_strategy = {
+        ...(out.gtm_strategy || {}),
+        how_to_win: core.how_to_win
+      };
+    }
+
+    if (core.competitive_context) {
+      out.gtm_strategy = {
+        ...(out.gtm_strategy || {}),
+        competitive_context: core.competitive_context
+      };
+    }
 
     // Legacy VP shapes → value_proposition
-    if (raw.value_prop_moore && !out.value_proposition) {
-      out.value_proposition = { moore: raw.value_prop_moore };
+    if (core.value_prop_moore && !out.value_proposition) {
+      out.value_proposition = { moore: core.value_prop_moore };
     }
-    if (raw.positioning_and_differentiation && !out.value_proposition) {
-      out.value_proposition = raw.positioning_and_differentiation.value_proposition || null;
+
+    if (core.positioning_and_differentiation && !out.value_proposition) {
+      const pod = core.positioning_and_differentiation;
+      if (pod && typeof pod === "object") {
+        out.value_proposition = pod.value_proposition || null;
+      }
     }
 
     // Messaging legacy → buyer_strategy
-    if (raw.messaging_matrix && !out.buyer_strategy) {
-      out.buyer_strategy = { matrix: raw.messaging_matrix };
+    if (core.messaging_matrix && !out.buyer_strategy) {
+      out.buyer_strategy = { matrix: core.messaging_matrix };
     }
 
     // Legacy case-studies block → proof_points section
-    if (raw.case_studies && !out.proof_points) {
-      out.proof_points = raw.case_studies;
+    if (core.case_studies && !out.proof_points) {
+      out.proof_points = core.case_studies;
     }
 
-    // Canonicalise fields expressed under a nested "sections"
-    if (raw.sections && typeof raw.sections === "object") {
-      const sec = raw.sections;
+    // Canonicalise fields expressed under nested "sections"
+    if (core.sections && typeof core.sections === "object") {
+      const sec = core.sections;
 
-      if (sec.buyer_strategy && !out.buyer_strategy)
+      if (sec.buyer_strategy && !out.buyer_strategy) {
         out.buyer_strategy = sec.buyer_strategy;
+      }
 
-      if (sec.value_proposition && !out.value_proposition)
+      if (sec.value_proposition && !out.value_proposition) {
         out.value_proposition = sec.value_proposition;
+      }
 
-      if (sec.messages && !out.buyer_strategy)
+      if (sec.messages && !out.buyer_strategy) {
         out.buyer_strategy = { messages: sec.messages };
+      }
 
-      if (sec.gtm && !out.gtm_strategy)
+      if (sec.gtm && !out.gtm_strategy) {
         out.gtm_strategy = sec.gtm;
+      }
     }
 
     return out;
