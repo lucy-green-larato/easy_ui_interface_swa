@@ -178,6 +178,21 @@ module.exports = async function (context, req) {
     base += "/";
   }
 
+  // ---- Prefix validation: status.json must exist ----
+  const statusCheck = container.getBlockBlobClient(`${base}status.json`);
+  if (!(await statusCheck.exists()) && !prefixOverride) {
+    context.res = {
+      status: 404,
+      headers: { ...H, "content-type": "application/json" },
+      body: {
+        error: "run_not_found",
+        message:
+          "No status.json found for this runId at the derived prefix. Prefix reconstruction may be incorrect."
+      }
+    };
+    return;
+  }
+
   // ---- single artifacts ----
   if (fileKey !== "sections" && fileKey !== "section") {
     const relName = VALID_MAP[fileKey];
@@ -206,20 +221,7 @@ module.exports = async function (context, req) {
         return;
       }
 
-      // 3) Fallback: campaign.json.evidence_log
-      const campaignBlob = container.getBlockBlobClient(`${base}campaign.json`);
-      if (await existsWithTinyRetry(campaignBlob, true)) {
-        const dl2 = await campaignBlob.download();
-        const t2 = await streamToString(dl2.readableStreamBody);
-        let cObj = null;
-        try { cObj = t2 ? JSON.parse(t2) : null; } catch { cObj = null; }
-        const claims = Array.isArray(cObj?.evidence_log) ? cObj.evidence_log : [];
-        const counts = summarizeClaims(claims);
-        context.res = { status: 200, headers: { ...H, "content-type": "application/json; charset=utf-8" }, body: { claims, counts } };
-        return;
-      }
-
-      // 4) Nothing found
+      // 3) Nothing found
       context.res = {
         status: 200,
         headers: { ...H, "content-type": "application/json; charset=utf-8" },
@@ -244,6 +246,19 @@ module.exports = async function (context, req) {
     // campaign/evidence/outline may appear moments after status flips → tiny retry
     const shouldRetry = fileKey === "campaign" || fileKey === "evidence_log" || fileKey === "outline";
     const ok = await existsWithTinyRetry(blob, shouldRetry);
+    // ---- Viability is mandatory if requested ----
+    if (fileKey === "viability" && !ok) {
+      context.res = {
+        status: 500,
+        headers: { ...H, "content-type": "application/json" },
+        body: {
+          error: "viability_missing",
+          message:
+            "Viability analysis is mandatory but was not produced by the strategy phase. This indicates a pipeline execution failure."
+        }
+      };
+      return;
+    }
 
     if (!ok) {
       // ---- Strategy-only fallback: no campaign.json, but strategy_v2 exists ----

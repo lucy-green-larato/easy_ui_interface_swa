@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js // 03-12-2025 Gold Writer v8.1
+// /api/campaign-write/index.js // 12-12-2025 Gold Writer v8.3
 // Responsibility:
 //   - Read strategy_v2 (campaign_strategy.json) produced by campaign-worker.
 //   - Read viability (strategy_v3/viability.json), if present.
@@ -433,6 +433,80 @@ function buildGoldViability(viabilityRaw) {
       urgency: mkDim("urgency")
     }
   };
+}
+
+if (!viabilityRaw) {
+  const fallback = {
+    _meta: {
+      version: "viability-fallback@writer",
+      generated_at: new Date().toISOString(),
+      inputs_present: false,
+      source: "campaign-write",
+      reason: "strategy_viability_step_not_executed"
+    },
+
+    // Strategy-level assessment (interpretive, not evidence)
+    overall: {
+      grade: "weak",          // schema-aligned: viable | borderline | weak
+      risk_level: "high",
+      summary:
+        "Viability could not be assessed because the strategy viability step did not run. " +
+        "This campaign should be treated as high risk until a full viability assessment is completed."
+    },
+
+    // No dimensional scoring possible without strategy inputs
+    dimensions: {},
+
+    // Blocking warning surfaced consistently across UI
+    warnings: [
+      {
+        code: "viability_missing",
+        severity: "block",
+        message:
+          "Viability analysis is missing. Strategy assessment is incomplete and must be reviewed.",
+        tab: "Executive summary"
+      }
+    ],
+
+    // Explicit UI contract so frontend never guesses
+    ui: {
+      tabs: {
+        "Executive summary": {
+          grade: "weak",
+          risk_level: "high",
+          primary_warnings: ["viability_missing"]
+        },
+        "Go-to-market": {
+          grade: "weak",
+          risk_level: "high",
+          primary_warnings: ["viability_missing"]
+        },
+        "Offering": {
+          grade: "weak",
+          risk_level: "high",
+          primary_warnings: ["viability_missing"]
+        },
+        "Sales enablement": {
+          grade: "weak",
+          risk_level: "high",
+          primary_warnings: ["viability_missing"]
+        },
+        "Proof points": {
+          grade: "weak",
+          risk_level: "high",
+          primary_warnings: ["viability_missing"]
+        }
+      }
+    }
+  };
+
+  await writeJson(
+    container,
+    `${prefix}strategy_v3/viability.json`,
+    fallback
+  );
+
+  viabilityRaw = fallback;
 }
 
 // ---------------------- Contract builders (Gold sections) ---------------------- //
@@ -1031,10 +1105,50 @@ module.exports = async function (context, queueItem) {
       );
     }
 
-    const viabilityRaw = await readJsonIfExists(
+    let viabilityRaw = await readJsonIfExists(
       container,
       `${prefix}strategy_v3/viability.json`
     );
+
+    if (!viabilityRaw) {
+      const fallback = {
+        _meta: {
+          version: "viability-fallback@writer",
+          generated_at: new Date().toISOString(),
+          inputs_present: false
+        },
+        overall: {
+          grade: "C",
+          risk_level: "high",
+          summary: "Viability could not be assessed because the strategy viability step did not run."
+        },
+        dimensions: {},
+        warnings: [{
+          code: "viability_missing",
+          severity: "block",
+          message: "Viability analysis is missing. Strategy assessment is incomplete.",
+          tab: "Executive summary"
+        }],
+        ui: {
+          tabs: {
+            "Executive summary": { grade: "C", risk_level: "high", primary_warnings: [] },
+            "Go-to-market": { grade: "C", risk_level: "high", primary_warnings: [] },
+            "Offering": { grade: "C", risk_level: "high", primary_warnings: [] },
+            "Sales enablement": { grade: "C", risk_level: "high", primary_warnings: [] },
+            "Proof points": { grade: "C", risk_level: "high", primary_warnings: [] }
+          }
+        }
+      };
+
+      await writeJson(
+        container,
+        `${prefix}strategy_v3/viability.json`,
+        fallback
+      );
+
+      viabilityRaw = fallback;
+    }
+
     const baseInput = await readJsonIfExists(
       container,
       `${prefix}input.json`
@@ -1108,14 +1222,14 @@ module.exports = async function (context, queueItem) {
       viability: goldViability,
       sections,
       _meta: {
-        version: "2025-12-03",
+        version: "2025-12-12",
         strategy_engine: strategy_v2.engine || "strategy_v2",
-        generated_at: new Date().toISOString()
+        generated_at: new Date().toISOString(),
+        source_prefix: prefix
       }
     };
 
     const outPath = `${prefix}campaign.json`;
-    contract.source_prefix = prefix;
     await writeJson(container, outPath, contract);
 
     await updateStatus(

@@ -1,5 +1,5 @@
-// /api/lib/strategy-viability.js 27-11-2025 v1
-// Strategy viability engine (Option B + V3 mode)
+// /api/lib/strategy-viability.js 12-12-2025 v3
+// Strategy viability engine
 // - Deterministic, no LLM.
 // - Reads strategy_v2 + buyer_logic + csv_normalized-style meta.
 // - Emits strategy_v3/viability.json (3-grade: A/B/C) with warnings
@@ -605,6 +605,44 @@ function evaluateStrategyViability({
   return out;
 }
 
+async function writeStrategyViability({
+  container,
+  prefix,
+  strategyV2,
+  buyerLogic,
+  csvCanon,
+  cohortSize,
+  evidenceClaimsCount,
+  mode
+}) {
+  let viability;
+
+  try {
+    viability = evaluateStrategyViability({
+      strategyV2,
+      buyerLogic,
+      csvCanon,
+      cohortSize,
+      evidenceClaimsCount,
+      mode
+    });
+  } catch (e) {
+  throw new Error(
+    `[strategy-viability] evaluation failed: ${String(e?.message || e)}`
+  );
+}
+
+  await container.uploadBlockBlob(
+    `${prefix}strategy_v3/viability.json`,
+    Buffer.from(JSON.stringify(viability, null, 2)),
+    Buffer.byteLength(JSON.stringify(viability))
+  );
+
+  return viability;
+}
+
+
 module.exports = {
-  evaluateStrategyViability
+  evaluateStrategyViability,
+  writeStrategyViability
 };
