@@ -1,4 +1,4 @@
-// /api/ixbrl-financials/index.js
+// /api/ixbrl-financials/index.js 01-11-2025 v1
 // Calls convert-ixbrl and returns a compact summary + derived ratios (CommonJS).
 
 const VERSION = "ixbrl-v1-2025-08-23";

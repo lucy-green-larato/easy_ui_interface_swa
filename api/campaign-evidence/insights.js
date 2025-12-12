@@ -1,4 +1,4 @@
-// /api/campaign-evidence/insights.js 21-11-2025 v4
+// /api/campaign-evidence/insights.js 21-11-2025 v5
 // Deterministic Insight Engine for campaign runs.
 //
 // Consumes (all best-effort; missing files are tolerated):
@@ -35,13 +35,24 @@ const { getJson, putJson } = require("../shared/storage");
 const seenMap = new WeakMap();
 const { validateAndWarn } = require("../shared/schemaValidators");
 
+// ----- small helpers -----
 
 function safeArray(v) {
   return Array.isArray(v) ? v : [];
 }
-// normaliseMarkdownPack:
-// Encodes the assumed shape of evidence_v2/markdown_pack.json.
-// If the markdown pack schema changes, update this normaliser first.
+
+/**
+ * normaliseMarkdownPack:
+ * Encodes the assumed shape of evidence_v2/markdown_pack.json.
+ * If the markdown pack schema changes, update this normaliser first.
+ *
+ * NOTE:
+ *   - We are intentionally only using the "contextual" buckets here:
+ *     industry_drivers, industry_risks, persona_pressures, competitor_profiles,
+ *     content_pillars, industry_stats.
+ *   - Supplier buckets (Tier-2a) remain available in markdown_pack.json but are
+ *     consumed later by strategy_v2 rather than this Phase 1 insights engine.
+ */
 function normaliseMarkdownPack(raw) {
   const keys = [
     "industry_drivers",
@@ -109,398 +120,242 @@ async function readJsonSafe(container, path, fallback = null) {
     return fallback;
   }
 }
+
 // buildInsights: deterministic, non-generative Phase 1 insight engine.
 // - Only derives from evidence.json, csv_normalized.json, needs_map.json, markdown_pack.json
 // - No model calls, no narrative generation
 // - Every item must be traceable back to source artefacts
 async function buildInsights(container, prefix) {
-  // 1) Load inputs (best-effort)
-  const evidenceRaw = await readJsonSafe(container, `${prefix}evidence.json`, null);
-  const csvNorm = (await readJsonSafe(container, `${prefix}csv_normalized.json`, {})) || {};
-  const needsMap = (await readJsonSafe(container, `${prefix}needs_map.json`, {})) || {};
-  const markdownPackRaw = (await readJsonSafe(container, `${prefix}evidence_v2/markdown_pack.json`, {})) || {};
+  // ---------------------------------------------------------------------------
+  // Phase 2 — Deterministic Insights Engine
+  //
+  // Authority:
+  //   - evidence.json is the single source of truth
+  //
+  // Rules:
+  //   - No raw markdown, CSV, or needs_map reads
+  //   - No inference beyond admissible evidence
+  //   - Every insight item must trace to claim_id
+  // ---------------------------------------------------------------------------
 
-  const markdownPack = normaliseMarkdownPack(markdownPackRaw);
+  const evidenceRaw = await readJsonSafe(
+    container,
+    `${prefix}evidence.json`,
+    null
+  );
 
-  let claims = [];
-  if (Array.isArray(evidenceRaw?.claims)) {
-    claims = evidenceRaw.claims;
-  } else if (Array.isArray(evidenceRaw)) {
-    claims = evidenceRaw;
+  if (!Array.isArray(evidenceRaw?.claims)) {
+    throw new Error("[insights] evidence.json missing or invalid");
   }
 
+  const claims = evidenceRaw.claims;
   const insights = initialiseInsights();
 
-  // --- 2) Market environment (drivers + stats + regulator claims) ---
+  // ---------------------------------------------------------------------------
+  // Helper: filter claims by tier / group
+  // ---------------------------------------------------------------------------
 
-  for (const item of markdownPack.industry_drivers) {
+  const byTier = (tier, group = null) =>
+    claims.filter(c =>
+      c &&
+      c.tier === tier &&
+      (group ? c.tier_group === group : true)
+    );
+
+  // ---------------------------------------------------------------------------
+  // 1) Market environment
+  //   - Tier 1 markdown drivers
+  //   - Tier 3 industry stats
+  //   - Regulator claims
+  // ---------------------------------------------------------------------------
+
+  for (const c of byTier(1, "markdown_industry_drivers")) {
     pushUnique(insights.market_environment, {
-      kind: "markdown_driver",
-      text: item.text,
+      kind: "industry_driver",
+      text: c.summary,
+      claim_id: c.claim_id,
       source: {
-        source_type: "markdown",
-        markdown_id: item.id || null,
-        markdown_file: item.source?.file || null,
-        markdown_heading: item.source?.heading || null,
-        markdown_origin: item.source?.origin || null
-      },
-      // add a standard from_markdown field for future use
-      from_markdown: {
-        id: item.id || null,
-        source: item.source || null
+        tier: c.tier,
+        tier_group: c.tier_group,
+        markdown_id: c.markdown_id || null
       }
     });
   }
 
-  for (const item of markdownPack.industry_stats) {
+  for (const c of byTier(3, "markdown_stats")) {
     pushUnique(insights.market_environment, {
-      kind: "markdown_stat",
-      text: item.text,
-      from_markdown: {
-        id: item.id || null,
-        source: item.source || null
-      }
-    });
-  }
-
-  // Regulator / macro evidence claims → environment + risk
-  const regulatorClaims = claims.filter(c => {
-    if (!c || typeof c !== "object") return false;
-    const hay = (
-      String(c.source_type || "") + " " +
-      String(c.title || "") + " " +
-      String(c.summary || "") + " " +
-      String(c.url || "")
-    ).toLowerCase();
-    return /(ofcom|gov\.uk|ons|ico|dsit|regulator)/.test(hay);
-  });
-
-  for (const c of regulatorClaims) {
-    const text = String(
-      (typeof c.summary === "string" && c.summary.trim()) ||
-      (typeof c.title === "string" && c.title.trim()) ||
-      (typeof c.url === "string" && c.url.trim()) ||
-      (typeof c.source_type === "string" && c.source_type.trim()) ||
-      ""
-    ).trim();
-
-    if (!text) continue;
-
-    const envEntry = {
-      kind: "regulator_claim",
-      text,
-      claim_id: c.claim_id || null,
-      source_type: c.source_type || null,
-      url: c.url || null
-    };
-    const riskEntry = { ...envEntry };
-
-    pushUnique(insights.market_environment, envEntry);
-    pushUnique(insights.risk_landscape, riskEntry);
-  }
-
-  // --- 3) Buyer pressures (persona pack + needs_map) ---
-
-  for (const item of markdownPack.persona_pressures) {
-    pushUnique(insights.buyer_pressures, {
-      kind: "markdown_persona_pressure",
-      text: item.text,
-      from_markdown: {
-        id: item.id || null,
-        source: item.source || null
-      }
-    });
-  }
-
-  const nmItems = safeArray(needsMap.items);
-
-  nmItems.forEach((n, idx) => {
-    const rawNeed =
-      (typeof n?.need === "string" && n.need.trim())
-        ? n.need
-        : (typeof n?.label === "string" && n.label.trim()
-          ? n.label
-          : "");
-    const need = rawNeed.trim();
-    if (!need) return;
-
-    pushUnique(insights.buyer_pressures, {
-      kind: "need_from_map",
-      need,
-      status: n.status || null,
-      hits: Array.isArray(n.hits)
-        ? n.hits.map(h => ({
-          name: (typeof h?.name === "string" && h.name.trim()) || null
-        }))
-        : [],
+      kind: "industry_stat",
+      text: c.summary,
+      claim_id: c.claim_id,
       source: {
-        source_type: "needs_map",
-        needs_index: idx,
-        needs_status: n.status || null,
-        needs_hits: Array.isArray(n.hits)
-          ? n.hits.map(h => ({
-            name: h.name || null
-          }))
-          : []
+        tier: c.tier,
+        tier_group: c.tier_group
       }
     });
-  });
-
-  // --- 4) Demand signals (CSV purchases) ---
-
-  const sig = csvNorm && typeof csvNorm === "object" ? (csvNorm.signals || {}) : {};
-  const glob = csvNorm && typeof csvNorm === "object" ? (csvNorm.global_signals || {}) : {};
-
-  const demandSources = [
-    { origin: "signals.top_purchases", values: safeArray(sig.top_purchases) },
-    { origin: "global_signals.top_purchases", values: safeArray(glob.top_purchases) }
-  ];
-
-  for (const src of demandSources) {
-    for (const v of src.values) {
-      if (typeof v !== "string") continue;
-      const label = v.trim();
-      if (!label) continue;
-      pushUnique(insights.demand_signals, {
-        kind: "csv_purchase_intent",
-        label,
-        source: {
-          field: src.origin
-        }
-      });
-    }
   }
 
-  // --- 5) Adoption barriers (CSV blockers) ---
+  const regulatorRegex = /(ofcom|gov\.uk|ons|ico|dsit|regulator)/i;
 
-  const blockerSources = [
-    { origin: "signals.top_blockers", values: safeArray(sig.top_blockers) },
-    { origin: "global_signals.top_blockers", values: safeArray(glob.top_blockers) }
-  ];
+  for (const c of claims) {
+    const hay =
+      `${c.source_type} ${c.title} ${c.summary} ${c.url}`.toLowerCase();
 
-  for (const src of blockerSources) {
-    src.values.forEach((v, idx) => {
-      if (typeof v !== "string") return;
-      const label = v.trim();
-      if (!label) return;
+    if (!regulatorRegex.test(hay)) continue;
 
-      pushUnique(insights.adoption_barriers, {
-        kind: "csv_blocker",
-        label,
-        source: {
-          source_type: "csv_signals",
-          field: src.origin,
-          csv_index: idx ?? null
-        }
-      });
+    pushUnique(insights.market_environment, {
+      kind: "regulator_signal",
+      text: c.summary || c.title,
+      claim_id: c.claim_id,
+      source: {
+        tier: c.tier,
+        tier_group: c.tier_group,
+        url: c.url || null
+      }
     });
-  }
 
-  // --- 6) Risk landscape (markdown + regulator claims already added above) ---
-
-  for (const item of markdownPack.industry_risks) {
     pushUnique(insights.risk_landscape, {
-      kind: "markdown_risk",
-      text: item.text,
-      from_markdown: {
-        id: item.id || null,
-        source: item.source || null
-      }
-    });
-  }
-
-  // --- 7) Timing drivers (subset of drivers mentioning time/renewals) ---
-
-  const timingRegex = /(renewal|contract|deadline|budget|fiscal|year-end|mandate|compliance date)/i;
-  for (const item of markdownPack.industry_drivers) {
-    if (!timingRegex.test(item.text)) continue;
-    pushUnique(insights.timing_drivers, {
-      kind: "markdown_timing_driver",
-      text: item.text,
-      from_markdown: {
-        id: item.id || null,
-        source: item.source || null
-      }
-    });
-  }
-
-  // --- 8) Opportunity map (needs_map items directly) ---
-  nmItems.forEach((n, idx) => {
-    const rawNeed =
-      (typeof n?.need === "string" && n.need.trim())
-        ? n.need
-        : (typeof n?.label === "string" && n.label.trim()
-          ? n.label
-          : "");
-    const need = rawNeed.trim();
-    if (!need) return;
-
-    pushUnique(insights.opportunity_map, {
-      need,
-      status: n.status || null,
-      hits: Array.isArray(n.hits)
-        ? n.hits.map(h => ({
-          name: (typeof h?.name === "string" && h.name.trim()) || null
-        }))
-        : [],
+      kind: "regulator_risk",
+      text: c.summary || c.title,
+      claim_id: c.claim_id,
       source: {
-        source_type: "needs_map",
-        needs_index: idx,
-        needs_status: n.status || null,
-        needs_hits: Array.isArray(n.hits)
-          ? n.hits.map(h => ({
-            name: h.name || null
-          }))
-          : []
+        tier: c.tier,
+        tier_group: c.tier_group,
+        url: c.url || null
       }
     });
-  });
-
-  // --- 9) Patterns.need_clusters (group needs by label) ---
-
-  if (nmItems.length) {
-    const clusters = new Map();
-    for (const n of nmItems) {
-      const rawNeed =
-        (typeof n?.need === "string" && n.need.trim())
-          ? n.need
-          : (typeof n?.label === "string" && n.label.trim()
-            ? n.label
-            : "");
-      const label = rawNeed.trim();
-      if (!label) continue;
-
-      const key = label.toLowerCase();
-      const entry = clusters.get(key) || { label, count: 0, statuses: new Set() };
-      entry.count += 1;
-      if (n.status) entry.statuses.add(String(n.status));
-      clusters.set(key, entry);
-    }
-    for (const entry of clusters.values()) {
-      insights.patterns.need_clusters.push({
-        label: entry.label,
-        count: entry.count,
-        statuses: Array.from(entry.statuses),
-        source: {
-          from_needs_map: true
-        }
-      });
-    }
   }
 
-  // --- 10) Patterns.blocker_clusters (group blockers with explicit sources) ---
+  // ---------------------------------------------------------------------------
+  // 2) Buyer pressures
+  //   - Tier 1 persona markdown
+  //   - Tier 4 coverage summary (derived structure)
+  // ---------------------------------------------------------------------------
 
-  const blockerClusterMap = new Map();
-
-  for (const src of blockerSources) {
-    for (const v of src.values) {
-      if (typeof v !== "string") continue;
-      const label = v.trim();
-      if (!label) continue;
-
-      const key = label.toLowerCase();
-      const entry = blockerClusterMap.get(key) || {
-        label,
-        count: 0,
-        fields: new Set()
-      };
-      entry.count += 1;
-      entry.fields.add(src.origin);
-      blockerClusterMap.set(key, entry);
-    }
-  }
-
-  for (const entry of blockerClusterMap.values()) {
-    insights.patterns.blocker_clusters.push({
-      label: entry.label,
-      count: entry.count,
-      sources: Array.from(entry.fields).map(field => ({ field }))
-    });
-  }
-
-  // Prepare a flat blockers list for themes (strings only)
-  const allBlockers = [];
-  for (const src of blockerSources) {
-    for (const v of src.values) {
-      if (typeof v !== "string") continue;
-      const label = v.trim();
-      if (!label) continue;
-      allBlockers.push(label);
-    }
-  }
-
-  // --- 11) Patterns.signal_themes (combined needs + blockers + purchases) ---
-
-  const signalThemes = new Map();
-
-  function bumpTheme(label, source) {
-    const key = String(label || "").toLowerCase().trim();
-    if (!key) return;
-    const baseLabel = String(label || "").trim();
-    if (!baseLabel) return;
-
-    const entry = signalThemes.get(key) || {
-      label: baseLabel,
-      count: 0,
-      sources: []
-    };
-    entry.count += 1;
-
-    if (source && source.field) {
-      const existingFields = new Set(entry.sources.map(s => s.field));
-      if (!existingFields.has(source.field) && entry.sources.length < 16) {
-        entry.sources.push(source);
+  for (const c of byTier(1, "markdown_persona")) {
+    pushUnique(insights.buyer_pressures, {
+      kind: "persona_pressure",
+      text: c.summary,
+      claim_id: c.claim_id,
+      source: {
+        tier: c.tier,
+        tier_group: c.tier_group
       }
-    }
-
-    signalThemes.set(key, entry);
-  }
-
-  // Needs (supplier + global)
-  for (const v of safeArray(sig.top_needs_supplier)) {
-    if (typeof v !== "string") continue;
-    const label = v.trim();
-    if (!label) continue;
-    bumpTheme(label, { field: "signals.top_needs_supplier" });
-  }
-  for (const v of safeArray(glob.top_needs_supplier)) {
-    if (typeof v !== "string") continue;
-    const label = v.trim();
-    if (!label) continue;
-    bumpTheme(label, { field: "global_signals.top_needs_supplier" });
-  }
-
-  // Purchases
-  for (const v of safeArray(sig.top_purchases)) {
-    if (typeof v !== "string") continue;
-    const label = v.trim();
-    if (!label) continue;
-    bumpTheme(label, { field: "signals.top_purchases" });
-  }
-  for (const v of safeArray(glob.top_purchases)) {
-    if (typeof v !== "string") continue;
-    const label = v.trim();
-    if (!label) continue;
-    bumpTheme(label, { field: "global_signals.top_purchases" });
-  }
-
-  // Blockers (already normalised)
-  for (const v of allBlockers) {
-    bumpTheme(v, { field: "blockers" });
-  }
-
-  for (const entry of signalThemes.values()) {
-    insights.patterns.signal_themes.push({
-      label: entry.label,
-      count: entry.count,
-      sources: entry.sources
     });
   }
 
-  // --- 12) Persist insights bundle ---
+  for (const c of byTier(4, "coverage_summary")) {
+    pushUnique(insights.buyer_pressures, {
+      kind: "coverage_signal",
+      text: c.summary,
+      claim_id: c.claim_id,
+      source: {
+        tier: c.tier,
+        tier_group: c.tier_group
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3) Demand signals & adoption barriers
+  //   - Tier 0 CSV summary only
+  // ---------------------------------------------------------------------------
+
+  const csvClaim = byTier(0, "csv_summary")[0];
+
+  if (csvClaim?.summary) {
+    pushUnique(insights.demand_signals, {
+      kind: "market_demand",
+      text: csvClaim.summary,
+      claim_id: csvClaim.claim_id,
+      source: {
+        tier: 0,
+        tier_group: "csv_summary"
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // 4) Risk landscape
+  //   - Tier 1 industry risks
+  // ---------------------------------------------------------------------------
+
+  for (const c of byTier(1, "markdown_industry_risks")) {
+    pushUnique(insights.risk_landscape, {
+      kind: "industry_risk",
+      text: c.summary,
+      claim_id: c.claim_id,
+      source: {
+        tier: c.tier,
+        tier_group: c.tier_group
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // 5) Timing drivers
+  //   - Tier 1 drivers mentioning time sensitivity
+  // ---------------------------------------------------------------------------
+
+  const timingRegex =
+    /(renewal|contract|deadline|budget|fiscal|year-end|mandate|compliance)/i;
+
+  for (const c of byTier(1, "markdown_industry_drivers")) {
+    if (!timingRegex.test(c.summary)) continue;
+
+    pushUnique(insights.timing_drivers, {
+      kind: "timing_driver",
+      text: c.summary,
+      claim_id: c.claim_id,
+      source: {
+        tier: c.tier,
+        tier_group: c.tier_group
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // 6) Opportunity map
+  //   - Tier 4 derived coverage (no raw needs_map access)
+  // ---------------------------------------------------------------------------
+
+  for (const c of byTier(4, "coverage_summary")) {
+    pushUnique(insights.opportunity_map, {
+      kind: "coverage_opportunity",
+      text: c.summary,
+      claim_id: c.claim_id,
+      source: {
+        tier: c.tier,
+        tier_group: c.tier_group
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // 7) Patterns (lightweight, evidence-backed only)
+  // ---------------------------------------------------------------------------
+
+  for (const c of claims) {
+    if (!c.summary) continue;
+
+    pushUnique(insights.patterns.signal_themes, {
+      label: c.summary.slice(0, 120),
+      count: 1,
+      sources: [{ claim_id: c.claim_id }]
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Final validation + persist
+  // ---------------------------------------------------------------------------
 
   validateAndWarn("insights", insights, console.log);
-  await putJson(container, `${prefix}insights_v1/insights.json`, insights);
+
+  await putJson(
+    container,
+    `${prefix}insights_v1/insights.json`,
+    insights
+  );
+
   return insights;
 }
 

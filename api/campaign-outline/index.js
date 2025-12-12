@@ -1,5 +1,5 @@
 // /api/campaign-outline/index.js
-// Clean rewrite 06-12-2025 — fully aligned with shared storage + shared status + router logic. V3
+// Clean rewrite 08-12-2025 — fully aligned with shared storage + shared status + router logic. V4
 
 const { enqueueTo } = require("../lib/campaign-queue");
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
@@ -314,22 +314,31 @@ module.exports = async function (context, queueItem) {
 
     // ---- Derive product names from site ----
     let productNames = [];
+
     if (Array.isArray(productsJson?.products) && productsJson.products.length) {
       productNames = productsJson.products;
     } else {
-      const snippet = siteJson?.snippet || "";
-      const lines = snippet.split(/\r?\n/).slice(0, 2000);
-      const out = new Set();
-      for (const line of lines) {
-        if (/(<h1|<h2|<h3|<li|product|solutions|services)/i.test(line)) {
-          const m = line.match(/>([^<>]{3,120})</);
-          if (m) {
-            const v = m[1].trim();
-            if (v && !/[{}<>]/.test(v)) out.add(v);
+      // NEW: handle array-based site.json correctly
+      const snippet = Array.isArray(siteJson)
+        ? (siteJson[0]?.snippet || "")
+        : (siteJson?.snippet || "");
+
+      if (snippet) {
+        const lines = snippet.split(/\r?\n/).slice(0, 2000);
+        const out = new Set();
+
+        for (const line of lines) {
+          if (/(<h1|<h2|<h3|<li|product|solutions|services)/i.test(line)) {
+            const m = line.match(/>([^<>]{3,120})</);
+            if (m) {
+              const v = m[1].trim();
+              if (v && !/[{}<>]/.test(v)) out.add(v);
+            }
           }
         }
+
+        productNames = Array.from(out);
       }
-      productNames = Array.from(out);
     }
 
     // ---- CSV signals ----

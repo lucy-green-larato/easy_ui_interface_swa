@@ -50,6 +50,15 @@
           "date": {
             "type": ["string", "null"],
             "description": "Optional published-at or reference date."
+          },
+
+          "tier": {
+            "description": "Doctrine tier identifier. May be numeric (0..n) or a tier label (e.g. '2a').",
+            "type": ["number", "string", "null"]
+          },
+          "tier_group": {
+            "description": "Doctrine tier group bucket name used for deterministic global ordering.",
+            "type": ["string", "null"]
           }
         },
         "required": ["claim_id", "title", "summary", "source_type", "url"]

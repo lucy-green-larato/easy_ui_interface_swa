@@ -1,4 +1,4 @@
-// api/lib/evidence/index.js 24-10-2025 v2. Used in campaign and lead qualification
+// api/lib/evidence/index.js 12-12-2025 v4. Used in campaign and lead qualification
 // Glues together website snapshots, PDF extracts, iXBRL (pass-through) and optional directories.
 // Updated to provide a stable buildEvidence() adapter for the campaign worker WITHOUT breaking existing consumers.
 
@@ -24,12 +24,22 @@ async function buildEvidencePack({ variables = {}, ixbrlSummary = {}, files = []
  * Signature the worker calls: ({ input, packs, runId, correlationId }) => Promise<Evidence[]>
  * ALWAYS returns an array of objects matching the strict schema:
  *   { url: string, title: string, snippet: string, claim: string }
+ *
+ * NOTE:
+ *   - Markdown intelligence is NOT handled here. It is loaded separately
+ *     into markdown_pack.json and consumed by buyer_logic / insights / strategy.
  */
 async function buildEvidence({ input = {}, packs = {}, runId, correlationId }) {
   // Derive variables expected by the legacy pack builder
   const vars = {
     prospect_website:
-      (input?.filters?.company?.website || input?.prospect_website || input?.prospect_website_url || input?.filters?.prospect_website || input?.filters?.website || "")
+      (input?.filters?.company?.website ||
+        input?.prospect_website ||
+        input?.prospect_website_url ||
+        input?.filters?.prospect_website ||
+        input?.filters?.website ||
+        ""
+      )
         .toString()
         .trim(),
     // Pass through anything else your directory pack might use
@@ -51,11 +61,44 @@ async function buildEvidence({ input = {}, packs = {}, runId, correlationId }) {
 
   // Helper to coerce and filter entries into the strict schema shape
   const norm = (obj = {}, fallbackClaim) => {
-    const url = (obj.url || obj.link || obj.href || "").toString().trim();
-    const title = (obj.title || obj.name || obj.heading || obj.source || "").toString().trim();
-    const snippet = (obj.snippet || obj.summary || obj.excerpt || obj.text || "").toString().trim();
-    const claim = (obj.claim || obj.reason || fallbackClaim || "").toString().trim();
+    // Allow filename to act as url/title fallback (for PDFs)
+    const filename = (obj.filename || "").toString().trim();
+
+    const url = (
+      obj.url ||
+      obj.link ||
+      obj.href ||
+      filename || // fallback for PDFs
+      ""
+    ).toString().trim();
+
+    const title = (
+      obj.title ||
+      obj.name ||
+      obj.heading ||
+      obj.source ||
+      filename || // fallback for PDFs
+      ""
+    ).toString().trim();
+
+    const snippet = (
+      obj.snippet ||
+      obj.summary ||
+      obj.excerpt ||
+      obj.text || // PDF text lands here
+      ""
+    ).toString().trim();
+
+    const claim = (
+      obj.claim ||
+      obj.reason ||
+      fallbackClaim ||
+      ""
+    ).toString().trim();
+
+    // If any canonical fields missing, drop
     if (!url || !title || !snippet || !claim) return null;
+
     return { url, title, snippet, claim };
   };
 
@@ -93,7 +136,60 @@ async function buildEvidence({ input = {}, packs = {}, runId, correlationId }) {
     // Common shapes: ix.documents[], ix.references[], ix.source_url
     if (Array.isArray(ix.documents)) candidates.push(...ix.documents);
     if (Array.isArray(ix.references)) candidates.push(...ix.references);
-    if (ix.source_url) candidates.push({ url: ix.source_url, title: "iXBRL Source", summary: "Company filing (iXBRL)" });
+    if (ix.source_url) {
+      candidates.push({
+        url: ix.source_url,
+        title: "iXBRL Source",
+        summary: "Company filing (iXBRL)"
+      });
+    }
+
+    // OPTIONAL ixbrl → proof evidence adapter (safe, non-strategic)
+    if (ix.summary && typeof ix.summary === "object") {
+      const summary = ix.summary;
+      const years = Array.isArray(summary.years) ? summary.years : [];
+      const derived = summary.derived || {};
+      const y1 = years[0] || null; // most recent year
+
+      const ixClaims = [];
+
+      const pushClaim = (label, value) => {
+        if (value == null) return;
+        ixClaims.push({
+          url: "ixbrl://financials", // pseudo-url indicating internal source
+          title: label,
+          snippet: String(value),
+          claim: `${label}: ${value}`
+        });
+      };
+
+      // Turnover & profitability
+      pushClaim("Turnover (most recent year)", y1?.turnover);
+      pushClaim("Operating profit", y1?.operatingProfit);
+      pushClaim("Profit before tax", y1?.profitBeforeTax);
+
+      // Ratios
+      if (derived.revenueYoYPct != null) {
+        pushClaim("Revenue growth YoY (%)", derived.revenueYoYPct.toFixed(1));
+      }
+      if (derived.grossMarginPct?.y1 != null) {
+        pushClaim("Gross margin (%)", derived.grossMarginPct.y1.toFixed(1));
+      }
+      if (derived.operatingMarginPct?.y1 != null) {
+        pushClaim("Operating margin (%)", derived.operatingMarginPct.y1.toFixed(1));
+      }
+      if (derived.currentRatio != null) {
+        pushClaim("Current ratio", derived.currentRatio.toFixed(2));
+      }
+      if (derived.cashRatio != null) {
+        pushClaim("Cash ratio", derived.cashRatio.toFixed(2));
+      }
+      if (derived.netDebtToEquity != null) {
+        pushClaim("Net debt to equity", derived.netDebtToEquity.toFixed(2));
+      }
+
+      if (ixClaims.length) out.push(...ixClaims);
+    }
 
     for (const c of candidates) {
       const item = norm(
@@ -107,33 +203,12 @@ async function buildEvidence({ input = {}, packs = {}, runId, correlationId }) {
       if (item) out.push(item);
     }
   }
-  if (packs.markdownPack && typeof packs.markdownPack === "object") {
-    const markdown = packs.markdownPack;
 
-    const flatten = (arr) => (Array.isArray(arr) ? arr : []).map(it => {
-      const file = it?.source?.file || "";
-      const heading = it?.source?.heading || "";
-      return {
-        url: file,
-        title: heading || "Markdown Pack",
-        snippet: it?.text || "",
-        claim: it?.text || ""
-      };
-    });
-
-    [
-      ...flatten(markdown.industry_drivers),
-      ...flatten(markdown.industry_risks),
-      ...flatten(markdown.persona_pressures),
-      ...flatten(markdown.competitor_profiles),
-      ...flatten(markdown.content_pillars),
-      ...flatten(markdown.industry_stats)
-    ].forEach(item => {
-      const normed = norm(item, "Markdown insight");
-      if (normed) out.push(normed);
-    });
-  }
   return out;
 }
 
-module.exports = { buildEvidencePack, buildEvidence, default: buildEvidence };
+module.exports = {
+  buildEvidencePack,
+  buildEvidence,
+  default: buildEvidence
+};

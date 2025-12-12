@@ -1,4 +1,4 @@
-// /api/campaign-evidence/markdownPack.js 26-11-2025 v4
+// /api/campaign-evidence/markdownPack.js 09-12-2025 v5
 // Deterministic Markdown pack ingestion for campaign evidence.
 //
 // Reads Markdown from the shared INPUT container:
@@ -7,17 +7,6 @@
 //
 // Writes structured JSON bundle to the RESULTS container:
 //   <prefix>evidence_v2/markdown_pack.json
-//
-// Shape:
-// {
-//   "industry_drivers":     [],
-//   "industry_risks":       [],
-//   "persona_pressures":    [],
-//   "competitor_profiles":  [],
-//   "content_pillars":      [],
-//   "industry_stats":       []
-// }
-//
 // Rules:
 //  - No AI, no summarisation.
 //  - Only headings + bullet lists are used.
@@ -42,7 +31,13 @@ function ensurePackShape(raw) {
     "persona_pressures",
     "competitor_profiles",
     "content_pillars",
-    "industry_stats"
+    "industry_stats",
+
+    // NEW: Supplier buckets (Tier-2a)
+    "supplier_strengths",
+    "supplier_capabilities",
+    "supplier_differentiators",
+    "supplier_value_proposition"
   ];
   const out = {};
   for (const k of keys) {
@@ -70,6 +65,25 @@ function headingToBucket(title) {
   if (/competitor|alt supplier|alternative provider|market landscape/.test(t)) {
     return "competitor_profiles";
   }
+  // Supplier strengths
+  if (/strength|core competency|core strength|advantage|what we do best/i.test(t)) {
+    return "supplier_strengths";
+  }
+
+  // Supplier capabilities
+  if (/capabilit|delivery model|service capability|technical capability|platform|infrastructure/i.test(t)) {
+    return "supplier_capabilities";
+  }
+
+  // Supplier differentiators
+  if (/differentiator|why us|why choose|unique value|our edge|our advantage/i.test(t)) {
+    return "supplier_differentiators";
+  }
+
+  // Supplier value proposition
+  if (/value proposition|our value|customer value|benefit|promise/i.test(t)) {
+    return "supplier_value_proposition";
+  }
   if (/content pillar|content theme|messaging pillar|narrative/.test(t)) {
     return "content_pillars";
   }
@@ -89,14 +103,7 @@ function headingToBucket(title) {
  */
 function parseMarkdownBullets(md, filePath, packType, diag) {
   const lines = String(md || "").split(/\r?\n/);
-  const out = {
-    industry_drivers: [],
-    industry_risks: [],
-    persona_pressures: [],
-    competitor_profiles: [],
-    content_pillars: [],
-    industry_stats: []
-  };
+  const out = ensurePackShape({});
 
   let currentBucket = null;
   let currentHeading = null;
@@ -207,15 +214,13 @@ async function buildMarkdownPack(resultsContainer, prefix) {
 
     const industryPacks = await loadMarkdownUnder(inputContainer, "packs/industry-sources/");
     const supplierPacks = await loadMarkdownUnder(inputContainer, "packs/supplier/");
+    const runScopedSupplier = await loadMarkdownUnder(
+      resultsContainer,
+      `${prefix}packs/`
+    );
 
-    const acc = {
-      industry_drivers: [],
-      industry_risks: [],
-      persona_pressures: [],
-      competitor_profiles: [],
-      content_pillars: [],
-      industry_stats: []
-    };
+    // Start from a fully shaped, empty pack (includes supplier buckets)
+    const acc = ensurePackShape({});
 
     const append = (partial) => {
       if (!partial) return;
@@ -232,7 +237,11 @@ async function buildMarkdownPack(resultsContainer, prefix) {
       const parsed = parseMarkdownBullets(p.text, p.path, "industry");
       append(parsed);
     }
-
+    // Merge run-scoped supplier markdown
+    for (const p of runScopedSupplier) {
+      const parsed = parseMarkdownBullets(p.text, p.path, "supplier_run");
+      append(parsed);
+    }
     for (const p of supplierPacks) {
       const parsed = parseMarkdownBullets(p.text, p.path, "supplier");
       append(parsed);

@@ -4,6 +4,7 @@
   "title": "Markdown context pack (industry + supplier)",
   "type": "object",
   "additionalProperties": false,
+
   "properties": {
     "industry_drivers": {
       "type": "array",
@@ -28,16 +29,40 @@
     "industry_stats": {
       "type": "array",
       "items": { "$ref": "#/definitions/markdownItem" }
+    },
+    
+    "supplier_strengths": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/markdownItem" }
+    },
+    "supplier_capabilities": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/markdownItem" }
+    },
+    "supplier_differentiators": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/markdownItem" }
+    },
+    "supplier_value_proposition": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/markdownItem" }
     }
   },
+
   "required": [
     "industry_drivers",
     "industry_risks",
     "persona_pressures",
     "competitor_profiles",
     "content_pillars",
-    "industry_stats"
+    "industry_stats",
+
+    "supplier_strengths",
+    "supplier_capabilities",
+    "supplier_differentiators",
+    "supplier_value_proposition"
   ],
+
   "definitions": {
     "markdownItem": {
       "type": "object",
