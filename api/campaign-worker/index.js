@@ -470,8 +470,8 @@ module.exports = async function (context, queueItem) {
     op: "afterworker",
     runId,
     prefix,
+    userId: msg.userId || "anonymous",
     page: msg.page || "campaign"
   });
-
   log("[worker] completed", { runId, outPath });
 };

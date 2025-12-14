@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js // 12-12-2025 Gold Writer v8.4
+// /api/campaign-write/index.js // 14-12-2025 Gold Writer v8.5
 // Responsibility:
 //   - Read strategy_v2 (campaign_strategy.json) produced by campaign-worker.
 //   - Read outline.json (campaign-outline) as evidence/competitor intelligence.
@@ -946,18 +946,14 @@ module.exports = async function (context, queueItem) {
 
   const userId = msg.userId || msg.user || "anonymous";
   const page = msg.page || "campaign";
-  let prefix;
-
-  if (msg.prefix) {
-    prefix = String(msg.prefix).trim();
-    prefix = prefix.replace(/^\/+/, "");
-    if (prefix.toLowerCase().startsWith(`${RESULTS_CONTAINER.toLowerCase()}/`)) {
-      prefix = prefix.slice(RESULTS_CONTAINER.length + 1);
-    }
-    if (!prefix.endsWith("/")) prefix += "/";
-  } else {
-    prefix = canonicalPrefix({ userId, page, runId });
+  if (!msg.prefix) {
+    throw new Error("Writer invoked without canonical prefix");
   }
+
+  let prefix = String(msg.prefix).trim();
+  prefix = prefix.replace(/^\/+/, "");
+  if (!prefix.endsWith("/")) prefix += "/";
+
   prefix = prefix.replace(/^\/+/, "");
   if (!prefix.endsWith("/")) prefix += "/";
 
@@ -1030,7 +1026,7 @@ module.exports = async function (context, queueItem) {
       );
     }
 
-    
+
     const viabilityRaw = await readJsonIfExists(
       container,
       `${prefix}strategy_v3/viability.json`
