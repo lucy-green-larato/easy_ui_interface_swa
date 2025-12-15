@@ -1,4 +1,4 @@
-// /api/campaign-router/index.js — Gold v8.4 canonical prefix router (06-12-2025)
+// /api/campaign-router/index.js — Gold v8.5 canonical prefix router (15-12-2025)
 
 "use strict";
 
@@ -18,8 +18,8 @@ module.exports = async function (context, queueItem) {
     typeof queueItem === "string"
       ? (() => { try { return JSON.parse(queueItem); } catch { return {}; } })()
       : queueItem && typeof queueItem === "object"
-      ? queueItem
-      : {};
+        ? queueItem
+        : {};
 
   const op = msg.op || "";
   const runId = msg.runId || msg.run_id || "unknown";
@@ -51,10 +51,64 @@ module.exports = async function (context, queueItem) {
   if (!status.markers) status.markers = {};
 
   // ==============================================================
-  // 1. afterstart → no-op
+  // 1. afterstart → wait for packsload
   // ==============================================================
   if (op === "afterstart") {
     log("[router] afterstart → no-op (evidence already enqueued)");
+    return;
+  }
+
+  // ==============================================================
+  // 1a. afterpacksload → enqueue markdown_pack ONCE
+  // ==============================================================
+  if (op === "afterpacksload") {
+    if (status.markers.markdownPackEnqueued) {
+      log("[router] afterpacksload: markdown_pack already enqueued; skipping");
+      return;
+    }
+
+    const markdownQueue =
+      process.env.Q_CAMPAIGN_MARKDOWN || "campaign-markdown-pack";
+
+    await enqueueTo(markdownQueue, {
+      op: "run_markdown_pack",
+      runId,
+      page,
+      prefix
+    });
+
+    status.markers.markdownPackEnqueued = true;
+    status.state = "markdown_pack_queued";
+    await putJson(container, statusPath, status);
+
+    log("[router] afterpacksload → enqueued markdown_pack", { runId, prefix });
+    return;
+  }
+
+  // ==============================================================
+  // 1b. aftermarkdown → enqueue evidence ONCE
+  // ==============================================================
+  if (op === "aftermarkdown") {
+    if (status.markers.evidenceEnqueued) {
+      log("[router] aftermarkdown: evidence already enqueued; skipping");
+      return;
+    }
+
+    const evidenceQueue =
+      process.env.Q_CAMPAIGN_EVIDENCE || "campaign-evidence";
+
+    await enqueueTo(evidenceQueue, {
+      op: "run_evidence",
+      runId,
+      page,
+      prefix
+    });
+
+    status.markers.evidenceEnqueued = true;
+    status.state = "evidence_queued";
+    await putJson(container, statusPath, status);
+
+    log("[router] aftermarkdown → enqueued evidence", { runId, prefix });
     return;
   }
 

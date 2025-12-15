@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 12-12-2025 — v59
+// /api/campaign-evidence/index.js 15-12-2025 — v60
 // -----------------------------------------------------------------------------
 // PHASE BOUNDARY NOTE
 //
@@ -947,27 +947,6 @@ module.exports = async function (context, job) {
       items: needsMap
     });
 
-    // ---------------------------------------------------------------------------
-    // BUILD MARKDOWN PACK (CANONICAL, PRE-INGESTION)
-    // ---------------------------------------------------------------------------
-    let markdownPack = {};
-
-    try {
-      markdownPack = await buildMarkdownPack(container, prefix);
-      const ev2Prefix = `${prefix}evidence_v2/`;
-      await putJson(container, `${ev2Prefix}markdown_pack.json`, markdownPack);
-
-      context.log("[campaign-evidence] markdownPack built (pre-ingestion)", {
-        keys: Object.keys(markdownPack || {})
-      });
-    } catch (e) {
-      context.log.warn(
-        "[campaign-evidence] markdown pack build failed (pre-ingestion)",
-        String(e?.message || e)
-      );
-      markdownPack = {};
-    }
-
     let evidenceLog = [];
 
     // ---------------------------------------------------------------------------
@@ -1025,7 +1004,13 @@ module.exports = async function (context, job) {
     // ---------------------------------------------------------------------------
     // Inject Markdown Evidence (Tier-1 → Tier-2 → Tier-3)
     // ---------------------------------------------------------------------------
-    const markdown = markdownPack || {};
+    let markdown = {};
+
+    try {
+      markdown = await getJson(container, `${prefix}evidence_v2/markdown_pack.json`) || {};
+    } catch {
+      markdown = {};
+    }
 
     function pushMarkdownEvidence(items, tier, tierGroup, sourceLabel) {
       if (!Array.isArray(items)) return;

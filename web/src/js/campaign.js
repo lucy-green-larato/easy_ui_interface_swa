@@ -1790,6 +1790,7 @@ window.CampaignUI = window.CampaignUI || {};
     }
     try {
       let prefix =
+        contract?._meta?.source_prefix ||
         contract?.source_prefix ||
         contract?.prefix ||
         null;
