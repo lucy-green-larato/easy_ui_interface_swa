@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 06-12-2025 v31
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 15-12-2025 v32
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, 
@@ -1939,14 +1939,10 @@ window.CampaignUI = window.CampaignUI || {};
     const okDuring = new Set([
       "queued",
       "validatinginput",
-      "packsload",
       "ingest",
       "draftcampaign",
       "evidencedigest",
       "outline",
-      "outline_queued",
-      "worker_queued",
-      "writer_queued",
       "strategysynthesis",
       "strategy_working",
       "strategy_ready",
@@ -1975,10 +1971,18 @@ window.CampaignUI = window.CampaignUI || {};
           return contract;
         }
 
-        if (stateName === "Failed" || stateName === "Unknown" || !okDuring.has(stateK)) {
-          const msg = st?.error?.message || `Run ended with unexpected state: ${stateName}`;
+        const isInProgress =
+          stateK.endsWith("_queued") ||
+          stateK.endsWith("_working") ||
+          okDuring.has(stateK);
+
+        if (stateK === "failed" || stateK === "unknown" || !isInProgress) {
+          const msg =
+            st?.error?.message ||
+            `Run ended with unexpected state: ${stateName}`;
           throw new Error(msg);
         }
+
       } catch (e) {
         consecutiveErrors += 1;
         UI.log("Status poll error: " + (e?.message || e));
