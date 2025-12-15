@@ -1,8 +1,9 @@
-// /api/campaign-packsload/index.js 15-12-2025 v4
+// /api/campaign-packsload/index.js 15-12-2025 v4.1
 // Phase: Packsload
 // Responsibility:
 //   • Load input.json
 //   • Resolve industry / supplier / competitor slugs
+//   • Persist slugs into status.context (canonical)
 //   • Emit afterpacksload → router
 //
 // Deterministic. No AI. No assumptions.
@@ -13,7 +14,8 @@
 const { enqueueTo } = require("../lib/campaign-queue");
 const {
   getResultsContainerClient,
-  getJson
+  getJson,
+  putJson
 } = require("../shared/storage");
 
 // ------------------------------------------------------------
@@ -22,12 +24,14 @@ const {
 
 function slugify(value) {
   if (!value || typeof value !== "string") return null;
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/['"]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || null;
+  return (
+    value
+      .toLowerCase()
+      .trim()
+      .replace(/['"]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || null
+  );
 }
 
 function uniq(arr) {
@@ -48,7 +52,7 @@ module.exports = async function (context, msg) {
     return;
   }
 
-  let resolved = {
+  const resolved = {
     industry_slug: null,
     supplier_slug: null,
     competitor_slugs: []
@@ -57,6 +61,9 @@ module.exports = async function (context, msg) {
   try {
     const container = await getResultsContainerClient();
 
+    // --------------------------------------------------------
+    // Load input.json
+    // --------------------------------------------------------
     const input =
       (await getJson(container, `${prefix}input.json`)) || {};
 
@@ -81,10 +88,9 @@ module.exports = async function (context, msg) {
     // ----------------------------
     // Competitors
     // ----------------------------
-    const competitors =
-      Array.isArray(input.relevant_competitors)
-        ? input.relevant_competitors
-        : [];
+    const competitors = Array.isArray(input.relevant_competitors)
+      ? input.relevant_competitors
+      : [];
 
     resolved.competitor_slugs = uniq(
       competitors
@@ -93,8 +99,31 @@ module.exports = async function (context, msg) {
         .slice(0, 8)
     );
 
+    // --------------------------------------------------------
+    // Persist into status.context (canonical)
+    // --------------------------------------------------------
+    const statusPath = `${prefix}status.json`;
+    const status =
+      (await getJson(container, statusPath)) ||
+      { runId, markers: {}, history: [] };
+
+    if (!status.context || typeof status.context !== "object") {
+      status.context = {};
+    }
+
+    status.context.industry_slug = resolved.industry_slug;
+    status.context.supplier_slug = resolved.supplier_slug;
+    status.context.competitor_slugs = resolved.competitor_slugs;
+
+    await putJson(container, statusPath, status);
+
+    log("[packsload] slugs resolved and persisted", {
+      runId,
+      ...resolved
+    });
+
   } catch (err) {
-    log.error("[packsload] failed to resolve slugs", err);
+    log.error("[packsload] failed to resolve or persist slugs", err);
     // IMPORTANT: continue safely — do not block router
   }
 

@@ -1,6 +1,4 @@
-// /api/campaign-router/index.js — Gold v8.7 canonical prefix router (15-12-2025)
-// 10/10 working: single import of campaign-queue, validated queue constants only,
-// status history logging, defensive parsing, and consistent state casing.
+// /api/campaign-router/index.js — Gold v8.8 canonical prefix router (15-12-2025)
 
 "use strict";
 
@@ -78,7 +76,6 @@ module.exports = async function (context, queueItem) {
   if (!status.markers || typeof status.markers !== "object") status.markers = {};
   if (!Array.isArray(status.history)) status.history = [];
 
-  // Always record receipt (helps UI timeline debugging)
   pushHistory(status, "router_received", `op=${op || "(none)"}`);
 
   // ==============================================================
@@ -119,13 +116,22 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
+    const {
+      industry_slug,
+      supplier_slug,
+      competitor_slugs
+    } = status.context || {};
+
     log("[router] afterpacksload → enqueue markdown_pack", { runId, prefix, queue: MARKDOWN_QUEUE_NAME });
 
     await enqueueTo(MARKDOWN_QUEUE_NAME, {
       op: "run_markdown_pack",
       runId,
       page,
-      prefix
+      prefix,
+      industry_slug,
+      supplier_slug,
+      competitor_slugs
     });
 
     status.markers.markdownPackEnqueued = true;
