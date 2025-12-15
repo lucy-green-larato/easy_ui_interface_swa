@@ -1,5 +1,6 @@
-// /api/campaign-packsload/index.js
-// 15-12-2025 v1.1 — Packs resolver / phase barrier
+// /api/campaign-packsload/index.js 15-12-2025 v3
+// Phase: Packsload
+// Responsibility: resolve slugs + signal router
 
 "use strict";
 
@@ -9,25 +10,19 @@ module.exports = async function (context, msg) {
   const { runId, prefix, page = "campaign" } = msg || {};
 
   if (!runId || !prefix) {
-    context.log.error("[packsload] missing runId or prefix", { runId, prefix });
+    context.log.error("[packsload] missing runId or prefix");
     return;
   }
 
-  // ------------------------------------------------------------------
-  // FUTURE:
-  // - resolve industry_slug
-  // - resolve supplier_slug
-  // - resolve competitor_slugs
-  // - write packs manifest if needed
-  // ------------------------------------------------------------------
+  // (future) resolve industry_slug / supplier_slug here
 
   await enqueueTo(
     process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs",
     {
       op: "afterpacksload",
       runId,
-      page,
-      prefix
+      prefix,
+      page
     }
   );
 
