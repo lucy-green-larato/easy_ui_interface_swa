@@ -1,40 +1,46 @@
-//  /api/lib/campaign-queue.js 01-12-2025 v2
+// /api/lib/campaign-queue.js 15-12-2025 v6
 // Canonical queue helper for Campaign apps.
 // - No manual Base64 encoding (SDK + Functions runtime handle that)
 // - Strict queue name validation
 // - JSON-safe message serialization
-// - Convenience helpers for main / evidence / outline / write queues
+// - Deterministic startup failure on misconfig
+// - Single source of truth for ALL pipeline queues
+
+"use strict";
 
 const { QueueServiceClient } = require("@azure/storage-queue");
 
 // ---- ENV ----
 const STORAGE_CONN = process.env.AzureWebJobsStorage || "";
 
-// Main “router” / orchestration queue
+// Main orchestration / router queue
 const DEFAULT_QUEUE_CANDIDATE =
   process.env.CAMPAIGN_QUEUE_NAME ||
   process.env.CAMPAIGN_QUEUE ||
   "campaign";
 
-// Stage-specific queues (used by worker/evidence/outline/write)
+// Pipeline stage queues
+const PACKSLOAD_QUEUE_CANDIDATE =
+  process.env.Q_CAMPAIGN_PACKSLOAD || "campaign-packsload";
+
+const MARKDOWN_QUEUE_CANDIDATE =
+  process.env.Q_CAMPAIGN_MARKDOWN || "campaign-markdown-pack";
+
 const EVIDENCE_QUEUE_CANDIDATE =
   process.env.Q_CAMPAIGN_EVIDENCE || "campaign-evidence-jobs";
 
 const OUTLINE_QUEUE_CANDIDATE =
   process.env.Q_CAMPAIGN_OUTLINE || "campaign-outline";
 
+const WORKER_QUEUE_CANDIDATE =
+  process.env.Q_CAMPAIGN_WORKER || "campaign-worker-jobs";
+
 const WRITE_QUEUE_CANDIDATE =
   process.env.Q_CAMPAIGN_WRITE || "campaign-write";
 
-/**
- * Normalise and validate an Azure Storage queue name.
- *
- * Rules (per Azure docs, simplified):
- *  - 3–63 characters
- *  - lowercase letters, numbers, and hyphen only
- *  - must start and end with letter/number
- *  - no consecutive hyphens
- */
+// --------------------------------------------------
+// Queue name normalisation + validation
+// --------------------------------------------------
 function normaliseQueueName(rawName) {
   const name = String(rawName || "").trim().toLowerCase();
 
@@ -63,16 +69,33 @@ function normaliseQueueName(rawName) {
   return name;
 }
 
-// Validated queue names (throws on misconfig at app start)
-const DEFAULT_QUEUE_NAME = normaliseQueueName(DEFAULT_QUEUE_CANDIDATE);
-const EVIDENCE_QUEUE_NAME = normaliseQueueName(EVIDENCE_QUEUE_CANDIDATE);
-const OUTLINE_QUEUE_NAME = normaliseQueueName(OUTLINE_QUEUE_CANDIDATE);
-const WRITE_QUEUE_NAME = normaliseQueueName(WRITE_QUEUE_CANDIDATE);
+// --------------------------------------------------
+// Validated queue constants (FAIL FAST on startup)
+// --------------------------------------------------
+const DEFAULT_QUEUE_NAME   = normaliseQueueName(DEFAULT_QUEUE_CANDIDATE);
+const PACKSLOAD_QUEUE_NAME = normaliseQueueName(PACKSLOAD_QUEUE_CANDIDATE);
+const MARKDOWN_QUEUE_NAME  = normaliseQueueName(MARKDOWN_QUEUE_CANDIDATE);
+const EVIDENCE_QUEUE_NAME  = normaliseQueueName(EVIDENCE_QUEUE_CANDIDATE);
+const OUTLINE_QUEUE_NAME   = normaliseQueueName(OUTLINE_QUEUE_CANDIDATE);
+const WORKER_QUEUE_NAME    = normaliseQueueName(WORKER_QUEUE_CANDIDATE);
+const WRITE_QUEUE_NAME     = normaliseQueueName(WRITE_QUEUE_CANDIDATE);
+
+// All validated constants (used to skip re-validation)
+const VALIDATED_QUEUES = new Set([
+  DEFAULT_QUEUE_NAME,
+  PACKSLOAD_QUEUE_NAME,
+  MARKDOWN_QUEUE_NAME,
+  EVIDENCE_QUEUE_NAME,
+  OUTLINE_QUEUE_NAME,
+  WORKER_QUEUE_NAME,
+  WRITE_QUEUE_NAME
+]);
 
 let _queueService;
 
-// ---- core helpers ----
-
+// --------------------------------------------------
+// Core helpers
+// --------------------------------------------------
 function assertStorageConfigured() {
   if (!STORAGE_CONN) {
     throw new Error(
@@ -89,57 +112,34 @@ function getQueueService() {
   return _queueService;
 }
 
-/**
- * Get a QueueClient for a given queue.
- */
 function getQueueClient(queueName = DEFAULT_QUEUE_NAME) {
   const name = normaliseQueueName(queueName || DEFAULT_QUEUE_NAME);
   return getQueueService().getQueueClient(name);
 }
 
-/**
- * Ensure the queue exists and return its client.
- */
 const _createdQueues = new Set();
 
 async function ensureQueue(queueName = DEFAULT_QUEUE_NAME) {
   const q = getQueueClient(queueName);
-
   if (!_createdQueues.has(queueName)) {
     await q.createIfNotExists();
     _createdQueues.add(queueName);
   }
-
   return q;
 }
 
-/**
- * Serialise a message to a string suitable for sendMessage().
- * - Strings are sent as-is
- * - Objects/arrays are JSON.stringified
- * - null / undefined are encoded as "null"
- */
 function serialiseMessage(message) {
-  if (typeof message === "string") {
-    return message;
-  }
-  if (message === null || message === undefined) {
-    return "null";
-  }
+  if (typeof message === "string") return message;
+  if (message === null || message === undefined) return "null";
   return JSON.stringify(message);
 }
 
-/**
- * Low-level send: ensures queue exists, then sends the serialised message.
- * No manual Base64: SDK + Functions runtime handle encoding/decoding.
- */
 async function send(queueName, message, options = {}) {
   const q = await ensureQueue(queueName);
   const text = serialiseMessage(message);
 
   const size = Buffer.byteLength(text, "utf8");
-  const MAX = 62 * 1024; // safety margin
-
+  const MAX = 62 * 1024;
   if (size > MAX) {
     throw new Error(
       `Queue message exceeds safe limit (${size} bytes). Reduce payload before enqueue.`
@@ -149,32 +149,21 @@ async function send(queueName, message, options = {}) {
   await q.sendMessage(text, options);
 }
 
-// ---- Public API ----
-
-/**
- * Enqueue to the main campaign queue (router / orchestration).
- */
+// --------------------------------------------------
+// Public API
+// --------------------------------------------------
 async function enqueueStart(message, options = {}) {
   return send(DEFAULT_QUEUE_NAME, message, options);
 }
 
-/**
- * Generic enqueue to any named queue.
- */
 async function enqueueTo(queueName, message, options = {}) {
-  // If caller passes a validated name constant, avoid re-validating.
-  const name = (queueName === DEFAULT_QUEUE_NAME ||
-    queueName === EVIDENCE_QUEUE_NAME ||
-    queueName === OUTLINE_QUEUE_NAME ||
-    queueName === WRITE_QUEUE_NAME)
+  const name = VALIDATED_QUEUES.has(queueName)
     ? queueName
     : normaliseQueueName(queueName);
+
   return send(name, message, options);
 }
 
-/**
- * Convenience helpers for stage-specific queues.
- */
 async function enqueueEvidence(message, options = {}) {
   return send(EVIDENCE_QUEUE_NAME, message, options);
 }
@@ -183,15 +172,22 @@ async function enqueueOutline(message, options = {}) {
   return send(OUTLINE_QUEUE_NAME, message, options);
 }
 
+async function enqueueWorker(message, options = {}) {
+  return send(WORKER_QUEUE_NAME, message, options);
+}
+
 async function enqueueWrite(message, options = {}) {
   return send(WRITE_QUEUE_NAME, message, options);
 }
 
 module.exports = {
-  // queue names (useful for logging/tests)
+  // queue name constants
   DEFAULT_QUEUE_NAME,
+  PACKSLOAD_QUEUE_NAME,
+  MARKDOWN_QUEUE_NAME,
   EVIDENCE_QUEUE_NAME,
   OUTLINE_QUEUE_NAME,
+  WORKER_QUEUE_NAME,
   WRITE_QUEUE_NAME,
 
   // low-level
@@ -203,5 +199,6 @@ module.exports = {
   enqueueStart,
   enqueueEvidence,
   enqueueOutline,
+  enqueueWorker,
   enqueueWrite
 };

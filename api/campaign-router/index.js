@@ -1,8 +1,19 @@
-// /api/campaign-router/index.js — Gold v8.6 canonical prefix router (15-12-2025)
+// /api/campaign-router/index.js — Gold v8.7 canonical prefix router (15-12-2025)
+// 10/10 working: single import of campaign-queue, validated queue constants only,
+// status history logging, defensive parsing, and consistent state casing.
 
 "use strict";
 
-const { enqueueTo } = require("../lib/campaign-queue");
+const {
+  enqueueTo,
+  PACKSLOAD_QUEUE_NAME,
+  MARKDOWN_QUEUE_NAME,
+  EVIDENCE_QUEUE_NAME,
+  OUTLINE_QUEUE_NAME,
+  WORKER_QUEUE_NAME,
+  WRITE_QUEUE_NAME
+} = require("../lib/campaign-queue");
+
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
 
 const RESULTS_CONTAINER =
@@ -10,56 +21,80 @@ const RESULTS_CONTAINER =
   process.env.RESULTS_CONTAINER ||
   "results";
 
+// ---------- helpers ----------
+function parseQueueItem(queueItem) {
+  if (!queueItem) return {};
+  if (typeof queueItem === "string") {
+    try { return JSON.parse(queueItem); } catch { return {}; }
+  }
+  return (queueItem && typeof queueItem === "object") ? queueItem : {};
+}
+
+function normPrefix(prefix) {
+  let p = String(prefix || "").trim();
+  if (!p) return "";
+  if (p.startsWith(`${RESULTS_CONTAINER}/`)) p = p.slice(`${RESULTS_CONTAINER}/`.length);
+  p = p.replace(/^\/+/, "");
+  if (!p.endsWith("/")) p += "/";
+  return p;
+}
+
+function pushHistory(status, phase, note) {
+  if (!status.history || !Array.isArray(status.history)) status.history = [];
+  status.history.push({
+    at: new Date().toISOString(),
+    phase: String(phase || "status"),
+    note: note ? String(note) : ""
+  });
+}
+
+async function persistStatus(container, statusPath, status) {
+  await putJson(container, statusPath, status);
+}
+
+// ---------- main ----------
 module.exports = async function (context, queueItem) {
   const log = context.log;
 
-  // ---------- Parse incoming message ----------
-  const msg =
-    typeof queueItem === "string"
-      ? (() => { try { return JSON.parse(queueItem); } catch { return {}; } })()
-      : queueItem && typeof queueItem === "object"
-        ? queueItem
-        : {};
+  const msg = parseQueueItem(queueItem);
 
-  const op = msg.op || "";
+  const op = String(msg.op || "").trim();
   const runId = msg.runId || msg.run_id || "unknown";
   const page = msg.page || "campaign";
-  let prefix = msg.prefix || "";
+  const prefix = normPrefix(msg.prefix || "");
 
   log("[router] received", { op, runId, prefix });
 
-  // ---------- Validate & normalise prefix ----------
   if (!prefix) {
     log("[router] missing prefix; cannot route");
     return;
   }
 
-  if (prefix.startsWith(`${RESULTS_CONTAINER}/`)) {
-    prefix = prefix.slice(`${RESULTS_CONTAINER}/`.length);
-  }
-
-  prefix = prefix.replace(/^\/+/, "");
-  if (!prefix.endsWith("/")) prefix += "/";
-
   const container = await getResultsContainerClient();
   const statusPath = `${prefix}status.json`;
 
-  let status =
-    (await getJson(container, statusPath)) || { runId, markers: {}, history: [] };
-
+  let status = (await getJson(container, statusPath)) || { runId, markers: {}, history: [] };
+  if (!status || typeof status !== "object") status = { runId, markers: {}, history: [] };
+  if (!status.markers || typeof status.markers !== "object") status.markers = {};
   if (!Array.isArray(status.history)) status.history = [];
-  if (!status.markers) status.markers = {};
+
+  // Always record receipt (helps UI timeline debugging)
+  pushHistory(status, "router_received", `op=${op || "(none)"}`);
 
   // ==============================================================
-  // 1. afterstart → wait for packsload
+  // 1. afterstart → enqueue packsload (ONCE)
   // ==============================================================
   if (op === "afterstart") {
-    if (status.markers.packsloadEnqueued) return;
+    if (status.markers.packsloadEnqueued) {
+      log("[router] afterstart: packsload already enqueued; skipping");
+      pushHistory(status, "packsload_skip", "already enqueued");
+      await persistStatus(container, statusPath, status);
+      return;
+    }
 
-    const packsloadQueue =
-      process.env.Q_CAMPAIGN_PACKSLOAD || "campaign-packsload";
+    log("[router] afterstart → enqueue packsload", { runId, prefix, queue: PACKSLOAD_QUEUE_NAME });
 
-    await enqueueTo(packsloadQueue, {
+    await enqueueTo(PACKSLOAD_QUEUE_NAME, {
       op: "run_packsload",
       runId,
       page,
@@ -68,24 +103,25 @@ module.exports = async function (context, queueItem) {
 
     status.markers.packsloadEnqueued = true;
     status.state = "packsload_queued";
-    await putJson(container, statusPath, status);
-
+    pushHistory(status, "packsload_queued");
+    await persistStatus(container, statusPath, status);
     return;
   }
 
   // ==============================================================
-  // 1a. afterpacksload → enqueue markdown_pack ONCE
+  // 1a. afterpacksload → enqueue markdown_pack (ONCE)
   // ==============================================================
   if (op === "afterpacksload") {
     if (status.markers.markdownPackEnqueued) {
       log("[router] afterpacksload: markdown_pack already enqueued; skipping");
+      pushHistory(status, "markdown_pack_skip", "already enqueued");
+      await persistStatus(container, statusPath, status);
       return;
     }
 
-    const markdownQueue =
-      process.env.Q_CAMPAIGN_MARKDOWN || "campaign-markdown-pack";
+    log("[router] afterpacksload → enqueue markdown_pack", { runId, prefix, queue: MARKDOWN_QUEUE_NAME });
 
-    await enqueueTo(markdownQueue, {
+    await enqueueTo(MARKDOWN_QUEUE_NAME, {
       op: "run_markdown_pack",
       runId,
       page,
@@ -94,25 +130,25 @@ module.exports = async function (context, queueItem) {
 
     status.markers.markdownPackEnqueued = true;
     status.state = "markdown_pack_queued";
-    await putJson(container, statusPath, status);
-
-    log("[router] afterpacksload → enqueued markdown_pack", { runId, prefix });
+    pushHistory(status, "markdown_pack_queued");
+    await persistStatus(container, statusPath, status);
     return;
   }
 
   // ==============================================================
-  // 1b. aftermarkdown → enqueue evidence ONCE
+  // 1b. aftermarkdown → enqueue evidence (ONCE)
   // ==============================================================
   if (op === "aftermarkdown") {
     if (status.markers.evidenceEnqueued) {
       log("[router] aftermarkdown: evidence already enqueued; skipping");
+      pushHistory(status, "evidence_skip", "already enqueued");
+      await persistStatus(container, statusPath, status);
       return;
     }
 
-    const evidenceQueue =
-      process.env.Q_CAMPAIGN_EVIDENCE || "campaign-evidence";
+    log("[router] aftermarkdown → enqueue evidence", { runId, prefix, queue: EVIDENCE_QUEUE_NAME });
 
-    await enqueueTo(evidenceQueue, {
+    await enqueueTo(EVIDENCE_QUEUE_NAME, {
       op: "run_evidence",
       runId,
       page,
@@ -121,24 +157,25 @@ module.exports = async function (context, queueItem) {
 
     status.markers.evidenceEnqueued = true;
     status.state = "evidence_queued";
-    await putJson(container, statusPath, status);
-
-    log("[router] aftermarkdown → enqueued evidence", { runId, prefix });
+    pushHistory(status, "evidence_queued");
+    await persistStatus(container, statusPath, status);
     return;
   }
 
   // ==============================================================
-  // 2. afterevidence → enqueue outline ONCE
+  // 2. afterevidence → enqueue outline (ONCE)
   // ==============================================================
   if (op === "afterevidence") {
     if (status.markers.outlineEnqueued) {
       log("[router] afterevidence: outline already enqueued; skipping");
+      pushHistory(status, "outline_skip", "already enqueued");
+      await persistStatus(container, statusPath, status);
       return;
     }
 
-    const outlineQueue = process.env.Q_CAMPAIGN_OUTLINE || "campaign-outline";
+    log("[router] afterevidence → enqueue outline", { runId, prefix, queue: OUTLINE_QUEUE_NAME });
 
-    await enqueueTo(outlineQueue, {
+    await enqueueTo(OUTLINE_QUEUE_NAME, {
       op: "run_outline",
       runId,
       page,
@@ -147,24 +184,25 @@ module.exports = async function (context, queueItem) {
 
     status.markers.outlineEnqueued = true;
     status.state = "outline_queued";
-    await putJson(container, statusPath, status);
-
-    log("[router] afterevidence → enqueued outline", { runId, prefix });
+    pushHistory(status, "outline_queued");
+    await persistStatus(container, statusPath, status);
     return;
   }
 
   // ==============================================================
-  // 3. afteroutline → enqueue strategy WORKER ONCE
+  // 3. afteroutline → enqueue strategy WORKER (ONCE)
   // ==============================================================
   if (op === "afteroutline") {
     if (status.markers.workerEnqueued) {
       log("[router] afteroutline: worker already enqueued; skipping");
+      pushHistory(status, "worker_skip", "already enqueued");
+      await persistStatus(container, statusPath, status);
       return;
     }
 
-    const workerQueue = process.env.Q_CAMPAIGN_WORKER || "campaign-worker-jobs";
+    log("[router] afteroutline → enqueue worker", { runId, prefix, queue: WORKER_QUEUE_NAME });
 
-    await enqueueTo(workerQueue, {
+    await enqueueTo(WORKER_QUEUE_NAME, {
       op: "run_strategy",
       runId,
       page,
@@ -173,24 +211,25 @@ module.exports = async function (context, queueItem) {
 
     status.markers.workerEnqueued = true;
     status.state = "worker_queued";
-    await putJson(container, statusPath, status);
-
-    log("[router] afteroutline → enqueued worker", { runId, prefix });
+    pushHistory(status, "worker_queued");
+    await persistStatus(container, statusPath, status);
     return;
   }
 
   // ==============================================================
-  // 4. afterworker → enqueue writer ONCE
+  // 4. afterworker → enqueue writer (ONCE)
   // ==============================================================
   if (op === "afterworker") {
     if (status.markers.writerEnqueued) {
       log("[router] afterworker: writer already enqueued; skipping");
+      pushHistory(status, "writer_skip", "already enqueued");
+      await persistStatus(container, statusPath, status);
       return;
     }
 
-    const writerQueue = process.env.Q_CAMPAIGN_WRITE || "campaign-write";
+    log("[router] afterworker → enqueue writer", { runId, prefix, queue: WRITE_QUEUE_NAME });
 
-    await enqueueTo(writerQueue, {
+    await enqueueTo(WRITE_QUEUE_NAME, {
       op: "run_writer",
       runId,
       page,
@@ -199,9 +238,8 @@ module.exports = async function (context, queueItem) {
 
     status.markers.writerEnqueued = true;
     status.state = "writer_queued";
-    await putJson(container, statusPath, status);
-
-    log("[router] afterworker → enqueued writer", { runId, prefix });
+    pushHistory(status, "writer_queued");
+    await persistStatus(container, statusPath, status);
     return;
   }
 
@@ -209,18 +247,20 @@ module.exports = async function (context, queueItem) {
   // 5. afterwrite → mark pipeline Completed
   // ==============================================================
   if (op === "afterwrite") {
-    status.state = "Completed";
+    status.state = "completed";
     status.markers.pipelineCompleted = true;
+    pushHistory(status, "completed");
 
-    await putJson(container, statusPath, status);
+    await persistStatus(container, statusPath, status);
 
     log("[router] afterwrite → pipeline Completed", { runId, prefix });
     return;
   }
 
   // ==============================================================
-  // 6. Unsupported ops → log + ignore
+  // 6. Unsupported ops → log + ignore (but persist receipt)
   // ==============================================================
   log("[router] unsupported op; skipping", { op, runId, prefix });
+  pushHistory(status, "unsupported_op", op || "(none)");
+  await persistStatus(container, statusPath, status);
 };
-
