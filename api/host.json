@@ -41,6 +41,7 @@
     "campaign-outline",
     "campaign-router",
     "campaign-markdown-pack",
+    "campaign-packsload",
     "campaign-write",
     "campaign-status",
     "campaign-fetch"

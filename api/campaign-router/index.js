@@ -1,4 +1,4 @@
-// /api/campaign-router/index.js — Gold v8.5 canonical prefix router (15-12-2025)
+// /api/campaign-router/index.js — Gold v8.6 canonical prefix router (15-12-2025)
 
 "use strict";
 
@@ -54,7 +54,22 @@ module.exports = async function (context, queueItem) {
   // 1. afterstart → wait for packsload
   // ==============================================================
   if (op === "afterstart") {
-    log("[router] afterstart → no-op (evidence already enqueued)");
+    if (status.markers.packsloadEnqueued) return;
+
+    const packsloadQueue =
+      process.env.Q_CAMPAIGN_PACKSLOAD || "campaign-packsload";
+
+    await enqueueTo(packsloadQueue, {
+      op: "run_packsload",
+      runId,
+      page,
+      prefix
+    });
+
+    status.markers.packsloadEnqueued = true;
+    status.state = "packsload_queued";
+    await putJson(container, statusPath, status);
+
     return;
   }
 
