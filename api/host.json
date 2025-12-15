@@ -40,6 +40,7 @@
     "campaign-evidence",
     "campaign-outline",
     "campaign-router",
+    "campaign-markdown-pack",
     "campaign-write",
     "campaign-status",
     "campaign-fetch"
