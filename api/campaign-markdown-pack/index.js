@@ -1,39 +1,20 @@
-// /api/campaign-markdown-pack/index.js 15-12-25 v1
-// v1 — Deterministic Markdown Pack Builder (Option A)
+// /api/campaign-markdown-pack/index.js
+// v1 — Deterministic Markdown Pack Builder (Model A)
+// 15-12-2025
+
+"use strict";
 
 const crypto = require("crypto");
 const { BlobServiceClient } = require("@azure/storage-blob");
+const { enqueueTo } = require("../lib/campaign-queue");
 
 const STORAGE = process.env.AzureWebJobsStorage;
 const INPUT_CONTAINER = "input";
 const RESULTS_CONTAINER = "results";
 
-// ---------------- helpers ----------------
-
-async function markStageComplete(container, prefix, stage, runId, context) {
-  const statusPath = `${prefix}status.json`;
-  const status = (await container.getBlockBlobClient(statusPath).exists())
-    ? JSON.parse(await (await container.getBlockBlobClient(statusPath).download()).readableStreamBody.read())
-    : { runId, markers: {}, history: [] };
-
-  status.markers = status.markers || {};
-  status.markers[stage] = true;
-  status.state = stage;
-  status.history = status.history || [];
-  status.history.push({
-    stage,
-    completed_at: new Date().toISOString()
-  });
-
-  await container
-    .getBlockBlobClient(statusPath)
-    .upload(
-      JSON.stringify(status, null, 2),
-      Buffer.byteLength(JSON.stringify(status))
-    );
-
-  context.log(`[markdown_pack] stage complete`, { stage, prefix });
-}
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
 
 function sha1(s) {
   return crypto.createHash("sha1").update(String(s)).digest("hex");
@@ -53,7 +34,7 @@ function stripMarkdown(s) {
 }
 
 function headingToBucket(h, scope) {
-  const k = h.toLowerCase();
+  const k = String(h || "").toLowerCase();
 
   if (scope === "industry") {
     if (k.includes("driver")) return "industry_drivers";
@@ -66,31 +47,38 @@ function headingToBucket(h, scope) {
   }
 
   if (scope === "supplier") {
-    if (k.includes("strength") || k.includes("capabil") || k.includes("different"))
+    if (
+      k.includes("strength") ||
+      k.includes("capabil") ||
+      k.includes("different")
+    ) {
       return "supplier_markdown";
+    }
     return "supplier_other";
   }
 
   return "industry_other";
 }
 
-async function readBlobText(container, name) {
-  const bc = container.getBlockBlobClient(name);
-  if (!(await bc.exists())) return null;
-  const dl = await bc.download();
-  return await streamToString(dl.readableStreamBody);
-}
-
 async function streamToString(readable) {
   const chunks = [];
-  for await (const ch of readable) chunks.push(ch);
+  for await (const chunk of readable) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf8");
 }
 
-// ---------------- parser ----------------
+async function readBlobText(container, name) {
+  const blob = container.getBlockBlobClient(name);
+  if (!(await blob.exists())) return null;
+  const dl = await blob.download();
+  return streamToString(dl.readableStreamBody);
+}
+
+// -----------------------------------------------------------------------------
+// Markdown parser (deterministic)
+// -----------------------------------------------------------------------------
 
 function parseMarkdown({ text, source_file, scope }) {
-  const lines = text.split(/\r?\n/);
+  const lines = String(text || "").split(/\r?\n/);
 
   let currentHeading = "General";
   let currentBucket = headingToBucket(currentHeading, scope);
@@ -102,14 +90,14 @@ function parseMarkdown({ text, source_file, scope }) {
     const line = raw.trim();
     if (!line) return;
 
-    // Heading
+    // Headings (## / ### only)
     if (/^#{2,3}\s+/.test(line)) {
       currentHeading = line.replace(/^#{2,3}\s+/, "").trim();
       currentBucket = headingToBucket(currentHeading, scope);
       return;
     }
 
-    // Bullet
+    // Bullets
     if (/^([-*•]|\d+\.)\s+/.test(line)) {
       const textClean = stripMarkdown(line);
       if (!textClean) return;
@@ -119,7 +107,7 @@ function parseMarkdown({ text, source_file, scope }) {
       seen.add(hash);
 
       out.push({
-        id: "md_" + hash.slice(0, 8),
+        id: `md_${hash.slice(0, 8)}`,
         text: textClean,
         bucket: currentBucket,
         source_type: "markdown",
@@ -135,23 +123,37 @@ function parseMarkdown({ text, source_file, scope }) {
   return out;
 }
 
-// ---------------- handler ----------------
+// -----------------------------------------------------------------------------
+// Azure Function handler
+// -----------------------------------------------------------------------------
 
 module.exports = async function (context, msg) {
-  const { runId, prefix, industry_slug, supplier_slug, competitor_slugs = [] } = msg;
+  const {
+    runId,
+    prefix,
+    industry_slug,
+    supplier_slug,
+    competitor_slugs = [],
+    page = "campaign"
+  } = msg || {};
+
+  if (!runId || !prefix) {
+    context.log.error("[markdown_pack] missing runId or prefix");
+    return;
+  }
 
   const blobSvc = BlobServiceClient.fromConnectionString(STORAGE);
   const input = blobSvc.getContainerClient(INPUT_CONTAINER);
   const results = blobSvc.getContainerClient(RESULTS_CONTAINER);
 
-  const base = prefix.endsWith("/") ? prefix : prefix + "/";
+  const base = prefix.endsWith("/") ? prefix : `${prefix}/`;
 
   const pack = {
     schema: "markdown-pack-v1",
     generated_at: nowISO(),
     source: {
-      industry_slug,
-      supplier_slug,
+      industry_slug: industry_slug || null,
+      supplier_slug: supplier_slug || null,
       competitor_slugs
     },
     industry_drivers: [],
@@ -165,47 +167,59 @@ module.exports = async function (context, msg) {
     supplier_other: []
   };
 
-  // ---- industry ----
+  // ---------------------------------------------------------------------------
+  // Industry markdown
+  // ---------------------------------------------------------------------------
   if (industry_slug) {
-    const p = `packs/industry/${industry_slug}.md`;
-    const txt = await readBlobText(input, p);
+    const path = `packs/industry/${industry_slug}.md`;
+    const txt = await readBlobText(input, path);
     if (txt) {
-      const items = parseMarkdown({ text: txt, source_file: `input/${p}`, scope: "industry" });
+      const items = parseMarkdown({
+        text: txt,
+        source_file: `input/${path}`,
+        scope: "industry"
+      });
       items.forEach(i => pack[i.bucket]?.push(i));
     }
   }
 
-  // ---- supplier ----
+  // ---------------------------------------------------------------------------
+  // Supplier markdown
+  // ---------------------------------------------------------------------------
   if (supplier_slug) {
-    const p = `packs/supplier/${supplier_slug}.md`;
-    const txt = await readBlobText(input, p);
+    const path = `packs/supplier/${supplier_slug}.md`;
+    const txt = await readBlobText(input, path);
     if (txt) {
-      const items = parseMarkdown({ text: txt, source_file: `input/${p}`, scope: "supplier" });
+      const items = parseMarkdown({
+        text: txt,
+        source_file: `input/${path}`,
+        scope: "supplier"
+      });
       items.forEach(i => pack[i.bucket]?.push(i));
     }
   }
 
-  // ---- competitors ----
+  // ---------------------------------------------------------------------------
+  // Competitor markdown
+  // ---------------------------------------------------------------------------
   for (const slug of competitor_slugs) {
-    const p = `packs/competitor/${slug}.md`;
-    const txt = await readBlobText(input, p);
+    const path = `packs/competitor/${slug}.md`;
+    const txt = await readBlobText(input, path);
     if (!txt) continue;
-    const items = parseMarkdown({ text: txt, source_file: `input/${p}`, scope: "industry" });
+
+    const items = parseMarkdown({
+      text: txt,
+      source_file: `input/${path}`,
+      scope: "industry"
+    });
     items.forEach(i => pack[i.bucket]?.push(i));
   }
 
-  // ---- write ----
-  const outBlob = results.getBlockBlobClient(
-    `${base}evidence_v2/markdown_pack.json`
-  );
-
-  await markStageComplete(
-    results,
-    base,
-    "markdownPackCompleted",
-    runId,
-    context
-  );
+  // ---------------------------------------------------------------------------
+  // Write markdown_pack.json
+  // ---------------------------------------------------------------------------
+  const outPath = `${base}evidence_v2/markdown_pack.json`;
+  const outBlob = results.getBlockBlobClient(outPath);
 
   await outBlob.upload(
     JSON.stringify(pack, null, 2),
@@ -214,21 +228,26 @@ module.exports = async function (context, msg) {
 
   context.log("[markdown_pack] written", {
     runId,
+    path: outPath,
     counts: Object.fromEntries(
-      Object.entries(pack).filter(([k, v]) => Array.isArray(v)).map(([k, v]) => [k, v.length])
+      Object.entries(pack)
+        .filter(([, v]) => Array.isArray(v))
+        .map(([k, v]) => [k, v.length])
     )
   });
+
+  // ---------------------------------------------------------------------------
+  // Hand off to router → aftermarkdown
+  // ---------------------------------------------------------------------------
+  await enqueueTo(
+    process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs",
+    {
+      op: "aftermarkdown",
+      runId,
+      page,
+      prefix: base
+    }
+  );
+
+  context.log("[markdown_pack] aftermarkdown enqueued", { runId, prefix: base });
 };
-
-const { enqueueTo } = require("../lib/campaign-queue");
-
-await enqueueTo(
-  process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs",
-  {
-    op: "aftermarkdown",
-    runId,
-    page: "campaign",
-    prefix
-  }
-);
-
