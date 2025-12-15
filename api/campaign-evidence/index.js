@@ -78,7 +78,6 @@ const {
 } = require("../shared/csvSignals");
 
 const { updateStatus } = require("../shared/status");
-const { buildMarkdownPack } = require("./markdownPack");
 const { buildBuyerLogic } = require("./buyerLogic");
 const { mdSection, bullets } = require("../lib/markdown");
 
