@@ -1,5 +1,5 @@
 // /api/campaign-worker/index.js 16-12-2025
-// Strategy Engine v21 — Fully deterministic, router-driven (Option B) 16-12-2025
+// Strategy Engine v22 — Fully deterministic, router-driven (Option B) 16-12-2025
 
 "use strict";
 
@@ -91,6 +91,79 @@ function indexClaimsByTag(evidence) {
     out[tag].push(c);
   }
   return out;
+}
+
+//---- Viability helper 
+function buildViability({ evidence, csvNormalized, markdownPack }) {
+  const claims = Array.isArray(evidence?.claims) ? evidence.claims : [];
+
+  const csvRows =
+    Number(csvNormalized?.meta?.rows) ||
+    Number(csvNormalized?.rows) ||
+    0;
+
+  const hasCaseStudies = claims.some(c =>
+    c.tag === "case_study" || c.tag === "customer_proof"
+  );
+
+  const hasSupplierProfile = claims.some(c =>
+    c.tag === "supplier_overview" || c.tag === "supplier_profile"
+  );
+
+  const hasCompetitorContext =
+    Array.isArray(markdownPack?.competitor_profiles) &&
+    markdownPack.competitor_profiles.length > 0;
+
+  // Deterministic signal derivation (rule-based)
+  let marketSize = "small";
+  if (csvRows >= 50 && csvRows < 400) marketSize = "medium";
+  if (csvRows >= 400) marketSize = "large";
+
+  let evidenceStrength = "weak";
+  if (claims.length >= 10) evidenceStrength = "moderate";
+  if (claims.length >= 25) evidenceStrength = "strong";
+
+  let differentiationClarity = "low";
+  if (hasCompetitorContext) differentiationClarity = "partial";
+  if (hasCompetitorContext && claims.some(c => c.tag === "differentiator")) {
+    differentiationClarity = "clear";
+  }
+
+  const viable =
+    csvRows > 0 &&
+    hasSupplierProfile &&
+    evidenceStrength !== "weak";
+
+  const constraints = [];
+  if (!hasCaseStudies) constraints.push("Limited case study proof");
+  if (!hasCompetitorContext) constraints.push("Partial competitor coverage");
+  if (csvRows < 50) constraints.push("Small addressable cohort");
+
+  return {
+    schema: "viability-v1",
+    generated_at: new Date().toISOString(),
+    inputs: {
+      csv_rows: csvRows,
+      has_case_studies: hasCaseStudies,
+      has_supplier_profile: hasSupplierProfile,
+      has_competitor_context: hasCompetitorContext
+    },
+    signals: {
+      market_size: marketSize,
+      evidence_strength: evidenceStrength,
+      differentiation_clarity: differentiationClarity
+    },
+    verdict: {
+      viable,
+      confidence:
+        viable && evidenceStrength === "strong"
+          ? "high"
+          : viable
+            ? "medium"
+            : "low",
+      constraints
+    }
+  };
 }
 
 // ---------------------------------------------------------------
@@ -391,6 +464,18 @@ module.exports = async function (context, queueItem) {
 
     // Persist status once (no clobber)
     await putJson(container, statusPath, st0);
+
+    const viability = buildViability({
+      evidence: combinedEvidence,
+      csvNormalized,
+      markdownPack
+    });
+
+    await putJson(
+      container,
+      `${prefix}strategy_v2/viability.json`,
+      viability
+    );
 
     // Notify router
     await enqueueTo(ROUTER_QUEUE, {
