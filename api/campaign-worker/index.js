@@ -1,28 +1,14 @@
 // /api/campaign-worker/index.js 16-12-2025
-// Strategy Engine v21 — Fully deterministic, router-driven (Option B)
-// ---------------------------------------------------------------
-// Responsibilities:
-//   • Listen ONLY for queue op: "run_strategy"
-//   • Load evidence, buyer_logic, insights, csv_normalized, markdown_pack, input.json
-//   • Generate strategy_v2 (deterministic, no AI)
-//   • Write results/<prefix>/strategy_v2/campaign_strategy.json
-//   • Update status.json → state="strategy_ready"
-//   • Notify router via afterworker event
-//
-// No viability. No routing logic inside worker. No LLM.
-// ---------------------------------------------------------------
+// Strategy Engine v21 — Fully deterministic, router-driven (Option B) 16-12-2025
 
 "use strict";
 
-const { enqueueTo } = require("../lib/campaign-queue");
-const {
-  getResultsContainerClient,
-  getJson,
-  putJson
-} = require("../shared/storage");
+const nodeCrypto = require("crypto"); // IMPORTANT: alias to avoid TDZ/shadowing
 
-const ROUTER_QUEUE =
-  process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
+const { enqueueTo } = require("../lib/campaign-queue");
+const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
+
+const ROUTER_QUEUE = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
 
 // ---------------------------------------------------------------
 // UTILITIES
@@ -31,11 +17,7 @@ const ROUTER_QUEUE =
 function parseQueueItem(queueItem) {
   if (!queueItem) return {};
   if (typeof queueItem === "string") {
-    try {
-      return JSON.parse(queueItem);
-    } catch {
-      return {};
-    }
+    try { return JSON.parse(queueItem); } catch { return {}; }
   }
   return typeof queueItem === "object" ? queueItem : {};
 }
@@ -65,6 +47,19 @@ function safeGet(obj, path, def) {
   } catch {
     return def;
   }
+}
+
+// Deterministic stringify (stable key ordering)
+function stableStringify(obj) {
+  if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
+  if (Array.isArray(obj)) return "[" + obj.map(stableStringify).join(",") + "]";
+  const keys = Object.keys(obj).sort();
+  return "{" + keys.map(k => JSON.stringify(k) + ":" + stableStringify(obj[k])).join(",") + "}";
+}
+
+function sha256(s) {
+  // IMPORTANT: always use nodeCrypto alias (cannot be shadowed by later declarations)
+  return nodeCrypto.createHash("sha256").update(String(s)).digest("hex");
 }
 
 // ---------------------------------------------------------------
@@ -102,59 +97,30 @@ function indexClaimsByTag(evidence) {
 // STRATEGY BUILDERS (v18 logic preserved, viability removed)
 // ---------------------------------------------------------------
 
-function buildStorySpine({
-  evidence,
-  insights,
-  buyerLogic,
-  markdownPack,
-  csvNormalized,
-  mergedInput
-}) {
+function buildStorySpine({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }) {
   const byTag = indexClaimsByTag(evidence);
 
   const environment = uniqNonEmpty(
     (byTag.environment || []).map(bulletFromClaim)
       .concat((byTag.buyer_priority || []).map(bulletFromClaim))
-      // IMPORTANT: use markdownPack.industry_drivers (as in your original v18)
-      .concat(
-        (safeGet(markdownPack, "industry_drivers", []) || []).map(
-          (d) => d.text || ""
-        )
-      )
+      .concat((safeGet(markdownPack, "industry_drivers", []) || []).map(d => d.text || ""))
   ).slice(0, 4);
 
   const case_for_action = uniqNonEmpty(
-    (safeGet(insights, "adoption_barriers", []) || []).map(
-      (x) => x.label || ""
-    )
-      .concat(
-        (safeGet(insights, "risk_landscape", []) || []).map((x) =>
-          withEvidenceTag(x.text, x.claim_id ? [x.claim_id] : [])
-        )
-      )
-      .concat(
-        (safeGet(insights, "timing_drivers", []) || []).map(
-          (x) => x.text || ""
-        )
-      )
-      .concat(
-        (safeGet(buyerLogic, "commercial_impacts", []) || []).map((ci) =>
-          withEvidenceTag(
-            ci.label,
-            safeGet(ci, "origin.related_claim_ids", [])
-          )
-        )
-      )
+    (safeGet(insights, "adoption_barriers", []) || []).map(x => x.label || "")
+      .concat((safeGet(insights, "risk_landscape", []) || []).map(x =>
+        withEvidenceTag(x.text, x.claim_id ? [x.claim_id] : [])
+      ))
+      .concat((safeGet(insights, "timing_drivers", []) || []).map(x => x.text || ""))
+      .concat((safeGet(buyerLogic, "commercial_impacts", []) || []).map(ci =>
+        withEvidenceTag(ci.label, safeGet(ci, "origin.related_claim_ids", []))
+      ))
   ).slice(0, 6);
 
   const how_we_win = uniqNonEmpty(
     (byTag.supplier_capability || []).map(bulletFromClaim)
       .concat((byTag.differentiator || []).map(bulletFromClaim))
-      .concat(
-        (safeGet(markdownPack, "content_pillars", []) || []).map(
-          (p) => p.text || ""
-        )
-      )
+      .concat((safeGet(markdownPack, "content_pillars", []) || []).map(p => p.text || ""))
   ).slice(0, 6);
 
   const n = safeGet(csvNormalized, "meta.rows", 0);
@@ -177,35 +143,20 @@ function buildStorySpine({
 
   const success = uniqNonEmpty([
     deriveOutcome(n, routeHint),
-    ...(safeGet(insights, "success_signals", []) || []).map(
-      (x) => x.text || ""
-    )
+    ...(safeGet(insights, "success_signals", []) || []).map(x => x.text || "")
   ]).slice(0, 4);
 
   const next_steps = uniqNonEmpty([
     n ? `NEXT_STEP:target_cohort_size=${n}` : "",
-    environment.length
-      ? `NEXT_STEP:align_to_environment_signals=${environment.length}`
-      : "",
-    case_for_action.length
-      ? `NEXT_STEP:prioritise_case_for_action=${case_for_action.length}`
-      : "",
-    how_we_win.length
-      ? `NEXT_STEP:validate_how_we_win=${how_we_win.length}`
-      : ""
+    environment.length ? `NEXT_STEP:align_to_environment_signals=${environment.length}` : "",
+    case_for_action.length ? `NEXT_STEP:prioritise_case_for_action=${case_for_action.length}` : "",
+    how_we_win.length ? `NEXT_STEP:validate_how_we_win=${how_we_win.length}` : ""
   ]).slice(0, 4);
 
   return { environment, case_for_action, how_we_win, success, next_steps };
 }
 
-function buildValueProposition({
-  evidence,
-  insights,
-  buyerLogic,
-  markdownPack,
-  csvNormalized,
-  mergedInput
-}) {
+function buildValueProposition({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }) {
   const industry = mergedInput.selected_industry || "input_group";
   const buyers = mergedInput.buyer_type || "personas";
 
@@ -215,18 +166,14 @@ function buildValueProposition({
     "";
 
   const byTag = indexClaimsByTag(evidence);
-  const capClaim =
-    (byTag.supplier_capability || [])[0] ||
-    (byTag.right_to_play || [])[0];
+  const capClaim = (byTag.supplier_capability || [])[0] || (byTag.right_to_play || [])[0];
 
   const ourSolutionCore = capClaim
     ? bulletFromClaim(capClaim).replace(/\s*\[[^\]]+\]\s*$/, "")
     : "";
 
-  const outcomeCore =
-    safeGet(buyerLogic, "commercial_impacts.0.label") || "";
-  const unlikeCore =
-    safeGet(markdownPack, "competitor_profiles.0.summary") || "";
+  const outcomeCore = safeGet(buyerLogic, "commercial_impacts.0.label") || "";
+  const unlikeCore = safeGet(markdownPack, "competitor_profiles.0.summary") || "";
 
   return {
     value_proposition: {
@@ -245,9 +192,7 @@ function buildCompetitiveStrategy({ evidence, markdownPack }) {
   const byTag = indexClaimsByTag(evidence);
 
   const competitor_map = uniqNonEmpty(
-    (safeGet(markdownPack, "competitor_profiles", []) || []).map(
-      (c) => c.summary || ""
-    )
+    (safeGet(markdownPack, "competitor_profiles", []) || []).map(c => c.summary || "")
   );
 
   const diffs = []
@@ -256,12 +201,12 @@ function buildCompetitiveStrategy({ evidence, markdownPack }) {
     .map(bulletFromClaim);
 
   const angles = (evidence.claims || [])
-    .filter((c) => c.tag === "buyer_blocker" || c.tag === "timing")
+    .filter(c => c.tag === "buyer_blocker" || c.tag === "timing")
     .map(bulletFromClaim);
 
   const vulnerability_map = uniqNonEmpty(
     (evidence.claims || [])
-      .filter((c) => c.tag === "risk" || c.tag === "buyer_blocker")
+      .filter(c => c.tag === "risk" || c.tag === "buyer_blocker")
       .map(bulletFromClaim)
   ).slice(0, 6);
 
@@ -277,40 +222,23 @@ function buildCompetitiveStrategy({ evidence, markdownPack }) {
 function buildBuyerStrategy({ buyerLogic, insights, evidence }) {
   return {
     problems: uniqNonEmpty(
-      (safeGet(buyerLogic, "problems", []) || []).map((p) =>
-        withEvidenceTag(
-          p.label,
-          safeGet(p, "origin.related_claim_ids", [])
-        )
+      (safeGet(buyerLogic, "problems", []) || []).map(p =>
+        withEvidenceTag(p.label, safeGet(p, "origin.related_claim_ids", []))
       )
     ).slice(0, 8),
 
     barriers: uniqNonEmpty(
-      (safeGet(insights, "adoption_barriers", []) || []).map(
-        (x) => x.label || ""
-      )
-        .concat(
-          (safeGet(buyerLogic, "risk_tolerances", []) || []).map((r) =>
-            withEvidenceTag(
-              r.label,
-              safeGet(r, "origin.related_claim_ids", [])
-            )
-          )
-        )
+      (safeGet(insights, "adoption_barriers", []) || []).map(x => x.label || "")
+        .concat((safeGet(buyerLogic, "risk_tolerances", []) || []).map(r =>
+          withEvidenceTag(r.label, safeGet(r, "origin.related_claim_ids", []))
+        ))
     ).slice(0, 8),
 
     urgency: uniqNonEmpty(
-      (safeGet(insights, "timing_drivers", []) || []).map(
-        (x) => x.text || ""
-      )
-        .concat(
-          (safeGet(buyerLogic, "urgency_factors", []) || []).map((u) =>
-            withEvidenceTag(
-              u.label,
-              safeGet(u, "origin.related_claim_ids", [])
-            )
-          )
-        )
+      (safeGet(insights, "timing_drivers", []) || []).map(x => x.text || "")
+        .concat((safeGet(buyerLogic, "urgency_factors", []) || []).map(u =>
+          withEvidenceTag(u.label, safeGet(u, "origin.related_claim_ids", []))
+        ))
     ).slice(0, 6)
   };
 }
@@ -323,9 +251,7 @@ function buildGtmStrategy({ csvNormalized, mergedInput }) {
   if (lower.includes("partner")) route = "partner";
   if (lower.includes("direct")) route = "direct";
 
-  return {
-    route_implications: [`ROUTE_MODEL=${route}`]
-  };
+  return { route_implications: [`ROUTE_MODEL=${route}`] };
 }
 
 function buildProofPoints({ evidence }) {
@@ -348,31 +274,10 @@ function buildRightToPlay({ evidence }) {
   ).slice(0, 6);
 }
 
-function buildStrategyV2({
-  evidence,
-  insights,
-  buyerLogic,
-  markdownPack,
-  csvNormalized,
-  mergedInput
-}) {
+function buildStrategyV2({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }) {
   return {
-    story_spine: buildStorySpine({
-      evidence,
-      insights,
-      buyerLogic,
-      markdownPack,
-      csvNormalized,
-      mergedInput
-    }),
-    value_proposition: buildValueProposition({
-      evidence,
-      insights,
-      buyerLogic,
-      markdownPack,
-      csvNormalized,
-      mergedInput
-    }).value_proposition,
+    story_spine: buildStorySpine({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }),
+    value_proposition: buildValueProposition({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }).value_proposition,
     competitive_strategy: buildCompetitiveStrategy({ evidence, markdownPack }),
     buyer_strategy: buildBuyerStrategy({ buyerLogic, insights, evidence }),
     gtm_strategy: buildGtmStrategy({ csvNormalized, mergedInput }),
@@ -391,6 +296,10 @@ module.exports = async function (context, queueItem) {
   const msg = parseQueueItem(queueItem);
   const op = msg.op || "";
 
+  // Binding name in function.json is "job"
+  // In Azure Functions, the second argument may arrive as that binding; keep parseQueueItem robust.
+
+  // Hard stop on wrong op, but do not crash.
   if (op !== "run_strategy") {
     log("[worker] ignoring message", op);
     return;
@@ -413,118 +322,109 @@ module.exports = async function (context, queueItem) {
 
   log("[worker] starting", { runId, prefix });
 
-  // Load Phase 1 artefacts
-  const evidence = await getJson(container, `${prefix}evidence.json`);
-  const evidenceLog = await getJson(container, `${prefix}evidence_log.json`);
-  const combinedEvidence = {
-    claims:
-      (Array.isArray(evidence?.claims) && evidence.claims) ||
-      (Array.isArray(evidenceLog) && evidenceLog) ||
-      []
-  };
-
-  const insights =
-    (await getJson(container, `${prefix}insights_v1/insights.json`)) ||
-    (await getJson(container, `${prefix}insights.json`)) ||
-    {};
-
-  const buyerLogic =
-    (await getJson(container, `${prefix}insights_v1/buyer_logic.json`)) ||
-    (await getJson(container, `${prefix}buyer_logic.json`)) ||
-    {};
-
-  const markdownPack =
-    (await getJson(container, `${prefix}evidence_v2/markdown_pack.json`)) ||
-    (await getJson(container, `${prefix}markdown_pack.json`)) ||
-    {};
-
-  const csvNormalized =
-    (await getJson(container, `${prefix}csv_normalized.json`)) || {};
-
-  const mergedInput =
-    (await getJson(container, `${prefix}input.json`)) || {};
-
-  // Build deterministic strategy_v2
-  const strategy_v2 = buildStrategyV2({
-    evidence: combinedEvidence,
-    insights,
-    buyerLogic,
-    markdownPack,
-    csvNormalized,
-    mergedInput
-  });
-
-  // Write output
-  const outPath = `${prefix}strategy_v2/campaign_strategy.json`;
-  const strategyHash = sha256(stableStringify({ strategy_v2 }));
-  
-  await putJson(container, outPath, { strategy_v2 });
-  // ------------------------------------------------------------
-  // Status marker: strategyChanged (single source of truth)
-  // - set true only when the strategy payload differs from last version
-  // ------------------------------------------------------------
-
-  // 1) Load previous strategy (if any) to compare
-  let prev = null;
-  try {
-    prev = await getJson(container, outPath); // same path as just written
-  } catch (_) {
-    prev = null;
-  }
-
-  // NOTE: prev is now the NEW one because we just wrote it.
-  // So we must load previous BEFORE writing, OR compare to a stored hash.
-  // Minimal approach: store a hash in status.json instead.
-
-  const crypto = require("crypto");
-  function stableStringify(obj) {
-    // Minimal stable stringify: sorts keys to make hash deterministic.
-    if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
-    if (Array.isArray(obj)) return "[" + obj.map(stableStringify).join(",") + "]";
-    const keys = Object.keys(obj).sort();
-    return "{" + keys.map(k => JSON.stringify(k) + ":" + stableStringify(obj[k])).join(",") + "}";
-  }
-  function sha256(s) {
-    return crypto.createHash("sha256").update(String(s)).digest("hex");
-  }
-
-  // 2) Read status.json
   const statusPath = `${prefix}status.json`;
-  const st0 = (await getJson(container, statusPath)) || { runId, markers: {}, history: [] };
-  st0.markers = (st0.markers && typeof st0.markers === "object") ? st0.markers : {};
 
-  // 3) Compare to last hash + set marker
-  const prevHash = st0.markers.strategyHash || null;
-  const changed = !prevHash || prevHash !== strategyHash;
+  try {
+    // Load Phase 1 artefacts (paths preserved to match your existing outputs)
+    const evidence = await getJson(container, `${prefix}evidence.json`);
+    const evidenceLog = await getJson(container, `${prefix}evidence_log.json`);
+    const combinedEvidence = {
+      claims:
+        (Array.isArray(evidence?.claims) && evidence.claims) ||
+        (Array.isArray(evidenceLog) && evidenceLog) ||
+        []
+    };
 
-  st0.markers.strategyHash = strategyHash;
-  st0.markers.strategyChanged = changed;
+    const insights =
+      (await getJson(container, `${prefix}insights_v1/insights.json`)) ||
+      (await getJson(container, `${prefix}insights.json`)) ||
+      {};
 
-  // Optional: timeline note (helps debugging UI)
-  if (!Array.isArray(st0.history)) st0.history = [];
-  st0.history.push({
-    at: new Date().toISOString(),
-    phase: "strategy_written",
-    note: changed ? "strategyChanged=true" : "strategyChanged=false"
-  });
+    const buyerLogic =
+      (await getJson(container, `${prefix}insights_v1/buyer_logic.json`)) ||
+      (await getJson(container, `${prefix}buyer_logic.json`)) ||
+      {};
 
-  // 4) Persist status.json
-  await putJson(container, statusPath, st0);
+    const markdownPack =
+      (await getJson(container, `${prefix}evidence_v2/markdown_pack.json`)) ||
+      (await getJson(container, `${prefix}markdown_pack.json`)) ||
+      {};
 
-  // Update status
-  const status = (await getJson(container, `${prefix}status.json`)) || {};
-  status.state = "strategy_ready";
-  status.markers = status.markers || {};
-  status.markers.strategyCompleted = true;
-  await putJson(container, `${prefix}status.json`, status);
+    const csvNormalized = (await getJson(container, `${prefix}csv_normalized.json`)) || {};
+    const mergedInput = (await getJson(container, `${prefix}input.json`)) || {};
 
-  // Notify router
-  await enqueueTo(ROUTER_QUEUE, {
-    op: "afterworker",
-    runId,
-    prefix,
-    userId: msg.userId || "anonymous",
-    page: msg.page || "campaign"
-  });
-  log("[worker] completed", { runId, outPath });
+    // Build deterministic strategy_v2
+    const strategy_v2 = buildStrategyV2({
+      evidence: combinedEvidence,
+      insights,
+      buyerLogic,
+      markdownPack,
+      csvNormalized,
+      mergedInput
+    });
+
+    // Compute hash BEFORE writing (single source of truth)
+    const strategyHash = sha256(stableStringify({ strategy_v2 }));
+
+    // Read status.json once, update markers deterministically, write once
+    const st0 = (await getJson(container, statusPath)) || { runId, markers: {}, history: [] };
+    st0.markers = (st0.markers && typeof st0.markers === "object") ? st0.markers : {};
+    if (!Array.isArray(st0.history)) st0.history = [];
+
+    const prevHash = st0.markers.strategyHash || null;
+    const changed = !prevHash || prevHash !== strategyHash;
+
+    st0.markers.strategyHash = strategyHash;
+    st0.markers.strategyChanged = changed;
+    st0.markers.strategyCompleted = true;
+    st0.state = "strategy_ready";
+
+    st0.history.push({
+      at: new Date().toISOString(),
+      phase: "strategy_written",
+      note: changed ? "strategyChanged=true" : "strategyChanged=false"
+    });
+
+    // Write output AFTER hash computed
+    const outPath = `${prefix}strategy_v2/campaign_strategy.json`;
+    await putJson(container, outPath, { strategy_v2 });
+
+    // Persist status once (no clobber)
+    await putJson(container, statusPath, st0);
+
+    // Notify router
+    await enqueueTo(ROUTER_QUEUE, {
+      op: "afterworker",
+      runId,
+      prefix,
+      userId: msg.userId || "anonymous",
+      page: msg.page || "campaign"
+    });
+
+    log("[worker] completed", { runId, outPath, strategyChanged: changed });
+  } catch (err) {
+    // Never deadlock: persist error into status
+    try {
+      const stE = (await getJson(container, statusPath)) || { runId, markers: {}, history: [] };
+      stE.markers = (stE.markers && typeof stE.markers === "object") ? stE.markers : {};
+      if (!Array.isArray(stE.history)) stE.history = [];
+      if (!Array.isArray(stE.errors)) stE.errors = [];
+
+      stE.state = "worker_failed";
+      stE.markers.workerFailed = true;
+      stE.errors.push({
+        at: new Date().toISOString(),
+        phase: "campaign-worker",
+        message: err && err.message ? String(err.message) : String(err),
+        stack: err && err.stack ? String(err.stack) : ""
+      });
+
+      await putJson(container, statusPath, stE);
+    } catch (e2) {
+      log("[worker] failed to persist failure status", e2);
+    }
+
+    log("[worker] ERROR", err);
+    throw err;
+  }
 };
