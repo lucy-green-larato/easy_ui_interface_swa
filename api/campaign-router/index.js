@@ -1,4 +1,4 @@
-// /api/campaign-router/index.js — Gold v8.9 canonical prefix router (15-12-2025)
+// /api/campaign-router/index.js — Gold v9.0 canonical prefix router (16-12-2025)
 
 "use strict";
 
@@ -151,6 +151,20 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
+    //LinkedIn reference ingestion
+    if (!status.markers.linkedinEnqueued) {
+      await enqueueTo(LINKEDIN_QUEUE_NAME, {
+        op: "run_linkedin_activation",
+        runId,
+        page,
+        prefix
+      });
+      status.markers.linkedinEnqueued = true;
+      pushHistory(status, "linkedin_queued");
+    } else {
+      pushHistory(status, "linkedin_skip", "already enqueued");
+    }
+
     await enqueueTo(EVIDENCE_QUEUE_NAME, {
       op: "run_evidence",
       runId,
@@ -247,21 +261,6 @@ module.exports = async function (context, queueItem) {
     status.state = "completed";
     status.markers.pipelineCompleted = true;
     pushHistory(status, "completed");
-
-    // ✅ LinkedIn is downstream activation, does not change "completed"
-    if (!status.markers.linkedinEnqueued) {
-      await enqueueTo(LINKEDIN_QUEUE_NAME, {
-        op: "run_linkedin",
-        runId,
-        page,
-        prefix
-      });
-      status.markers.linkedinEnqueued = true;
-      pushHistory(status, "linkedin_queued");
-    } else {
-      pushHistory(status, "linkedin_skip", "already enqueued");
-    }
-
     await persistStatus(container, statusPath, status);
 
     log("[router] afterwrite → completed (+linkedin if needed)", { runId, prefix });

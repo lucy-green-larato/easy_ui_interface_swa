@@ -1,4 +1,4 @@
-// /api/lib/campaign-queue.js 15-12-2025 v6
+// /api/lib/campaign-queue.js 16-12-2025 v7
 // Canonical queue helper for Campaign apps.
 // - No manual Base64 encoding (SDK + Functions runtime handle that)
 // - Strict queue name validation
@@ -25,6 +25,9 @@ const PACKSLOAD_QUEUE_CANDIDATE =
 
 const MARKDOWN_QUEUE_CANDIDATE =
   process.env.Q_CAMPAIGN_MARKDOWN || "campaign-markdown-pack";
+
+  const LINKEDIN_QUEUE_CANDIDATE =
+  process.env.Q_CAMPAIGN_LINKEDIN || "campaign-linkedin";
 
 const EVIDENCE_QUEUE_CANDIDATE =
   process.env.Q_CAMPAIGN_EVIDENCE || "campaign-evidence-jobs";
@@ -72,19 +75,21 @@ function normaliseQueueName(rawName) {
 // --------------------------------------------------
 // Validated queue constants (FAIL FAST on startup)
 // --------------------------------------------------
-const DEFAULT_QUEUE_NAME   = normaliseQueueName(DEFAULT_QUEUE_CANDIDATE);
+const DEFAULT_QUEUE_NAME = normaliseQueueName(DEFAULT_QUEUE_CANDIDATE);
 const PACKSLOAD_QUEUE_NAME = normaliseQueueName(PACKSLOAD_QUEUE_CANDIDATE);
-const MARKDOWN_QUEUE_NAME  = normaliseQueueName(MARKDOWN_QUEUE_CANDIDATE);
-const EVIDENCE_QUEUE_NAME  = normaliseQueueName(EVIDENCE_QUEUE_CANDIDATE);
-const OUTLINE_QUEUE_NAME   = normaliseQueueName(OUTLINE_QUEUE_CANDIDATE);
-const WORKER_QUEUE_NAME    = normaliseQueueName(WORKER_QUEUE_CANDIDATE);
-const WRITE_QUEUE_NAME     = normaliseQueueName(WRITE_QUEUE_CANDIDATE);
+const MARKDOWN_QUEUE_NAME = normaliseQueueName(MARKDOWN_QUEUE_CANDIDATE);
+const LINKEDIN_QUEUE_NAME = normaliseQueueName(LINKEDIN_QUEUE_CANDIDATE);
+const EVIDENCE_QUEUE_NAME = normaliseQueueName(EVIDENCE_QUEUE_CANDIDATE);
+const OUTLINE_QUEUE_NAME = normaliseQueueName(OUTLINE_QUEUE_CANDIDATE);
+const WORKER_QUEUE_NAME = normaliseQueueName(WORKER_QUEUE_CANDIDATE);
+const WRITE_QUEUE_NAME = normaliseQueueName(WRITE_QUEUE_CANDIDATE);
 
 // All validated constants (used to skip re-validation)
 const VALIDATED_QUEUES = new Set([
   DEFAULT_QUEUE_NAME,
   PACKSLOAD_QUEUE_NAME,
   MARKDOWN_QUEUE_NAME,
+  LINKEDIN_QUEUE_NAME,
   EVIDENCE_QUEUE_NAME,
   OUTLINE_QUEUE_NAME,
   WORKER_QUEUE_NAME,
@@ -185,6 +190,7 @@ module.exports = {
   DEFAULT_QUEUE_NAME,
   PACKSLOAD_QUEUE_NAME,
   MARKDOWN_QUEUE_NAME,
+  LINKEDIN_QUEUE_NAME,
   EVIDENCE_QUEUE_NAME,
   OUTLINE_QUEUE_NAME,
   WORKER_QUEUE_NAME,
