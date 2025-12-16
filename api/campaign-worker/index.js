@@ -1,5 +1,5 @@
-// /api/campaign-worker/index.js 06-12-2025
-// Strategy Engine v20 — Fully deterministic, router-driven (Option B)
+// /api/campaign-worker/index.js 16-12-2025
+// Strategy Engine v21 — Fully deterministic, router-driven (Option B)
 // ---------------------------------------------------------------
 // Responsibilities:
 //   • Listen ONLY for queue op: "run_strategy"
@@ -456,7 +456,60 @@ module.exports = async function (context, queueItem) {
 
   // Write output
   const outPath = `${prefix}strategy_v2/campaign_strategy.json`;
+  const strategyHash = sha256(stableStringify({ strategy_v2 }));
+  
   await putJson(container, outPath, { strategy_v2 });
+  // ------------------------------------------------------------
+  // Status marker: strategyChanged (single source of truth)
+  // - set true only when the strategy payload differs from last version
+  // ------------------------------------------------------------
+
+  // 1) Load previous strategy (if any) to compare
+  let prev = null;
+  try {
+    prev = await getJson(container, outPath); // same path as just written
+  } catch (_) {
+    prev = null;
+  }
+
+  // NOTE: prev is now the NEW one because we just wrote it.
+  // So we must load previous BEFORE writing, OR compare to a stored hash.
+  // Minimal approach: store a hash in status.json instead.
+
+  const crypto = require("crypto");
+  function stableStringify(obj) {
+    // Minimal stable stringify: sorts keys to make hash deterministic.
+    if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
+    if (Array.isArray(obj)) return "[" + obj.map(stableStringify).join(",") + "]";
+    const keys = Object.keys(obj).sort();
+    return "{" + keys.map(k => JSON.stringify(k) + ":" + stableStringify(obj[k])).join(",") + "}";
+  }
+  function sha256(s) {
+    return crypto.createHash("sha256").update(String(s)).digest("hex");
+  }
+
+  // 2) Read status.json
+  const statusPath = `${prefix}status.json`;
+  const st0 = (await getJson(container, statusPath)) || { runId, markers: {}, history: [] };
+  st0.markers = (st0.markers && typeof st0.markers === "object") ? st0.markers : {};
+
+  // 3) Compare to last hash + set marker
+  const prevHash = st0.markers.strategyHash || null;
+  const changed = !prevHash || prevHash !== strategyHash;
+
+  st0.markers.strategyHash = strategyHash;
+  st0.markers.strategyChanged = changed;
+
+  // Optional: timeline note (helps debugging UI)
+  if (!Array.isArray(st0.history)) st0.history = [];
+  st0.history.push({
+    at: new Date().toISOString(),
+    phase: "strategy_written",
+    note: changed ? "strategyChanged=true" : "strategyChanged=false"
+  });
+
+  // 4) Persist status.json
+  await putJson(container, statusPath, st0);
 
   // Update status
   const status = (await getJson(container, `${prefix}status.json`)) || {};

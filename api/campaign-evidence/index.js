@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 15-12-2025 — v61
+// /api/campaign-evidence/index.js 16-12-2025 — v62
 // -----------------------------------------------------------------------------
 // PHASE BOUNDARY NOTE
 //
@@ -16,6 +16,11 @@ const { validateAndWarn } = require("../shared/schemaValidators");
 const { canonicalPrefix } = require("../lib/prefix");
 const { enqueueTo } = require("../lib/campaign-queue");
 const { nowIso } = require("../shared/utils");
+const {
+  toSlug,
+  buildSupplierProfileEvidence
+} = require("../lib/profileEvidence");
+
 const ROUTER_QUEUE_NAME = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
 const RESULTS_CONTAINER =
   process.env.CAMPAIGN_RESULTS_CONTAINER ||
@@ -1699,6 +1704,75 @@ module.exports = async function (context, job) {
         "[campaign-evidence] buildBuyerLogic failed",
         String(e?.message || e)
       );
+    }
+
+    const status =
+      (await getJson(container, `${prefix}status.json`)) || {};
+
+    // ------------------------------------------------------------
+    // LinkedIn activation (DOWNSTREAM ONLY — gated on strategy change)
+    // ------------------------------------------------------------
+
+    const status0 =
+      (await getJson(container, `${prefix}status.json`)) || {};
+
+    const strategyChanged = !!status0?.markers?.strategyChanged;
+
+    if (!strategyChanged) {
+      context.log("[evidence] strategy unchanged — linkedin.json skipped");
+    } else {
+      const strategy =
+        (await getJson(container, `${prefix}strategy_v2/strategy.json`)) ||
+        (await getJson(container, `${prefix}strategy_v2.json`)) ||
+        null;
+
+      if (strategy && typeof strategy === "object") {
+        const linkedin = {
+          schema: "linkedin-activation-v1",
+          generated_at: new Date().toISOString(),
+          derived_from: {
+            strategy_v2: true,
+            proof_points: true
+          },
+          rules: {
+            no_new_claims: true,
+            no_new_evidence: true,
+            activation_only: true
+          },
+          hooks: []
+        };
+
+        if (
+          Array.isArray(strategy?.buyer_strategy?.problems) &&
+          strategy.buyer_strategy.problems.length > 0
+        ) {
+          const problem = String(strategy.buyer_strategy.problems[0]).trim();
+
+          linkedin.hooks.push({
+            id: `li_${runId.slice(0, 8)}_001`,
+            pillar: "Buyer pressure",
+            audience: "Decision-makers",
+            post: `Many teams struggle with ${problem}. Most don’t talk about it openly.`,
+            cta: "Worth unpacking?"
+          });
+        }
+
+        await putJson(
+          container,
+          `${prefix}evidence_v2/linkedin.json`,
+          linkedin
+        );
+
+        // 🔒 clear the flag after successful generation
+        status0.markers = {
+          ...(status0.markers || {}),
+          strategyChanged: false
+        };
+
+        await putJson(container, `${prefix}status.json`, status0);
+      } else {
+        context.log.warn("[evidence] strategy missing — linkedin.json skipped");
+      }
     }
 
     // Hand off to router exactly once → afterevidence

@@ -1,4 +1,4 @@
-// /api/campaign-router/index.js — Gold v8.8 canonical prefix router (15-12-2025)
+// /api/campaign-router/index.js — Gold v8.9 canonical prefix router (15-12-2025)
 
 "use strict";
 
@@ -9,7 +9,8 @@ const {
   EVIDENCE_QUEUE_NAME,
   OUTLINE_QUEUE_NAME,
   WORKER_QUEUE_NAME,
-  WRITE_QUEUE_NAME
+  WRITE_QUEUE_NAME,
+  LINKEDIN_QUEUE_NAME
 } = require("../lib/campaign-queue");
 
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
@@ -89,8 +90,6 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
-    log("[router] afterstart → enqueue packsload", { runId, prefix, queue: PACKSLOAD_QUEUE_NAME });
-
     await enqueueTo(PACKSLOAD_QUEUE_NAME, {
       op: "run_packsload",
       runId,
@@ -116,13 +115,13 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
-    const {
-      industry_slug,
-      supplier_slug,
-      competitor_slugs
-    } = status.context || {};
-
-    log("[router] afterpacksload → enqueue markdown_pack", { runId, prefix, queue: MARKDOWN_QUEUE_NAME });
+    // ✅ IMPORTANT: prefer slugs provided by packsload message,
+    // fallback to status.context if present.
+    const industry_slug = msg.industry_slug ?? status?.context?.industry_slug ?? null;
+    const supplier_slug = msg.supplier_slug ?? status?.context?.supplier_slug ?? null;
+    const competitor_slugs = Array.isArray(msg.competitor_slugs)
+      ? msg.competitor_slugs
+      : (Array.isArray(status?.context?.competitor_slugs) ? status.context.competitor_slugs : []);
 
     await enqueueTo(MARKDOWN_QUEUE_NAME, {
       op: "run_markdown_pack",
@@ -152,8 +151,6 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
-    log("[router] aftermarkdown → enqueue evidence", { runId, prefix, queue: EVIDENCE_QUEUE_NAME });
-
     await enqueueTo(EVIDENCE_QUEUE_NAME, {
       op: "run_evidence",
       runId,
@@ -178,8 +175,6 @@ module.exports = async function (context, queueItem) {
       await persistStatus(container, statusPath, status);
       return;
     }
-
-    log("[router] afterevidence → enqueue outline", { runId, prefix, queue: OUTLINE_QUEUE_NAME });
 
     await enqueueTo(OUTLINE_QUEUE_NAME, {
       op: "run_outline",
@@ -206,8 +201,6 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
-    log("[router] afteroutline → enqueue worker", { runId, prefix, queue: WORKER_QUEUE_NAME });
-
     await enqueueTo(WORKER_QUEUE_NAME, {
       op: "run_strategy",
       runId,
@@ -233,8 +226,6 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
-    log("[router] afterworker → enqueue writer", { runId, prefix, queue: WRITE_QUEUE_NAME });
-
     await enqueueTo(WRITE_QUEUE_NAME, {
       op: "run_writer",
       runId,
@@ -250,16 +241,30 @@ module.exports = async function (context, queueItem) {
   }
 
   // ==============================================================
-  // 5. afterwrite → mark pipeline Completed
+  // 5. afterwrite → mark pipeline Completed AND enqueue LinkedIn (ONCE)
   // ==============================================================
   if (op === "afterwrite") {
     status.state = "completed";
     status.markers.pipelineCompleted = true;
     pushHistory(status, "completed");
 
+    // ✅ LinkedIn is downstream activation, does not change "completed"
+    if (!status.markers.linkedinEnqueued) {
+      await enqueueTo(LINKEDIN_QUEUE_NAME, {
+        op: "run_linkedin",
+        runId,
+        page,
+        prefix
+      });
+      status.markers.linkedinEnqueued = true;
+      pushHistory(status, "linkedin_queued");
+    } else {
+      pushHistory(status, "linkedin_skip", "already enqueued");
+    }
+
     await persistStatus(container, statusPath, status);
 
-    log("[router] afterwrite → pipeline Completed", { runId, prefix });
+    log("[router] afterwrite → completed (+linkedin if needed)", { runId, prefix });
     return;
   }
 

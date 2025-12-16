@@ -42,6 +42,7 @@
     "campaign-router",
     "campaign-markdown-pack",
     "campaign-packsload",
+    "campaign-linkedin",
     "campaign-write",
     "campaign-status",
     "campaign-fetch"

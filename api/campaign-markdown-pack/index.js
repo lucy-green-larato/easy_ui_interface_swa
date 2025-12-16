@@ -200,20 +200,29 @@ module.exports = async function (context, msg) {
   }
 
   // ---------------------------------------------------------------------------
-  // Competitor markdown
-  // ---------------------------------------------------------------------------
-  for (const slug of competitor_slugs) {
-    const path = `packs/competitor/${slug}.md`;
-    const txt = await readBlobText(input, path);
-    if (!txt) continue;
+// Competitor markdown
+// NOTE: competitors are company profiles stored in packs/supplier/
+// ---------------------------------------------------------------------------
+for (const slug of competitor_slugs) {
+  const path = `packs/supplier/${slug}.md`;
+  const txt = await readBlobText(input, path);
 
-    const items = parseMarkdown({
-      text: txt,
-      source_file: `input/${path}`,
-      scope: "industry"
+  if (!txt) {
+    context.log("[markdown_pack] competitor profile not found (expected)", {
+      slug,
+      path
     });
-    items.forEach(i => pack[i.bucket]?.push(i));
+    continue;
   }
+
+  const items = parseMarkdown({
+    text: txt,
+    source_file: `input/${path}`,
+    scope: "industry"
+  });
+
+  items.forEach(i => pack[i.bucket]?.push(i));
+}
 
   // ---------------------------------------------------------------------------
   // Write markdown_pack.json
