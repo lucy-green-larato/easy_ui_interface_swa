@@ -1,4 +1,4 @@
-// /api/lib/campaign-queue.js 16-12-2025 v7
+// /api/lib/campaign-queue.js 17-12-2025 v8
 // Canonical queue helper for Campaign apps.
 // - No manual Base64 encoding (SDK + Functions runtime handle that)
 // - Strict queue name validation
@@ -26,7 +26,7 @@ const PACKSLOAD_QUEUE_CANDIDATE =
 const MARKDOWN_QUEUE_CANDIDATE =
   process.env.Q_CAMPAIGN_MARKDOWN || "campaign-markdown-pack";
 
-  const LINKEDIN_QUEUE_CANDIDATE =
+const LINKEDIN_QUEUE_CANDIDATE =
   process.env.Q_CAMPAIGN_LINKEDIN || "campaign-linkedin";
 
 const EVIDENCE_QUEUE_CANDIDATE =
@@ -40,6 +40,14 @@ const WORKER_QUEUE_CANDIDATE =
 
 const WRITE_QUEUE_CANDIDATE =
   process.env.Q_CAMPAIGN_WRITE || "campaign-write";
+
+// 🔹 Phase 3 — Competitor enrichment
+const COMPETITOR_ENRICH_QUEUE_CANDIDATE =
+  process.env.Q_CAMPAIGN_COMPETITOR_ENRICH || "campaign-competitor-enrich-jobs";
+
+// 🔹 Phase 4 — Competitor scoring
+const COMPETITOR_SCORE_QUEUE_CANDIDATE =
+  process.env.Q_CAMPAIGN_COMPETITOR_SCORE || "campaign-competitor-score-jobs";
 
 // --------------------------------------------------
 // Queue name normalisation + validation
@@ -84,6 +92,10 @@ const OUTLINE_QUEUE_NAME = normaliseQueueName(OUTLINE_QUEUE_CANDIDATE);
 const WORKER_QUEUE_NAME = normaliseQueueName(WORKER_QUEUE_CANDIDATE);
 const WRITE_QUEUE_NAME = normaliseQueueName(WRITE_QUEUE_CANDIDATE);
 
+// 🔹 Phase 3 / 4 validated queues
+const COMPETITOR_ENRICH_QUEUE_NAME = normaliseQueueName(COMPETITOR_ENRICH_QUEUE_CANDIDATE);
+const COMPETITOR_SCORE_QUEUE_NAME = normaliseQueueName(COMPETITOR_SCORE_QUEUE_CANDIDATE);
+
 // All validated constants (used to skip re-validation)
 const VALIDATED_QUEUES = new Set([
   DEFAULT_QUEUE_NAME,
@@ -93,7 +105,9 @@ const VALIDATED_QUEUES = new Set([
   EVIDENCE_QUEUE_NAME,
   OUTLINE_QUEUE_NAME,
   WORKER_QUEUE_NAME,
-  WRITE_QUEUE_NAME
+  WRITE_QUEUE_NAME,
+  COMPETITOR_ENRICH_QUEUE_NAME,
+  COMPETITOR_SCORE_QUEUE_NAME
 ]);
 
 let _queueService;
@@ -169,22 +183,6 @@ async function enqueueTo(queueName, message, options = {}) {
   return send(name, message, options);
 }
 
-async function enqueueEvidence(message, options = {}) {
-  return send(EVIDENCE_QUEUE_NAME, message, options);
-}
-
-async function enqueueOutline(message, options = {}) {
-  return send(OUTLINE_QUEUE_NAME, message, options);
-}
-
-async function enqueueWorker(message, options = {}) {
-  return send(WORKER_QUEUE_NAME, message, options);
-}
-
-async function enqueueWrite(message, options = {}) {
-  return send(WRITE_QUEUE_NAME, message, options);
-}
-
 module.exports = {
   // queue name constants
   DEFAULT_QUEUE_NAME,
@@ -195,6 +193,8 @@ module.exports = {
   OUTLINE_QUEUE_NAME,
   WORKER_QUEUE_NAME,
   WRITE_QUEUE_NAME,
+  COMPETITOR_ENRICH_QUEUE_NAME,
+  COMPETITOR_SCORE_QUEUE_NAME,
 
   // low-level
   getQueueClient,
@@ -202,9 +202,5 @@ module.exports = {
   enqueueTo,
 
   // high-level convenience
-  enqueueStart,
-  enqueueEvidence,
-  enqueueOutline,
-  enqueueWorker,
-  enqueueWrite
+  enqueueStart
 };
