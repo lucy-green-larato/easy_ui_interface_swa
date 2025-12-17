@@ -1,6 +1,4 @@
-// /api/campaign-fetch/index.js 03-12-2025 v18
-// GET /api/campaign-fetch?runId=<id>&file=<campaign|evidence_log|csv|status|outline|sections|section>&name=<sectionName?>
-// Optional: &prefix=<container-relative override>
+// /api/campaign-fetch/index.js 17-12-2025 v19
 
 const { BlobServiceClient } = require("@azure/storage-blob");
 
@@ -55,19 +53,50 @@ const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
 
 // ---------- valid keys ----------
 const VALID_MAP = Object.freeze({
+  // ─────────────────────────────────────────
+  // FINAL CAMPAIGN OUTPUT
+  // ─────────────────────────────────────────
   campaign: "campaign.json",
+
+  // ─────────────────────────────────────────
+  // STRATEGY & VIABILITY (PHASE 2)
+  // ─────────────────────────────────────────
   campaign_strategy: "strategy_v2/campaign_strategy.json",
   "strategy_v2/campaign_strategy.json": "strategy_v2/campaign_strategy.json", // legacy UI safety
+  viability: "strategy_v2/viability.json",
+
+  // ─────────────────────────────────────────
+  // EVIDENCE & DIAGNOSTICS
+  // ─────────────────────────────────────────
   evidence: "evidence.json",
   evidence_log: "evidence_log.json",
   csv: "csv_normalized.json",
   csv_normalized: "csv_normalized.json",
-  status: "status.json",
-  outline: "outline.json",
-  viability: "strategy_v2/viability.json",
+
+  // ─────────────────────────────────────────
+  // BUYER LOGIC & NEEDS
+  // ─────────────────────────────────────────
   buyer_logic: "insights_v1/buyer_logic.json",
-  insights: "insights_v1/insights.json",
-  products_meta: "products_meta.json"
+  needs_map: "needs_map.json",
+
+  // ─────────────────────────────────────────
+  // COMPETITOR MODEL (DECLARED → ENRICHED → SCORED)
+  // ─────────────────────────────────────────
+  competitors: "competitors.json",
+  competitors_enriched: "competitors_enriched.json",
+  competitor_scores: "competitor_scores.json",
+
+  // ─────────────────────────────────────────
+  // ACTIVATION
+  // ─────────────────────────────────────────
+  linkedin: "linkedin.json",
+
+  // ─────────────────────────────────────────
+  // SUPPORTING / META
+  // ─────────────────────────────────────────
+  outline: "outline.json",
+  products_meta: "products_meta.json",
+  status: "status.json"
 });
 
 const SECTION_KEYS = [
@@ -246,16 +275,12 @@ module.exports = async function (context, req) {
     // campaign/evidence/outline may appear moments after status flips → tiny retry
     const shouldRetry = fileKey === "campaign" || fileKey === "evidence_log" || fileKey === "outline";
     const ok = await existsWithTinyRetry(blob, shouldRetry);
-    // ---- Viability is mandatory if requested ----
+    // ---- Viability is OPTIONAL ----
     if (fileKey === "viability" && !ok) {
       context.res = {
-        status: 500,
-        headers: { ...H, "content-type": "application/json" },
-        body: {
-          error: "viability_missing",
-          message:
-            "Viability analysis is mandatory but was not produced by the strategy phase. This indicates a pipeline execution failure."
-        }
+        status: 200,
+        headers: { ...H, "content-type": "application/json; charset=utf-8" },
+        body: null
       };
       return;
     }

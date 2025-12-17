@@ -1,6 +1,6 @@
 // /api/campaign-competitor-enrich/index.js
 // Phase 3 — Competitor enrichment (deterministic, non-evidence)
-// 17-12-2025 v1.1
+// 17-12-2025 v1.2
 
 "use strict";
 
@@ -162,19 +162,40 @@ module.exports = async function (context, queueItem) {
 
   const enriched = [];
 
-  for (const name of declared) {
-    const slug = slugify(name);
+  for (const c of declared) {
+    const name =
+      typeof c === "string"
+        ? c
+        : typeof c?.name === "string"
+          ? c.name
+          : "";
 
-    const mdEntry =
-      markdownPack?.competitors?.[slug] ||
-      markdownPack?.[slug] ||
-      null;
+    if (!name) continue;
 
-    const mdText =
-      typeof mdEntry === "string"
-        ? mdEntry
-        : (typeof mdEntry?.content === "string" ? mdEntry.content : null);
+    const slug =
+      typeof c?.slug === "string" && c.slug
+        ? c.slug
+        : slugify(name);
 
+
+    // Phase 3 join rule (deterministic):
+    // competitor markdown is the set of pack items whose source_file matches the competitor profile path
+    const expectedSourceFile = `input/packs/supplier/${slug}.md`;
+
+    const packArrays = Object.values(markdownPack || {}).filter(Array.isArray);
+
+    // Collect all markdown bullet items that came from this competitor's markdown file
+    const mdItems = [];
+    for (const arr of packArrays) {
+      for (const it of arr) {
+        if (it && typeof it === "object" && it.source_file === expectedSourceFile) {
+          // join uses only canonical fields already in the pack (no inference)
+          if (typeof it.text === "string" && it.text.trim()) mdItems.push(it.text.trim());
+        }
+      }
+    }
+
+    const mdText = mdItems.length ? mdItems.join("\n") : null;
     const facts = extractFactsFromMarkdown(mdText);
 
     enriched.push({
