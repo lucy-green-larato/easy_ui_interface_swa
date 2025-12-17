@@ -10,7 +10,8 @@ const {
   OUTLINE_QUEUE_NAME,
   WORKER_QUEUE_NAME,
   WRITE_QUEUE_NAME,
-  LINKEDIN_QUEUE_NAME
+  LINKEDIN_QUEUE_NAME,
+  COMPETITOR_SCORE_QUEUE_NAME
 } = require("../lib/campaign-queue");
 
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
@@ -222,31 +223,31 @@ module.exports = async function (context, queueItem) {
   }
 
   // ==============================================================
-// 2b. aftercompetitorscored → enqueue outline (ONCE)
-//      Phase 4b → Phase 5 transition
-// ==============================================================
+  // 2b. aftercompetitorscored → enqueue outline (ONCE)
+  //      Phase 4b → Phase 5 transition
+  // ==============================================================
 
-if (op === "aftercompetitorscored") {
-  if (status.markers.outlineEnqueued) {
-    log("[router] aftercompetitorscored: outline already enqueued; skipping");
-    pushHistory(status, "outline_skip", "already enqueued");
+  if (op === "aftercompetitorscored") {
+    if (status.markers.outlineEnqueued) {
+      log("[router] aftercompetitorscored: outline already enqueued; skipping");
+      pushHistory(status, "outline_skip", "already enqueued");
+      await persistStatus(container, statusPath, status);
+      return;
+    }
+
+    await enqueueTo(OUTLINE_QUEUE_NAME, {
+      op: "run_outline",
+      runId,
+      page,
+      prefix
+    });
+
+    status.markers.outlineEnqueued = true;
+    status.state = "outline_queued";
+    pushHistory(status, "outline_queued");
     await persistStatus(container, statusPath, status);
     return;
   }
-
-  await enqueueTo(OUTLINE_QUEUE_NAME, {
-    op: "run_outline",
-    runId,
-    page,
-    prefix
-  });
-
-  status.markers.outlineEnqueued = true;
-  status.state = "outline_queued";
-  pushHistory(status, "outline_queued");
-  await persistStatus(container, statusPath, status);
-  return;
-}
 
   // ==============================================================
   // 3. afteroutline → enqueue strategy WORKER (ONCE)
