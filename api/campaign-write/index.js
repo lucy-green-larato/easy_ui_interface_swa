@@ -1029,7 +1029,7 @@ module.exports = async function (context, queueItem) {
 
     const viabilityRaw = await readJsonIfExists(
       container,
-      `${prefix}strategy_v3/viability.json`
+      `${prefix}strategy_v2/viability.json`
     );
 
     const baseInput = await readJsonIfExists(

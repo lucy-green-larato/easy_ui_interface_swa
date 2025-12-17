@@ -64,7 +64,7 @@ const VALID_MAP = Object.freeze({
   csv_normalized: "csv_normalized.json",
   status: "status.json",
   outline: "outline.json",
-  viability: "strategy_v3/viability.json",
+  viability: "strategy_v2/viability.json",
   buyer_logic: "insights_v1/buyer_logic.json",
   insights: "insights_v1/insights.json",
   products_meta: "products_meta.json"

@@ -439,6 +439,19 @@ module.exports = async function (context, queueItem) {
     // Compute hash BEFORE writing (single source of truth)
     const strategyHash = sha256(stableStringify({ strategy_v2 }));
 
+    // Build viability (Phase 2 artefact)
+    const viability = buildViability({
+      evidence: combinedEvidence,
+      csvNormalized,
+      markdownPack
+    });
+
+    await putJson(
+      container,
+      `${prefix}strategy_v2/viability.json`,
+      viability
+    );
+
     // Read status.json once, update markers deterministically, write once
     const st0 = (await getJson(container, statusPath)) || { runId, markers: {}, history: [] };
     st0.markers = (st0.markers && typeof st0.markers === "object") ? st0.markers : {};
@@ -454,8 +467,8 @@ module.exports = async function (context, queueItem) {
 
     st0.history.push({
       at: new Date().toISOString(),
-      phase: "strategy_written",
-      note: changed ? "strategyChanged=true" : "strategyChanged=false"
+      phase: "viability_written",
+      note: viability.verdict.viable ? "viable" : "not_viable"
     });
 
     // Write output AFTER hash computed
@@ -464,18 +477,6 @@ module.exports = async function (context, queueItem) {
 
     // Persist status once (no clobber)
     await putJson(container, statusPath, st0);
-
-    const viability = buildViability({
-      evidence: combinedEvidence,
-      csvNormalized,
-      markdownPack
-    });
-
-    await putJson(
-      container,
-      `${prefix}strategy_v2/viability.json`,
-      viability
-    );
 
     // Notify router
     await enqueueTo(ROUTER_QUEUE, {

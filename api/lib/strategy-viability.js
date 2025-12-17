@@ -2,7 +2,7 @@
 // Strategy viability engine
 // - Deterministic, no LLM.
 // - Reads strategy_v2 + buyer_logic + csv_normalized-style meta.
-// - Emits strategy_v3/viability.json (3-grade: A/B/C) with warnings
+// - Emits strategy_v2/viability.json (3-grade: A/B/C) with warnings
 //   mapped to UI tabs (Exec summary, Go-to-market, Offering, Sales enablement, Proof points).
 
 const VERSION = "strategy-viability@2025-11-27-v1";
@@ -633,7 +633,7 @@ async function writeStrategyViability({
 }
 
   await container.uploadBlockBlob(
-    `${prefix}strategy_v3/viability.json`,
+    `${prefix}strategy_v2/viability.json`,
     Buffer.from(JSON.stringify(viability, null, 2)),
     Buffer.byteLength(JSON.stringify(viability))
   );

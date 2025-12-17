@@ -30,12 +30,12 @@ const ajv = new Ajv({ allErrors: true, strict: false });
 // They live under api/schemas/phase1/ and are intentionally explicit
 // rather than auto discovered, so changes are deliberate and traceable.
 
-const evidenceSchema      = require("../schemas/phase1/evidence.json");
-const evidenceLogSchema   = require("../schemas/phase1/evidence_log.json");
+const evidenceSchema = require("../schemas/phase1/evidence.json");
+const evidenceLogSchema = require("../schemas/phase1/evidence_log.json");
 const csvNormalizedSchema = require("../schemas/phase1/csv_normalized.json");
-const markdownPackSchema  = require("../schemas/phase1/markdown_pack.json");
-const insightsSchema      = require("../schemas/phase1/insights.json");
-const buyerLogicSchema    = require("../schemas/phase1/buyer_logic.json");
+const markdownPackSchema = require("../schemas/phase1/markdown_pack.json");
+const insightsSchema = require("../schemas/phase1/insights.json");
+const buyerLogicSchema = require("../schemas/phase1/buyer_logic.json");
 
 // Logical validator keys:
 // These are the canonical names used by this module.
@@ -86,29 +86,29 @@ function resolveValidatorKey(kind) {
 
 /**
  * validateAndWarn(kind, data, logFn?)
- *
- * Validate a Phase 1 artefact against its JSON Schema.
- *
- * Parameters:
- *   kind   - logical artefact name, eg "evidence", "csv_normalized",
- *            "markdown_pack", "insights", "buyer_logic".
- *            Versioned aliases are also accepted:
- *            "insights_v1", "buyer_logic_v1", "markdown_pack_v2".
- *
- *   data   - JavaScript object to validate.
- *
- *   logFn  - optional logging function. Defaults to console.warn.
- *            In Azure Functions you can pass context.log for structured logs.
- *
- * Returns:
- *   true   - if either there is no validator for this kind OR validation passes.
- *   false  - if validation fails (and a warning is logged).
- *
- * Notes:
- *   - This function never throws on validation failure.
- *   - It is intentionally non fatal. Callers decide whether to treat a
- *     warning as an error for their own phase.
- */
+  *
+   * Validate a Phase 1 artefact against its JSON Schema.
+    *
+     * Parameters:
+      *   kind   - logical artefact name, eg "evidence", "csv_normalized",
+       *            "markdown_pack", "insights", "buyer_logic".
+        *            Versioned aliases are also accepted:
+         *            "insights_v1", "buyer_logic_v1", "markdown_pack_v2".
+          *
+           *   data   - JavaScript object to validate.
+            *
+             *   logFn  - optional logging function. Defaults to console.warn.
+              *            In Azure Functions you can pass context.log for structured logs.
+               *
+                * Returns:
+                 *   true   - if either there is no validator for this kind OR validation passes.
+                  *   false  - if validation fails (and a warning is logged).
+                   *
+                    * Notes:
+                     *   - This function never throws on validation failure.
+                      *   - It is intentionally non fatal. Callers decide whether to treat a
+                       *     warning as an error for their own phase.
+                        */
 function validateAndWarn(kind, data, logFn = console.warn) {
   const key = resolveValidatorKey(kind);
   if (!key) {

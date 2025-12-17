@@ -41,11 +41,10 @@ const WORKER_QUEUE_CANDIDATE =
 const WRITE_QUEUE_CANDIDATE =
   process.env.Q_CAMPAIGN_WRITE || "campaign-write";
 
-// 🔹 Phase 3 — Competitor enrichment
+// NEW: Phase 3/4 competitor queues
 const COMPETITOR_ENRICH_QUEUE_CANDIDATE =
   process.env.Q_CAMPAIGN_COMPETITOR_ENRICH || "campaign-competitor-enrich-jobs";
 
-// 🔹 Phase 4 — Competitor scoring
 const COMPETITOR_SCORE_QUEUE_CANDIDATE =
   process.env.Q_CAMPAIGN_COMPETITOR_SCORE || "campaign-competitor-score-jobs";
 
@@ -92,7 +91,7 @@ const OUTLINE_QUEUE_NAME = normaliseQueueName(OUTLINE_QUEUE_CANDIDATE);
 const WORKER_QUEUE_NAME = normaliseQueueName(WORKER_QUEUE_CANDIDATE);
 const WRITE_QUEUE_NAME = normaliseQueueName(WRITE_QUEUE_CANDIDATE);
 
-// 🔹 Phase 3 / 4 validated queues
+// NEW
 const COMPETITOR_ENRICH_QUEUE_NAME = normaliseQueueName(COMPETITOR_ENRICH_QUEUE_CANDIDATE);
 const COMPETITOR_SCORE_QUEUE_NAME = normaliseQueueName(COMPETITOR_SCORE_QUEUE_CANDIDATE);
 
@@ -139,10 +138,11 @@ function getQueueClient(queueName = DEFAULT_QUEUE_NAME) {
 const _createdQueues = new Set();
 
 async function ensureQueue(queueName = DEFAULT_QUEUE_NAME) {
-  const q = getQueueClient(queueName);
-  if (!_createdQueues.has(queueName)) {
+  const name = normaliseQueueName(queueName || DEFAULT_QUEUE_NAME);
+  const q = getQueueClient(name);
+  if (!_createdQueues.has(name)) {
     await q.createIfNotExists();
-    _createdQueues.add(queueName);
+    _createdQueues.add(name);
   }
   return q;
 }
@@ -183,6 +183,22 @@ async function enqueueTo(queueName, message, options = {}) {
   return send(name, message, options);
 }
 
+async function enqueueEvidence(message, options = {}) {
+  return send(EVIDENCE_QUEUE_NAME, message, options);
+}
+
+async function enqueueOutline(message, options = {}) {
+  return send(OUTLINE_QUEUE_NAME, message, options);
+}
+
+async function enqueueWorker(message, options = {}) {
+  return send(WORKER_QUEUE_NAME, message, options);
+}
+
+async function enqueueWrite(message, options = {}) {
+  return send(WRITE_QUEUE_NAME, message, options);
+}
+
 module.exports = {
   // queue name constants
   DEFAULT_QUEUE_NAME,
@@ -193,6 +209,8 @@ module.exports = {
   OUTLINE_QUEUE_NAME,
   WORKER_QUEUE_NAME,
   WRITE_QUEUE_NAME,
+
+  // NEW: competitor queues
   COMPETITOR_ENRICH_QUEUE_NAME,
   COMPETITOR_SCORE_QUEUE_NAME,
 
@@ -202,5 +220,9 @@ module.exports = {
   enqueueTo,
 
   // high-level convenience
-  enqueueStart
+  enqueueStart,
+  enqueueEvidence,
+  enqueueOutline,
+  enqueueWorker,
+  enqueueWrite
 };

@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://larato.co.uk/schemas/viability-v1.schema.json",
+  "title": "viability-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "generated_at", "inputs", "signals", "verdict"],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "viability-v1",
+      "description": "Viability contract version identifier."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when viability.json was generated."
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "csv_rows",
+        "has_case_studies",
+        "has_supplier_profile",
+        "has_competitor_context"
+      ],
+      "properties": {
+        "csv_rows": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Row count of the normalised CSV cohort used for strategy."
+        },
+        "has_case_studies": {
+          "type": "boolean",
+          "description": "True if any case studies are present in deterministic inputs."
+        },
+        "has_supplier_profile": {
+          "type": "boolean",
+          "description": "True if supplier markdown or structured supplier profile data exists."
+        },
+        "has_competitor_context": {
+          "type": "boolean",
+          "description": "True if competitor context exists (e.g. competitor markdown/enrich/score outputs)."
+        }
+      }
+    },
+    "signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["market_size", "evidence_strength", "differentiation_clarity"],
+      "properties": {
+        "market_size": {
+          "type": "string",
+          "enum": ["none", "small", "medium", "large"],
+          "description": "Deterministic market size signal derived from CSV cohort size or other non-LLM rules."
+        },
+        "evidence_strength": {
+          "type": "string",
+          "enum": ["none", "weak", "moderate", "strong"],
+          "description": "Deterministic evidence strength signal derived from claims coverage and quality markers."
+        },
+        "differentiation_clarity": {
+          "type": "string",
+          "enum": ["none", "partial", "clear"],
+          "description": "Deterministic clarity signal derived from presence and completeness of differentiators and competitor context."
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["viable", "confidence", "constraints"],
+      "properties": {
+        "viable": {
+          "type": "boolean",
+          "description": "Conservative deterministic viability flag."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["low", "medium", "high"],
+          "description": "Confidence in viability given deterministic signals."
+        },
+        "constraints": {
+          "type": "array",
+          "description": "Human-readable constraints derived deterministically from missing inputs or weak signals.",
+          "items": { "type": "string" },
+          "default": []
+        }
+      }
+    },
+    "debug": {
+      "type": "object",
+      "description": "Optional diagnostic block for deterministic computations. Safe to omit.",
+      "additionalProperties": true
+    }
+  }
+}
