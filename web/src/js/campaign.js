@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 15-12-2025 v32
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 15-12-2025 v33
    Gold schema aware:
    - Understands "Gold Campaign" contract shape (executive_summary, value_proposition,
      messaging_matrix, sales_enablement, go_to_market_plan, 
@@ -134,7 +134,7 @@ window.CampaignUI = window.CampaignUI || {};
         console.warn("[UI] resultsBaseUrl is not absolute:", base);
       }
 
-      const url = `${base}${p}strategy_v3/viability.json`;
+      const url = `${base}${p}strategy_v2/viability.json`;
 
       console.log("[UI] viability url:", url);
 
@@ -1720,40 +1720,70 @@ window.CampaignUI = window.CampaignUI || {};
   function detectPreferredTab(contract) {
     if (!contract || typeof contract !== "object") return null;
 
+    // -------------------------
+    // 0) WRITER OUTPUT FIRST
+    // -------------------------
+    // If the writer produced Gold/sections content, default to Executive Summary.
+    // This prevents "completed but looks empty" when strategy_v2 is sparse.
+    const hasWriterSections =
+      (contract.sections && typeof contract.sections === "object" && Object.keys(contract.sections).length > 0) ||
+      (contract.executive_summary && typeof contract.executive_summary === "object") ||
+      (contract.value_proposition && typeof contract.value_proposition === "object") ||
+      (contract.go_to_market_plan && typeof contract.go_to_market_plan === "object") ||
+      (contract.sales_enablement && typeof contract.sales_enablement === "object");
+
+    if (hasWriterSections) return "exec";
+
     const sv2 = contract.strategy_v2 || {};
 
-    // 1. Executive summary (story spine)
+    // -------------------------
+    // 1) STRATEGY V2 (PHASE 2)
+    // -------------------------
+    // Executive summary (story spine)
     if (sv2.story_spine) return "exec";
 
-    // 2. GTM strategy (primary Gold block)
-    if (sv2.gtm_strategy ||
+    // GTM strategy
+    if (
+      sv2.gtm_strategy ||
       sv2.where_to_play ||
       sv2.how_to_win ||
-      sv2.competitive_context) {
+      sv2.competitive_context
+    ) {
       return "gtm";
     }
 
-    // 3. Buyer strategy / messaging
+    // Buyer strategy / messaging
     if (sv2.buyer_strategy || sv2.personas || sv2.messages) {
       return "msg";
     }
 
-    // 4. Value proposition / differentiation
-    if (sv2.value_proposition ||
-      sv2.value_prop_moore ||
-      sv2.right_to_play) {
+    // Value proposition / differentiation
+    if (sv2.value_proposition || sv2.value_prop_moore || sv2.right_to_play) {
       return "off";
     }
 
-    // 5. Case studies / proof points
+    // Case studies / proof points
     if (sv2.proof_points || sv2.case_studies) {
       return "pp";
     }
 
-    // 6. Sales enablement updates
-    if (contract.sales_enablement) {
-      return "se";
-    }
+    // -------------------------
+    // 2) SALES ENABLEMENT (ANY SHAPE)
+    // -------------------------
+    if (contract.sales_enablement) return "se";
+
+    // -------------------------
+    // 3) FALLBACK SIGNALS
+    // -------------------------
+    // If viability was loaded, it's useful to surface it.
+    if (state?.viability) return "viab";
+
+    // If we at least have evidence, show evidence log rather than an empty exec panel.
+    const hasEvidence =
+      (Array.isArray(contract.evidence_log) && contract.evidence_log.length) ||
+      (Array.isArray(state?.evidence) && state.evidence.length);
+
+    if (hasEvidence) return "elog";
 
     return null; // fall back to default ("exec")
   }
@@ -1788,8 +1818,9 @@ window.CampaignUI = window.CampaignUI || {};
         UI.log("Evidence load failed completely: " + (e2?.message || e2));
       }
     }
+
     try {
-      let prefix =
+      const prefix =
         contract?._meta?.source_prefix ||
         contract?.source_prefix ||
         contract?.prefix ||
@@ -1799,14 +1830,19 @@ window.CampaignUI = window.CampaignUI || {};
         UI.log("[UI] viability skipped: no canonical prefix present");
       } else if (typeof loadViability === "function") {
         await loadViability(prefix);
-        UI.log("[UI] viability loaded OK");
+
+        if (state.viability) {
+          UI.log("[UI] viability loaded OK");
+        } else {
+          UI.log("[UI] viability not present (allowed)");
+        }
       } else {
         UI.log("[UI] viability loader missing");
       }
     } catch (err) {
-      UI.log("viability load failed: " + (err?.message || err));
+      console.warn("[UI] viability load failed (non-fatal)", err);
+      UI.log("[UI] viability load failed (non-fatal)");
     }
-
 
     window.CampaignUI?.setContract?.(contract, { evidence: evidenceItems });
     try {

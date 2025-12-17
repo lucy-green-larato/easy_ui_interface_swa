@@ -1189,7 +1189,17 @@ module.exports = async function (context, job) {
       if (competitors.length) {
         const rel = `${prefix}competitors.json`;
         try {
-          await putJson(container, rel, { competitors });
+          await putJson(container, rel, {
+            schema: "competitors-v1",
+            source: "user-input",
+            declared_at: new Date().toISOString(),
+            competitors: competitors.map(name => ({
+              name,
+              slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+              status: "declared",
+              evidence_claim_ids: []
+            }))
+          });
         } catch { /* non-fatal */ }
 
         safePushIfRoom(

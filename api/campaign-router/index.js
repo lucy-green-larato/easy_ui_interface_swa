@@ -1,4 +1,4 @@
-// /api/campaign-router/index.js — Gold v9.0 canonical prefix router (16-12-2025)
+// /api/campaign-router/index.js — Gold v9.2 canonical prefix router (17-12-2025) 
 
 "use strict";
 
@@ -19,6 +19,11 @@ const RESULTS_CONTAINER =
   process.env.CAMPAIGN_RESULTS_CONTAINER ||
   process.env.RESULTS_CONTAINER ||
   "results";
+
+// ✅ Phase 3 queue: local constant so router works even if lib/campaign-queue is unchanged
+const COMPETITOR_ENRICH_QUEUE_NAME =
+  process.env.Q_CAMPAIGN_COMPETITOR_ENRICH ||
+  "campaign-competitor-enrich-jobs";
 
 // ---------- helpers ----------
 function parseQueueItem(queueItem) {
@@ -115,8 +120,7 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
-    // ✅ IMPORTANT: prefer slugs provided by packsload message,
-    // fallback to status.context if present.
+    // Prefer slugs provided by packsload message, fallback to status.context
     const industry_slug = msg.industry_slug ?? status?.context?.industry_slug ?? null;
     const supplier_slug = msg.supplier_slug ?? status?.context?.supplier_slug ?? null;
     const competitor_slugs = Array.isArray(msg.competitor_slugs)
@@ -151,20 +155,6 @@ module.exports = async function (context, queueItem) {
       return;
     }
 
-    //LinkedIn reference ingestion
-    if (!status.markers.linkedinEnqueued) {
-      await enqueueTo(LINKEDIN_QUEUE_NAME, {
-        op: "run_linkedin_activation",
-        runId,
-        page,
-        prefix
-      });
-      status.markers.linkedinEnqueued = true;
-      pushHistory(status, "linkedin_queued");
-    } else {
-      pushHistory(status, "linkedin_skip", "already enqueued");
-    }
-
     await enqueueTo(EVIDENCE_QUEUE_NAME, {
       op: "run_evidence",
       runId,
@@ -180,29 +170,83 @@ module.exports = async function (context, queueItem) {
   }
 
   // ==============================================================
-  // 2. afterevidence → enqueue outline (ONCE)
+  // 2. afterevidence → enqueue competitor enrichment (PHASE 3) (ONCE)
   // ==============================================================
   if (op === "afterevidence") {
-    if (status.markers.outlineEnqueued) {
-      log("[router] afterevidence: outline already enqueued; skipping");
-      pushHistory(status, "outline_skip", "already enqueued");
+    if (status.markers.competitorEnrichEnqueued) {
+      log("[router] afterevidence: competitor enrichment already enqueued; skipping");
+      pushHistory(status, "competitor_enrich_skip", "already enqueued");
       await persistStatus(container, statusPath, status);
       return;
     }
 
-    await enqueueTo(OUTLINE_QUEUE_NAME, {
-      op: "run_outline",
+    await enqueueTo(COMPETITOR_ENRICH_QUEUE_NAME, {
+      op: "enrich_competitors",
       runId,
       page,
       prefix
     });
 
-    status.markers.outlineEnqueued = true;
-    status.state = "outline_queued";
-    pushHistory(status, "outline_queued");
+    status.markers.competitorEnrichEnqueued = true;
+    status.state = "competitor_enrich_queued";
+    pushHistory(status, "competitor_enrich_queued");
     await persistStatus(container, statusPath, status);
     return;
   }
+
+  // ==============================================================
+  // 2a. aftercompetitorenrich → enqueue competitor scoring (ONCE)
+  //      Phase 4a — deterministic competitor scoring
+  // ==============================================================
+
+  if (op === "aftercompetitorenrich") {
+    if (status.markers.competitorScoreEnqueued) {
+      log("[router] aftercompetitorenrich: competitor scoring already enqueued; skipping");
+      pushHistory(status, "competitor_scoring_skip", "already enqueued");
+      await persistStatus(container, statusPath, status);
+      return;
+    }
+
+    await enqueueTo(COMPETITOR_SCORE_QUEUE_NAME, {
+      op: "score_competitors",
+      runId,
+      page,
+      prefix
+    });
+
+    status.markers.competitorScoreEnqueued = true;
+    status.state = "competitor_scoring_queued";
+    pushHistory(status, "competitor_scoring_queued");
+    await persistStatus(container, statusPath, status);
+    return;
+  }
+
+  // ==============================================================
+// 2b. aftercompetitorscored → enqueue outline (ONCE)
+//      Phase 4b → Phase 5 transition
+// ==============================================================
+
+if (op === "aftercompetitorscored") {
+  if (status.markers.outlineEnqueued) {
+    log("[router] aftercompetitorscored: outline already enqueued; skipping");
+    pushHistory(status, "outline_skip", "already enqueued");
+    await persistStatus(container, statusPath, status);
+    return;
+  }
+
+  await enqueueTo(OUTLINE_QUEUE_NAME, {
+    op: "run_outline",
+    runId,
+    page,
+    prefix
+  });
+
+  status.markers.outlineEnqueued = true;
+  status.state = "outline_queued";
+  pushHistory(status, "outline_queued");
+  await persistStatus(container, statusPath, status);
+  return;
+}
 
   // ==============================================================
   // 3. afteroutline → enqueue strategy WORKER (ONCE)
@@ -255,15 +299,37 @@ module.exports = async function (context, queueItem) {
   }
 
   // ==============================================================
-  // 5. afterwrite → mark pipeline Completed AND enqueue LinkedIn (ONCE)
+  // 5. afterwrite → mark Completed AND enqueue LinkedIn (doctrine-gated) (ONCE)
   // ==============================================================
   if (op === "afterwrite") {
     status.state = "completed";
     status.markers.pipelineCompleted = true;
     pushHistory(status, "completed");
+
+    // ✅ Doctrine: LinkedIn is downstream activation only,
+    // gated by status.markers.strategyChanged === true
+    const strategyChanged = status?.markers?.strategyChanged === true;
+
+    if (strategyChanged) {
+      if (!status.markers.linkedinEnqueued) {
+        await enqueueTo(LINKEDIN_QUEUE_NAME, {
+          op: "run_linkedin_activation",
+          runId,
+          page,
+          prefix
+        });
+        status.markers.linkedinEnqueued = true;
+        pushHistory(status, "linkedin_queued", "strategyChanged=true");
+      } else {
+        pushHistory(status, "linkedin_skip", "already enqueued");
+      }
+    } else {
+      pushHistory(status, "linkedin_skip", "strategyChanged=false");
+    }
+
     await persistStatus(container, statusPath, status);
 
-    log("[router] afterwrite → completed (+linkedin if needed)", { runId, prefix });
+    log("[router] afterwrite → completed (+linkedin gated)", { runId, prefix, strategyChanged });
     return;
   }
 
