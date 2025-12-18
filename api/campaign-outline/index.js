@@ -1,5 +1,5 @@
 // /api/campaign-outline/index.js
-// Clean rewrite 08-12-2025 — fully aligned with shared storage + shared status + router logic. V4
+// 08-12-2025 — fully aligned with shared storage + shared status + router logic. V4
 
 const { enqueueTo } = require("../lib/campaign-queue");
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");

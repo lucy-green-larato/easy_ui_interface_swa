@@ -1,4 +1,4 @@
-// /api/campaign-write/index.js // 14-12-2025 Gold Writer v8.5
+// /api/campaign-write/index.js // 18-12-2025 Gold Writer v8.6
 // Responsibility:
 //   - Read strategy_v2 (campaign_strategy.json) produced by campaign-worker.
 //   - Read outline.json (campaign-outline) as evidence/competitor intelligence.
@@ -17,7 +17,6 @@
 "use strict";
 
 const { BlobServiceClient } = require("@azure/storage-blob");
-const { canonicalPrefix } = require("../lib/prefix");
 
 const RESULTS_CONTAINER =
   process.env.CAMPAIGN_RESULTS_CONTAINER ||

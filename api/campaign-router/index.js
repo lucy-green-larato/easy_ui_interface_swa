@@ -1,4 +1,4 @@
-// /api/campaign-router/index.js — Gold v9.2 canonical prefix router (17-12-2025) 
+// /api/campaign-router/index.js — Gold v9.3 canonical prefix router (18-12-2025) 
 
 "use strict";
 

@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 16-12-2025 — v62
+// /api/campaign-evidence/index.js 18-12-2025 — v63
 // -----------------------------------------------------------------------------
 // PHASE BOUNDARY NOTE
 //
@@ -13,7 +13,6 @@
 // never influence its construction.
 
 const { validateAndWarn } = require("../shared/schemaValidators");
-const { canonicalPrefix } = require("../lib/prefix");
 const { enqueueTo } = require("../lib/campaign-queue");
 const { nowIso } = require("../shared/utils");
 const {
@@ -230,69 +229,87 @@ module.exports = async function (context, job) {
   // --------------------------------------------------------------
 
   const container = await getResultsContainerClient();
-  const msg = (typeof job === "string")
-    ? (() => { try { return JSON.parse(job); } catch { return {}; } })()
-    : (job && typeof job === "object" ? job : {});
 
-  let runId = (msg.runId && String(msg.runId)) || null;
+  // -------------------------------
+  // Parse queue message (robust)
+  // -------------------------------
+  const msg =
+    typeof job === "string"
+      ? (() => { try { return JSON.parse(job); } catch { return {}; } })()
+      : (job && typeof job === "object" ? job : {});
 
-  let input = msg.input || msg.inputs || msg || {};
-  if (input == null || typeof input !== "object") input = {};
-  if (!runId) {
-    runId = msg.runId || msg.run_id || null;
+  // -------------------------------
+  // PREFIX — SINGLE SOURCE OF TRUTH
+  // -------------------------------
+  if (!msg.prefix || typeof msg.prefix !== "string") {
+    throw new Error("EvidenceDigest: missing canonical prefix in queue message");
   }
+
+  // Accept prefix as immutable run identity
+  let prefix = String(msg.prefix);
+
+  // Representation normalisation ONLY (no recomputation)
+  prefix = prefix.replace(/^\/+/, "");
+  if (prefix.startsWith(`${RESULTS_CONTAINER}/`)) {
+    prefix = prefix.slice(`${RESULTS_CONTAINER}/`.length);
+  }
+  if (!prefix.endsWith("/")) {
+    prefix += "/";
+  }
+
+  // Freeze to prevent accidental mutation
+  Object.freeze(prefix);
+
+  // -------------------------------
+  // runId — derived for logging only
+  // -------------------------------
+  let runId =
+    (typeof msg.runId === "string" && msg.runId.trim()) ||
+    (typeof msg.run_id === "string" && msg.run_id.trim()) ||
+    null;
+
   if (!runId) {
     try {
-      const maybePrefix = msg.prefix || "";
-      const parts = String(maybePrefix).split("/").filter(Boolean);
-      if (parts.length >= 7) runId = parts[parts.length - 1];
-    } catch { }
+      const parts = prefix.split("/").filter(Boolean);
+      if (parts.length) runId = parts[parts.length - 1];
+    } catch { /* noop */ }
   }
+
   if (!runId) runId = "unknown";
 
-  const userId = msg.userId || msg.user || "anonymous";
-  const page = msg.page || "campaign";
-  const date = msg.date ? new Date(msg.date) : undefined;
-  let prefix = canonicalPrefix({ userId, page, runId, date });
-  if (!prefix.endsWith("/")) prefix += "/";
-  if (!runId) {
-    if (typeof prefix === "string") {
-      const parts = prefix.split("/").filter(Boolean);
-      if (parts.length >= 7) {
-        runId = parts[parts.length - 1];
-      }
-    }
-    if (!runId) {
-      runId = "unknown";
-    }
-  }
+  // -------------------------------
+  // Input object (hydration allowed)
+  // -------------------------------
+  let input = msg.input || msg.inputs || {};
+  if (!input || typeof input !== "object") input = {};
+
   try {
     const persisted = await getJson(container, `${prefix}input.json`);
     if (persisted && typeof persisted === "object") {
       const keys = [
-        "csvSummary", "csvText", "selected_industry", "buyer_industry", "campaign_industry",
-        "relevant_competitors", "competitors", "supplier_website", "company_website", "prospect_website"
+        "csvSummary",
+        "csvText",
+        "selected_industry",
+        "buyer_industry",
+        "campaign_industry",
+        "relevant_competitors",
+        "competitors",
+        "supplier_website",
+        "company_website",
+        "prospect_website"
       ];
+
       for (const k of keys) {
-        if (input[k] == null || (typeof input[k] === "string" && input[k].trim() === "")) {
+        if (
+          input[k] == null ||
+          (typeof input[k] === "string" && input[k].trim() === "")
+        ) {
           input[k] = persisted[k] ?? input[k];
         }
       }
-      if (!input.csvSummary && persisted.csvSummary) input.csvSummary = persisted.csvSummary;
-      if (!input.csvText && persisted.csvText) input.csvText = persisted.csvText;
     }
   } catch {
-    // non-fatal; continue
-  }
-
-  if (prefix.startsWith(`${RESULTS_CONTAINER}/`)) {
-    prefix = prefix.slice(`${RESULTS_CONTAINER}/`.length);
-  }
-  if (prefix.startsWith("/")) {
-    prefix = prefix.replace(/^\/+/, "");
-  }
-  if (!prefix.endsWith("/")) {
-    prefix = `${prefix}/`;
+    // Non-fatal; continue with msg input
   }
 
   async function loadSupplierProfileClaims() {
