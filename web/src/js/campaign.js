@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — Gold-only UI (v2.0) 19-12-2025. 
+/* /src/js/campaign.js — Gold-only UI (v2.1) 19-12-2025.
    Purpose:
    - Render campaign.json written by Phase 3 writer
    - No legacy support
@@ -226,6 +226,24 @@
   };
 
   // ---------------------------------------------------------------------------
+  // Go button enable/disable logic (CSV OR recent run, and no CSV error)
+  // ---------------------------------------------------------------------------
+  function updateGo() {
+    const go = document.getElementById("goBtn");
+    if (!go) return;
+
+    const csvInput = document.getElementById("csvUpload");
+    const runSelect = document.getElementById("runSelect");
+    const csvErrorBanner = document.getElementById("csvErrorBanner");
+
+    const hasCsv = !!(csvInput && csvInput.files && csvInput.files.length > 0);
+    const hasRecent = !!(runSelect && runSelect.value && runSelect.value.trim() !== "");
+    const hasError = !!(csvErrorBanner && csvErrorBanner.style.display !== "none");
+
+    go.disabled = !(hasCsv || hasRecent) || hasError;
+  }
+
+  // ---------------------------------------------------------------------------
   // Boot
   // ---------------------------------------------------------------------------
   document.addEventListener("DOMContentLoaded", () => {
@@ -251,7 +269,6 @@
     const industryCustom = document.getElementById("buyerIndustryCustom");
 
     if (industrySelect && industryCustom) {
-      // Initial state
       const syncIndustryUI = () => {
         if (industrySelect.value === "__custom") {
           industryCustom.style.display = "block";
@@ -263,7 +280,18 @@
       };
 
       syncIndustryUI();
-      industrySelect.addEventListener("change", syncIndustryUI);
+      industrySelect.addEventListener("change", () => {
+        syncIndustryUI();
+        updateGo();
+      });
+    }
+
+    // --------------------------------------------------
+    // Recent run selector must also unlock Go
+    // --------------------------------------------------
+    const runSelect = document.getElementById("runSelect");
+    if (runSelect) {
+      runSelect.addEventListener("change", updateGo);
     }
 
     // --------------------------------------------------
@@ -276,7 +304,7 @@
       csvInput.addEventListener("change", async () => {
         const file = csvInput.files && csvInput.files[0];
 
-        // Reset error state FIRST (this unlocks Go)
+        // Reset error state FIRST
         if (csvErrorBanner) {
           csvErrorBanner.style.display = "none";
           csvErrorBanner.textContent = "";
@@ -284,11 +312,11 @@
 
         if (!file) {
           if (csvBadge) csvBadge.textContent = "(no file)";
-          updateGo?.();
+          updateGo();
           return;
         }
 
-        // Badge update immediately (fixes UI confusion)
+        // Badge update immediately
         if (csvBadge) {
           const kb = Math.round(file.size / 1024);
           csvBadge.textContent = `${file.name} (${kb} KB)`;
@@ -312,7 +340,6 @@
             csvErrorBanner.style.display = "none";
             csvErrorBanner.textContent = "";
           }
-
         } catch (err) {
           if (csvErrorBanner) {
             csvErrorBanner.textContent = "CSV error: " + (err.message || err);
@@ -324,13 +351,13 @@
         }
 
         // CRITICAL: re-evaluate Go button state
-        updateGo?.();
+        updateGo();
       });
     }
 
     // -----------------------------
     // Initial Go button evaluation
     // -----------------------------
-    updateGo?.();
+    updateGo();
   });
 })();
