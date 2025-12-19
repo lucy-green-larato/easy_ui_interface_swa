@@ -231,6 +231,32 @@
   document.addEventListener("DOMContentLoaded", () => {
     mountTabs();
     renderExecutiveSummary();
-  });
 
+    // --------------------------------------------------
+    // Buyer industry selector — explicit custom handling
+    // --------------------------------------------------
+    const industrySelect = document.getElementById("buyerIndustrySelect");
+    const industryCustom = document.getElementById("buyerIndustryCustom");
+
+    if (industrySelect && industryCustom) {
+      // Initial state on page load
+      if (industrySelect.value === "__custom") {
+        industryCustom.style.display = "block";
+      } else {
+        industryCustom.style.display = "none";
+        industryCustom.value = "";
+      }
+
+      // Toggle custom input on change
+      industrySelect.addEventListener("change", () => {
+        if (industrySelect.value === "__custom") {
+          industryCustom.style.display = "block";
+          industryCustom.focus();
+        } else {
+          industryCustom.style.display = "none";
+          industryCustom.value = "";
+        }
+      });
+    }
+  });
 })();
