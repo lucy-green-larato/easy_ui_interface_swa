@@ -21,9 +21,10 @@
 const Ajv = require("ajv");
 
 // Ajv configuration:
-// - allErrors: true → collect all validation issues
-// - strict: false → tolerate small schema quirks while you iterate
-const ajv = new Ajv({ allErrors: true, strict: false });
+const ajv = new Ajv({
+  allErrors: true,
+  strict: false
+});
 
 // --- Phase 1 schemas ---
 // These files define the canonical shapes for the Phase 1 artefacts.
@@ -78,64 +79,57 @@ const ALIASES = {
 // Resolve a validator key from a requested kind, taking aliases into account.
 function resolveValidatorKey(kind) {
   if (!kind) return null;
-  if (validators[kind]) return kind;
-  const alias = ALIASES[kind];
+  const k = String(kind).toLowerCase();
+  if (validators[k]) return k;
+  const alias = ALIASES[k];
   if (alias && validators[alias]) return alias;
   return null;
 }
 
-/**
- * validateAndWarn(kind, data, logFn?)
-  *
-   * Validate a Phase 1 artefact against its JSON Schema.
-    *
-     * Parameters:
-      *   kind   - logical artefact name, eg "evidence", "csv_normalized",
-       *            "markdown_pack", "insights", "buyer_logic".
-        *            Versioned aliases are also accepted:
-         *            "insights_v1", "buyer_logic_v1", "markdown_pack_v2".
-          *
-           *   data   - JavaScript object to validate.
-            *
-             *   logFn  - optional logging function. Defaults to console.warn.
-              *            In Azure Functions you can pass context.log for structured logs.
-               *
-                * Returns:
-                 *   true   - if either there is no validator for this kind OR validation passes.
-                  *   false  - if validation fails (and a warning is logged).
-                   *
-                    * Notes:
-                     *   - This function never throws on validation failure.
-                      *   - It is intentionally non fatal. Callers decide whether to treat a
-                       *     warning as an error for their own phase.
-                        */
 function validateAndWarn(kind, data, logFn = console.warn) {
   const key = resolveValidatorKey(kind);
   if (!key) {
-    // No validator registered for this kind. This is not fatal; it allows
-    // callers to introduce new artefacts before adding schemas.
+    // No validator registered for this kind – fail soft
     return true;
   }
 
   const validate = validators[key];
   if (!validate) {
-    // Should not happen if resolveValidatorKey is in sync, but we fail soft.
+    // Defensive: should never happen
     return true;
   }
 
+  // Guard: null / undefined payloads are invalid but non-fatal
+  if (data == null) {
+    try {
+      logFn(
+        `[SCHEMA_WARNING][${kind}][${key}]`,
+        "Payload is null/undefined; skipping schema validation."
+      );
+    } catch {
+      // swallow logging failures
+    }
+    return false;
+  }
+
   const ok = validate(data);
+
   if (!ok) {
-    // Ajv returns a structured errors array. We stringify for readability.
-    // Callers can search logs for "Schema validation WARNING" by kind.
+    // Ajv returns a structured errors array
     try {
       const msg = JSON.stringify(validate.errors, null, 2);
-      logFn(`Schema validation WARNING for ${kind} (using schema "${key}")`, msg);
-    } catch (err) {
-      // If logging itself fails, we swallow the error rather than breaking the run.
-      logFn(`Schema validation WARNING for ${kind} (using schema "${key}") but could not stringify errors.`);
+      logFn(
+        `[SCHEMA_WARNING][${kind}][${key}]`,
+        msg
+      );
+    } catch {
+      logFn(
+        `[SCHEMA_WARNING][${kind}][${key}]`,
+        "Validation failed, but could not stringify errors."
+      );
     }
   }
+
   return ok;
 }
-
 module.exports = { validateAndWarn };

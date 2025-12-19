@@ -1,6 +1,6 @@
 // /api/campaign-competitor-enrich/index.js
 // Phase 3 — Competitor enrichment (deterministic, non-evidence)
-// 17-12-2025 v1.3 — diagnostics hardened
+// 19-12-2025 v1.4 — diagnostics hardened
 
 "use strict";
 
@@ -12,7 +12,22 @@ const ROUTER_QUEUE =
   process.env.Q_CAMPAIGN_ROUTER ||
   "campaign-router-jobs";
 
+const SUPPLIER_MD_SCHEMA = {
+  "Supplier Overview": { tier: 2, group: "supplier_profile" },
+  "Portfolio & capabilities": { tier: 2, group: "supplier_capability" },
+  "Priority segments & use cases": { tier: 2, group: "supplier_use_case" },
+  "Where the supplier wins": { tier: 2, group: "supplier_differentiator" },
+  "Proof points": { tier: 5, group: "case_study" },
+  "SWOT": { tier: 3, group: "supporting_context" },
+  "Competitive context": { tier: 1, group: "competitor_context" }
+};
+
+
 // ---------------- helpers ----------------
+
+function makeClaimId(slug, i) {
+  return `${slug}-md-${i}`;
+}
 
 function parseQueueItem(queueItem) {
   if (!queueItem) return {};
@@ -45,55 +60,58 @@ function pushHistory(status, phase, note) {
   });
 }
 
-// VERY conservative extraction helpers (no inference)
-function extractFactsFromMarkdown(mdText) {
-  if (!mdText || typeof mdText !== "string") {
-    return {
-      offerings: [],
-      industries: [],
-      geography: []
-    };
-  }
+function extractClaimsFromSupplierMarkdown(mdText, slug, diagnostics) {
+  if (!mdText || typeof mdText !== "string") return [];
 
-  const lines = mdText
-    .split(/\r?\n/)
-    .map(l => l.trim())
-    .filter(Boolean);
+  const lines = mdText.split(/\r?\n/);
 
-  const offerings = [];
-  const industries = [];
-  const geography = [];
+  let currentSection = null;
+  let currentSubsection = null;
+  const claims = [];
+  let idx = 0;
 
-  for (const l of lines) {
-    const low = l.toLowerCase();
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
 
-    if (low.startsWith("-") || low.startsWith("*")) {
-      const item = l.replace(/^[-*]\s*/, "").trim();
-      if (!item) continue;
-
-      if (low.includes("industry") || low.includes("sector")) {
-        industries.push(item);
-      } else if (
-        low.includes("uk") ||
-        low.includes("europe") ||
-        low.includes("global")
-      ) {
-        geography.push(item);
-      } else {
-        offerings.push(item);
-      }
+    // Section (H2)
+    if (line.startsWith("## ")) {
+      const title = line.replace(/^##\s+/, "").trim();
+      currentSection = SUPPLIER_MD_SCHEMA[title] ? title : null;
+      currentSubsection = null;
+      continue;
     }
 
-    if (low.startsWith("we provide") || low.startsWith("our services")) {
-      offerings.push(l);
+    // Subsection (H3)
+    if (line.startsWith("### ")) {
+      currentSubsection = line.replace(/^###\s+/, "").trim();
+      continue;
+    }
+
+    // Bullet
+    if ((line.startsWith("- ") || line.startsWith("* ")) && currentSection) {
+      const summary = line.replace(/^[-*]\s+/, "").trim();
+      if (!summary) continue;
+
+      const meta = SUPPLIER_MD_SCHEMA[currentSection];
+
+      claims.push({
+        claim_id: makeClaimId(slug, ++idx),
+        summary,
+        section: currentSection,
+        subsection: currentSubsection || null,
+        tier: meta.tier,
+        tier_group: meta.group,
+        source_type: "supplier_markdown"
+      });
     }
   }
 
-  return {
-    offerings: Array.from(new Set(offerings)),
-    industries: Array.from(new Set(industries)),
-    geography: Array.from(new Set(geography))
-  };
+  if (mdText && claims.length === 0) {
+    diagnostics.skip_reasons.push("supplier_markdown_schema_mismatch");
+  }
+
+  return claims;
 }
 
 // ---------------- main ----------------
@@ -205,7 +223,13 @@ module.exports = async function (context, queueItem) {
     }
 
     const mdText = mdItems.length ? mdItems.join("\n") : null;
-    const facts = extractFactsFromMarkdown(mdText);
+    const diagnostics = { skip_reasons: [] };
+
+    const claims = extractClaimsFromSupplierMarkdown(
+      mdText,
+      slug,
+      diagnostics
+    );
 
     enriched.push({
       name,
@@ -213,10 +237,22 @@ module.exports = async function (context, queueItem) {
       inputs: {
         declared: true,
         markdown_present: !!mdText,
+        markdown_claims_extracted: claims.length,
         case_studies_present: false,
         stats_present: false
       },
-      facts,
+
+      // Canonical extracted content (schema-aware, deterministic)
+      claims,
+
+      // Diagnostics specific to supplier markdown extraction
+      diagnostics: {
+        markdown_schema_expected: true,
+        markdown_schema_matched: !!mdText && claims.length > 0,
+        skip_reasons: diagnostics.skip_reasons || []
+      },
+
+      // Downstream join hints only (no inference)
       evidence_candidates: mdText
         ? [{ type: "markdown", source: `${slug}.md` }]
         : []

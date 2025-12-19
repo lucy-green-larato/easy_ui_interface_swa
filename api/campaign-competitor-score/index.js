@@ -1,6 +1,6 @@
 // /api/campaign-competitor-score/index.js
 // Phase 4 — Competitor scoring (deterministic, non-evidence, no LLM)
-// 17-12-2025 v1.1 — diagnostics hardened (empty-but-valid is explainable)
+// 19-12-2025 v1.2 — diagnostics hardened (empty-but-valid is explainable)
 
 "use strict";
 
@@ -70,22 +70,38 @@ function keywordsFromStrings(list) {
   return Array.from(out);
 }
 
-function containsAny(haystack, needles) {
-  const h = norm(haystack);
-  if (!h) return false;
-  for (const n of needles || []) {
-    const t = norm(n);
-    if (!t) continue;
-    if (h.includes(t)) return true;
-  }
-  return false;
+function isScoringSignal(scores) {
+  if (!scores || typeof scores !== "object") return false;
+  return (
+    scores.coverage_overlap !== "unknown" ||
+    scores.differentiation_clarity !== "unknown" ||
+    scores.buyer_relevance !== "unknown" ||
+    scores.proof_strength !== "none"
+  );
+}
+
+function claimsForGroup(competitor, group) {
+  return (competitor?.claims || []).filter(
+    c => c && c.tier_group === group && typeof c.summary === "string"
+  );
+}
+
+function allClaimText(competitor) {
+  return (competitor?.claims || [])
+    .map(c => String(c.summary || "").trim())
+    .filter(Boolean);
+}
+
+function hasClaims(competitor) {
+  return Array.isArray(competitor?.claims) && competitor.claims.length > 0;
 }
 
 // ---------------- scoring rules (v1) ----------------
 
-// 1) coverage_overlap: competitor offerings vs our strategy text (very conservative)
 function scoreCoverageOverlap(competitor, strategyCore) {
-  const offerings = uniq(competitor?.facts?.offerings || []);
+  const offerings = claimsForGroup(competitor, "supplier_capability")
+    .map(c => c.summary);
+
   if (!offerings.length) return "unknown";
 
   const stratText = norm(toText(strategyCore));
@@ -93,22 +109,19 @@ function scoreCoverageOverlap(competitor, strategyCore) {
 
   const hits = offerings.filter(o => {
     const t = norm(o);
-    if (!t || t.length < 4) return false;
-    // avoid matching "industry" etc; just a cheap contains
+    if (t.length < 4) return false;
     return stratText.includes(t);
   }).length;
 
-  // Conservative buckets
   if (hits >= 3) return "high";
   if (hits >= 1) return "medium";
   return "low";
 }
 
-// 2) differentiation_clarity: do we have at least one distinct differentiator signal?
-// We only call it "clear" if (a) we have our advantage text and (b) competitor has offerings,
-// and (c) there exists at least one term in our advantage that is NOT present in competitor offerings.
 function scoreDifferentiationClarity(competitor, strategyCore) {
-  const offerings = uniq(competitor?.facts?.offerings || []);
+  const offerings = claimsForGroup(competitor, "supplier_capability")
+    .map(c => c.summary);
+
   if (!offerings.length) return "unknown";
 
   const ourAdv = []
@@ -121,9 +134,7 @@ function scoreDifferentiationClarity(competitor, strategyCore) {
   const advKeys = keywordsFromStrings(advText);
   if (!advKeys.length) return "unknown";
 
-  const compText = norm(toText(offerings));
-  if (!compText) return "unknown";
-
+  const compText = norm(offerings.join(" | "));
   const distinct = advKeys.filter(k => !compText.includes(norm(k)));
 
   if (distinct.length >= 6) return "clear";
@@ -164,36 +175,24 @@ function scoreProofStrength(competitor, evidenceCanon) {
   return "weak";
 }
 
-// 4) buyer_relevance: based on buyer_logic + industry mentions in competitor facts.
-// - unknown if we have no buyer_logic signals
-// - high if competitor industries/geography overlap any buyer_logic keywords
-// - medium if we have any competitor facts but no overlap
-// - low only if competitor is declared but has zero facts (very conservative)
 function scoreBuyerRelevance(competitor, buyerLogic) {
+  if (!hasClaims(competitor)) return "low";
+
   const blTxt = norm(toText(buyerLogic));
   if (!blTxt) return "unknown";
 
-  const factsTxt = []
-    .concat(competitor?.facts?.industries || [])
-    .concat(competitor?.facts?.geography || [])
-    .concat(competitor?.facts?.offerings || []);
-
-  const facts = uniq(factsTxt);
-  if (!facts.length) return "low";
-
-  // Use buyer_logic problems/urgency/risk as "buyer frame" keywords
   const frame = []
     .concat((buyerLogic?.problems || []).map(x => x?.label || x))
     .concat((buyerLogic?.urgency_factors || []).map(x => x?.label || x))
     .concat((buyerLogic?.commercial_impacts || []).map(x => x?.label || x));
 
   const frameKeys = keywordsFromStrings(frame);
-  const factsJoined = norm(facts.join(" | "));
+  if (!frameKeys.length) return "unknown";
 
-  const overlap = frameKeys.some(k => factsJoined.includes(norm(k)));
+  const claimText = norm(allClaimText(competitor).join(" | "));
+  const overlap = frameKeys.some(k => claimText.includes(norm(k)));
 
-  if (overlap) return "high";
-  return "medium";
+  return overlap ? "high" : "medium";
 }
 
 function buildConstraints(competitor, scores) {
@@ -201,6 +200,8 @@ function buildConstraints(competitor, scores) {
 
   if (!competitor?.inputs?.markdown_present) {
     constraints.push("No competitor markdown available");
+  } else if (!hasClaims(competitor)) {
+    constraints.push("Supplier markdown present but no extractable claims");
   }
 
   if (scores?.proof_strength === "none") {
@@ -210,11 +211,11 @@ function buildConstraints(competitor, scores) {
   }
 
   if (scores?.coverage_overlap === "unknown") {
-    constraints.push("Insufficient competitor offering data to assess overlap");
+    constraints.push("Insufficient supplier capability claims to assess overlap");
   }
 
   if (scores?.differentiation_clarity === "unknown") {
-    constraints.push("Insufficient differentiator signals to assess clarity");
+    constraints.push("Insufficient differentiator claims to assess clarity");
   }
 
   return constraints;
@@ -318,7 +319,8 @@ module.exports = async function (context, queueItem) {
     };
   });
 
-  const produced_count = scored.length;
+  const produced_count = scored.filter(x => isScoringSignal(x?.scores)).length;
+  out.diagnostics.produced_entries_count = produced_entries_count;
 
   // ============================================================
   // STEP 4.6 — WRITE OUTPUT (ALWAYS, DIAGNOSTIC, BACKWARD COMPAT)
@@ -331,7 +333,7 @@ module.exports = async function (context, queueItem) {
   if (inputs_present.competitors_enriched_json && !Array.isArray(enrichedDoc.competitors)) skip_reasons.push("competitors_enriched_invalid_shape");
   if (declared_count === 0) skip_reasons.push("no_declared_competitors");
 
-  if (!inputs_present.strategy_json) skip_reasons.push("strategy_json_missing");
+  if (!inputs_present.strategy_json) skip_reasons.push("strategy_json_missing_optional");
   if (!inputs_present.evidence_json) skip_reasons.push("evidence_json_missing");
   if (!inputs_present.buyer_logic_json) skip_reasons.push("buyer_logic_json_missing");
 
