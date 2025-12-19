@@ -320,7 +320,6 @@ module.exports = async function (context, queueItem) {
   });
 
   const produced_count = scored.filter(x => isScoringSignal(x?.scores)).length;
-  out.diagnostics.produced_entries_count = produced_entries_count;
 
   // ============================================================
   // STEP 4.6 — WRITE OUTPUT (ALWAYS, DIAGNOSTIC, BACKWARD COMPAT)
