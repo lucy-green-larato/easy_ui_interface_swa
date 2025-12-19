@@ -229,6 +229,9 @@
   // Boot
   // ---------------------------------------------------------------------------
   document.addEventListener("DOMContentLoaded", () => {
+    // -----------------------------
+    // Initial UI mount
+    // -----------------------------
     mountTabs();
     renderExecutiveSummary();
 
@@ -255,6 +258,59 @@
         } else {
           industryCustom.style.display = "none";
           industryCustom.value = "";
+        }
+      });
+    }
+
+    // --------------------------------------------------
+    // CSV upload handling — RESTORED (v2-safe)
+    // --------------------------------------------------
+    const csvInput = document.getElementById("csvUpload");
+    const csvBadge = document.getElementById("csvBadge");
+    const csvErrorBanner = document.getElementById("csvErrorBanner");
+
+    if (csvInput) {
+      csvInput.addEventListener("change", async () => {
+        const file = csvInput.files && csvInput.files[0];
+
+        // Reset UI
+        if (csvErrorBanner) {
+          csvErrorBanner.style.display = "none";
+          csvErrorBanner.textContent = "";
+        }
+
+        if (!file) {
+          if (csvBadge) csvBadge.textContent = "(no file)";
+          return;
+        }
+
+        // Update badge immediately (fixes your screenshot issue)
+        if (csvBadge) {
+          const kb = Math.round(file.size / 1024);
+          csvBadge.textContent = `${file.name} (${kb} KB)`;
+        }
+
+        // Lightweight validation only (no parsing here)
+        try {
+          const text = await file.text();
+
+          if (!text.trim()) {
+            throw new Error("CSV file is empty.");
+          }
+
+          const lines = text.split(/\r?\n/).filter(Boolean);
+          if (lines.length < 2) {
+            throw new Error("CSV must contain a header row and at least one data row.");
+          }
+
+        } catch (err) {
+          if (csvErrorBanner) {
+            csvErrorBanner.textContent = "CSV error: " + (err.message || err);
+            csvErrorBanner.style.display = "block";
+          }
+          if (csvBadge) {
+            csvBadge.textContent = "(invalid CSV)";
+          }
         }
       });
     }
