@@ -1,16 +1,17 @@
 // /api/campaign-linkedin/index.js
 // LinkedIn Activation (Option B) — downstream-only, bounded to validated artefacts
-// 15-12-2025 v1.0
+// 19-12-2025 v1.2 — diagnostics hardened (empty-but-valid is explainable)
 //
 // Trigger: run_linkedin (enqueued only after afterwrite)
 // Reads:  strategy_v2/campaign_strategy.json, campaign.json
-// Writes: linkedin.json
+// Writes: linkedin.json AND evidence_v2/linkedin.json (same payload for backward compatibility)
 //
 // Node 20 / Azure Functions v4 / CommonJS
 
 "use strict";
 
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
+const { nowIso, buildDiagnostics, uniqStrings } = require("../shared/diagnostics");
 
 const RESULTS_CONTAINER =
   process.env.CAMPAIGN_RESULTS_CONTAINER ||
@@ -110,10 +111,10 @@ function buildActivationInputs(campaign, strategy) {
   return out;
 }
 
-function emptyOutput() {
+function emptyOutputBase() {
   return {
     schema: "linkedin-activation-v1",
-    generated_at: nowISO(),
+    generated_at: nowIso(),
     derived_from: { strategy: "strategy_v2", campaign: "campaign.json" },
     posts: []
   };
@@ -257,6 +258,19 @@ function buildPrompts({ runId, activationInputs }) {
   return { system, user };
 }
 
+/**
+ * Writes the same payload to:
+ * - `${prefix}linkedin.json` (backward compatible path)
+ * - `${prefix}evidence_v2/linkedin.json` (canonical evidence artefact path per Objective A)
+ */
+async function writeLinkedInArtefacts(container, prefix, payload) {
+  const p1 = `${prefix}linkedin.json`;
+  const p2 = `${prefix}evidence_v2/linkedin.json`;
+  await putJson(container, p1, payload);
+  await putJson(container, p2, payload);
+  return { p1, p2 };
+}
+
 module.exports = async function (context, queueItem) {
   const log = context.log;
 
@@ -293,10 +307,25 @@ module.exports = async function (context, queueItem) {
   // --- HARD GATES ---
   const strategyPath = `${prefix}strategy_v2/campaign_strategy.json`;
   const campaignPath = `${prefix}campaign.json`;
-  const linkedinPath = `${prefix}linkedin.json`;
+
+  // Diagnostics-required existence checks (do not infer)
+  const competitorsDoc = await getJson(container, `${prefix}competitors.json`);
+  const markdownPack = await getJson(container, `${prefix}evidence_v2/markdown_pack.json`);
 
   const strategy = await getJson(container, strategyPath);
   const campaign = await getJson(container, campaignPath);
+
+  const inputs_present = {
+    competitors_json: competitorsDoc != null,
+    markdown_pack: markdownPack != null,
+    strategy_json: strategy != null,
+    campaign_json: campaign != null
+  };
+
+  // declared_count is not meaningful for this artefact; keep deterministic 0
+  const declared_count = 0;
+  let attempted_count = 0;
+  let produced_count = 0;
 
   // Gate on existence
   if (!strategy || !campaign) {
@@ -307,14 +336,30 @@ module.exports = async function (context, queueItem) {
 
     log("[linkedin] gate failed: missing inputs", missing);
 
-    const out = emptyOutput();
+    const skip_reasons = [];
+    if (!strategy) skip_reasons.push("strategy_json_missing");
+    if (!campaign) skip_reasons.push("campaign_json_missing");
+    if (!inputs_present.markdown_pack) skip_reasons.push("markdown_pack_missing"); // diagnostic-only
+    // produced_count will be 0 => skipped true
+
+    const out = emptyOutputBase();
+    out.prefix = prefix;
+    out.diagnostics = buildDiagnostics({
+      declared_count,
+      attempted_count,
+      produced_count: 0,
+      skip_reasons: uniqStrings(skip_reasons),
+      inputs_present
+    });
     out.note = `Skipped: missing required inputs: ${missing.join(", ")}`;
 
-    await putJson(container, linkedinPath, out);
+    const paths = await writeLinkedInArtefacts(container, prefix, out);
 
     status.markers.linkedinWritten = true;
     pushHistory(status, "linkedin_written", out.note);
     await putJson(container, statusPath, status);
+
+    log("[linkedin] wrote empty artefact (gate failed)", { runId, paths });
     return;
   }
 
@@ -334,6 +379,8 @@ module.exports = async function (context, queueItem) {
 
   // Call model (Azure preferred, OpenAI fallback)
   let raw = "";
+  attempted_count = 1;
+
   try {
     if (AZURE_OPENAI_ENDPOINT && AZURE_OPENAI_KEY && AZURE_OPENAI_DEPLOYMENT) {
       raw = await callAzureOpenAI({ system, user });
@@ -345,14 +392,29 @@ module.exports = async function (context, queueItem) {
   } catch (err) {
     log("[linkedin] model call failed", String(err?.message || err));
 
-    const out = emptyOutput();
+    const skip_reasons = ["model_call_failed"];
+    if (!AZURE_OPENAI_ENDPOINT || !AZURE_OPENAI_KEY || !AZURE_OPENAI_DEPLOYMENT) {
+      if (!OPENAI_API_KEY) skip_reasons.push("llm_not_configured");
+    }
+
+    const out = emptyOutputBase();
+    out.prefix = prefix;
+    out.diagnostics = buildDiagnostics({
+      declared_count,
+      attempted_count,
+      produced_count: 0,
+      skip_reasons: uniqStrings(skip_reasons),
+      inputs_present
+    });
     out.note = "Skipped: model call failed";
 
-    await putJson(container, linkedinPath, out);
+    const paths = await writeLinkedInArtefacts(container, prefix, out);
 
     status.markers.linkedinWritten = true;
     pushHistory(status, "linkedin_written", out.note);
     await putJson(container, statusPath, status);
+
+    log("[linkedin] wrote empty artefact (model call failed)", { runId, paths });
     return;
   }
 
@@ -367,21 +429,32 @@ module.exports = async function (context, queueItem) {
   if (!obj) {
     log("[linkedin] invalid JSON from model (not parsable)");
 
-    const out = emptyOutput();
+    const out = emptyOutputBase();
+    out.prefix = prefix;
+    out.diagnostics = buildDiagnostics({
+      declared_count,
+      attempted_count,
+      produced_count: 0,
+      skip_reasons: uniqStrings(["model_non_json"]),
+      inputs_present
+    });
     out.note = "Model returned non-JSON output; wrote empty activation pack";
 
-    await putJson(container, linkedinPath, out);
+    const paths = await writeLinkedInArtefacts(container, prefix, out);
 
     status.markers.linkedinWritten = true;
     pushHistory(status, "linkedin_written", out.note);
     await putJson(container, statusPath, status);
+
+    log("[linkedin] wrote empty artefact (non-JSON)", { runId, paths });
     return;
   }
 
   // Force required top-level fields (defensive)
   obj.schema = "linkedin-activation-v1";
-  obj.generated_at = nowISO();
+  obj.generated_at = nowIso();
   obj.derived_from = { strategy: "strategy_v2", campaign: "campaign.json" };
+  obj.prefix = prefix;
   if (!Array.isArray(obj.posts)) obj.posts = [];
 
   // Validate structure & caps
@@ -389,23 +462,48 @@ module.exports = async function (context, queueItem) {
   if (!v.ok) {
     log("[linkedin] invalid JSON schema from model", v.reason);
 
-    const out = emptyOutput();
+    const out = emptyOutputBase();
+    out.prefix = prefix;
+    out.diagnostics = buildDiagnostics({
+      declared_count,
+      attempted_count,
+      produced_count: 0,
+      skip_reasons: uniqStrings([`model_validation_failed:${v.reason}`]),
+      inputs_present
+    });
     out.note = `Model output failed validation: ${v.reason}`;
 
-    await putJson(container, linkedinPath, out);
+    const paths = await writeLinkedInArtefacts(container, prefix, out);
 
     status.markers.linkedinWritten = true;
     pushHistory(status, "linkedin_written", out.note);
     await putJson(container, statusPath, status);
+
+    log("[linkedin] wrote empty artefact (validation failed)", { runId, paths });
     return;
   }
 
-  // Write
-  await putJson(container, linkedinPath, obj);
+  // Final diagnostics (including empty-but-valid posts[])
+  produced_count = Array.isArray(obj.posts) ? obj.posts.length : 0;
+
+  const skip_reasons = [];
+  if (!inputs_present.markdown_pack) skip_reasons.push("markdown_pack_missing"); // diagnostic-only
+  if (produced_count === 0) skip_reasons.push("produced_count_zero");
+
+  obj.diagnostics = buildDiagnostics({
+    declared_count,
+    attempted_count,
+    produced_count,
+    skip_reasons: uniqStrings(skip_reasons),
+    inputs_present
+  });
+
+  // Write to both artefact paths (backward compatible)
+  const paths = await writeLinkedInArtefacts(container, prefix, obj);
 
   status.markers.linkedinWritten = true;
-  pushHistory(status, "linkedin_written", `posts=${obj.posts.length}`);
+  pushHistory(status, "linkedin_written", `posts=${produced_count}`);
   await putJson(container, statusPath, status);
 
-  log("[linkedin] written", { runId, path: linkedinPath, posts: obj.posts.length });
+  log("[linkedin] written", { runId, page, paths, posts: produced_count });
 };

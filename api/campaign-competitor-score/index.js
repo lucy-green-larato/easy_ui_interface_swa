@@ -1,11 +1,12 @@
 // /api/campaign-competitor-score/index.js
 // Phase 4 — Competitor scoring (deterministic, non-evidence, no LLM)
-// 17-12-2025 v1.0
+// 17-12-2025 v1.1 — diagnostics hardened (empty-but-valid is explainable)
 
 "use strict";
 
 const { enqueueTo } = require("../lib/campaign-queue");
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
+const { nowIso, buildDiagnostics, uniqStrings } = require("../shared/diagnostics");
 
 const ROUTER_QUEUE =
   process.env.Q_CAMPAIGN_ROUTER ||
@@ -258,25 +259,50 @@ module.exports = async function (context, queueItem) {
 
   const container = await getResultsContainerClient();
 
-  const enriched = await getJson(container, `${prefix}competitors_enriched.json`);
-  if (!enriched || typeof enriched !== "object" || !Array.isArray(enriched.competitors)) {
-    throw new Error("competitor-score: competitors_enriched.json missing or invalid");
-  }
+  // Existence checks for REQUIRED diagnostics keys (no inference).
+  // These reads are for diagnostics only and do not alter scoring logic.
+  const competitorsDocRaw = await getJson(container, `${prefix}competitors.json`);
+  const markdownPackRaw = await getJson(container, `${prefix}evidence_v2/markdown_pack.json`);
+  const strategyWrapperRaw = await getJson(container, `${prefix}strategy_v2/campaign_strategy.json`);
+  const enrichedRaw = await getJson(container, `${prefix}competitors_enriched.json`);
+  const evidenceCanonRaw = await getJson(container, `${prefix}evidence.json`);
+  const buyerLogicRaw = await getJson(container, `${prefix}buyer_logic.json`);
 
-  const strategyWrapper = await getJson(container, `${prefix}strategy_v2/campaign_strategy.json`);
+  const inputs_present = {
+    // Required block fields
+    competitors_json: competitorsDocRaw != null,
+    markdown_pack: markdownPackRaw != null,
+    strategy_json: strategyWrapperRaw != null,
+
+    // Additional precise inputs for this stage
+    competitors_enriched_json: enrichedRaw != null,
+    evidence_json: evidenceCanonRaw != null,
+    buyer_logic_json: buyerLogicRaw != null
+  };
+
+  // Normalised objects used by scoring (fail-safe, no throws for emptiness)
+  const enrichedDoc = (enrichedRaw && typeof enrichedRaw === "object") ? enrichedRaw : {};
+  const competitors = Array.isArray(enrichedDoc.competitors) ? enrichedDoc.competitors : [];
+
+  const strategyWrapper = (strategyWrapperRaw && typeof strategyWrapperRaw === "object") ? strategyWrapperRaw : {};
   const strategyCore =
     (strategyWrapper && typeof strategyWrapper === "object" && strategyWrapper.strategy_v2 && typeof strategyWrapper.strategy_v2 === "object")
       ? strategyWrapper.strategy_v2
       : (strategyWrapper && typeof strategyWrapper === "object" ? strategyWrapper : {});
 
-  const evidenceCanon = (await getJson(container, `${prefix}evidence.json`)) || {};
-  const buyerLogic = (await getJson(container, `${prefix}buyer_logic.json`)) || {};
+  const evidenceCanon = (evidenceCanonRaw && typeof evidenceCanonRaw === "object") ? evidenceCanonRaw : {};
+  const buyerLogic = (buyerLogicRaw && typeof buyerLogicRaw === "object") ? buyerLogicRaw : {};
+
+  const declared_count = competitors.length;
+  let attempted_count = 0;
 
   // ============================================================
   // STEP 4.4 / 4.5 — SCORE COMPETITORS (DETERMINISTIC)
   // ============================================================
 
-  const scored = (enriched.competitors || []).map(c => {
+  const scored = (competitors || []).map(c => {
+    attempted_count++;
+
     const scores = {
       coverage_overlap: scoreCoverageOverlap(c, strategyCore),
       differentiation_clarity: scoreDifferentiationClarity(c, strategyCore),
@@ -292,14 +318,40 @@ module.exports = async function (context, queueItem) {
     };
   });
 
+  const produced_count = scored.length;
+
   // ============================================================
-  // STEP 4.6 — WRITE OUTPUT
+  // STEP 4.6 — WRITE OUTPUT (ALWAYS, DIAGNOSTIC, BACKWARD COMPAT)
   // ============================================================
 
+  const skip_reasons = [];
+
+  // deterministic, non-inferential reasons
+  if (!inputs_present.competitors_enriched_json) skip_reasons.push("competitors_enriched_missing");
+  if (inputs_present.competitors_enriched_json && !Array.isArray(enrichedDoc.competitors)) skip_reasons.push("competitors_enriched_invalid_shape");
+  if (declared_count === 0) skip_reasons.push("no_declared_competitors");
+
+  if (!inputs_present.strategy_json) skip_reasons.push("strategy_json_missing");
+  if (!inputs_present.evidence_json) skip_reasons.push("evidence_json_missing");
+  if (!inputs_present.buyer_logic_json) skip_reasons.push("buyer_logic_json_missing");
+
+  if (produced_count === 0 && attempted_count === 0) skip_reasons.push("no_attempts_made");
+  if (produced_count === 0 && attempted_count > 0) skip_reasons.push("produced_count_zero");
+
   const out = {
-    schema: "competitor-scores-v1",
-    generated_at: new Date().toISOString(),
+    schema: "competitor-scores-v2",
+    generated_at: nowIso(),
+    prefix,
     method: "deterministic-rule-set-v1",
+    diagnostics: buildDiagnostics({
+      declared_count,
+      attempted_count,
+      produced_count,
+      skip_reasons: uniqStrings(skip_reasons),
+      inputs_present
+    }),
+
+    // backward compatible payload
     competitors: scored
   };
 
@@ -314,9 +366,7 @@ module.exports = async function (context, queueItem) {
   const status = (await getJson(container, statusPath)) || { runId, markers: {}, history: [] };
 
   if (!status || typeof status !== "object") {
-    // If status is corrupt, replace with minimum safe object
-    // (still deterministic, and avoids pipeline deadlock)
-    // NOTE: This is a recovery behaviour, not a preferred state.
+    // Recovery behaviour, unchanged from your original intent
     log("[competitor-score] WARNING: status.json invalid; recreating minimal status");
   }
 
@@ -343,7 +393,9 @@ module.exports = async function (context, queueItem) {
 
   log("[competitor-score] completed", {
     runId,
-    competitors: scored.length,
+    declared: declared_count,
+    attempted: attempted_count,
+    produced: produced_count,
     outPath
   });
 };

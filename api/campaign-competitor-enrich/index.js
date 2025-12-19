@@ -1,11 +1,12 @@
 // /api/campaign-competitor-enrich/index.js
 // Phase 3 — Competitor enrichment (deterministic, non-evidence)
-// 17-12-2025 v1.2
+// 17-12-2025 v1.3 — diagnostics hardened
 
 "use strict";
 
 const { enqueueTo } = require("../lib/campaign-queue");
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
+const { nowIso, buildDiagnostics, uniqStrings } = require("../shared/diagnostics");
 
 const ROUTER_QUEUE =
   process.env.Q_CAMPAIGN_ROUTER ||
@@ -152,9 +153,18 @@ module.exports = async function (context, queueItem) {
     status.history = [];
   }
 
+  const inputs_present = {
+    competitors_json: !!competitorsDoc && Object.keys(competitorsDoc).length > 0,
+    markdown_pack: !!markdownPack && Object.keys(markdownPack).length > 0,
+    strategy_json: false // not used in Phase 3; explicit false by design
+  };
+
   const declared = Array.isArray(competitorsDoc.competitors)
     ? competitorsDoc.competitors
     : [];
+
+  const declared_count = declared.length;
+  let attempted_count = 0;
 
   // ============================================================
   // STEP 4.4 / 4.5 — NORMALISE + EXTRACT
@@ -163,6 +173,8 @@ module.exports = async function (context, queueItem) {
   const enriched = [];
 
   for (const c of declared) {
+    attempted_count++;
+
     const name =
       typeof c === "string"
         ? c
@@ -177,20 +189,17 @@ module.exports = async function (context, queueItem) {
         ? c.slug
         : slugify(name);
 
-
-    // Phase 3 join rule (deterministic):
-    // competitor markdown is the set of pack items whose source_file matches the competitor profile path
     const expectedSourceFile = `input/packs/supplier/${slug}.md`;
 
     const packArrays = Object.values(markdownPack || {}).filter(Array.isArray);
 
-    // Collect all markdown bullet items that came from this competitor's markdown file
     const mdItems = [];
     for (const arr of packArrays) {
       for (const it of arr) {
         if (it && typeof it === "object" && it.source_file === expectedSourceFile) {
-          // join uses only canonical fields already in the pack (no inference)
-          if (typeof it.text === "string" && it.text.trim()) mdItems.push(it.text.trim());
+          if (typeof it.text === "string" && it.text.trim()) {
+            mdItems.push(it.text.trim());
+          }
         }
       }
     }
@@ -204,8 +213,8 @@ module.exports = async function (context, queueItem) {
       inputs: {
         declared: true,
         markdown_present: !!mdText,
-        case_studies_present: false, // Phase 4+
-        stats_present: false          // Phase 4+
+        case_studies_present: false,
+        stats_present: false
       },
       facts,
       evidence_candidates: mdText
@@ -214,13 +223,31 @@ module.exports = async function (context, queueItem) {
     });
   }
 
+  const produced_count = enriched.length;
+
   // ============================================================
-  // STEP 4.6 — WRITE competitors_enriched.json (ALWAYS)
+  // STEP 4.6 — WRITE competitors_enriched.json (ALWAYS, DIAGNOSTIC)
   // ============================================================
 
+  const skip_reasons = [];
+  if (declared_count === 0) skip_reasons.push("no_declared_competitors");
+  if (!inputs_present.markdown_pack) skip_reasons.push("markdown_pack_missing");
+  if (produced_count === 0 && attempted_count > 0) skip_reasons.push("no_valid_sources_found");
+  if (produced_count === 0 && attempted_count === 0) skip_reasons.push("no_attempts_made");
+
   const out = {
-    schema: "competitors-enriched-v1",
-    generated_at: new Date().toISOString(),
+    schema: "competitors-enriched-v2",
+    generated_at: nowIso(),
+    prefix,
+    diagnostics: buildDiagnostics({
+      declared_count,
+      attempted_count,
+      produced_count,
+      skip_reasons: uniqStrings(skip_reasons),
+      inputs_present
+    }),
+
+    // backward compatible payload
     competitors: enriched
   };
 
@@ -253,6 +280,8 @@ module.exports = async function (context, queueItem) {
 
   log("[competitor-enrich] completed", {
     runId,
-    competitors: enriched.length
+    declared: declared_count,
+    attempted: attempted_count,
+    produced: produced_count
   });
 };
