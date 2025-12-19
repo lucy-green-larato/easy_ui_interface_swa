@@ -230,10 +230,19 @@
   // ---------------------------------------------------------------------------
   document.addEventListener("DOMContentLoaded", () => {
     // -----------------------------
-    // Initial UI mount
+    // Initial UI mount (safe)
     // -----------------------------
     mountTabs();
     renderExecutiveSummary();
+
+    // -----------------------------
+    // CSV error banner MUST start hidden
+    // -----------------------------
+    const csvErrorBanner = document.getElementById("csvErrorBanner");
+    if (csvErrorBanner) {
+      csvErrorBanner.style.display = "none";
+      csvErrorBanner.textContent = "";
+    }
 
     // --------------------------------------------------
     // Buyer industry selector — explicit custom handling
@@ -242,16 +251,8 @@
     const industryCustom = document.getElementById("buyerIndustryCustom");
 
     if (industrySelect && industryCustom) {
-      // Initial state on page load
-      if (industrySelect.value === "__custom") {
-        industryCustom.style.display = "block";
-      } else {
-        industryCustom.style.display = "none";
-        industryCustom.value = "";
-      }
-
-      // Toggle custom input on change
-      industrySelect.addEventListener("change", () => {
+      // Initial state
+      const syncIndustryUI = () => {
         if (industrySelect.value === "__custom") {
           industryCustom.style.display = "block";
           industryCustom.focus();
@@ -259,21 +260,23 @@
           industryCustom.style.display = "none";
           industryCustom.value = "";
         }
-      });
+      };
+
+      syncIndustryUI();
+      industrySelect.addEventListener("change", syncIndustryUI);
     }
 
     // --------------------------------------------------
-    // CSV upload handling — RESTORED (v2-safe)
+    // CSV upload handling — FULLY RESTORED + UNLOCK SAFE
     // --------------------------------------------------
     const csvInput = document.getElementById("csvUpload");
     const csvBadge = document.getElementById("csvBadge");
-    const csvErrorBanner = document.getElementById("csvErrorBanner");
 
     if (csvInput) {
       csvInput.addEventListener("change", async () => {
         const file = csvInput.files && csvInput.files[0];
 
-        // Reset UI
+        // Reset error state FIRST (this unlocks Go)
         if (csvErrorBanner) {
           csvErrorBanner.style.display = "none";
           csvErrorBanner.textContent = "";
@@ -281,19 +284,20 @@
 
         if (!file) {
           if (csvBadge) csvBadge.textContent = "(no file)";
+          updateGo?.();
           return;
         }
 
-        // Update badge immediately (fixes your screenshot issue)
+        // Badge update immediately (fixes UI confusion)
         if (csvBadge) {
           const kb = Math.round(file.size / 1024);
           csvBadge.textContent = `${file.name} (${kb} KB)`;
         }
 
-        // Lightweight validation only (no parsing here)
         try {
           const text = await file.text();
 
+          // Minimal validation ONLY
           if (!text.trim()) {
             throw new Error("CSV file is empty.");
           }
@@ -301,6 +305,12 @@
           const lines = text.split(/\r?\n/).filter(Boolean);
           if (lines.length < 2) {
             throw new Error("CSV must contain a header row and at least one data row.");
+          }
+
+          // SUCCESS: explicitly clear any error state
+          if (csvErrorBanner) {
+            csvErrorBanner.style.display = "none";
+            csvErrorBanner.textContent = "";
           }
 
         } catch (err) {
@@ -312,7 +322,15 @@
             csvBadge.textContent = "(invalid CSV)";
           }
         }
+
+        // CRITICAL: re-evaluate Go button state
+        updateGo?.();
       });
     }
+
+    // -----------------------------
+    // Initial Go button evaluation
+    // -----------------------------
+    updateGo?.();
   });
 })();
