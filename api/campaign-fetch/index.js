@@ -197,51 +197,23 @@ module.exports = async function (context, req) {
     return;
   }
 
-  // ---------- canonical prefix (authoritative) ----------
+  // ---------- canonical prefix (authoritative & deterministic) ----------
   let canonicalPrefix = null;
 
   if (prefixOverride) {
     canonicalPrefix = prefixOverride;
   } else {
-    // Prefix must be read from status.json, never recomputed
-    const statusBlob =
-      container.getBlockBlobClient(`runs/${runId}/status.json`);
+    // Canonical prefix MUST be deterministically rebuilt.
+    // status.json is validated AFTER prefix resolution, not used to discover it.
+    const { canonicalPrefix: buildPrefix } = require("../lib/prefix");
 
-    if (!(await statusBlob.exists())) {
-      context.res = {
-        status: 404,
-        headers: { ...H, "content-type": "application/json" },
-        body: {
-          error: "run_not_found",
-          message:
-            "No status.json found for this runId at the canonical prefix."
-        }
-      };
-      return;
-    }
+    const page = String(req.query?.page || "campaign")
+      .trim()
+      .toLowerCase();
 
-    const dl = await statusBlob.download();
-    const txt = await streamToString(dl.readableStreamBody);
-    let status = null;
-
-    try {
-      status = txt ? JSON.parse(txt) : null;
-    } catch { }
-
-    if (!status || typeof status.prefix !== "string") {
-      context.res = {
-        status: 500,
-        headers: { ...H, "content-type": "application/json" },
-        body: {
-          error: "invalid_status",
-          message: "status.json missing authoritative prefix"
-        }
-      };
-      return;
-    }
-
-    canonicalPrefix = status.prefix;
+    canonicalPrefix = buildPrefix({ userId, page, runId });
   }
+
   let base = canonicalPrefix
     .replace(/^results\//, "")
     .replace(/^\/+/, "");
