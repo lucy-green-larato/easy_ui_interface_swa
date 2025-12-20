@@ -166,7 +166,7 @@ module.exports = async function (context, req) {
   }
 
   try {
-     // 🔍 DEBUG: what does this running instance actually see?
+    // 🔍 DEBUG: what does this running instance actually see?
     context.log("DEBUG_Q_CAMPAIGN_EVIDENCE", process.env.Q_CAMPAIGN_EVIDENCE);
     context.log("DEBUG_AzureWebJobsStorage_set", !!process.env.AzureWebJobsStorage);
     if (!STORAGE_CONN) {
@@ -298,12 +298,17 @@ module.exports = async function (context, req) {
     const runId = clientRunKey
       ? crypto.createHash("sha1").update(String(clientRunKey)).digest("hex")
       : (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`);
-    const prefix = canonicalPrefix({
-      page,
-      userId,
+    // campaign-start
+    const prefix = canonicalPrefix({ page, userId, runId, date: now });
+
+    await putJson(container, `${prefix}status.json`, {
       runId,
-      date: now
+      prefix,
+      markers: {},
+      history: []
     });
+
+    res.json({ runId, prefix });
 
     // ---- initial status ----
     const enqueuedAt = now.toISOString();

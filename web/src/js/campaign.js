@@ -733,19 +733,8 @@ window.CampaignUI = window.CampaignUI || {};
       }
     }
 
-    // Viability artefact (optional). Prefix is authoritative from backend if present.
-    try {
-      const prefix =
-        contract?._meta?.source_prefix ||
-        contract?.source_prefix ||
-        contract?.prefix ||
-        null;
-
-      if (prefix) await loadViability(prefix);
-      else state.viability = null;
-    } catch (e) {
-      state.viability = null;
-    }
+    const prefix = state.run?.prefix || null;
+    if (prefix) await loadViability(prefix);
 
     window.CampaignUI?.setContract?.(contract, { evidence: evidenceItems });
 
