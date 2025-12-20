@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 19-12-2025 v34
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 20-12-2025 v35
    ROLE/SCOPE (hard boundaries):
    - Deterministic transport + rendering layer only
    - No inference, no “helpful” guesses, no CSV interpretation/summarisation
@@ -753,8 +753,16 @@ window.CampaignUI = window.CampaignUI || {};
     }
 
     function isTerminalSuccess(statusObj) {
-      const k = stateKey(statusObj?.state);
-      return k === "writer_ready" || k === "completed";
+      if (!statusObj || typeof statusObj !== "object") return false;
+
+      // Primary authoritative completion signal
+      if (String(statusObj.state).toLowerCase() === "completed") return true;
+
+      // Secondary authoritative completion signal (writer finished)
+      if (statusObj.markers && statusObj.markers.writerCompleted === true)
+        return true;
+
+      return false;
     }
 
     // Buttons/banners (transparent; do not “decide” outcomes)
