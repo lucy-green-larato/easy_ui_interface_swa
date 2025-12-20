@@ -149,6 +149,11 @@ module.exports = async function (context, req) {
     return;
   }
 
+  const blobSvc =
+    BlobServiceClient.fromConnectionString(STORAGE_CONN);
+  const container =
+    blobSvc.getContainerClient(RESULTS_CONTAINER);
+
   const runId = String(req.query?.runId || "").trim();
   const fileKey = String(req.query?.file || "").trim().toLowerCase();
   const sectionName = String(req.query?.name || "")
@@ -241,11 +246,6 @@ module.exports = async function (context, req) {
     .replace(/^results\//, "")
     .replace(/^\/+/, "");
   if (!base.endsWith("/")) base += "/";
-
-  const blobSvc =
-    BlobServiceClient.fromConnectionString(STORAGE_CONN);
-  const container =
-    blobSvc.getContainerClient(RESULTS_CONTAINER);
 
   if (!prefixOverride) {
     const statusCheck =
