@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 20-12-2025 v35
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 20-12-2025 v36
    ROLE/SCOPE (hard boundaries):
    - Deterministic transport + rendering layer only
    - No inference, no “helpful” guesses, no CSV interpretation/summarisation
@@ -747,8 +747,17 @@ window.CampaignUI = window.CampaignUI || {};
     const stateKey = (s) => normState(s).toLowerCase();
 
     async function fetchCampaignContract() {
-      const contract = await http("GET", API.fetchContract(runId), { timeoutMs: 30000 });
-      if (!contract || typeof contract !== "object") throw new Error("Empty or invalid contract JSON");
+      const prefix = state.run?.prefix;
+      const url =
+        prefix
+          ? `${API.fetchContract(runId)}&prefix=${encodeURIComponent(prefix)}`
+          : API.fetchContract(runId);
+
+      const contract = await http("GET", url, { timeoutMs: 30000 });
+
+      if (!contract || typeof contract !== "object")
+        throw new Error("Empty or invalid contract JSON");
+
       return contract;
     }
 
@@ -778,6 +787,10 @@ window.CampaignUI = window.CampaignUI || {};
       if (Date.now() - started > MAX_MS) throw new Error("Timed out waiting for completion");
 
       const st = await http("GET", API.status(runId), { timeoutMs: 15000 });
+      if (st?.prefix) {
+        state.run = state.run || {};
+        state.run.prefix = st.prefix;
+      }
       const stateName = normState(st?.state);
       const k = stateKey(st?.state);
 
