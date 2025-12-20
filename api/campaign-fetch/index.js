@@ -112,7 +112,7 @@ module.exports = async function (context, req) {
     const auth = await requireAuth(context, req);
     if (auth?.correlationId) correlationId = auth.correlationId;
     if (auth?.userId) userId = auth.userId;
-  } catch {}
+  } catch { }
 
   const H = {
     "x-correlation-id": correlationId,
@@ -192,18 +192,51 @@ module.exports = async function (context, req) {
     return;
   }
 
-  // ---------- canonical prefix ----------
-  let canonicalPrefix;
+  // ---------- canonical prefix (authoritative) ----------
+  let canonicalPrefix = null;
+
   if (prefixOverride) {
     canonicalPrefix = prefixOverride;
   } else {
-    const { canonicalPrefix: buildPrefix } = require("../lib/prefix");
-    const page = String(req.query?.page || "campaign")
-      .trim()
-      .toLowerCase();
-    canonicalPrefix = buildPrefix({ userId, page, runId });
-  }
+    // Prefix must be read from status.json, never recomputed
+    const statusBlob =
+      container.getBlockBlobClient(`runs/${runId}/status.json`);
 
+    if (!(await statusBlob.exists())) {
+      context.res = {
+        status: 404,
+        headers: { ...H, "content-type": "application/json" },
+        body: {
+          error: "run_not_found",
+          message:
+            "No status.json found for this runId at the canonical prefix."
+        }
+      };
+      return;
+    }
+
+    const dl = await statusBlob.download();
+    const txt = await streamToString(dl.readableStreamBody);
+    let status = null;
+
+    try {
+      status = txt ? JSON.parse(txt) : null;
+    } catch { }
+
+    if (!status || typeof status.prefix !== "string") {
+      context.res = {
+        status: 500,
+        headers: { ...H, "content-type": "application/json" },
+        body: {
+          error: "invalid_status",
+          message: "status.json missing authoritative prefix"
+        }
+      };
+      return;
+    }
+
+    canonicalPrefix = status.prefix;
+  }
   let base = canonicalPrefix
     .replace(/^results\//, "")
     .replace(/^\/+/, "");
@@ -257,7 +290,7 @@ module.exports = async function (context, req) {
     let parsed = null;
     try {
       parsed = text ? JSON.parse(text) : null;
-    } catch {}
+    } catch { }
 
     // ---------- strict writer contract ----------
     if (fileKey === "campaign" && parsed && typeof parsed === "object") {
