@@ -1,6 +1,10 @@
-// /api/campaign-start/index.js 15-12-2025 v25
+// /api/campaign-start/index.js 20-12-2025 v26
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
-// POST /api/campaign-start → writes status/input, enqueues kickoff to main queue + full job to evidence queue.
+// POST /api/campaign-start → writes status/input, seeds csv_normalized, updates per-user recent index,
+// then enqueues router kickoff (afterstart). No other queue is enqueued here.
+
+"use strict";
+
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { enqueueTo } = require("../lib/campaign-queue");
 const crypto = require("crypto");
@@ -8,8 +12,6 @@ const { canonicalPrefix } = require("../lib/prefix");
 
 // ---- Config ----
 const RESULTS_CONTAINER = process.env.CAMPAIGN_RESULTS_CONTAINER || "results";
-const WORKER_QUEUE = process.env.Q_CAMPAIGN_WORKER || "campaign-worker-jobs";
-const EVIDENCE_QUEUE = process.env.Q_CAMPAIGN_EVIDENCE || "campaign-evidence-jobs";
 const ROUTER_QUEUE = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
 const STORAGE_CONN = process.env.AzureWebJobsStorage;
 
@@ -24,7 +26,8 @@ const MAX_BYTES =
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Correlation-Id, X-Idempotency-Key, Authorization",
+  "Access-Control-Allow-Headers":
+    "Content-Type, X-Correlation-Id, X-Idempotency-Key, Authorization",
 };
 
 function readHeader(req, name) {
@@ -58,21 +61,36 @@ function normalizeArray(v) {
   if (typeof v === "string") return v.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
   return [];
 }
+
 function decodeClientPrincipal(req) {
   const b64 = readHeader(req, "x-ms-client-principal");
   if (!b64) return null;
-  try { return JSON.parse(Buffer.from(b64, "base64").toString("utf8")); } catch { return null; }
+  try {
+    return JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+  } catch {
+    return null;
+  }
 }
+
 function getUserIdFromReq(req) {
   const cp = decodeClientPrincipal(req) || {};
   const claims = cp.claims || [];
   const byType = Object.create(null);
   for (const c of claims) byType[(c.typ || "").toLowerCase()] = c.val;
-  const oid = byType["http://schemas.microsoft.com/identity/claims/objectidentifier"] || byType["oid"] || null;
+
+  const oid =
+    byType["http://schemas.microsoft.com/identity/claims/objectidentifier"] ||
+    byType["oid"] ||
+    null;
   const sub = byType["sub"] || null;
   const email = (byType["emails"] || byType["email"] || cp.userDetails || "").toLowerCase();
+
   const chosen = oid || sub || email || "anonymous";
-  return String(chosen).trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, "-").replace(/-+/g, "-");
+  return String(chosen)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.@-]/g, "-")
+    .replace(/-+/g, "-");
 }
 
 // Blob helpers
@@ -81,21 +99,41 @@ async function streamToBuffer(readable) {
   for await (const chunk of readable) chunks.push(chunk);
   return Buffer.concat(chunks);
 }
+
 async function writeJson(containerClient, relPath, obj) {
   const data = Buffer.from(JSON.stringify(obj, null, 2));
-  await containerClient.getBlockBlobClient(relPath)
-    .uploadData(data, { blobHTTPHeaders: { blobContentType: "application/json; charset=utf-8" } });
+  await containerClient
+    .getBlockBlobClient(relPath)
+    .uploadData(data, {
+      blobHTTPHeaders: { blobContentType: "application/json; charset=utf-8" },
+    });
 }
+
 async function writeInitialStatus(containerClient, relPrefix, status) {
   await writeJson(containerClient, `${relPrefix}status.json`, status);
 }
 
-// Canonical seed for csv_normalized.json. Evidence phase may overwrite/extend this later, but all writers should preserve this shape.
+function pushHistory(status, phase, note) {
+  if (!status || typeof status !== "object") return;
+  if (!Array.isArray(status.history)) status.history = [];
+  status.history.push({
+    at: new Date().toISOString(),
+    phase: String(phase || "status"),
+    note: note ? String(note) : "",
+  });
+}
+
+// Canonical seed for csv_normalized.json. Evidence phase may overwrite/extend this later,
+// but all writers should preserve this shape.
 async function normalizeCsvAndPersist(containerClient, prefix, input) {
   const csv = input?.csvSummary || {};
-  const rows = Number.isFinite(Number(input?.rowCount)) ? Number(input.rowCount) : Number(csv.rowCountScoped || 0);
+  const rows = Number.isFinite(Number(input?.rowCount))
+    ? Number(input.rowCount)
+    : Number(csv.rowCountScoped || 0);
+
   const selected_industry =
-    (input?.selected_industry ?? input?.campaign_industry ?? input?.buyer_industry ?? null) || null;
+    (input?.selected_industry ?? input?.campaign_industry ?? input?.buyer_industry ?? null) ||
+    null;
 
   const normalized = {
     selected_industry,
@@ -105,33 +143,37 @@ async function normalizeCsvAndPersist(containerClient, prefix, input) {
     meta: {
       rows: Math.max(0, rows || 0),
       source: csv?.source || (input?.csvFilename || null),
-      csv_has_multiple_sectors: Boolean(csv?.csvHasMultipleSectors || csv?.hasMultipleSectors)
+      csv_has_multiple_sectors: Boolean(csv?.csvHasMultipleSectors || csv?.hasMultipleSectors),
     },
     preview: {
-      cohort: Array.isArray(csv.sampleRows) ? csv.sampleRows.slice(0, 5) : []
-    }
+      cohort: Array.isArray(csv.sampleRows) ? csv.sampleRows.slice(0, 5) : [],
+    },
   };
 
   try {
     const sum = csv && typeof csv === "object" ? csv : null;
     if (sum) {
       const takeTop = (arr, key = "value", n = 8) =>
-        Array.isArray(arr) ? arr.map(x => String(x?.[key] || "").trim()).filter(Boolean).slice(0, n) : [];
+        Array.isArray(arr)
+          ? arr.map(x => String(x?.[key] || "").trim()).filter(Boolean).slice(0, n)
+          : [];
+
       const needs = takeTop(sum.needs);
       const blockers = takeTop(sum.blockers);
       const purchases = takeTop(sum.purchases);
+
       if (needs.length || blockers.length || purchases.length) {
         normalized.signals = {
           spend_band: null,
           top_blockers: blockers,
           top_needs_supplier: needs,
-          top_purchases: purchases
+          top_purchases: purchases,
         };
         normalized.global_signals = {
           spend_band: null,
           top_blockers: blockers,
           top_needs_supplier: needs,
-          top_purchases: purchases
+          top_purchases: purchases,
         };
       }
     }
@@ -143,10 +185,17 @@ async function normalizeCsvAndPersist(containerClient, prefix, input) {
   return normalized;
 }
 
-
 // Queue helpers
-function safeStringify(obj) { try { return JSON.stringify(obj); } catch { return "{}"; } }
-function byteLen(s) { return Buffer.byteLength(s, "utf8"); }
+function safeStringify(obj) {
+  try {
+    return JSON.stringify(obj);
+  } catch {
+    return "{}";
+  }
+}
+function byteLen(s) {
+  return Buffer.byteLength(s, "utf8");
+}
 
 module.exports = async function (context, req) {
   const method = (req?.method || "GET").toUpperCase();
@@ -156,23 +205,26 @@ module.exports = async function (context, req) {
     context.res = { status: 204, headers: CORS };
     return;
   }
+
   if (method !== "POST") {
     context.res = {
       status: 405,
-      headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId, allow: "POST" },
+      headers: {
+        ...CORS,
+        "content-type": "application/json; charset=utf-8",
+        "x-correlation-id": correlationId,
+        allow: "POST",
+      },
       body: { error: "method_not_allowed", message: "Only POST is supported" },
     };
     return;
   }
 
   try {
-    // 🔍 DEBUG: what does this running instance actually see?
-    context.log("DEBUG_Q_CAMPAIGN_EVIDENCE", process.env.Q_CAMPAIGN_EVIDENCE);
-    context.log("DEBUG_AzureWebJobsStorage_set", !!process.env.AzureWebJobsStorage);
     if (!STORAGE_CONN) {
       context.res = {
         status: 500,
-        headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
+        headers: { ...CORS, "content-type": "application/json; charset=utf-8", "x-correlation-id": correlationId },
         body: { error: "config", message: "AzureWebJobsStorage app setting is missing" },
       };
       return;
@@ -194,8 +246,11 @@ module.exports = async function (context, req) {
 
     // USPs: accept array or delimited string
     if (!Array.isArray(body.supplier_usps)) {
-      if (typeof body.usps === "string") body.supplier_usps = body.usps.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
-      else if (Array.isArray(body.usps)) body.supplier_usps = body.usps.map(s => String(s ?? "").trim()).filter(Boolean);
+      if (typeof body.usps === "string") {
+        body.supplier_usps = body.usps.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+      } else if (Array.isArray(body.usps)) {
+        body.supplier_usps = body.usps.map(s => String(s ?? "").trim()).filter(Boolean);
+      }
     }
 
     // Competitors (dedup, cap 8)
@@ -210,16 +265,22 @@ module.exports = async function (context, req) {
 
     // sales_model / call_type accept mirrors (including filters.*)
     const salesModelRaw = [
-      body.sales_model, body.salesModel,
-      body.filters?.sales_model, body.filters?.salesModel
-    ].map(v => (v == null ? "" : String(v).trim().toLowerCase()))
+      body.sales_model,
+      body.salesModel,
+      body.filters?.sales_model,
+      body.filters?.salesModel,
+    ]
+      .map(v => (v == null ? "" : String(v).trim().toLowerCase()))
       .find(v => v === "direct" || v === "partner");
     const sales_model = salesModelRaw || "direct";
 
     const callTypeRaw = [
-      body.call_type, body.callType,
-      body.filters?.call_type, body.filters?.callType
-    ].map(v => (v == null ? "" : String(v).trim().toLowerCase()))
+      body.call_type,
+      body.callType,
+      body.filters?.call_type,
+      body.filters?.callType,
+    ]
+      .map(v => (v == null ? "" : String(v).trim().toLowerCase()))
       .find(v => v === "direct" || v === "partner");
     const call_type = callTypeRaw || null;
 
@@ -232,6 +293,7 @@ module.exports = async function (context, req) {
     const supplier_usps = Array.isArray(body.supplier_usps)
       ? body.supplier_usps.map(s => String(s || "").trim()).filter(Boolean).slice(0, 12)
       : [];
+
     let supplier_products = [];
     if (Array.isArray(body.supplier_products)) {
       supplier_products = body.supplier_products.map(s => String(s || "").trim()).filter(Boolean).slice(0, 24);
@@ -241,13 +303,15 @@ module.exports = async function (context, req) {
       const arr = Array.isArray(body.products) ? body.products : body.products.split(/[,;\n]/);
       supplier_products = arr.map(s => String(s || "").trim()).filter(Boolean).slice(0, 24);
     }
+
     // Campaign context
-    const campaign_industry = (body.campaign_industry ?? body.companyIndustry ?? body.industry ?? "").toString().trim() || null;
+    const campaign_industry =
+      (body.campaign_industry ?? body.companyIndustry ?? body.industry ?? "").toString().trim() || null;
 
     // csv inputs
     const csvText = (typeof body.csvText === "string" && body.csvText.trim()) || null;
     const csvFilename = (typeof body.csvFilename === "string" && body.csvFilename.trim()) || null;
-    const csvSummary = (body.csvSummary && typeof body.csvSummary === "object") ? body.csvSummary : null;
+    const csvSummary = body.csvSummary && typeof body.csvSummary === "object" ? body.csvSummary : null;
 
     // rowCount (optional); infer from csvText if not supplied
     let rowCount = null;
@@ -256,7 +320,7 @@ module.exports = async function (context, req) {
       if (!Number.isFinite(n) || n < 0) {
         context.res = {
           status: 400,
-          headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
+          headers: { ...CORS, "content-type": "application/json; charset=utf-8", "x-correlation-id": correlationId },
           body: { error: "bad_request", message: "rowCount must be a non-negative number" },
         };
         return;
@@ -282,13 +346,13 @@ module.exports = async function (context, req) {
     if (missing.length) {
       context.res = {
         status: 400,
-        headers: { ...CORS, "content-type": "application/json", "x-correlation-id": correlationId },
-        body: { error: "bad_request", message: `Missing required field(s): ${missing.join(", ")}` }
+        headers: { ...CORS, "content-type": "application/json; charset=utf-8", "x-correlation-id": correlationId },
+        body: { error: "bad_request", message: `Missing required field(s): ${missing.join(", ")}` },
       };
       return;
     }
 
-    // ---- Storage + Queues ----
+    // ---- Storage ----
     const blobService = BlobServiceClient.fromConnectionString(STORAGE_CONN);
     const containerClient = blobService.getContainerClient(RESULTS_CONTAINER);
     await containerClient.createIfNotExists();
@@ -298,58 +362,10 @@ module.exports = async function (context, req) {
     const runId = clientRunKey
       ? crypto.createHash("sha1").update(String(clientRunKey)).digest("hex")
       : (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`);
-    // campaign-start
+
     const prefix = canonicalPrefix({ page, userId, runId, date: now });
 
-    await putJson(container, `${prefix}status.json`, {
-      runId,
-      prefix,
-      markers: {},
-      history: []
-    });
-
-    res.json({ runId, prefix });
-
-    // ---- initial status ----
-    const enqueuedAt = now.toISOString();
-    const initialStatus = {
-      runId,
-      state: "Queued",
-      input: {
-        page,
-        rowCount: rowCount ?? null,
-        filters: body.filters ?? null,
-        notes: body.notes ?? null,
-        sales_model,
-        call_type,
-        supplier_company,
-        supplier_website,
-        supplier_linkedin,
-        supplier_usps,
-        supplier_products,
-        campaign_industry,
-        selected_industry: campaign_industry, // mirror for downstream
-        campaign_requirement: campaign_requirement_effective,
-        relevant_competitors,
-        // Legacy mirrors (kept for back-compat)
-        prospect_company: supplier_company,
-        prospect_website: supplier_website,
-        prospect_linkedin: supplier_linkedin,
-        user_usps: supplier_usps,
-        company_industry: campaign_industry,
-        flags: {
-          use_new_evidence: false,
-          use_new_insights: false,
-          use_new_strategy: false,
-          use_writer_assembler: false
-        }
-      },
-      enqueuedAt,
-      correlationId,
-    };
-    await writeInitialStatus(containerClient, prefix, initialStatus);
-
-    // ---- input.json (full) ----
+    // ---- Build input payload (full) ----
     const inputPayload = {
       page,
       rowCount: rowCount ?? null,
@@ -374,14 +390,64 @@ module.exports = async function (context, req) {
       prospect_website: supplier_website,
       prospect_linkedin: supplier_linkedin,
       user_usps: supplier_usps,
-      company_industry: campaign_industry
+      company_industry: campaign_industry,
     };
+
+    // ============================================================
+    // ✅ CRITICAL FIX: write canonical status.json ONCE, EARLY
+    // This prevents your router/status endpoint 404.
+    // ============================================================
+    const enqueuedAt = now.toISOString();
+    const initialStatus = {
+      runId,
+      prefix,
+      state: "Queued",
+      input: {
+        page,
+        rowCount: rowCount ?? null,
+        filters: body.filters ?? null,
+        notes: body.notes ?? null,
+        sales_model,
+        call_type,
+        supplier_company,
+        supplier_website,
+        supplier_linkedin,
+        supplier_usps,
+        supplier_products,
+        campaign_industry,
+        selected_industry: campaign_industry,
+        campaign_requirement: campaign_requirement_effective,
+        relevant_competitors,
+        // Legacy mirrors (back-compat)
+        prospect_company: supplier_company,
+        prospect_website: supplier_website,
+        prospect_linkedin: supplier_linkedin,
+        user_usps: supplier_usps,
+        company_industry: campaign_industry,
+        flags: {
+          use_new_evidence: false,
+          use_new_insights: false,
+          use_new_strategy: false,
+          use_writer_assembler: false,
+        },
+      },
+      markers: {},
+      history: [],
+      enqueuedAt,
+      correlationId,
+    };
+
+    pushHistory(initialStatus, "campaign_start", "status_seeded");
+    await writeInitialStatus(containerClient, prefix, initialStatus);
+
+    // ---- input.json (full) ----
     await writeJson(containerClient, `${prefix}input.json`, inputPayload);
+
+    // ---- csv_normalized.json seed ----
     await normalizeCsvAndPersist(containerClient, prefix, inputPayload);
 
     // ---- per-user recent index (bounded 50) ----
-    const isAnonymous = (userId === "anonymous");
-
+    const isAnonymous = userId === "anonymous";
     if (!isAnonymous) {
       const userIdxClient = containerClient.getBlockBlobClient(`users/${userId}/recent.json`);
       let idx = { userId, items: [] };
@@ -389,7 +455,9 @@ module.exports = async function (context, req) {
         const dl = await userIdxClient.download();
         idx = JSON.parse((await streamToBuffer(dl.readableStreamBody)).toString("utf8"));
         if (!idx || typeof idx !== "object") idx = { userId, items: [] };
-      } catch { /* create fresh */ }
+      } catch {
+        // create fresh
+      }
 
       idx.items = [
         {
@@ -397,13 +465,14 @@ module.exports = async function (context, req) {
           page,
           when: now.toISOString(),
           prefix,
-          summary: { supplier_company, campaign_industry, rowCount: rowCount ?? null }
+          summary: { supplier_company, campaign_industry, rowCount: rowCount ?? null },
         },
-        ...(Array.isArray(idx.items) ? idx.items : [])
+        ...(Array.isArray(idx.items) ? idx.items : []),
       ].slice(0, 50);
 
       await writeJson(containerClient, `users/${userId}/recent.json`, idx);
     }
+
     // ---- Build queue payload (canonical + mirrors) ----
     const msg = {
       op: "kickoff",
@@ -418,9 +487,10 @@ module.exports = async function (context, req) {
       clientRunKey: clientRunKey ?? null,
       runConfig: {
         campaign_requirement: campaign_requirement_effective,
-        relevant_competitors
+        relevant_competitors,
       },
       input: inputPayload,
+
       // mirrors for legacy workers
       rowCount: inputPayload.rowCount,
       filters: inputPayload.filters,
@@ -442,16 +512,27 @@ module.exports = async function (context, req) {
       prospect_website: inputPayload.prospect_website,
       prospect_linkedin: inputPayload.prospect_linkedin,
       user_usps: inputPayload.user_usps,
-      company_industry: inputPayload.company_industry
+      company_industry: inputPayload.company_industry,
     };
 
     // ---- Payload slimming (preserve important fields) ----
     const PROTECT = new Set([
-      "notes", "rowCount", "campaign_industry", "company_industry",
-      "relevant_competitors", "sales_model", "salesModel",
-      "call_type", "callType", "supplier_company", "supplier_website",
-      "supplier_linkedin", "prospect_company", "prospect_website",
-      "prospect_linkedin", "csvFilename"
+      "notes",
+      "rowCount",
+      "campaign_industry",
+      "company_industry",
+      "relevant_competitors",
+      "sales_model",
+      "salesModel",
+      "call_type",
+      "callType",
+      "supplier_company",
+      "supplier_website",
+      "supplier_linkedin",
+      "prospect_company",
+      "prospect_website",
+      "prospect_linkedin",
+      "csvFilename",
     ]);
 
     let payload = safeStringify(msg);
@@ -480,8 +561,8 @@ module.exports = async function (context, req) {
       }
 
       payload = safeStringify(slim);
+
       if (byteLen(payload) > MAX_BYTES) {
-        // last-resort: strip any remaining non-essential top-level fields
         const { op, runId, userId, page, prefix, container, correlationId, clientRunKey, runConfig, input } = slim;
         payload = safeStringify({ op, runId, userId, page, prefix, container, correlationId, clientRunKey, runConfig, input });
       }
@@ -489,44 +570,40 @@ module.exports = async function (context, req) {
       context.log.warn("campaign_start_payload_slimmed", { bytes: byteLen(payload) });
     }
 
+    // (We keep this parse step because you had it; it also validates JSON)
     const parsed = JSON.parse(payload);
 
-    // 1. ALWAYS notify router that start phase completed
-    const rRouter = await enqueueTo(ROUTER_QUEUE, {
+    // ============================================================
+    // Enqueue router continuation: afterstart
+    // ============================================================
+    await enqueueTo(ROUTER_QUEUE, {
       op: "afterstart",
       runId,
       prefix,
-      page
+      page,
+      correlationId,
+      clientRunKey: clientRunKey ?? null,
     });
 
-    // 2. Safe log (no undefined vars)
-    context.log("campaign_start_enqueued", {
-      runId,
-      evidenceQueue: EVIDENCE_QUEUE,
-      routerQueue: ROUTER_QUEUE,
-      routerMsgId: rRouter?.messageId,
-      correlationId
-    });
-
-    context.log("campaign_start_enqueued", {
-      runId,
-      workerQueue: WORKER_QUEUE,
-      evidenceQueue: EVIDENCE_QUEUE,
-      correlationId
-    });
+    pushHistory(initialStatus, "router_enqueued", "afterstart");
+    await writeJson(containerClient, `${prefix}status.json`, initialStatus);
 
     // ---- Response ----
     context.res = {
       status: 202,
-      headers: { ...CORS, "content-type": "application/json; charset=utf-8", "x-correlation-id": correlationId },
+      headers: {
+        ...CORS,
+        "content-type": "application/json; charset=utf-8",
+        "x-correlation-id": correlationId,
+      },
       body: {
         runId,
         prefix,
         statusUrl: `${containerClient.url}/${prefix}status.json`,
-        inputUrl: `${containerClient.url}/${prefix}input.json`
-      }
+        inputUrl: `${containerClient.url}/${prefix}input.json`,
+        bytes: byteLen(safeStringify(parsed)),
+      },
     };
-
   } catch (e) {
     context.log.error("campaign_start_failed", { error: String(e?.message || e), correlationId });
     context.res = {
