@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 20-12-2025 v36
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 20-12-2025 v37
    ROLE/SCOPE (hard boundaries):
    - Deterministic transport + rendering layer only
    - No inference, no “helpful” guesses, no CSV interpretation/summarisation
@@ -7,9 +7,6 @@
 
 window.CampaignUI = window.CampaignUI || {};
 (function () {
-  // ---------------------------------------------------------------------------
-  // DOM helpers
-  // ---------------------------------------------------------------------------
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
@@ -25,9 +22,26 @@ window.CampaignUI = window.CampaignUI || {};
       "https://<YOUR-STORAGE-ACCOUNT>.blob.core.windows.net/results/"
   };
 
-  // ---------------------------------------------------------------------------
-  // Truth-preserving UI helpers (render what exists; surface absence explicitly)
-  // ---------------------------------------------------------------------------
+  function getSection(name) {
+    if (!name) return null;
+
+    // Gold doctrine: narrative sections live under strategy_v2.sections
+    if (state.contract?.strategy_v2?.sections?.[name] !== undefined) {
+      return state.contract.strategy_v2.sections[name];
+    }
+
+    // Transitional tolerance: flattened contract fields (legacy writer output)
+    if (state.contract?.sections?.[name] !== undefined) {
+      return state.contract.sections[name];
+    }
+
+    if (state.contract?.[name] !== undefined) {
+      return state.contract[name];
+    }
+
+    return null;
+  }
+
   function setPanelContent(node) {
     const mount = $("#centerPanel");
     if (!mount) return;
@@ -175,7 +189,6 @@ window.CampaignUI = window.CampaignUI || {};
   const SECTIONS = [
     { id: "exec", label: "Executive summary", render: renderExecutiveSummary },
     { id: "gtm", label: "Go-to-market", render: renderGoToMarket },
-    { id: "msg", label: "Messaging", render: renderMessaging },
     { id: "off", label: "Offering", render: renderOffering },
     { id: "se", label: "Sales enablement", render: renderSalesEnablement },
     { id: "pp", label: "Proof points", render: renderProofPoints },
@@ -227,95 +240,52 @@ window.CampaignUI = window.CampaignUI || {};
   // Renderers (truth-preserving; backend is source of truth)
   // ---------------------------------------------------------------------------
   function renderExecutiveSummary() {
-    // Prefer Gold writer sections if present; otherwise show whatever exists verbatim.
-    const c = state.contract;
-    const wrap = document.createElement("div");
-
-    // Gold v2 renderer shape (your newer writer): contract.sections.executive_summary
-    const gold = c?.sections?.executive_summary;
-    if (gold !== undefined) {
-      setPanelContent(renderSectionObject(null, gold));
+    const data = getSection("executive_summary");
+    if (data === null) {
+      setPanelContent(makePre("Executive summary not available yet."));
       return;
     }
-
-    // Legacy-ish: contract.executive_summary
-    if (c?.executive_summary !== undefined) {
-      setPanelContent(renderSectionObject(null, c.executive_summary));
-      return;
-    }
-
-    wrap.appendChild(makePre("The executive summary will show here when your campaign has been created."));
-    setPanelContent(wrap);
+    setPanelContent(renderSectionObject(null, data));
   }
 
   function renderGoToMarket() {
-    const c = state.contract;
-    const gold = c?.sections?.go_to_market;
-    if (gold !== undefined) {
-      setPanelContent(renderSectionObject(null, gold));
-      return;
-    }
-    if (c?.go_to_market_plan !== undefined) {
-      setPanelContent(renderSectionObject(null, c.go_to_market_plan));
-      return;
-    }
-    setPanelContent(makePre("Go-to-market section not available."));
-  }
+    const data = getSection("go_to_market");
 
-  function renderMessaging() {
-    const c = state.contract;
-    const gold = c?.sections?.messaging;
-    if (gold !== undefined) {
-      setPanelContent(renderSectionObject(null, gold));
+    if (data === null) {
+      setPanelContent(makePre("Go-to-market section not available yet."));
       return;
     }
-    if (c?.messaging_matrix !== undefined) {
-      setPanelContent(renderSectionObject(null, c.messaging_matrix));
-      return;
-    }
-    setPanelContent(makePre("Messaging section not available."));
+    setPanelContent(renderSectionObject(null, data));
   }
 
   function renderOffering() {
-    const c = state.contract;
-    const gold = c?.sections?.offering;
-    if (gold !== undefined) {
-      setPanelContent(renderSectionObject(null, gold));
+    const data = getSection("offering");
+
+    if (data === null) {
+      setPanelContent(makePre("Offering section not available yet."));
       return;
     }
-    if (c?.value_proposition !== undefined) {
-      setPanelContent(renderSectionObject(null, c.value_proposition));
-      return;
-    }
-    setPanelContent(makePre("Offering section not available."));
+    setPanelContent(renderSectionObject(null, data));
   }
 
   function renderSalesEnablement() {
-    const c = state.contract;
-    const gold = c?.sections?.sales_enablement;
-    if (gold !== undefined) {
-      setPanelContent(renderSectionObject(null, gold));
+    const data = getSection("sales_enablement");
+
+    if (data === null) {
+      setPanelContent(makePre("Sales enablement section not available yet."));
       return;
     }
-    if (c?.sales_enablement !== undefined) {
-      setPanelContent(renderSectionObject(null, c.sales_enablement));
-      return;
-    }
-    setPanelContent(makePre("Sales enablement section not available."));
+    setPanelContent(renderSectionObject(null, data));
   }
 
   function renderProofPoints() {
-    const c = state.contract;
-    const gold = c?.sections?.proof_points;
-    if (gold !== undefined) {
-      setPanelContent(renderSectionObject(null, gold));
+    const data = getSection("proof_points");
+
+    if (data === null) {
+      setPanelContent(makePre("Proof points not available yet."));
       return;
     }
-    if (c?.proof_points !== undefined) {
-      setPanelContent(renderSectionObject(null, c.proof_points));
-      return;
-    }
-    setPanelContent(makePre("Proof points section not available."));
+    setPanelContent(renderSectionObject(null, data));
   }
 
   function renderEvidenceLog() {
@@ -548,6 +518,12 @@ window.CampaignUI = window.CampaignUI || {};
     fetchEvidenceLog: (runId) => `/api/campaign-fetch?runId=${encodeURIComponent(runId)}&file=evidence_log`
   };
 
+  function withPrefix(url) {
+    const prefix = state.run?.prefix;
+    if (!prefix) return url;
+    return `${url}&prefix=${encodeURIComponent(prefix)}`;
+  }
+
   // ---------------------------------------------------------------------------
   // Transitional adapter (structure-only). No inference; no multi-schema bridging.
   // ---------------------------------------------------------------------------
@@ -710,7 +686,7 @@ window.CampaignUI = window.CampaignUI || {};
 
     // Fetch strategy_v2 (optional) and attach verbatim-ish under contract.strategy_v2
     try {
-      const strategyV2 = await http("GET", API.fetchStrategyV2(runId), { timeoutMs: 20000 });
+      const strategyV2 = await http("GET", withPrefix(API.fetchStrategyV2(runId)), { timeoutMs: 20000 });
       if (strategyV2 && typeof strategyV2 === "object") {
         contract.strategy_v2 = normaliseStrategyV2(strategyV2);
       }
@@ -721,12 +697,12 @@ window.CampaignUI = window.CampaignUI || {};
     // Fetch evidence (optional). Preserve verbatim.
     let evidenceItems = [];
     try {
-      const evCanon = await http("GET", API.fetchEvidence(runId), { timeoutMs: 20000 });
+      const evCanon = await http("GET", withPrefix(API.fetchEvidence(runId)), { timeoutMs: 20000 });
       if (evCanon && Array.isArray(evCanon.claims)) evidenceItems = evCanon.claims;
       else if (Array.isArray(evCanon)) evidenceItems = evCanon;
     } catch (e1) {
       try {
-        const evLegacy = await http("GET", API.fetchEvidenceLog(runId), { timeoutMs: 20000 });
+        const evLegacy = await http("GET", withPrefix(API.fetchEvidenceLog(runId)), { timeoutMs: 20000 });
         if (Array.isArray(evLegacy)) evidenceItems = evLegacy;
       } catch (e2) {
         UI.log("Evidence load failed: " + (e2?.message || e2));

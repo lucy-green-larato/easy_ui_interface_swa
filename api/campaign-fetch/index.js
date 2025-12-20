@@ -1,4 +1,4 @@
-// /api/campaign-fetch/index.js 19-12-2025
+// /api/campaign-fetch/index.js 20-12-2025 v6
 // Campaign Fetch — strict writer/UI contract diagnostics (no remap)
 // 10/10 canonical, deterministic, UI-safe
 
