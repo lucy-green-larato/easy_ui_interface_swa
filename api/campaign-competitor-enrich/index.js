@@ -1,6 +1,6 @@
 // /api/campaign-competitor-enrich/index.js
 // Phase 3 — Competitor enrichment (deterministic, non-evidence)
-// 19-12-2025 v1.4 — diagnostics hardened
+// 29-12-2025 v1.5
 
 "use strict";
 
@@ -40,6 +40,7 @@ function parseQueueItem(queueItem) {
 function normalisePrefix(prefix) {
   let p = String(prefix || "").trim();
   p = p.replace(/^\/+/, "");
+  if (p.startsWith("results/")) p = p.slice("results/".length);
   if (!p.endsWith("/")) p += "/";
   return p;
 }
@@ -153,11 +154,24 @@ module.exports = async function (context, queueItem) {
 
   const container = await getResultsContainerClient();
 
-  const competitorsDoc =
-    (await getJson(container, `${prefix}competitors.json`)) || {};
+  let competitorsDoc = {};
+  let markdownPack = {};
 
-  const markdownPack =
-    (await getJson(container, `${prefix}evidence_v2/markdown_pack.json`)) || {};
+  try {
+    competitorsDoc =
+      (await getJson(container, `${prefix}competitors.json`)) || {};
+  } catch (e) {
+    competitorsDoc = {};
+    log("[competitor-enrich] competitors.json read failed", String(e?.message || e));
+  }
+
+  try {
+    markdownPack =
+      (await getJson(container, `${prefix}evidence_v2/markdown_pack.json`)) || {};
+  } catch (e) {
+    markdownPack = {};
+    log("[competitor-enrich] markdown_pack read failed", String(e?.message || e));
+  }
 
   const statusPath = `${prefix}status.json`;
   const status =

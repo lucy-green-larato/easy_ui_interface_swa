@@ -1,10 +1,10 @@
-// /api/campaign-write/index.js // 19-12-2025 Gold Writer v8.7
+// /api/campaign-write/index.js // 29-12-2025 Gold Writer v8.8
 // Responsibility:
 //   - Read strategy_v2 (campaign_strategy.json) produced by campaign-worker.
 //   - Read outline.json (campaign-outline) as evidence/competitor intelligence.
 //   - Read input.json to recover campaign_requirement and supplier context.
 //   - Build a Gold Campaign contract JSON that matches campaign_gold_v2 schema
-//   - Update: status.json.state = "writer_working" / "writer_error" / "Completed"
+//   - Update: status.json.state = "writer_working" / "writer_error" / "completed"
 //   - No LLM calls – pure deterministic rendering.
 //
 // IMPORTANT: Root object conforms to campaign_gold_v2 schema:

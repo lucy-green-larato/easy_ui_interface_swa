@@ -1,6 +1,6 @@
 // /api/campaign-competitor-score/index.js
 // Phase 4 — Competitor scoring (deterministic, non-evidence, no LLM)
-// 19-12-2025 v1.2 — diagnostics hardened (empty-but-valid is explainable)
+// 29-12-2025 v1.3 — diagnostics hardened (empty-but-valid is explainable)
 
 "use strict";
 
@@ -25,9 +25,11 @@ function parseQueueItem(queueItem) {
 function normalisePrefix(prefix) {
   let p = String(prefix || "").trim();
   p = p.replace(/^\/+/, "");
+  if (p.startsWith("results/")) p = p.slice("results/".length);
   if (!p.endsWith("/")) p += "/";
   return p;
 }
+
 
 function pushHistory(status, phase, note) {
   if (!status || typeof status !== "object") return;
@@ -261,13 +263,23 @@ module.exports = async function (context, queueItem) {
   const container = await getResultsContainerClient();
 
   // Existence checks for REQUIRED diagnostics keys (no inference).
-  // These reads are for diagnostics only and do not alter scoring logic.
-  const competitorsDocRaw = await getJson(container, `${prefix}competitors.json`);
-  const markdownPackRaw = await getJson(container, `${prefix}evidence_v2/markdown_pack.json`);
-  const strategyWrapperRaw = await getJson(container, `${prefix}strategy_v2/campaign_strategy.json`);
-  const enrichedRaw = await getJson(container, `${prefix}competitors_enriched.json`);
-  const evidenceCanonRaw = await getJson(container, `${prefix}evidence.json`);
-  const buyerLogicRaw = await getJson(container, `${prefix}buyer_logic.json`);
+  // LOAD INPUTS (READ-ONLY, FAIL-SAFE: missing blobs become null, not crashes)
+
+  let competitorsDocRaw = null;
+  let markdownPackRaw = null;
+  let strategyWrapperRaw = null;
+  let enrichedRaw = null;
+  let evidenceCanonRaw = null;
+  let buyerLogicRaw = null;
+
+  try { competitorsDocRaw = await getJson(container, `${prefix}competitors.json`); } catch { competitorsDocRaw = null; }
+  try { markdownPackRaw = await getJson(container, `${prefix}evidence_v2/markdown_pack.json`); } catch { markdownPackRaw = null; }
+  try { strategyWrapperRaw = await getJson(container, `${prefix}strategy_v2/campaign_strategy.json`); } catch { strategyWrapperRaw = null; }
+  try { enrichedRaw = await getJson(container, `${prefix}competitors_enriched.json`); } catch { enrichedRaw = null; }
+  try { evidenceCanonRaw = await getJson(container, `${prefix}evidence.json`); } catch { evidenceCanonRaw = null; }
+
+  // NOTE: buyer logic is written to insights_v1/buyer_logic.json (per buyerLogic.js)
+  try { buyerLogicRaw = await getJson(container, `${prefix}insights_v1/buyer_logic.json`); } catch { buyerLogicRaw = null; }
 
   const inputs_present = {
     // Required block fields

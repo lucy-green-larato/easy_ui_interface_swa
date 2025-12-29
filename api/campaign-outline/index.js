@@ -1,5 +1,5 @@
 // /api/campaign-outline/index.js
-// 08-12-2025 — fully aligned with shared storage + shared status + router logic. V4
+// 29-12-2025 — fully aligned with shared storage + shared status + router logic. V5
 
 const { enqueueTo } = require("../lib/campaign-queue");
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
@@ -262,6 +262,7 @@ module.exports = async function (context, queueItem) {
     // Normalise prefix
     prefix = String(prefix || "").replace(/^\/+/, "");
     if (!prefix.endsWith("/")) prefix += "/";
+    const prefixReady = !!prefix;
 
     // Open container
     const container = await getResultsContainerClient();
@@ -462,13 +463,16 @@ ${safeForPrompt(competitors)}
     await putJson(container, `${prefix}outline.json`, outline);
 
     // ---- Update status: state=Outline, outlineCompleted=true ----
+    // IMPORTANT: re-read status to avoid using stale markers
+    const stBeforeComplete = await getJson(container, `${prefix}status.json`);
+
     await updateStatus(
       container,
       prefix,
       {
         state: "Outline",
         markers: {
-          ...(status0?.markers || {}),
+          ...(stBeforeComplete?.markers || {}),
           outlineCompleted: true
         }
       },
@@ -489,14 +493,22 @@ ${safeForPrompt(competitors)}
 
   } catch (err) {
     context.log.error("[outline] failure", String(err?.message || err));
-    // Minimal fail-safe update
     try {
       const container = await getResultsContainerClient();
-      const status = (await getJson(container, `${prefix}status.json`)) || {};
+      if (!prefixReady) {
+        context.log.error(
+          "[outline] aborting status write — prefix not initialised",
+          { error: String(err?.message || err) }
+        );
+        return;
+      }
+      const statusPath = `${prefix}status.json`;
+      const status = (await getJson(container, statusPath)) || {};
       status.state = "Failed";
       status.error = String(err?.message || err);
       status.failedAt = nowIso();
-      await putJson(container, `${prefix}status.json`, status);
+      await putJson(container, statusPath, status);
+
     } catch { }
   }
 };

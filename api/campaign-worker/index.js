@@ -1,5 +1,5 @@
-// /api/campaign-worker/index.js 16-12-2025
-// Strategy Engine v22 — Fully deterministic, router-driven (Option B) 16-12-2025
+// /api/campaign-worker/index.js 29-12-2025
+// Strategy Engine v24
 
 "use strict";
 
@@ -49,6 +49,15 @@ function safeGet(obj, path, def) {
   }
 }
 
+async function readJsonSafe(container, path, fallback = null) {
+  try {
+    const v = await getJson(container, path);
+    return v ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 // Deterministic stringify (stable key ordering)
 function stableStringify(obj) {
   if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
@@ -86,7 +95,7 @@ function indexClaimsByTag(evidence) {
   const claims = Array.isArray(evidence?.claims) ? evidence.claims : [];
   const out = {};
   for (const c of claims) {
-    const tag = c.tag || "other";
+    const tag = c.tag || c.tier_group || "other";
     if (!out[tag]) out[tag] = [];
     out[tag].push(c);
   }
@@ -399,8 +408,8 @@ module.exports = async function (context, queueItem) {
 
   try {
     // Load Phase 1 artefacts (paths preserved to match your existing outputs)
-    const evidence = await getJson(container, `${prefix}evidence.json`);
-    const evidenceLog = await getJson(container, `${prefix}evidence_log.json`);
+    const evidence = await readJsonSafe(container, `${prefix}evidence.json`);
+    const evidenceLog = await readJsonSafe(container, `${prefix}evidence_log.json`);
     const combinedEvidence = {
       claims:
         (Array.isArray(evidence?.claims) && evidence.claims) ||
@@ -409,22 +418,22 @@ module.exports = async function (context, queueItem) {
     };
 
     const insights =
-      (await getJson(container, `${prefix}insights_v1/insights.json`)) ||
-      (await getJson(container, `${prefix}insights.json`)) ||
+      (await readJsonSafe(container, `${prefix}insights_v1/insights.json`)) ||
+      (await readJsonSafe(container, `${prefix}insights.json`)) ||
       {};
 
     const buyerLogic =
-      (await getJson(container, `${prefix}insights_v1/buyer_logic.json`)) ||
-      (await getJson(container, `${prefix}buyer_logic.json`)) ||
+      (await readJsonSafe(container, `${prefix}insights_v1/buyer_logic.json`)) ||
+      (await readJsonSafe(container, `${prefix}buyer_logic.json`)) ||
       {};
 
     const markdownPack =
-      (await getJson(container, `${prefix}evidence_v2/markdown_pack.json`)) ||
-      (await getJson(container, `${prefix}markdown_pack.json`)) ||
+      (await readJsonSafe(container, `${prefix}evidence_v2/markdown_pack.json`)) ||
+      (await readJsonSafe(container, `${prefix}markdown_pack.json`)) ||
       {};
 
-    const csvNormalized = (await getJson(container, `${prefix}csv_normalized.json`)) || {};
-    const mergedInput = (await getJson(container, `${prefix}input.json`)) || {};
+    const csvNormalized = (await readJsonSafe(container, `${prefix}csv_normalized.json`)) || {};
+    const mergedInput = (await readJsonSafe(container, `${prefix}input.json`)) || {};
 
     // Build deterministic strategy_v2
     const strategy_v2 = buildStrategyV2({
@@ -445,15 +454,20 @@ module.exports = async function (context, queueItem) {
       csvNormalized,
       markdownPack
     });
-
+    st0.markers.viabilityCompleted = true;
     await putJson(
       container,
       `${prefix}strategy_v2/viability.json`,
       viability
     );
+    st0.history.push({
+      at: new Date().toISOString(),
+      phase: "viability_written",
+      note: `${prefix}strategy_v2/viability.json`
+    });
 
     // Read status.json once, update markers deterministically, write once
-    const st0 = (await getJson(container, statusPath)) || { runId, markers: {}, history: [] };
+    const st0 = (await readJsonSafe(container, statusPath)) || { runId, markers: {}, history: [] };
     st0.markers = (st0.markers && typeof st0.markers === "object") ? st0.markers : {};
     if (!Array.isArray(st0.history)) st0.history = [];
 
@@ -475,6 +489,13 @@ module.exports = async function (context, queueItem) {
     const outPath = `${prefix}strategy_v2/campaign_strategy.json`;
     await putJson(container, outPath, { strategy_v2 });
 
+    // Record the write (traceability)
+    st0.history.push({
+      at: new Date().toISOString(),
+      phase: "strategy_written",
+      note: outPath
+    });
+
     // Persist status once (no clobber)
     await putJson(container, statusPath, st0);
 
@@ -491,7 +512,7 @@ module.exports = async function (context, queueItem) {
   } catch (err) {
     // Never deadlock: persist error into status
     try {
-      const stE = (await getJson(container, statusPath)) || { runId, markers: {}, history: [] };
+      const stE = (await readJsonSafe(container, statusPath)) || { runId, markers: {}, history: [] };
       stE.markers = (stE.markers && typeof stE.markers === "object") ? stE.markers : {};
       if (!Array.isArray(stE.history)) stE.history = [];
       if (!Array.isArray(stE.errors)) stE.errors = [];

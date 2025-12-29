@@ -1,4 +1,4 @@
-/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 20-12-2025 v37
+/* /src/js/campaign.js — unified (start/poll + renderers + tabs) 29-12-2025 v38
    ROLE/SCOPE (hard boundaries):
    - Deterministic transport + rendering layer only
    - No inference, no “helpful” guesses, no CSV interpretation/summarisation
@@ -14,6 +14,8 @@ window.CampaignUI = window.CampaignUI || {};
     contract: null,
     evidence: [],
     viability: null,
+    strategy_v2: null,
+    run: null,
     active: "exec",
     tabsMounted: false,
     timeline: [],
@@ -23,18 +25,12 @@ window.CampaignUI = window.CampaignUI || {};
   };
 
   function getSection(name) {
-    if (!name) return null;
-
-    // Gold doctrine: narrative sections live under strategy_v2.sections
-    if (state.contract?.strategy_v2?.sections?.[name] !== undefined) {
-      return state.contract.strategy_v2.sections[name];
-    }
-
-    // Transitional tolerance: flattened contract fields (legacy writer output)
+    // Canonical: UI renders writer output only
     if (state.contract?.sections?.[name] !== undefined) {
       return state.contract.sections[name];
     }
 
+    // Transitional tolerance: very old writers flattened sections at top level
     if (state.contract?.[name] !== undefined) {
       return state.contract[name];
     }
@@ -688,7 +684,7 @@ window.CampaignUI = window.CampaignUI || {};
     try {
       const strategyV2 = await http("GET", withPrefix(API.fetchStrategyV2(runId)), { timeoutMs: 20000 });
       if (strategyV2 && typeof strategyV2 === "object") {
-        contract.strategy_v2 = normaliseStrategyV2(strategyV2);
+        state.strategy_v2 = normaliseStrategyV2(strategyV2);
       }
     } catch (e) {
       UI.log("strategy_v2 fetch skipped: " + (e?.message || e));

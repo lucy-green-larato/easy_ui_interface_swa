@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 18-12-2025 — v63
+// /api/campaign-evidence/index.js 29-12-2025 — v65
 // -----------------------------------------------------------------------------
 // PHASE BOUNDARY NOTE
 //
@@ -429,6 +429,35 @@ module.exports = async function (context, job) {
     } catch { /* best-effort; continue */ }
 
     const productsMeta = { declared: [], observed: [], validated: [], chosen: [], notes: Object.create(null) };
+    // Supplier markdown → declared products (authoritative)
+    try {
+      const supplierSlug = toSlug(
+        input?.supplier_company || input?.company_name || ""
+      );
+
+      if (supplierSlug) {
+        const md = await getText(
+          container,
+          `${prefix}packs/${supplierSlug}/profile.md`
+        );
+
+        if (md) {
+          const sec = mdSection(md, "Products|Solutions|Services|Offerings");
+          if (sec) {
+            const extracted = bullets(sec)
+              .map(s => String(s).trim())
+              .filter(Boolean)
+              .slice(0, 24);
+
+            productsMeta.declared = Array.from(
+              new Set([...productsMeta.declared, ...extracted])
+            );
+          }
+        }
+      }
+    } catch {
+      /* non-fatal */
+    }
 
     // Declared products (user-specified): array OR a single string (split on ; , or newline)
     try {
@@ -747,6 +776,7 @@ module.exports = async function (context, job) {
 
     await putJson(container, `${prefix}csv_normalized.json`, csvNormalizedCanonical);
 
+
     // Validated products (Observed/Declared cross-checked with CSV signals)
     try {
       productsMeta.notes = productsMeta.notes || Object.create(null);
@@ -986,6 +1016,7 @@ module.exports = async function (context, job) {
 
     // --- TIER 0: CSV SUMMARY (MANDATORY, FIRST) ---
 
+
     const industryName =
       csvNormalizedCanonical?.selected_industry ||
       input?.selected_industry ||
@@ -1043,8 +1074,8 @@ module.exports = async function (context, job) {
         const ev = {
           claim_id: nextClaimId(),
           source_type: sourceLabel,
-          title: `${sourceLabel.replace(/_/g, " ")} — ${it.source?.heading || "Untitled"}`,
-          url: it.source?.file ? `${container.url}/${it.source.file}` : "",
+          title: `${sourceLabel.replace(/_/g, " ")} — ${it.source_heading || "Untitled"}`,
+          url: it.source_file ? `${container.url}/${it.source_file}` : "",
           summary: addCitation(text, sourceLabel),
           quote: text,
           markdown_id: it.id || null,
@@ -1474,60 +1505,65 @@ module.exports = async function (context, job) {
       const tierCounts = Object.create(null);
       let missingTierMeta = 0;
 
+      // ---------------------------------------------------------
+      // Count tiers and detect metadata violations
+      // ---------------------------------------------------------
       for (const c of Array.isArray(claims) ? claims : []) {
-        const tier = c?.tier;
-        const tierGroup = c?.tier_group;
-
-        // Track missing metadata explicitly (audit signal)
-        if (tier == null || tierGroup == null) {
+        if (c?.tier == null || c?.tier_group == null) {
           missingTierMeta++;
           continue;
         }
-
-        tierCounts[tier] = (tierCounts[tier] || 0) + 1;
+        tierCounts[c.tier] = (tierCounts[c.tier] || 0) + 1;
       }
 
-      // -------------------------------------------------------------------------
-      // HARD ASSERTS (run must fail if violated)
-      // -------------------------------------------------------------------------
+      // ---------------------------------------------------------
+      // HARD ASSERTS — MUST FAIL RUN
+      // ---------------------------------------------------------
 
-      // 1) Every evidence item must have tier metadata
       if (missingTierMeta > 0) {
         throw new Error(
-          `[evidence] Tier integrity violation: ${missingTierMeta} evidence item(s) missing tier or tier_group`
+          `[evidence] Tier integrity violation: ${missingTierMeta} claim(s) missing tier metadata`
         );
       }
 
-      // 2) Exactly one Tier-0 (CSV summary) must exist
       const tier0Count = tierCounts[0] || 0;
       if (tier0Count !== 1) {
         throw new Error(
-          `[evidence] Tier-0 violation: expected exactly 1 csv_summary item, found ${tier0Count}`
+          `[evidence] Tier-0 violation: expected exactly 1 csv_summary claim, found ${tier0Count}`
         );
       }
 
-      // -------------------------------------------------------------------------
-      // SOFT WARNINGS (audit visibility, non-fatal)
-      // -------------------------------------------------------------------------
-      if (log?.warn) {
-        if (!tierCounts[1]) log.warn("[evidence] No Tier-1 markdown evidence present");
-        if (!tierCounts[2]) log.warn("[evidence] No Tier-2 supplier profile evidence present");
-        if (!tierCounts[3]) {
-          log.warn("[evidence] No Tier-3 supporting narrative evidence present");
-        }
-        if (!tierCounts[4]) {
-          log.warn("[evidence] No Tier-4 derived structure (coverage) evidence present");
-        }
+      // ---------------------------------------------------------
+      // SOFT WARNINGS — AUDIT ONLY
+      // ---------------------------------------------------------
 
+      if (log?.warn) {
+        if (!tierCounts[1]) log.warn("[evidence] No Tier-1 strategic markdown evidence present");
+        if (!tierCounts[2]) log.warn("[evidence] No Tier-2 supplier profile evidence present");
+        if (!tierCounts[4]) log.warn("[evidence] No Tier-4 coverage evidence present");
         if (!tierCounts[5]) log.warn("[evidence] No Tier-5 case study evidence present");
-        if (!tierCounts[7]) log.warn("[evidence] No Tier-7 LinkedIn evidence present");
       }
 
-      // -------------------------------------------------------------------------
-      // Return structured counts for evidence.json
-      // -------------------------------------------------------------------------
+      // ---------------------------------------------------------
+      // SYNTHESIS READINESS (STRUCTURAL, NON-INTERPRETIVE)
+      // ---------------------------------------------------------
+
+      const readiness = {
+        synthesis_safe:
+          tierCounts[0] === 1 &&
+          !!tierCounts[1] &&
+          !!tierCounts[2],
+
+        requirements: {
+          tier0_csv_present: tierCounts[0] === 1,
+          tier1_present: !!tierCounts[1],
+          tier2_present: !!tierCounts[2]
+        }
+      };
+
       return {
         by_tier: { ...tierCounts },
+        readiness,
         totals: {
           items: Array.isArray(claims) ? claims.length : 0,
           missing_tier_metadata: missingTierMeta
@@ -1685,8 +1721,8 @@ module.exports = async function (context, job) {
       const evidenceBundle = {
         claims,
         counts: {
-          ...summarizeClaims(claims),
-          by_tier: tierCounts
+          by_tier: tierCounts.by_tier,
+          readiness: tierCounts.readiness
         },
         doctrine: {
           tier_model: "csv-first-tiered-v2.1",
@@ -1722,6 +1758,7 @@ module.exports = async function (context, job) {
         "[evidence] failed to write evidence bundle (MODULE 2.9)",
         String(e?.message || e)
       );
+      throw e;
     }
 
     try {
@@ -1749,7 +1786,7 @@ module.exports = async function (context, job) {
       context.log("[evidence] strategy unchanged — linkedin.json skipped");
     } else {
       const strategy =
-        (await getJson(container, `${prefix}strategy_v2/strategy.json`)) ||
+        (await getJson(container, `${prefix}strategy_v2/campaign_strategy.json`)) ||
         (await getJson(container, `${prefix}strategy_v2.json`)) ||
         null;
 
@@ -1807,6 +1844,10 @@ module.exports = async function (context, job) {
       const st0 = (await getJson(container, `${prefix}status.json`)) || { runId, history: [], markers: {} };
       const already = !!st0?.markers?.afterevidenceSent;
       if (!already) {
+        const evidenceOk = await getJson(container, `${prefix}evidence.json`);
+        if (!evidenceOk) {
+          throw new Error("EvidenceDigest: evidence.json missing; refusing to enqueue afterevidence");
+        }
         await enqueueTo(ROUTER_QUEUE_NAME, { op: "afterevidence", runId, page: "campaign", prefix });
         st0.markers = { ...(st0.markers || {}), afterevidenceSent: true };
         await putJson(container, `${prefix}status.json`, st0);

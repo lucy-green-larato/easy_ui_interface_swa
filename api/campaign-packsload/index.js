@@ -107,13 +107,20 @@ module.exports = async function (context, msg) {
       (await getJson(container, statusPath)) ||
       { runId, markers: {}, history: [] };
 
-    if (!status.context || typeof status.context !== "object") {
+        if (!status.context || typeof status.context !== "object") {
       status.context = {};
     }
 
     status.context.industry_slug = resolved.industry_slug;
     status.context.supplier_slug = resolved.supplier_slug;
     status.context.competitor_slugs = resolved.competitor_slugs;
+
+    if (!Array.isArray(status.history)) status.history = [];
+    status.history.push({
+      at: new Date().toISOString(),
+      phase: "packsload",
+      note: "scope_declared"
+    });
 
     await putJson(container, statusPath, status);
 

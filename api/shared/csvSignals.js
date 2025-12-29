@@ -1,4 +1,4 @@
-// /api/shared/csvSignals.js 24-11-2025 v24
+// /api/shared/csvSignals.js 29-12-2025 v25
 //
 // Responsibilities:
 //  - Parse loose CSV into rows
@@ -604,21 +604,6 @@ function csvSummaryEvidence({
   };
 }
 
-module.exports = {
-  // ... keep your other exports ...
-  csvSummaryEvidence,
-  // csvSignalsEvidence,
-  // etc.
-};
-
-
-/**
- * Build an evidence item summarising CSV buyer signals.
- *
- * Requires:
- *  - nextClaimId(): function → string
- *  - addCitation(text, tag): function → string
- */
 function csvSignalsEvidence({
   csvCanonical,
   prefix,
@@ -635,6 +620,17 @@ function csvSignalsEvidence({
   }
 
   const sig = csvCanonical?.signals || {};
+  const hasSignal =
+  (sig.top_needs_supplier?.length || 0) +
+  (sig.top_blockers?.length || 0) +
+  (sig.top_purchases?.length || 0) > 0;
+
+let summary = "";
+
+if (!hasSignal) {
+  summary =
+    "CSV present; no buyer needs/blockers/purchases signals were extracted.";
+}
   const gsig = csvCanonical?.global_signals || {};
   const selInd = csvCanonical?.selected_industry || null;
   const rowCount = Number(csvCanonical?.meta?.rows || 0);

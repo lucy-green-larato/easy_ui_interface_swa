@@ -1,4 +1,4 @@
-// /api/campaign-evidence/insights.js 21-11-2025 v5
+// /api/campaign-evidence/insights.js 29-12-2025 v6
 // Deterministic Insight Engine for campaign runs.
 //
 // Consumes (all best-effort; missing files are tolerated):
@@ -145,7 +145,20 @@ async function buildInsights(container, prefix) {
   );
 
   if (!Array.isArray(evidenceRaw?.claims)) {
-    throw new Error("[insights] evidence.json missing or invalid");
+    const insights = initialiseInsights();
+
+    // Truthful signalling: tolerate missing artefact but make it explicit.
+    console.warn("[insights] evidence.json missing or invalid; writing empty-but-valid insights");
+
+    validateAndWarn("insights", insights, console);
+
+    await putJson(
+      container,
+      `${prefix}insights_v1/insights.json`,
+      insights
+    );
+
+    return insights;
   }
 
   const claims = evidenceRaw.claims;
@@ -348,7 +361,7 @@ async function buildInsights(container, prefix) {
   // Final validation + persist
   // ---------------------------------------------------------------------------
 
-  validateAndWarn("insights", insights, console.log);
+  validateAndWarn("insights", insights, console);
 
   await putJson(
     container,

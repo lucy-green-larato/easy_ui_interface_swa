@@ -1,4 +1,4 @@
-// /api/campaign-status/index.js 03-12-2025 v10.2
+// /api/campaign-status/index.js 29-12-2025 v10.3
 // GET /api/campaign-status?runId=... [&page=campaign]
 //
 // Canonical status resolver for Campaign runs.
@@ -181,6 +181,26 @@ module.exports = async function (context, req) {
     if (providedPrefix) {
       // Caller supplied an explicit prefix → trust it but normalise shape
       prefix = String(providedPrefix).trim();
+      const pLower = String(prefix).toLowerCase();
+      const rLower = String(runId).toLowerCase();
+
+      // Minimal correctness guard: provided prefix must contain runId token.
+      // Prevents accidental or hostile reads of unrelated status.json blobs.
+      if (!pLower.includes(rLower)) {
+        context.res = {
+          status: 400,
+          headers: {
+            ...CORS,
+            "Content-Type": "application/json",
+            "x-correlation-id": correlationId,
+          },
+          body: {
+            error: "bad_request",
+            message: "Provided prefix does not match runId",
+          },
+        };
+        return;
+      }
     } else {
       // Fallback: reconstruct using canonicalPrefix
       const userId = userIdFromReq(req); // only used for fallback
@@ -308,8 +328,6 @@ module.exports = async function (context, req) {
       });
     }
 
-    const responseText = JSON.stringify(statusPayload);
-
     context.res = {
       status: 200,
       headers: {
@@ -320,7 +338,7 @@ module.exports = async function (context, req) {
         "Cache-Control": "no-cache",
         "x-correlation-id": correlationId,
       },
-      body: responseText,
+      body: statusPayload,
     };
   } catch (err) {
     context.log.error(

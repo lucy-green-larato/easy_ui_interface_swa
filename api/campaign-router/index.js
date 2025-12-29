@@ -1,14 +1,7 @@
 // /api/campaign-router/index.js
-// Gold v9.5 — canonical, idempotent, prefix-safe router
-// 20-12-2025
+// Gold v9.7 — canonical, idempotent, prefix-safe router
+// 29-12-2025
 //
-// Doctrine:
-// - Deterministic routing only
-// - Prefix is canonical truth
-// - Each phase enqueues ONCE
-// - Replays are tolerated, never amplified
-// - Router never infers, only advances state
-
 "use strict";
 
 const {
@@ -78,7 +71,19 @@ module.exports = async function (context, queueItem) {
   const msg = parseQueueItem(queueItem);
 
   const op = String(msg.op || "").trim();
-  const runId = msg.runId || msg.run_id || "unknown";
+  let runId = (typeof msg.runId === "string" && msg.runId.trim())
+    ? msg.runId.trim()
+    : (typeof msg.run_id === "string" && msg.run_id.trim())
+      ? msg.run_id.trim()
+      : null;
+
+  if (!runId) {
+    try {
+      const parts = prefix.split("/").filter(Boolean);
+      if (parts.length) runId = parts[parts.length - 1];
+    } catch { /* noop */ }
+  }
+  if (!runId) runId = "unknown";
   const page = msg.page || "campaign";
   const prefix = normPrefix(msg.prefix || "");
 
@@ -92,7 +97,19 @@ module.exports = async function (context, queueItem) {
   const container = await getResultsContainerClient();
   const statusPath = `${prefix}status.json`;
 
-  let status = (await getJson(container, statusPath)) || {};
+  let status = {};
+  try {
+    status = (await getJson(container, statusPath)) || {};
+  } catch (e) {
+    log("[router] status read failed", {
+      runId,
+      prefix,
+      statusPath,
+      err: String(e?.message || e)
+    });
+    return;
+  }
+
   if (!status || typeof status !== "object") status = {};
   if (!status.markers || typeof status.markers !== "object") status.markers = {};
   if (!Array.isArray(status.history)) status.history = [];
@@ -147,7 +164,7 @@ module.exports = async function (context, queueItem) {
     status.markers.markdownPackEnqueued = true;
     status.state = "markdown_pack_queued";
     pushHistory(status, "markdown_pack_queued");
-    await Status(container, statusPath, status);
+    await persistStatus(container, statusPath, status);
     return;
   }
 
@@ -157,7 +174,8 @@ module.exports = async function (context, queueItem) {
   if (op === "aftermarkdown") {
     if (status.markers.evidenceEnqueued) {
       pushHistory(status, "evidence_skip", "already enqueued");
-      await persistStatus
+      await persistStatus(container, statusPath, status);
+      return;
     }
 
     await enqueueTo(EVIDENCE_QUEUE_NAME, {
@@ -173,7 +191,6 @@ module.exports = async function (context, queueItem) {
     await persistStatus(container, statusPath, status);
     return;
   }
-
   // ---------------------------------------------------------------------------
   // afterevidence → competitor enrich (ONCE)
   // ---------------------------------------------------------------------------

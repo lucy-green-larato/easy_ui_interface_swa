@@ -1,4 +1,4 @@
-// /api/campaign-fetch/index.js 20-12-2025 v6
+// /api/campaign-fetch/index.js 29-12-2025 v7
 // Campaign Fetch — strict writer/UI contract diagnostics (no remap)
 // 10/10 canonical, deterministic, UI-safe
 
@@ -13,6 +13,7 @@ const genId = () =>
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function streamToString(readable) {
+  if (!readable) return "";
   const chunks = [];
   for await (const ch of readable) chunks.push(ch);
   return Buffer.concat(chunks).toString("utf8");
@@ -266,15 +267,19 @@ module.exports = async function (context, req) {
 
     // ---------- strict writer contract ----------
     if (fileKey === "campaign" && parsed && typeof parsed === "object") {
-      const actualKeys = Object.keys(parsed).filter(
-        (k) => !k.startsWith("_") && k !== "diagnostics"
-      );
+      const actualKeys =
+        parsed.sections && typeof parsed.sections === "object"
+          ? Object.keys(parsed.sections)
+          : [];
+
       const { missing_keys, unexpected_keys } = diffKeys(
         SECTION_KEYS,
         actualKeys
       );
+
       if (missing_keys.length || unexpected_keys.length) {
         parsed.diagnostics = {
+          ...(parsed.diagnostics || {}),
           contract_mismatch: true,
           expected_keys: SECTION_KEYS,
           received_keys: actualKeys,
@@ -285,11 +290,8 @@ module.exports = async function (context, req) {
     }
 
     // ---------- inject canonical prefix ----------
-    if (parsed && typeof parsed === "object") {
-      parsed._meta = {
-        ...(parsed._meta || {}),
-        source_prefix: base
-      };
+    if (parsed && typeof parsed === "object" && parsed._meta && typeof parsed._meta === "object") {
+      if (!parsed._meta.source_prefix) parsed._meta.source_prefix = base;
     }
 
     context.res = {

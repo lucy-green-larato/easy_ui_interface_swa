@@ -1,5 +1,5 @@
 // /api/campaign-evidence/buyerLogic.js
-// 2025-12-12 v6
+// 2025-29-12 v7
 //
 // -----------------------------------------------------------------------------
 // PHASE 1 — BUYER LOGIC (DETERMINISTIC CLASSIFICATION)
@@ -145,6 +145,15 @@ async function buildBuyerLogic(container, prefix) {
     ? evidenceBundle.claims
     : [];
 
+  // After loading evidenceBundle, csvNorm, needsMap:
+  const hasEvidence = Array.isArray(evidenceBundle?.claims) && evidenceBundle.claims.length > 0;
+  const hasCsv = !!csvNorm?.signals || !!csvNorm?.global_signals;
+  const hasNeeds = Array.isArray(needsMap?.items) && needsMap.items.length > 0;
+
+  if (!hasEvidence && !hasCsv && !hasNeeds) {
+    throw new Error("buyerLogic: no authoritative inputs found (evidence.json, csv_normalized.json, needs_map.json)");
+  }
+
   // ---------------------------------------------------------------------------
   // 2) CSV SIGNALS → problems, root causes, impacts, urgency
   // ---------------------------------------------------------------------------
@@ -274,7 +283,7 @@ async function buildBuyerLogic(container, prefix) {
   // ---------------------------------------------------------------------------
 
   const out = ensureBuyerLogicShape(buyerLogic);
-  validateAndWarn("buyer_logic", out, console.log);
+  validateAndWarn("buyer_logic", out, console);
   await putJson(container, `${prefix}insights_v1/buyer_logic.json`, out);
 
   return out;

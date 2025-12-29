@@ -1,14 +1,16 @@
-// /api/campaign-markdown-pack/index.js
-// v1 — Deterministic Markdown Pack Builder (Model A)
-// 15-12-2025
+// /api/campaign-markdown-pack/index.js Deterministic Markdown Pack Builder (Model A)
+// 29-12-2025 v2
 
 "use strict";
 
 const crypto = require("crypto");
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { enqueueTo } = require("../lib/campaign-queue");
-
 const STORAGE = process.env.AzureWebJobsStorage;
+if (!STORAGE) {
+  context.log.error("[markdown_pack] AzureWebJobsStorage not configured");
+  return;
+}
 const INPUT_CONTAINER = "input";
 const RESULTS_CONTAINER = "results";
 
@@ -61,10 +63,14 @@ function headingToBucket(h, scope) {
 }
 
 async function streamToString(readable) {
+  if (!readable) {
+    return "";
+  }
   const chunks = [];
   for await (const chunk of readable) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf8");
 }
+
 
 async function readBlobText(container, name) {
   const blob = container.getBlockBlobClient(name);
@@ -178,8 +184,21 @@ module.exports = async function (context, msg) {
         text: txt,
         source_file: `input/${path}`,
         scope: "industry"
+      }).map(it => ({
+        ...it,
+        bucket: "competitor_profiles"
+      }));
+      items.forEach(i => {
+        if (!pack[i.bucket]) {
+          context.log.warn("[markdown_pack] unknown bucket; item dropped", {
+            bucket: i.bucket,
+            source_file: i.source_file,
+            source_heading: i.source_heading
+          });
+          return;
+        }
+        pack[i.bucket].push(i);
       });
-      items.forEach(i => pack[i.bucket]?.push(i));
     }
   }
 
@@ -200,39 +219,40 @@ module.exports = async function (context, msg) {
   }
 
   // ---------------------------------------------------------------------------
-// Competitor markdown
-// NOTE: competitors are company profiles stored in packs/supplier/
-// ---------------------------------------------------------------------------
-for (const slug of competitor_slugs) {
-  const path = `packs/supplier/${slug}.md`;
-  const txt = await readBlobText(input, path);
+  // Competitor markdown
+  // NOTE: competitors are company profiles stored in packs/supplier/
+  // ---------------------------------------------------------------------------
+  for (const slug of competitor_slugs) {
+    const path = `packs/supplier/${slug}.md`;
+    const txt = await readBlobText(input, path);
 
-  if (!txt) {
-    context.log("[markdown_pack] competitor profile not found (expected)", {
-      slug,
-      path
+    if (!txt) {
+      context.log("[markdown_pack] competitor profile not found (expected)", {
+        slug,
+        path
+      });
+      continue;
+    }
+
+    const items = parseMarkdown({
+      text: txt,
+      source_file: `input/${path}`,
+      scope: "industry"
     });
-    continue;
+
+    items.forEach(i => pack[i.bucket]?.push(i));
   }
-
-  const items = parseMarkdown({
-    text: txt,
-    source_file: `input/${path}`,
-    scope: "industry"
-  });
-
-  items.forEach(i => pack[i.bucket]?.push(i));
-}
 
   // ---------------------------------------------------------------------------
   // Write markdown_pack.json
   // ---------------------------------------------------------------------------
   const outPath = `${base}evidence_v2/markdown_pack.json`;
   const outBlob = results.getBlockBlobClient(outPath);
+  const payload = JSON.stringify(pack, null, 2);
 
   await outBlob.upload(
-    JSON.stringify(pack, null, 2),
-    Buffer.byteLength(JSON.stringify(pack))
+    payload,
+    Buffer.byteLength(payload)
   );
 
   context.log("[markdown_pack] written", {
