@@ -1,5 +1,5 @@
 // /api/campaign-worker/index.js 29-12-2025
-// Strategy Engine v24
+// Strategy Engine v25
 
 "use strict";
 
@@ -447,30 +447,29 @@ module.exports = async function (context, queueItem) {
 
     // Compute hash BEFORE writing (single source of truth)
     const strategyHash = sha256(stableStringify({ strategy_v2 }));
-
     // Build viability (Phase 2 artefact)
     const viability = buildViability({
       evidence: combinedEvidence,
       csvNormalized,
       markdownPack
     });
-    st0.markers.viabilityCompleted = true;
-    await putJson(
-      container,
-      `${prefix}strategy_v2/viability.json`,
-      viability
-    );
-    st0.history.push({
-      at: new Date().toISOString(),
-      phase: "viability_written",
-      note: `${prefix}strategy_v2/viability.json`
-    });
+
+    // Write viability.json (no status mutation yet)
+    const viabilityPath = `${prefix}strategy_v2/viability.json`;
+    await putJson(container, viabilityPath, viability);
 
     // Read status.json once, update markers deterministically, write once
-    const st0 = (await readJsonSafe(container, statusPath)) || { runId, markers: {}, history: [] };
+    const st0 =
+      (await readJsonSafe(container, statusPath)) ||
+      { runId, markers: {}, history: [] };
+
     st0.markers = (st0.markers && typeof st0.markers === "object") ? st0.markers : {};
     if (!Array.isArray(st0.history)) st0.history = [];
 
+    // Mark viability completed AFTER st0 exists
+    st0.markers.viabilityCompleted = true;
+
+    // Compute changed flag (strategy hash)
     const prevHash = st0.markers.strategyHash || null;
     const changed = !prevHash || prevHash !== strategyHash;
 
@@ -479,10 +478,11 @@ module.exports = async function (context, queueItem) {
     st0.markers.strategyCompleted = true;
     st0.state = "strategy_ready";
 
+    // Optional human-readable viability note (keep or remove, but only ONE entry)
     st0.history.push({
       at: new Date().toISOString(),
-      phase: "viability_written",
-      note: viability.verdict.viable ? "viable" : "not_viable"
+      phase: "viability_verdict",
+      note: viability?.verdict?.viable ? "viable" : "not_viable"
     });
 
     // Write output AFTER hash computed
