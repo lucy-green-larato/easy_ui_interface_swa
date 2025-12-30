@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 30-12-2025 — v66
+// /api/campaign-evidence/index.js 30-12-2025 — v67
 // -----------------------------------------------------------------------------
 // PHASE BOUNDARY NOTE
 //
@@ -92,6 +92,31 @@ let MAX_EVIDENCE_ITEMS = parseInt(process.env.MAX_EVIDENCE_ITEMS || "24", 10);
 if (!Number.isFinite(MAX_EVIDENCE_ITEMS) || MAX_EVIDENCE_ITEMS <= 0) MAX_EVIDENCE_ITEMS = 24;
 if (MAX_EVIDENCE_ITEMS > 128) MAX_EVIDENCE_ITEMS = 128;
 
+// ---------------------------------------------------------------------------
+// Evidence capacity controls (Azure env-driven)
+// ---------------------------------------------------------------------------
+let RESERVED_TIER2_ITEMS = parseInt(process.env.RESERVED_TIER2_ITEMS || "10", 10);
+if (!Number.isFinite(RESERVED_TIER2_ITEMS) || RESERVED_TIER2_ITEMS < 0) RESERVED_TIER2_ITEMS = 10;
+
+// Reserved Tier-2 can never exceed total cap
+if (RESERVED_TIER2_ITEMS > MAX_EVIDENCE_ITEMS) RESERVED_TIER2_ITEMS = MAX_EVIDENCE_ITEMS;
+
+// Tier-1 cap ensures Tier-2 always has room
+const MAX_TIER1_ITEMS = Math.max(0, MAX_EVIDENCE_ITEMS - RESERVED_TIER2_ITEMS);
+
+// Tier-2 internal caps (prevent Tier-2 from flooding the whole pack)
+let TIER2_MARKDOWN_MAX = parseInt(process.env.TIER2_MARKDOWN_MAX || "8", 10);
+if (!Number.isFinite(TIER2_MARKDOWN_MAX) || TIER2_MARKDOWN_MAX < 0) TIER2_MARKDOWN_MAX = 8;
+
+let TIER2_PROFILE_MAX = parseInt(process.env.TIER2_PROFILE_MAX || "6", 10);
+if (!Number.isFinite(TIER2_PROFILE_MAX) || TIER2_PROFILE_MAX < 0) TIER2_PROFILE_MAX = 6;
+
+// Defensive: Tier-2 sub-caps must not exceed Tier-2 reserve in total
+const tier2Total = TIER2_MARKDOWN_MAX + TIER2_PROFILE_MAX;
+if (tier2Total > RESERVED_TIER2_ITEMS) {
+  const overflow = tier2Total - RESERVED_TIER2_ITEMS;
+  TIER2_MARKDOWN_MAX = Math.max(0, TIER2_MARKDOWN_MAX - overflow);
+}
 
 // Local helper: use schema validation as a warning, never as a hard stop
 async function safeValidate(schemaKey, payload, log, statusUpdater) {
@@ -179,7 +204,7 @@ function validateLinkedInUrl(url) {
 module.exports = async function (context, job) {
   context.log("EVIDENCE_DEBUG_Q_CAMPAIGN_EVIDENCE", process.env.Q_CAMPAIGN_EVIDENCE);
   context.log("EVIDENCE_DEBUG_AzureWebJobsStorage_set", !!process.env.AzureWebJobsStorage);
-  context.log("[campaign-evidence] v58 starting", {
+  context.log("[campaign-evidence] v67 starting", {
     hasJob: !!job,
     type: typeof job
   });
@@ -1036,91 +1061,141 @@ module.exports = async function (context, job) {
       markdown = {};
     }
 
-    function pushMarkdownEvidence(items, tier, tierGroup, sourceLabel) {
-      if (!Array.isArray(items)) return;
+    function pushMarkdownEvidence(items, tier, tierGroup, sourceLabel, opts = {}) {
+      if (!Array.isArray(items)) return 0;
+
+      const maxItems =
+        Number.isFinite(opts.maxItems) && opts.maxItems >= 0 ? opts.maxItems : Infinity;
+
+      let added = 0;
 
       for (const it of items) {
-        // Markdown pack items store the claim text in `text`
+        if (added >= maxItems) break;
+
         const text = String(it?.text || "").trim();
         if (!text) continue;
 
-        // Build a stable title
         const heading = String(it?.source_heading || it?.heading || "").trim();
         const titleHeading = heading || "Untitled";
 
-        // source_file is stored like "input/packs/industry/xyz.md"
-        // Do NOT try to build an HTTP URL from container.url — blob access is often private.
-        // Instead persist a blob-path style reference that can be resolved deterministically.
         const sourceFile = String(it?.source_file || "").trim();
         const sourceRef = sourceFile ? `blob:${sourceFile}` : "";
 
         const ev = {
           claim_id: nextClaimId(),
-
-          // This is the label that downstream logic expects (eg "markdown_supplier")
           source_type: sourceLabel,
-
-          // Useful readable title for UI/debugging
           title: `${sourceLabel.replace(/_/g, " ")} — ${titleHeading}`,
-
-          // Preserve deterministic source reference (not public URL)
           url: sourceRef,
-
-          // Primary content
           summary: addCitation(text, sourceLabel),
           quote: text,
 
-          // Cross-reference back to markdown_pack
           markdown_id: it?.id || null,
           sha1: it?.sha1 || null,
 
-          // Correct metadata mapping (your pack uses these names)
           source_file: sourceFile || null,
           source_heading: heading || null,
           line_no: Number.isFinite(it?.line_no) ? it.line_no : null,
           bucket: it?.bucket || null,
 
-          // Tier routing
           tier,
           tier_group: tierGroup
         };
 
-        safePushIfRoom(evidenceLog, stampTier(ev), MAX_EVIDENCE_ITEMS);
+        const ok = safePushIfRoom(evidenceLog, stampTier(ev), MAX_EVIDENCE_ITEMS);
+        if (!ok) break; // global cap hit
+
+        added++;
       }
+
+      return added;
     }
 
     // ---------------------------------------------------------------------------
     // TIER-1 MARKDOWN  (external, strategic truth)
+    // Hard cap Tier-1 so Tier-2 always has room
     // ---------------------------------------------------------------------------
-    pushMarkdownEvidence(markdown.industry_drivers, 1, "markdown_industry_drivers", "industry_driver");
-    pushMarkdownEvidence(markdown.industry_risks, 1, "markdown_industry_risks", "industry_risk");
-    pushMarkdownEvidence(markdown.persona_pressures, 1, "markdown_persona", "persona_pressure");
-    pushMarkdownEvidence(markdown.competitor_profiles, 1, "markdown_competitor", "competitor_profile");
+
+    let tier1Added = 0;
+
+    tier1Added += pushMarkdownEvidence(
+      markdown.industry_drivers || [],
+      1,
+      "markdown_industry_drivers",
+      "industry_driver",
+      { maxItems: Math.max(0, MAX_TIER1_ITEMS - tier1Added) }
+    );
+
+    tier1Added += pushMarkdownEvidence(
+      markdown.industry_risks || [],
+      1,
+      "markdown_industry_risks",
+      "industry_risk",
+      { maxItems: Math.max(0, MAX_TIER1_ITEMS - tier1Added) }
+    );
+
+    tier1Added += pushMarkdownEvidence(
+      markdown.persona_pressures || [],
+      1,
+      "markdown_persona",
+      "persona_pressure",
+      { maxItems: Math.max(0, MAX_TIER1_ITEMS - tier1Added) }
+    );
+
+    tier1Added += pushMarkdownEvidence(
+      markdown.competitor_profiles || [],
+      1,
+      "markdown_competitor",
+      "competitor_profile",
+      { maxItems: Math.max(0, MAX_TIER1_ITEMS - tier1Added) }
+    );
 
     // ---------------------------------------------------------------------------
-    // SUPPLIER PROFILE (Tier-2) — must come AFTER Tier-1 markdown
+    // SUPPLIER PROFILE (Tier-2) — cap via TIER2_PROFILE_MAX
     // ---------------------------------------------------------------------------
     try {
       const profClaims = await loadSupplierProfileClaims();
-      if (Array.isArray(profClaims)) {
-        for (const c of profClaims) {
-          const text = String(c.summary || c.quote || "").trim();
+
+      if (Array.isArray(profClaims) && profClaims.length) {
+        // Optional: stable ordering so runs are deterministic
+        // (if buildSupplierProfileEvidence already preserves order, you can remove this)
+        const ordered = profClaims.slice().sort((a, b) => {
+          const ta = String(a?.title || a?.summary || a?.quote || "").toLowerCase();
+          const tb = String(b?.title || b?.summary || b?.quote || "").toLowerCase();
+          return ta.localeCompare(tb);
+        });
+
+        let added = 0;
+
+        for (const c of ordered) {
+          if (added >= TIER2_PROFILE_MAX) break;
+
+          const text = String(c?.summary || c?.quote || "").trim();
           if (!text) continue;
 
-          safePushIfRoom(
-            evidenceLog,
-            stampTier({
-              ...c,
-              claim_id: nextClaimId(),
-              source_type: "supplier_profile",
-              summary: addCitation(text, "supplier_profile"),
-              quote: text,
-              tier: 2,
-              tier_group: "supplier_profile"
-            }),
-            MAX_EVIDENCE_ITEMS
-          );
+          const ev = stampTier({
+            ...c,
+            claim_id: nextClaimId(),
+            source_type: "supplier_profile",
+            summary: addCitation(text, "supplier_profile"),
+            quote: text,
+            tier: 2,
+            tier_group: "supplier_profile"
+          });
+
+          const before = evidenceLog.length;
+          safePushIfRoom(evidenceLog, ev, MAX_EVIDENCE_ITEMS);
+
+          // Only count it if it actually made it into evidenceLog
+          if (evidenceLog.length > before) added++;
         }
+
+        context.log("[campaign-evidence] supplier profile injected", {
+          available: profClaims.length,
+          added,
+          cap: TIER2_PROFILE_MAX
+        });
+      } else {
+        context.log("[campaign-evidence] supplier profile: none found");
       }
     } catch (e) {
       context.log.warn(
@@ -1130,12 +1205,40 @@ module.exports = async function (context, job) {
     }
 
     // ---------------------------------------------------------------------------
-    // TIER-2 MARKDOWN  (supplier strategic context)
+    // TIER-2 MARKDOWN (supplier strategic context)
+    // One total cap across ALL markdown_supplier items (strongest guarantee)
     // ---------------------------------------------------------------------------
-    pushMarkdownEvidence(markdown.supplier_capabilities || [], 2, "markdown_supplier", "supplier_capability");
-    pushMarkdownEvidence(markdown.supplier_strengths || [], 2, "markdown_supplier", "supplier_strength");
-    pushMarkdownEvidence(markdown.supplier_differentiators || [], 2, "markdown_supplier", "supplier_differentiator");
-    pushMarkdownEvidence(markdown.content_pillars || [], 2, "markdown_pillars", "content_pillar");
+
+    function takeUpTo(arr, limit, state) {
+      if (!Array.isArray(arr) || limit <= 0) return [];
+      const remaining = Math.max(0, limit - state.used);
+      const out = remaining > 0 ? arr.slice(0, remaining) : [];
+      state.used += out.length;
+      return out;
+    }
+
+    const tier2MdState = { used: 0 };
+
+    pushMarkdownEvidence(
+      takeUpTo(markdown.supplier_capabilities || [], TIER2_MARKDOWN_MAX, tier2MdState),
+      2,
+      "markdown_supplier",
+      "supplier_capability"
+    );
+
+    pushMarkdownEvidence(
+      takeUpTo(markdown.supplier_strengths || [], TIER2_MARKDOWN_MAX, tier2MdState),
+      2,
+      "markdown_supplier",
+      "supplier_strength"
+    );
+
+    pushMarkdownEvidence(
+      takeUpTo(markdown.supplier_differentiators || [], TIER2_MARKDOWN_MAX, tier2MdState),
+      2,
+      "markdown_supplier",
+      "supplier_differentiator"
+    );
 
     // ---------------------------------------------------------------------------
     // TIER-3 MARKDOWN  (industry stats — narrative only)
