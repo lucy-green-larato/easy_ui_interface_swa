@@ -1101,9 +1101,9 @@ module.exports = async function (context, job) {
           tier_group: tierGroup
         };
 
-        const ok = safePushIfRoom(evidenceLog, stampTier(ev), MAX_EVIDENCE_ITEMS);
-        if (!ok) break; // global cap hit
-
+        const before = evidenceLog.length;
+        safePushIfRoom(evidenceLog, stampTier(ev), MAX_EVIDENCE_ITEMS);
+        if (evidenceLog.length === before) break;
         added++;
       }
 
@@ -1156,17 +1156,9 @@ module.exports = async function (context, job) {
       const profClaims = await loadSupplierProfileClaims();
 
       if (Array.isArray(profClaims) && profClaims.length) {
-        // Optional: stable ordering so runs are deterministic
-        // (if buildSupplierProfileEvidence already preserves order, you can remove this)
-        const ordered = profClaims.slice().sort((a, b) => {
-          const ta = String(a?.title || a?.summary || a?.quote || "").toLowerCase();
-          const tb = String(b?.title || b?.summary || b?.quote || "").toLowerCase();
-          return ta.localeCompare(tb);
-        });
-
         let added = 0;
 
-        for (const c of ordered) {
+        for (const c of profClaims) {
           if (added >= TIER2_PROFILE_MAX) break;
 
           const text = String(c?.summary || c?.quote || "").trim();
@@ -1183,9 +1175,11 @@ module.exports = async function (context, job) {
           });
 
           const before = evidenceLog.length;
-          safePushIfRoom(evidenceLog, ev, MAX_EVIDENCE_ITEMS);
+          const ok = safePushIfRoom(evidenceLog, ev, MAX_EVIDENCE_ITEMS);
 
-          // Only count it if it actually made it into evidenceLog
+          // If global cap is hit, stop immediately (nothing else can be added anyway)
+          if (!ok) break;
+
           if (evidenceLog.length > before) added++;
         }
 

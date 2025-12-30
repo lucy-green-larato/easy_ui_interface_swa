@@ -750,13 +750,22 @@ window.CampaignUI = window.CampaignUI || {};
     const errorBanner = $("#runErrorBanner");
     const retryBtn = $("#retryBtn");
     const restartBtn = $("#restartRunBtn");
-
     const started = Date.now();
-    const MAX_MS = 8 * 60 * 1000;
+
+    // Allow override via window.CONFIG (set from your hosting layer if desired)
+    const MAX_MS =
+      (Number.isFinite(Number(window.CONFIG?.campaignRunMaxMs)) && Number(window.CONFIG.campaignRunMaxMs) > 0)
+        ? Number(window.CONFIG.campaignRunMaxMs)
+        : 8 * 60 * 1000;
+
+    // Optional: tiny pad to avoid “near-boundary” failures
+    const MAX_MS_PAD = 30 * 1000;
+    const MAX_MS_TOTAL = MAX_MS + MAX_MS_PAD;
+
     let attempt = 0;
 
     while (true) {
-      if (Date.now() - started > MAX_MS) throw new Error("Timed out waiting for completion");
+      if (Date.now() - started > MAX_MS_TOTAL) throw new Error("Timed out waiting for completion");
 
       const st = await http("GET", API.status(runId), { timeoutMs: 15000 });
       if (st?.prefix) {
