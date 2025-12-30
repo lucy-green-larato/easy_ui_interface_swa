@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 29-12-2025 — v65
+// /api/campaign-evidence/index.js 30-12-2025 — v66
 // -----------------------------------------------------------------------------
 // PHASE BOUNDARY NOTE
 //
@@ -312,35 +312,7 @@ module.exports = async function (context, job) {
     // Non-fatal; continue with msg input
   }
 
-  async function loadSupplierProfileClaims() {
-    const companyName = (input?.supplier_company || input?.company_name || "").trim();
-    const slug = toSlug(companyName);
-    const paths = [];
 
-    if (slug) {
-      paths.push(`${prefix}packs/${slug}/profile.md`);
-      paths.push(`packs/${slug}/profile.md`);
-    }
-
-    paths.push(`${prefix}profile.md`);
-
-    for (const rel of paths) {
-      const md = await getText(container, rel);
-      if (!md) continue;
-
-      try {
-        const claims = buildSupplierProfileEvidence(md, { addCitation });
-        return Array.isArray(claims) ? claims : [];
-      } catch (e) {
-        context.log?.warn?.(
-          "[campaign-evidence] loadSupplierProfileClaims failed",
-          { path: rel, err: String(e?.message || e) }
-        );
-      }
-    }
-
-    return [];
-  }
 
   await updateStatus(
     container,
@@ -1068,19 +1040,47 @@ module.exports = async function (context, job) {
       if (!Array.isArray(items)) return;
 
       for (const it of items) {
+        // Markdown pack items store the claim text in `text`
         const text = String(it?.text || "").trim();
         if (!text) continue;
 
+        // Build a stable title
+        const heading = String(it?.source_heading || it?.heading || "").trim();
+        const titleHeading = heading || "Untitled";
+
+        // source_file is stored like "input/packs/industry/xyz.md"
+        // Do NOT try to build an HTTP URL from container.url — blob access is often private.
+        // Instead persist a blob-path style reference that can be resolved deterministically.
+        const sourceFile = String(it?.source_file || "").trim();
+        const sourceRef = sourceFile ? `blob:${sourceFile}` : "";
+
         const ev = {
           claim_id: nextClaimId(),
+
+          // This is the label that downstream logic expects (eg "markdown_supplier")
           source_type: sourceLabel,
-          title: `${sourceLabel.replace(/_/g, " ")} — ${it.source_heading || "Untitled"}`,
-          url: it.source_file ? `${container.url}/${it.source_file}` : "",
+
+          // Useful readable title for UI/debugging
+          title: `${sourceLabel.replace(/_/g, " ")} — ${titleHeading}`,
+
+          // Preserve deterministic source reference (not public URL)
+          url: sourceRef,
+
+          // Primary content
           summary: addCitation(text, sourceLabel),
           quote: text,
-          markdown_id: it.id || null,
-          pack_type: it.source?.pack_type || null,
-          heading: it.source?.heading || null,
+
+          // Cross-reference back to markdown_pack
+          markdown_id: it?.id || null,
+          sha1: it?.sha1 || null,
+
+          // Correct metadata mapping (your pack uses these names)
+          source_file: sourceFile || null,
+          source_heading: heading || null,
+          line_no: Number.isFinite(it?.line_no) ? it.line_no : null,
+          bucket: it?.bucket || null,
+
+          // Tier routing
           tier,
           tier_group: tierGroup
         };
