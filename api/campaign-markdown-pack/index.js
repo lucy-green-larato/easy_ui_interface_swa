@@ -32,15 +32,32 @@ function stripMarkdown(s) {
 // ------------------------------------------------------------
 // Bucket mapping (canonical)
 // ------------------------------------------------------------
-
-// Industry buckets (Tier 1 + Tier 3)
 function headingToIndustryBucket(h) {
-  const k = String(h || "").toLowerCase();
+  // Normalise: lower, strip leading numbering like "1." / "6.1"
+  const k = String(h || "")
+    .toLowerCase()
+    .trim()
+    .replace(/^\s*\d+(\.\d+)*\s*[\.\)]\s*/, ""); // "6.1 " or "1. " etc.
 
+  // Explicit canonical headings (industry specific template)
+  if (k.includes("sector overview")) return "industry_drivers";
+  if (k.includes("industry drivers") || k.includes("drivers & trends") || k.includes("drivers and trends"))
+    return "industry_drivers";
+  if (k.includes("sector risks") || k.includes("risks & constraints") || k.includes("risks and constraints"))
+    return "industry_risks";
+  if (k.includes("buyer landscape")) return "persona_pressures";
+  if (k.includes("business problems") || k.includes("connectivity solutions") || k.includes("matrix"))
+    return "persona_pressures";
+  if (k.includes("role of connectivity") || k.includes("technology in this sector"))
+    return "content_pillars";
+  if (k.includes("competitor")) return "competitor_profiles";
+  if (k.includes("stats") || k.includes("benchmarks")) return "industry_stats";
+  if (k.includes("strategic implications")) return "content_pillars";
+
+  // Keyword fallbacks (for general overview)
   if (k.includes("driver")) return "industry_drivers";
   if (k.includes("risk")) return "industry_risks";
   if (k.includes("persona")) return "persona_pressures";
-  if (k.includes("competitor")) return "competitor_profiles";
   if (k.includes("pillar")) return "content_pillars";
   if (k.includes("stat")) return "industry_stats";
 
