@@ -1,9 +1,3 @@
-Here’s the supplier pack with Comms365 mapped into your template structure, using only information from the template and your Comms365 analysis file.
-
-You can paste everything below directly into your template file.
-
----
-
 # SUPPLIER PACK — Comms365
 
 > NOTE: This file is used by an automated reasoning system.

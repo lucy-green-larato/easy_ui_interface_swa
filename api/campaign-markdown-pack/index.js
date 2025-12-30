@@ -1,22 +1,16 @@
-// /api/campaign-markdown-pack/index.js Deterministic Markdown Pack Builder (Model A)
-// 29-12-2025 v2
-
+// /api/campaign-markdown-pack/index.js
+// Deterministic Markdown Pack Builder (Model A)
+// 30-12-2025 v2.2
+//
 "use strict";
 
 const crypto = require("crypto");
 const { BlobServiceClient } = require("@azure/storage-blob");
 const { enqueueTo } = require("../lib/campaign-queue");
+
 const STORAGE = process.env.AzureWebJobsStorage;
-if (!STORAGE) {
-  context.log.error("[markdown_pack] AzureWebJobsStorage not configured");
-  return;
-}
 const INPUT_CONTAINER = "input";
 const RESULTS_CONTAINER = "results";
-
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
 
 function sha1(s) {
   return crypto.createHash("sha1").update(String(s)).digest("hex");
@@ -35,42 +29,56 @@ function stripMarkdown(s) {
     .trim();
 }
 
-function headingToBucket(h, scope) {
+// ------------------------------------------------------------
+// Bucket mapping (canonical)
+// ------------------------------------------------------------
+
+// Industry buckets (Tier 1 + Tier 3)
+function headingToIndustryBucket(h) {
   const k = String(h || "").toLowerCase();
 
-  if (scope === "industry") {
-    if (k.includes("driver")) return "industry_drivers";
-    if (k.includes("risk")) return "industry_risks";
-    if (k.includes("persona")) return "persona_pressures";
-    if (k.includes("competitor")) return "competitor_profiles";
-    if (k.includes("pillar")) return "content_pillars";
-    if (k.includes("stat")) return "industry_stats";
-    return "industry_other";
-  }
-
-  if (scope === "supplier") {
-    if (
-      k.includes("strength") ||
-      k.includes("capabil") ||
-      k.includes("different")
-    ) {
-      return "supplier_markdown";
-    }
-    return "supplier_other";
-  }
+  if (k.includes("driver")) return "industry_drivers";
+  if (k.includes("risk")) return "industry_risks";
+  if (k.includes("persona")) return "persona_pressures";
+  if (k.includes("competitor")) return "competitor_profiles";
+  if (k.includes("pillar")) return "content_pillars";
+  if (k.includes("stat")) return "industry_stats";
 
   return "industry_other";
 }
 
+// Supplier buckets (Tier 2)
+function headingToSupplierBucket(h) {
+  const k = String(h || "").toLowerCase();
+
+  // Strong matches
+  if (k.includes("capabil") || k.includes("capability")) return "supplier_capabilities";
+  if (k.includes("strength")) return "supplier_strengths";
+  if (k.includes("different") || k.includes("differentiator")) return "supplier_differentiators";
+
+  // Common variants (defensive)
+  if (k.includes("why us") || k.includes("why choose")) return "supplier_differentiators";
+  if (k.includes("what we do") || k.includes("solutions") || k.includes("services") || k.includes("offerings"))
+    return "supplier_capabilities";
+
+  return "supplier_other";
+}
+
+function headingToCompetitorBucket(/* h */) {
+  // Competitor markdown is always a profile pack, regardless of headings.
+  return "competitor_profiles";
+}
+
+// ------------------------------------------------------------
+// Azure helpers
+// ------------------------------------------------------------
+
 async function streamToString(readable) {
-  if (!readable) {
-    return "";
-  }
+  if (!readable) return "";
   const chunks = [];
   for await (const chunk of readable) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf8");
 }
-
 
 async function readBlobText(container, name) {
   const blob = container.getBlockBlobClient(name);
@@ -79,37 +87,44 @@ async function readBlobText(container, name) {
   return streamToString(dl.readableStreamBody);
 }
 
-// -----------------------------------------------------------------------------
-// Markdown parser (deterministic)
-// -----------------------------------------------------------------------------
-
+// ------------------------------------------------------------
+// Markdown parser (deterministic; bullets only)
+// ------------------------------------------------------------
 function parseMarkdown({ text, source_file, scope }) {
   const lines = String(text || "").split(/\r?\n/);
 
   let currentHeading = "General";
-  let currentBucket = headingToBucket(currentHeading, scope);
+
+  function scopeBucket(scope, heading) {
+    if (scope === "supplier") return headingToSupplierBucket(heading);
+    if (scope === "competitor") return headingToCompetitorBucket(heading);
+    return headingToIndustryBucket(heading); // default: industry
+  }
+
+  let currentBucket = scopeBucket(scope, currentHeading);
 
   const out = [];
   const seen = new Set();
 
-  lines.forEach((raw, i) => {
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
     const line = raw.trim();
-    if (!line) return;
+    if (!line) continue;
 
     // Headings (## / ### only)
     if (/^#{2,3}\s+/.test(line)) {
       currentHeading = line.replace(/^#{2,3}\s+/, "").trim();
-      currentBucket = headingToBucket(currentHeading, scope);
-      return;
+      currentBucket = scopeBucket(scope, currentHeading); // ✅ FIX
+      continue;
     }
 
     // Bullets
     if (/^([-*•]|\d+\.)\s+/.test(line)) {
       const textClean = stripMarkdown(line);
-      if (!textClean) return;
+      if (!textClean) continue;
 
       const hash = sha1(`${source_file}|${currentHeading}|${textClean}`);
-      if (seen.has(hash)) return;
+      if (seen.has(hash)) continue;
       seen.add(hash);
 
       out.push({
@@ -124,16 +139,24 @@ function parseMarkdown({ text, source_file, scope }) {
         created_at: nowISO()
       });
     }
-  });
+  }
 
   return out;
 }
 
-// -----------------------------------------------------------------------------
-// Azure Function handler
-// -----------------------------------------------------------------------------
+// ------------------------------------------------------------
+// Main handler
+// ------------------------------------------------------------
 
 module.exports = async function (context, msg) {
+  const log = context.log;
+
+  // IMPORTANT: STORAGE check must happen inside the handler (context is in scope)
+  if (!STORAGE) {
+    log.error("[markdown_pack] AzureWebJobsStorage not configured");
+    return;
+  }
+
   const {
     runId,
     prefix,
@@ -144,7 +167,7 @@ module.exports = async function (context, msg) {
   } = msg || {};
 
   if (!runId || !prefix) {
-    context.log.error("[markdown_pack] missing runId or prefix");
+    log.error("[markdown_pack] missing runId or prefix");
     return;
   }
 
@@ -154,51 +177,122 @@ module.exports = async function (context, msg) {
 
   const base = prefix.endsWith("/") ? prefix : `${prefix}/`;
 
+  // ---------------------------------------------------------------------------
+  // Canonical output schema (MUST match EvidenceDigest expectations)
+  // ---------------------------------------------------------------------------
+
   const pack = {
-    schema: "markdown-pack-v1",
+    schema: "markdown-pack-v2",
     generated_at: nowISO(),
     source: {
       industry_slug: industry_slug || null,
       supplier_slug: supplier_slug || null,
-      competitor_slugs
+      competitor_slugs: Array.isArray(competitor_slugs) ? competitor_slugs : []
     },
+
+    // Tier 1 (strategic external truth)
     industry_drivers: [],
     industry_risks: [],
     persona_pressures: [],
     competitor_profiles: [],
+
+    // Tier 2 (supplier strategic context)
+    supplier_capabilities: [],
+    supplier_strengths: [],
+    supplier_differentiators: [],
+
+    // Tier 3 (supporting narrative context)
     content_pillars: [],
     industry_stats: [],
-    supplier_markdown: [],
+
+    // Other / catch-all
     industry_other: [],
     supplier_other: []
   };
 
+  function pushItems(items) {
+    if (!Array.isArray(items)) return;
+
+    for (const it of items) {
+      const bucket = String(it?.bucket || "").trim();
+      if (!bucket) continue;
+
+      if (!pack[bucket]) {
+        log.warn("[markdown_pack] unknown bucket; item dropped", {
+          bucket,
+          source_file: it?.source_file,
+          source_heading: it?.source_heading
+        });
+        continue;
+      }
+
+      pack[bucket].push(it);
+    }
+  }
+
   // ---------------------------------------------------------------------------
-  // Industry markdown
+  // Industry sources — ALWAYS included (general truth)
+  // ---------------------------------------------------------------------------
+  try {
+    const sourcesPath = `packs/industry/sources.md`;
+    const sourcesTxt = await readBlobText(input, sourcesPath);
+
+    if (sourcesTxt) {
+      const items = parseMarkdown({
+        text: sourcesTxt,
+        source_file: `input/${sourcesPath}`,
+        scope: "industry"
+      });
+
+      pushItems(items);
+      log("[markdown_pack] ingested industry sources", {
+        path: sourcesPath,
+        count: items.length
+      });
+    } else {
+      log.warn("[markdown_pack] industry sources not found (non-fatal)", {
+        path: sourcesPath
+      });
+    }
+  } catch (e) {
+    log.warn(
+      "[markdown_pack] industry sources ingestion failed (non-fatal)",
+      String(e?.message || e)
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Specific industry markdown (if selected/dominant)
   // ---------------------------------------------------------------------------
   if (industry_slug) {
-    const path = `packs/industry/${industry_slug}.md`;
-    const txt = await readBlobText(input, path);
-    if (txt) {
-      const items = parseMarkdown({
-        text: txt,
-        source_file: `input/${path}`,
-        scope: "industry"
-      }).map(it => ({
-        ...it,
-        bucket: "competitor_profiles"
-      }));
-      items.forEach(i => {
-        if (!pack[i.bucket]) {
-          context.log.warn("[markdown_pack] unknown bucket; item dropped", {
-            bucket: i.bucket,
-            source_file: i.source_file,
-            source_heading: i.source_heading
-          });
-          return;
-        }
-        pack[i.bucket].push(i);
-      });
+    try {
+      const industryPath = `packs/industry/${industry_slug}.md`;
+      const industryTxt = await readBlobText(input, industryPath);
+
+      if (industryTxt) {
+        const items = parseMarkdown({
+          text: industryTxt,
+          source_file: `input/${industryPath}`,
+          scope: "industry"
+        });
+
+        pushItems(items);
+        log("[markdown_pack] ingested industry pack", {
+          industry_slug,
+          path: industryPath,
+          count: items.length
+        });
+      } else {
+        log.warn("[markdown_pack] industry pack missing (non-fatal)", {
+          industry_slug,
+          path: industryPath
+        });
+      }
+    } catch (e) {
+      log.warn(
+        "[markdown_pack] industry ingestion failed (non-fatal)",
+        String(e?.message || e)
+      );
     }
   }
 
@@ -206,56 +300,75 @@ module.exports = async function (context, msg) {
   // Supplier markdown
   // ---------------------------------------------------------------------------
   if (supplier_slug) {
-    const path = `packs/supplier/${supplier_slug}.md`;
-    const txt = await readBlobText(input, path);
-    if (txt) {
-      const items = parseMarkdown({
-        text: txt,
-        source_file: `input/${path}`,
-        scope: "supplier"
-      });
-      items.forEach(i => pack[i.bucket]?.push(i));
+    try {
+      const path = `packs/supplier/${supplier_slug}.md`;
+      const txt = await readBlobText(input, path);
+      if (txt) {
+        const items = parseMarkdown({
+          text: txt,
+          source_file: `input/${path}`,
+          scope: "supplier"
+        });
+        pushItems(items);
+        log("[markdown_pack] ingested supplier pack", { supplier_slug, path, count: items.length });
+      } else {
+        log.warn("[markdown_pack] supplier pack missing (non-fatal)", { supplier_slug, path });
+      }
+    } catch (e) {
+      log.warn("[markdown_pack] supplier ingestion failed (non-fatal)", String(e?.message || e));
     }
   }
 
   // ---------------------------------------------------------------------------
   // Competitor markdown
-  // NOTE: competitors are company profiles stored in packs/supplier/
-  // ---------------------------------------------------------------------------
-  for (const slug of competitor_slugs) {
-    const path = `packs/supplier/${slug}.md`;
-    const txt = await readBlobText(input, path);
+  // NOTE: competitors live in packs/supplier/ for repo simplicity
+  // --------------------------------------------------------------------------
+  if (Array.isArray(competitor_slugs) && competitor_slugs.length) {
+    for (const slug of competitor_slugs) {
+      try {
+        const competitorPath = `packs/supplier/${slug}.md`;
+        const competitorTxt = await readBlobText(input, competitorPath);
 
-    if (!txt) {
-      context.log("[markdown_pack] competitor profile not found (expected)", {
-        slug,
-        path
-      });
-      continue;
+        if (!competitorTxt) {
+          log("[markdown_pack] competitor profile not found (expected possible)", {
+            slug,
+            path: competitorPath
+          });
+          continue;
+        }
+
+        const competitorItems = parseMarkdown({
+          text: competitorTxt,
+          source_file: `input/${competitorPath}`,
+          scope: "competitor"
+        });
+
+        pushItems(competitorItems);
+
+        log("[markdown_pack] ingested competitor profile", {
+          slug,
+          path: competitorPath,
+          count: competitorItems.length
+        });
+      } catch (e) {
+        log.warn("[markdown_pack] competitor ingestion failed (non-fatal)", {
+          slug,
+          err: String(e?.message || e)
+        });
+      }
     }
-
-    const items = parseMarkdown({
-      text: txt,
-      source_file: `input/${path}`,
-      scope: "industry"
-    });
-
-    items.forEach(i => pack[i.bucket]?.push(i));
   }
 
   // ---------------------------------------------------------------------------
-  // Write markdown_pack.json
+  // Write markdown_pack.json (exactly one artefact)
   // ---------------------------------------------------------------------------
   const outPath = `${base}evidence_v2/markdown_pack.json`;
   const outBlob = results.getBlockBlobClient(outPath);
   const payload = JSON.stringify(pack, null, 2);
 
-  await outBlob.upload(
-    payload,
-    Buffer.byteLength(payload)
-  );
+  await outBlob.upload(payload, Buffer.byteLength(payload));
 
-  context.log("[markdown_pack] written", {
+  log("[markdown_pack] written", {
     runId,
     path: outPath,
     counts: Object.fromEntries(
@@ -268,15 +381,12 @@ module.exports = async function (context, msg) {
   // ---------------------------------------------------------------------------
   // Hand off to router → aftermarkdown
   // ---------------------------------------------------------------------------
-  await enqueueTo(
-    process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs",
-    {
-      op: "aftermarkdown",
-      runId,
-      page,
-      prefix: base
-    }
-  );
+  await enqueueTo(process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs", {
+    op: "aftermarkdown",
+    runId,
+    page,
+    prefix: base
+  });
 
-  context.log("[markdown_pack] aftermarkdown enqueued", { runId, prefix: base });
+  log("[markdown_pack] aftermarkdown enqueued", { runId, prefix: base });
 };
