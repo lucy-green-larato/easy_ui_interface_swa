@@ -1,9 +1,35 @@
-// /api/campaign-worker/index.js 29-12-2025
-// Strategy Engine v25
+// /api/campaign-worker/index.js
+// 02-01-2026 — Strategy Engine Option A (content_pillars-first), hash-locked, deterministic. V27
+//
+// Doctrine (Option A):
+// - Worker MUST consume content_pillars.json as the primary messaging truth source.
+// - Worker MUST NOT interpret supplier markdown packs or regenerate supplier/industry pillars.
+// - Worker MUST NOT consume insights.json for strategy construction (interpretive synthesis excluded).
+// - Worker MAY consume:
+//     - evidence.json (claim ids + proof anchors)
+//     - buyer_logic.json (deterministic derived model from evidence)
+//     - csv_normalized.json (signals only)
+//     - input.json (identity + constraints)
+// - Worker MUST be hash-locked:
+//     - content_pillars_sha1
+//     - evidence_sha1
+//   and must fail if declared hashes mismatch.
+// - Worker writes:
+//     - strategy_v2/campaign_strategy.json
+//     - strategy_v2/viability.json
+//   and updates status.json markers deterministically.
+//
+// Output discipline:
+// - Strategy text MUST be sourced from content_pillars and/or buyer_logic labels, not invented.
+// - Proof points MUST carry claim_id anchors (existing claim IDs only).
+//
+// Notes:
+// - This version preserves your queue contract: op=run_strategy, prefix required.
+// - Router notify op remains: afterworker.
 
 "use strict";
 
-const nodeCrypto = require("crypto"); // IMPORTANT: alias to avoid TDZ/shadowing
+const nodeCrypto = require("crypto"); // alias to avoid TDZ/shadowing
 
 const { enqueueTo } = require("../lib/campaign-queue");
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
@@ -67,21 +93,31 @@ function stableStringify(obj) {
 }
 
 function sha256(s) {
-  // IMPORTANT: always use nodeCrypto alias (cannot be shadowed by later declarations)
   return nodeCrypto.createHash("sha256").update(String(s)).digest("hex");
 }
 
-// ---------------------------------------------------------------
-// Basic text helpers
-// ---------------------------------------------------------------
+function sha1(s) {
+  return nodeCrypto.createHash("sha1").update(String(s)).digest("hex");
+}
 
-function bulletFromClaim(c) {
-  if (!c) return "";
-  const body = c.summary || c.title || "";
-  const id = c.claim_id || "";
-  if (!body) return "";
-  if (!id) return body.trim();
-  return `${body.trim()} [${id}]`;
+function sha1OfJson(obj) {
+  return sha1(stableStringify(obj ?? null));
+}
+
+function normPrefix(prefix) {
+  let p = String(prefix || "").trim();
+  if (!p) return "";
+  p = p.replace(/^\/+/, "");
+  if (!p.endsWith("/")) p += "/";
+  return p;
+}
+
+function ensureArray(v) {
+  return Array.isArray(v) ? v : [];
+}
+
+function isNonEmptyString(v) {
+  return typeof v === "string" && v.trim().length > 0;
 }
 
 function withEvidenceTag(text, ids) {
@@ -91,6 +127,7 @@ function withEvidenceTag(text, ids) {
   return `${s} [${ids[0]}]`;
 }
 
+// Evidence claims indexing (stable tag grouping)
 function indexClaimsByTag(evidence) {
   const claims = Array.isArray(evidence?.claims) ? evidence.claims : [];
   const out = {};
@@ -102,8 +139,49 @@ function indexClaimsByTag(evidence) {
   return out;
 }
 
-//---- Viability helper 
-function buildViability({ evidence, csvNormalized, markdownPack }) {
+function bulletFromClaim(c) {
+  if (!c) return "";
+  const body = c.summary || c.title || "";
+  const id = c.claim_id || "";
+  if (!body) return "";
+  if (!id) return body.trim();
+  return `${body.trim()} [${id}]`;
+}
+
+function validateContentPillarsShape(cp) {
+  if (!cp || typeof cp !== "object") return { ok: false, reason: "not_object" };
+  if (!isNonEmptyString(cp.schema)) return { ok: false, reason: "missing_schema" };
+  if (!cp.meta || typeof cp.meta !== "object") return { ok: false, reason: "missing_meta" };
+  if (!Array.isArray(cp.pillars)) return { ok: false, reason: "missing_pillars_array" };
+  for (const p of cp.pillars) {
+    if (!p || typeof p !== "object") return { ok: false, reason: "pillar_not_object" };
+    if (!isNonEmptyString(p.id)) return { ok: false, reason: "pillar_missing_id" };
+    if (!isNonEmptyString(p.title)) return { ok: false, reason: "pillar_missing_title" };
+    if (!p.provenance || typeof p.provenance !== "object") return { ok: false, reason: "pillar_missing_provenance" };
+  }
+  return { ok: true };
+}
+
+function flattenClaimIdsFromContentPillars(cp) {
+  const ids = new Set();
+  for (const p of ensureArray(cp?.pillars)) {
+    for (const id of ensureArray(p?.evidence_claim_ids)) {
+      const s = String(id || "").trim();
+      if (s) ids.add(s);
+    }
+  }
+  return Array.from(ids);
+}
+
+function clamp(arr, n) {
+  return ensureArray(arr).slice(0, Math.max(0, n | 0));
+}
+
+// ---------------------------------------------------------------
+// VIABILITY (DOCTRINE SAFE; NO INSIGHTS)
+// ---------------------------------------------------------------
+
+function buildViability({ evidence, csvNormalized, contentPillars }) {
   const claims = Array.isArray(evidence?.claims) ? evidence.claims : [];
 
   const csvRows =
@@ -112,16 +190,19 @@ function buildViability({ evidence, csvNormalized, markdownPack }) {
     0;
 
   const hasCaseStudies = claims.some(c =>
-    c.tag === "case_study" || c.tag === "customer_proof"
+    c.tag === "case_study" ||
+    c.tier_group === "case_study" ||
+    c.source_type === "pdf_extract" ||
+    c.source_type === "website_case_study"
   );
 
   const hasSupplierProfile = claims.some(c =>
-    c.tag === "supplier_overview" || c.tag === "supplier_profile"
+    c.tag === "supplier_profile" ||
+    c.tier_group === "supplier_profile" ||
+    c.source_type === "supplier_profile"
   );
 
-  const hasCompetitorContext =
-    Array.isArray(markdownPack?.competitor_profiles) &&
-    markdownPack.competitor_profiles.length > 0;
+  const cpCount = ensureArray(contentPillars?.pillars).length;
 
   // Deterministic signal derivation (rule-based)
   let marketSize = "small";
@@ -132,40 +213,39 @@ function buildViability({ evidence, csvNormalized, markdownPack }) {
   if (claims.length >= 10) evidenceStrength = "moderate";
   if (claims.length >= 25) evidenceStrength = "strong";
 
-  let differentiationClarity = "low";
-  if (hasCompetitorContext) differentiationClarity = "partial";
-  if (hasCompetitorContext && claims.some(c => c.tag === "differentiator")) {
-    differentiationClarity = "clear";
-  }
+  let positioningClarity = "low";
+  if (cpCount >= 6) positioningClarity = "partial";
+  if (cpCount >= 10 && hasSupplierProfile) positioningClarity = "clear";
 
   const viable =
     csvRows > 0 &&
     hasSupplierProfile &&
-    evidenceStrength !== "weak";
+    evidenceStrength !== "weak" &&
+    cpCount >= 4;
 
   const constraints = [];
   if (!hasCaseStudies) constraints.push("Limited case study proof");
-  if (!hasCompetitorContext) constraints.push("Partial competitor coverage");
+  if (cpCount < 6) constraints.push("Limited content pillars scope");
   if (csvRows < 50) constraints.push("Small addressable cohort");
 
   return {
-    schema: "viability-v1",
+    schema: "viability-v2",
     generated_at: new Date().toISOString(),
     inputs: {
       csv_rows: csvRows,
       has_case_studies: hasCaseStudies,
       has_supplier_profile: hasSupplierProfile,
-      has_competitor_context: hasCompetitorContext
+      content_pillars_count: cpCount
     },
     signals: {
       market_size: marketSize,
       evidence_strength: evidenceStrength,
-      differentiation_clarity: differentiationClarity
+      positioning_clarity: positioningClarity
     },
     verdict: {
       viable,
       confidence:
-        viable && evidenceStrength === "strong"
+        viable && evidenceStrength === "strong" && positioningClarity === "clear"
           ? "high"
           : viable
             ? "medium"
@@ -176,34 +256,45 @@ function buildViability({ evidence, csvNormalized, markdownPack }) {
 }
 
 // ---------------------------------------------------------------
-// STRATEGY BUILDERS (v18 logic preserved, viability removed)
+// STRATEGY BUILDERS (OPTION A; NO MARKDOWN PACK, NO INSIGHTS)
 // ---------------------------------------------------------------
 
-function buildStorySpine({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }) {
+function buildStorySpine({ evidence, buyerLogic, csvNormalized, mergedInput, contentPillars }) {
   const byTag = indexClaimsByTag(evidence);
 
+  // Environment signals: strictly from Tier-1 markdown drivers/risks/persona OR buyerLogic labels.
+  // We do NOT invent; we list existing summaries with claim IDs.
   const environment = uniqNonEmpty(
-    (byTag.environment || []).map(bulletFromClaim)
-      .concat((byTag.buyer_priority || []).map(bulletFromClaim))
-      .concat((safeGet(markdownPack, "industry_drivers", []) || []).map(d => d.text || ""))
-  ).slice(0, 4);
-
-  const case_for_action = uniqNonEmpty(
-    (safeGet(insights, "adoption_barriers", []) || []).map(x => x.label || "")
-      .concat((safeGet(insights, "risk_landscape", []) || []).map(x =>
-        withEvidenceTag(x.text, x.claim_id ? [x.claim_id] : [])
-      ))
-      .concat((safeGet(insights, "timing_drivers", []) || []).map(x => x.text || ""))
-      .concat((safeGet(buyerLogic, "commercial_impacts", []) || []).map(ci =>
+    []
+      .concat((byTag.markdown_industry_drivers || []).map(bulletFromClaim))
+      .concat((byTag.markdown_industry_risks || []).map(bulletFromClaim))
+      .concat((byTag.markdown_persona || []).map(bulletFromClaim))
+      .concat(ensureArray(safeGet(buyerLogic, "commercial_impacts", [])).map(ci =>
         withEvidenceTag(ci.label, safeGet(ci, "origin.related_claim_ids", []))
       ))
   ).slice(0, 6);
 
+  // Case for action: buyerLogic problems + urgency (anchored)
+  const case_for_action = uniqNonEmpty(
+    []
+      .concat(ensureArray(safeGet(buyerLogic, "problems", [])).map(p =>
+        withEvidenceTag(p.label, safeGet(p, "origin.related_claim_ids", []))
+      ))
+      .concat(ensureArray(safeGet(buyerLogic, "urgency_factors", [])).map(u =>
+        withEvidenceTag(u.label, safeGet(u, "origin.related_claim_ids", []))
+      ))
+  ).slice(0, 8);
+
+  // How we win: content pillars titles + differentiators (anchored by evidence ids if present)
   const how_we_win = uniqNonEmpty(
-    (byTag.supplier_capability || []).map(bulletFromClaim)
-      .concat((byTag.differentiator || []).map(bulletFromClaim))
-      .concat((safeGet(markdownPack, "content_pillars", []) || []).map(p => p.text || ""))
-  ).slice(0, 6);
+    []
+      .concat(ensureArray(contentPillars?.pillars).map(p => {
+        const ids = ensureArray(p?.evidence_claim_ids);
+        return withEvidenceTag(p.title, ids);
+      }))
+      .concat((byTag.supplier_profile || []).map(bulletFromClaim))
+      .concat((byTag.markdown_supplier || []).map(bulletFromClaim))
+  ).slice(0, 8);
 
   const n = safeGet(csvNormalized, "meta.rows", 0);
   const routeHint = mergedInput.sales_model || mergedInput.call_type || "";
@@ -225,107 +316,107 @@ function buildStorySpine({ evidence, insights, buyerLogic, markdownPack, csvNorm
 
   const success = uniqNonEmpty([
     deriveOutcome(n, routeHint),
-    ...(safeGet(insights, "success_signals", []) || []).map(x => x.text || "")
+    ...ensureArray(safeGet(buyerLogic, "success_signals", [])).map(x => x.label || x.text || "")
   ]).slice(0, 4);
 
   const next_steps = uniqNonEmpty([
     n ? `NEXT_STEP:target_cohort_size=${n}` : "",
     environment.length ? `NEXT_STEP:align_to_environment_signals=${environment.length}` : "",
     case_for_action.length ? `NEXT_STEP:prioritise_case_for_action=${case_for_action.length}` : "",
-    how_we_win.length ? `NEXT_STEP:validate_how_we_win=${how_we_win.length}` : ""
+    how_we_win.length ? `NEXT_STEP:validate_pillars=${how_we_win.length}` : ""
   ]).slice(0, 4);
 
   return { environment, case_for_action, how_we_win, success, next_steps };
 }
 
-function buildValueProposition({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }) {
-  const industry = mergedInput.selected_industry || "input_group";
-  const buyers = mergedInput.buyer_type || "personas";
+function buildValueProposition({ buyerLogic, mergedInput, contentPillars }) {
+  const industry = mergedInput.selected_industry || mergedInput.campaign_industry || "general";
+  const buyers = mergedInput.buyer_type || "decision-makers";
 
   const topProblem =
     safeGet(buyerLogic, "problems.0.label") ||
-    safeGet(insights, "buyer_pressures.0.text") ||
+    safeGet(buyerLogic, "urgency_factors.0.label") ||
     "";
 
-  const byTag = indexClaimsByTag(evidence);
-  const capClaim = (byTag.supplier_capability || [])[0] || (byTag.right_to_play || [])[0];
+  const topOutcome =
+    safeGet(buyerLogic, "commercial_impacts.0.label") ||
+    "";
 
-  const ourSolutionCore = capClaim
-    ? bulletFromClaim(capClaim).replace(/\s*\[[^\]]+\]\s*$/, "")
+  const firstPillar = ensureArray(contentPillars?.pillars)[0] || null;
+
+  const ourSolutionCore = firstPillar
+    ? firstPillar.title
     : "";
-
-  const outcomeCore = safeGet(buyerLogic, "commercial_impacts.0.label") || "";
-  const unlikeCore = safeGet(markdownPack, "competitor_profiles.0.summary") || "";
 
   return {
     value_proposition: {
       moore_chain: {
         for_who: `For ${industry} ${buyers}`,
-        problem: `who struggle with ${topProblem}`,
-        our_solution: `we provide ${ourSolutionCore}`,
-        outcome: `so that ${outcomeCore}`,
-        unlike: `unlike ${unlikeCore}`
+        problem: topProblem ? `who struggle with ${topProblem}` : "who struggle with operational and commercial pressures",
+        our_solution: ourSolutionCore ? `we provide ${ourSolutionCore}` : "we provide a supplier-aligned capability set",
+        outcome: topOutcome ? `so that ${topOutcome}` : "so that outcomes improve commercially and operationally",
+        unlike: "unlike undifferentiated connectivity or unmanaged propositions"
       }
     }
   };
 }
 
-function buildCompetitiveStrategy({ evidence, markdownPack }) {
+function buildCompetitiveStrategy({ evidence }) {
   const byTag = indexClaimsByTag(evidence);
 
   const competitor_map = uniqNonEmpty(
-    (safeGet(markdownPack, "competitor_profiles", []) || []).map(c => c.summary || "")
-  );
+    (byTag.markdown_competitor || []).map(bulletFromClaim)
+  ).slice(0, 8);
 
-  const diffs = []
-    .concat(byTag.differentiator || [])
-    .concat(byTag.right_to_play || [])
-    .map(bulletFromClaim);
-
-  const angles = (evidence.claims || [])
-    .filter(c => c.tag === "buyer_blocker" || c.tag === "timing")
-    .map(bulletFromClaim);
+  const diffs = uniqNonEmpty(
+    []
+      .concat(byTag.markdown_supplier || [])
+      .concat(byTag.supplier_profile || [])
+      .map(bulletFromClaim)
+  ).slice(0, 8);
 
   const vulnerability_map = uniqNonEmpty(
     (evidence.claims || [])
-      .filter(c => c.tag === "risk" || c.tag === "buyer_blocker")
+      .filter(c =>
+        c.tag === "risk" ||
+        c.tier_group === "markdown_industry_risks" ||
+        c.tier_group === "microclaim"
+      )
       .map(bulletFromClaim)
-  ).slice(0, 6);
+  ).slice(0, 8);
 
   return {
     competitor_map,
-    our_advantage: uniqNonEmpty(diffs).slice(0, 6),
-    angles_of_attack: uniqNonEmpty(angles).slice(0, 6),
-    defensible_differentiators: uniqNonEmpty(diffs).slice(0, 6),
+    our_advantage: diffs.slice(0, 6),
+    angles_of_attack: competitor_map.slice(0, 6),
+    defensible_differentiators: diffs.slice(0, 6),
     vulnerability_map
   };
 }
 
-function buildBuyerStrategy({ buyerLogic, insights, evidence }) {
+function buildBuyerStrategy({ buyerLogic }) {
   return {
     problems: uniqNonEmpty(
-      (safeGet(buyerLogic, "problems", []) || []).map(p =>
+      ensureArray(safeGet(buyerLogic, "problems", [])).map(p =>
         withEvidenceTag(p.label, safeGet(p, "origin.related_claim_ids", []))
       )
-    ).slice(0, 8),
+    ).slice(0, 10),
 
     barriers: uniqNonEmpty(
-      (safeGet(insights, "adoption_barriers", []) || []).map(x => x.label || "")
-        .concat((safeGet(buyerLogic, "risk_tolerances", []) || []).map(r =>
-          withEvidenceTag(r.label, safeGet(r, "origin.related_claim_ids", []))
-        ))
-    ).slice(0, 8),
+      ensureArray(safeGet(buyerLogic, "risk_tolerances", [])).map(r =>
+        withEvidenceTag(r.label, safeGet(r, "origin.related_claim_ids", []))
+      )
+    ).slice(0, 10),
 
     urgency: uniqNonEmpty(
-      (safeGet(insights, "timing_drivers", []) || []).map(x => x.text || "")
-        .concat((safeGet(buyerLogic, "urgency_factors", []) || []).map(u =>
-          withEvidenceTag(u.label, safeGet(u, "origin.related_claim_ids", []))
-        ))
-    ).slice(0, 6)
+      ensureArray(safeGet(buyerLogic, "urgency_factors", [])).map(u =>
+        withEvidenceTag(u.label, safeGet(u, "origin.related_claim_ids", []))
+      )
+    ).slice(0, 8)
   };
 }
 
-function buildGtmStrategy({ csvNormalized, mergedInput }) {
+function buildGtmStrategy({ mergedInput }) {
   const routeRaw = mergedInput.sales_model || mergedInput.call_type || "";
   const lower = (routeRaw || "").toLowerCase();
 
@@ -336,34 +427,45 @@ function buildGtmStrategy({ csvNormalized, mergedInput }) {
   return { route_implications: [`ROUTE_MODEL=${route}`] };
 }
 
-function buildProofPoints({ evidence }) {
+function buildProofPoints({ evidence, contentPillars }) {
   const byTag = indexClaimsByTag(evidence);
-  return uniqNonEmpty(
-    []
-      .concat(byTag.supplier_capability || [])
-      .concat(byTag.right_to_play || [])
-      .map(bulletFromClaim)
-  ).slice(0, 10);
+
+  // Strongest proof sources:
+  // - content pillars with evidence ids
+  // - case studies
+  // - supplier profile
+  const out = [];
+
+  for (const p of clamp(contentPillars?.pillars, 12)) {
+    const ids = ensureArray(p?.evidence_claim_ids);
+    if (!ids.length) continue;
+    out.push(withEvidenceTag(p.title, ids));
+  }
+
+  out.push(...(byTag.case_study || []).map(bulletFromClaim));
+  out.push(...(byTag.supplier_profile || []).map(bulletFromClaim));
+
+  return uniqNonEmpty(out).slice(0, 12);
 }
 
 function buildRightToPlay({ evidence }) {
   const byTag = indexClaimsByTag(evidence);
   return uniqNonEmpty(
     []
-      .concat(byTag.right_to_play || [])
-      .concat(byTag.supplier_overview || [])
+      .concat(byTag.supplier_profile || [])
+      .concat(byTag.microclaim || [])
       .map(bulletFromClaim)
-  ).slice(0, 6);
+  ).slice(0, 8);
 }
 
-function buildStrategyV2({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }) {
+function buildStrategyV2({ evidence, buyerLogic, csvNormalized, mergedInput, contentPillars }) {
   return {
-    story_spine: buildStorySpine({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }),
-    value_proposition: buildValueProposition({ evidence, insights, buyerLogic, markdownPack, csvNormalized, mergedInput }).value_proposition,
-    competitive_strategy: buildCompetitiveStrategy({ evidence, markdownPack }),
-    buyer_strategy: buildBuyerStrategy({ buyerLogic, insights, evidence }),
-    gtm_strategy: buildGtmStrategy({ csvNormalized, mergedInput }),
-    proof_points: buildProofPoints({ evidence }),
+    story_spine: buildStorySpine({ evidence, buyerLogic, csvNormalized, mergedInput, contentPillars }),
+    value_proposition: buildValueProposition({ buyerLogic, mergedInput, contentPillars }).value_proposition,
+    competitive_strategy: buildCompetitiveStrategy({ evidence }),
+    buyer_strategy: buildBuyerStrategy({ buyerLogic }),
+    gtm_strategy: buildGtmStrategy({ mergedInput }),
+    proof_points: buildProofPoints({ evidence, contentPillars }),
     right_to_play: buildRightToPlay({ evidence })
   };
 }
@@ -378,9 +480,6 @@ module.exports = async function (context, queueItem) {
   const msg = parseQueueItem(queueItem);
   const op = msg.op || "";
 
-  // Binding name in function.json is "job"
-  // In Azure Functions, the second argument may arrive as that binding; keep parseQueueItem robust.
-
   // Hard stop on wrong op, but do not crash.
   if (op !== "run_strategy") {
     log("[worker] ignoring message", op);
@@ -392,9 +491,7 @@ module.exports = async function (context, queueItem) {
     return;
   }
 
-  let prefix = String(msg.prefix).replace(/^\/+/, "");
-  if (!prefix.endsWith("/")) prefix += "/";
-
+  const prefix = normPrefix(msg.prefix);
   const container = await getResultsContainerClient();
 
   const runId =
@@ -407,7 +504,9 @@ module.exports = async function (context, queueItem) {
   const statusPath = `${prefix}status.json`;
 
   try {
-    // Load Phase 1 artefacts (paths preserved to match your existing outputs)
+    // -------------------------------------------------------------------------
+    // Load canonical Phase 1 artefacts
+    // -------------------------------------------------------------------------
     const evidence = await readJsonSafe(container, `${prefix}evidence.json`);
     const evidenceLog = await readJsonSafe(container, `${prefix}evidence_log.json`);
     const combinedEvidence = {
@@ -417,89 +516,146 @@ module.exports = async function (context, queueItem) {
         []
     };
 
-    const insights =
-      (await readJsonSafe(container, `${prefix}insights_v1/insights.json`)) ||
-      (await readJsonSafe(container, `${prefix}insights.json`)) ||
-      {};
-
     const buyerLogic =
-      (await readJsonSafe(container, `${prefix}insights_v1/buyer_logic.json`)) ||
       (await readJsonSafe(container, `${prefix}buyer_logic.json`)) ||
-      {};
-
-    const markdownPack =
-      (await readJsonSafe(container, `${prefix}evidence_v2/markdown_pack.json`)) ||
-      (await readJsonSafe(container, `${prefix}markdown_pack.json`)) ||
+      (await readJsonSafe(container, `${prefix}insights_v1/buyer_logic.json`)) ||
       {};
 
     const csvNormalized = (await readJsonSafe(container, `${prefix}csv_normalized.json`)) || {};
     const mergedInput = (await readJsonSafe(container, `${prefix}input.json`)) || {};
 
-    // Build deterministic strategy_v2
+    // -------------------------------------------------------------------------
+    // Option A: load content_pillars.json (required)
+    // -------------------------------------------------------------------------
+    const contentPillars = await readJsonSafe(container, `${prefix}content_pillars.json`);
+    const shape = validateContentPillarsShape(contentPillars);
+
+    if (!shape.ok) {
+      const errMsg = `content_pillars.json invalid: ${shape.reason}`;
+      log("[worker] ERROR", errMsg);
+
+      const stFail = (await readJsonSafe(container, statusPath)) || { runId, markers: {}, history: [] };
+      stFail.state = "worker_failed";
+      stFail.markers = stFail.markers || {};
+      stFail.markers.workerFailed = true;
+      stFail.markers.workerFailedReason = "missing_or_invalid_content_pillars";
+      stFail.history = Array.isArray(stFail.history) ? stFail.history : [];
+      stFail.history.push({ at: new Date().toISOString(), phase: "worker", note: errMsg });
+
+      await putJson(container, statusPath, stFail);
+      throw new Error(errMsg);
+    }
+
+    // -------------------------------------------------------------------------
+    // Hash locks (deterministic audit)
+    // -------------------------------------------------------------------------
+    const contentPillarsSha1 = sha1OfJson(contentPillars);
+    const evidenceSha1 = sha1OfJson(evidence);
+
+    const declaredEvidenceSha1 = contentPillars?.inputs?.evidence_sha1 || null;
+    const declaredMarkdownSha1 = contentPillars?.inputs?.markdown_pack_sha1 || null;
+
+    if (declaredEvidenceSha1 && String(declaredEvidenceSha1) !== evidenceSha1) {
+      const errMsg =
+        `Evidence hash mismatch: content_pillars.inputs.evidence_sha1=${declaredEvidenceSha1} but evidence.json sha1=${evidenceSha1}`;
+      log("[worker] ERROR", errMsg);
+      throw new Error(errMsg);
+    }
+
+    // -------------------------------------------------------------------------
+    // Build deterministic strategy_v2 (no insights, no markdown pack)
+    // -------------------------------------------------------------------------
     const strategy_v2 = buildStrategyV2({
       evidence: combinedEvidence,
-      insights,
       buyerLogic,
-      markdownPack,
       csvNormalized,
-      mergedInput
+      mergedInput,
+      contentPillars
     });
 
+    // Include audit locks in the strategy wrapper (no mutation in child objects)
+    const strategyBundle = {
+      schema: "campaign-strategy-v2.1",
+      generated_at: new Date().toISOString(),
+      run_id: runId,
+      inputs: {
+        content_pillars_sha1: contentPillarsSha1,
+        evidence_sha1: evidenceSha1,
+        markdown_pack_sha1: declaredMarkdownSha1 || null
+      },
+      strategy_v2
+    };
+
     // Compute hash BEFORE writing (single source of truth)
-    const strategyHash = sha256(stableStringify({ strategy_v2 }));
-    // Build viability (Phase 2 artefact)
+    const strategyHash = sha256(stableStringify(strategyBundle));
+
+    // Viability (deterministic; no insights)
     const viability = buildViability({
       evidence: combinedEvidence,
       csvNormalized,
-      markdownPack
+      contentPillars
     });
 
-    // Write viability.json (no status mutation yet)
+    // -------------------------------------------------------------------------
+    // Persist viability.json
+    // -------------------------------------------------------------------------
     const viabilityPath = `${prefix}strategy_v2/viability.json`;
     await putJson(container, viabilityPath, viability);
 
-    // Read status.json once, update markers deterministically, write once
+    // -------------------------------------------------------------------------
+    // Read status once, update markers deterministically, write once
+    // -------------------------------------------------------------------------
     const st0 =
       (await readJsonSafe(container, statusPath)) ||
       { runId, markers: {}, history: [] };
 
     st0.markers = (st0.markers && typeof st0.markers === "object") ? st0.markers : {};
     if (!Array.isArray(st0.history)) st0.history = [];
+    if (!Array.isArray(st0.errors)) st0.errors = [];
 
-    // Mark viability completed AFTER st0 exists
+    // Mark viability completed
     st0.markers.viabilityCompleted = true;
 
-    // Compute changed flag (strategy hash)
+    // Strategy changed flag
     const prevHash = st0.markers.strategyHash || null;
     const changed = !prevHash || prevHash !== strategyHash;
 
     st0.markers.strategyHash = strategyHash;
     st0.markers.strategyChanged = changed;
     st0.markers.strategyCompleted = true;
+
+    // Store locks in status (enforced downstream)
+    st0.markers.contentPillarsSha1 = contentPillarsSha1;
+    st0.markers.contentPillarsEvidenceSha1 = evidenceSha1;
+    st0.markers.contentPillarsMarkdownSha1 = declaredMarkdownSha1 || null;
+    st0.markers.contentPillarsLocked = true;
+
     st0.state = "strategy_ready";
 
-    // Optional human-readable viability note (keep or remove, but only ONE entry)
+    // Deterministic audit history
     st0.history.push({
       at: new Date().toISOString(),
       phase: "viability_verdict",
       note: viability?.verdict?.viable ? "viable" : "not_viable"
     });
 
-    // Write output AFTER hash computed
+    // -------------------------------------------------------------------------
+    // Persist strategy
+    // -------------------------------------------------------------------------
     const outPath = `${prefix}strategy_v2/campaign_strategy.json`;
-    await putJson(container, outPath, { strategy_v2 });
+    await putJson(container, outPath, strategyBundle);
 
-    // Record the write (traceability)
     st0.history.push({
       at: new Date().toISOString(),
       phase: "strategy_written",
       note: outPath
     });
 
-    // Persist status once (no clobber)
     await putJson(container, statusPath, st0);
 
+    // -------------------------------------------------------------------------
     // Notify router
+    // -------------------------------------------------------------------------
     await enqueueTo(ROUTER_QUEUE, {
       op: "afterworker",
       runId,
@@ -509,6 +665,7 @@ module.exports = async function (context, queueItem) {
     });
 
     log("[worker] completed", { runId, outPath, strategyChanged: changed });
+
   } catch (err) {
     // Never deadlock: persist error into status
     try {
@@ -519,6 +676,7 @@ module.exports = async function (context, queueItem) {
 
       stE.state = "worker_failed";
       stE.markers.workerFailed = true;
+
       stE.errors.push({
         at: new Date().toISOString(),
         phase: "campaign-worker",

@@ -1,5 +1,5 @@
 // /api/campaign-router/index.js
-// Gold v9.9 — canonical, idempotent, prefix-safe router 02-01-2026
+// Gold v10 — canonical, idempotent, prefix-safe router 02-01-2026
 //
 "use strict";
 
@@ -21,6 +21,11 @@ const RESULTS_CONTAINER =
   process.env.CAMPAIGN_RESULTS_CONTAINER ||
   process.env.RESULTS_CONTAINER ||
   "results";
+
+// Phase 1C queue (new)
+const PILLARS_QUEUE_NAME =
+  process.env.Q_CAMPAIGN_PILLARS ||
+  "campaign-pillars-jobs";
 
 // Phase 3 queue (local, explicit)
 const COMPETITOR_ENRICH_QUEUE_NAME =
@@ -62,14 +67,6 @@ async function persistStatus(container, path, status) {
   await putJson(container, path, status);
 }
 
-function runIdFromPrefix(prefixNoTrailingSlash) {
-  const parts = String(prefixNoTrailingSlash || "")
-    .split("/")
-    .map(s => s.trim())
-    .filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : null;
-}
-
 // -----------------------------------------------------------------------------
 // main
 // -----------------------------------------------------------------------------
@@ -77,11 +74,14 @@ module.exports = async function (context, queueItem) {
   const log = context.log;
   const msg = parseQueueItem(queueItem);
   const op = String(msg.op || "").trim();
+
   const prefix = normPrefix(msg.prefix || "");
   if (!prefix) {
     log("[router] missing prefix; aborting", { op });
     return;
   }
+
+  // runId for logging only
   let runId =
     (typeof msg.runId === "string" && msg.runId.trim())
       ? msg.runId.trim()
@@ -90,13 +90,8 @@ module.exports = async function (context, queueItem) {
         : null;
 
   if (!runId) {
-    try {
-      // prefix is already normalised and guaranteed to end with "/"
-      const prefixNoSlash = prefix.replace(/\/$/, "");
-      runId = runIdFromPrefix(prefixNoSlash);
-    } catch {
-      runId = null;
-    }
+    const m = String(prefix).match(/\/runs\/([^/]+)\/$/);
+    if (m) runId = m[1];
   }
 
   if (!runId) runId = "unknown";
@@ -201,10 +196,35 @@ module.exports = async function (context, queueItem) {
     await persistStatus(container, statusPath, status);
     return;
   }
+
   // ---------------------------------------------------------------------------
-  // afterevidence → competitor enrich (ONCE)
+  // afterevidence → pillars synthesis (ONCE)  ✅ NEW STAGE
   // ---------------------------------------------------------------------------
   if (op === "afterevidence") {
+    if (status.markers.pillarsEnqueued) {
+      pushHistory(status, "pillars_skip", "already enqueued");
+      await persistStatus(container, statusPath, status);
+      return;
+    }
+
+    await enqueueTo(PILLARS_QUEUE_NAME, {
+      op: "run_pillars",
+      runId,
+      page,
+      prefix
+    });
+
+    status.markers.pillarsEnqueued = true;
+    status.state = "pillars_queued";
+    pushHistory(status, "pillars_queued");
+    await persistStatus(container, statusPath, status);
+    return;
+  }
+
+  // ---------------------------------------------------------------------------
+  // afterpillars → competitor enrich (ONCE)  ✅ MOVED FROM afterevidence
+  // ---------------------------------------------------------------------------
+  if (op === "afterpillars") {
     if (status.markers.competitorEnrichEnqueued) {
       pushHistory(status, "competitor_enrich_skip", "already enqueued");
       await persistStatus(container, statusPath, status);
