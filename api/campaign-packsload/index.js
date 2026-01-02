@@ -103,25 +103,19 @@ module.exports = async function (context, msg) {
     // Persist into status.context (canonical)
     // --------------------------------------------------------
     const statusPath = `${prefix}status.json`;
-    const status =
-      (await getJson(container, statusPath)) ||
-      { runId, markers: {}, history: [] };
-
-        if (!status.context || typeof status.context !== "object") {
-      status.context = {};
-    }
-
-    status.context.industry_slug = resolved.industry_slug;
-    status.context.supplier_slug = resolved.supplier_slug;
-    status.context.competitor_slugs = resolved.competitor_slugs;
-
-    if (!Array.isArray(status.history)) status.history = [];
-    status.history.push({
-      at: new Date().toISOString(),
-      phase: "packsload",
-      note: "scope_declared"
-    });
-
+    await updateStatus(
+      container,
+      prefix,
+      {
+        context: {
+          industry_slug: resolved.industry_slug,
+          supplier_slug: resolved.supplier_slug,
+          competitor_slugs: resolved.competitor_slugs
+        }
+      },
+      { phase: "packsload", note: "scope_declared" }
+    );
+    
     await putJson(container, statusPath, status);
 
     log("[packsload] slugs resolved and persisted", {

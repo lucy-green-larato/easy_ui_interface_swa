@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 30-12-2025 — v67
+// /api/campaign-evidence/index.js 02-01-2026 — v68
 // -----------------------------------------------------------------------------
 // PHASE BOUNDARY NOTE
 //
@@ -312,16 +312,41 @@ module.exports = async function (context, job) {
     const persisted = await getJson(container, `${prefix}input.json`);
     if (persisted && typeof persisted === "object") {
       const keys = [
-        "csvSummary",
-        "csvText",
+        "page",
+        "rowCount",
+
         "selected_industry",
         "buyer_industry",
         "campaign_industry",
-        "relevant_competitors",
-        "competitors",
+        "company_industry",
+        "industry",
+
+        "supplier_company",
+        "company_name",
+        "prospect_company",
+
         "supplier_website",
         "company_website",
-        "prospect_website"
+        "prospect_website",
+
+        "supplier_linkedin",
+        "company_linkedin",
+        "prospect_linkedin",
+
+        "supplier_usps",
+        "supplier_products",
+        "campaign_requirement",
+        "sales_model",
+        "salesModel",
+        "call_type",
+
+        "relevant_competitors",
+        "competitors",
+        "notes",
+
+        "csvSummary",
+        "csvText",
+        "csvFilename"
       ];
 
       for (const k of keys) {
@@ -337,18 +362,17 @@ module.exports = async function (context, job) {
     // Non-fatal; continue with msg input
   }
 
-
-
-  await updateStatus(
-    container,
-    prefix,
-    {
-      state: "EvidenceDigest",
-      phase: "start",
-      updatedAt: nowIso(),
-      input: {
+  await updateStatus(container, prefix, {
+    state: "EvidenceDigest",
+    phase: "start",
+    updatedAt: nowIso(),
+    evidence: {
+      input_snapshot: {
         page: input.page || null,
-        rowCount: Number(input.rowCount || 0),
+        rowCount: (() => {
+          const n = Number(input.rowCount);
+          return Number.isFinite(n) && n >= 0 ? n : null;
+        })(),
         supplier_company: input.supplier_company || input.company_name || input.prospect_company || null,
         supplier_website: input.supplier_website || input.company_website || input.prospect_website || null,
         supplier_linkedin: input.supplier_linkedin || input.company_linkedin || input.prospect_linkedin || null,
@@ -369,9 +393,9 @@ module.exports = async function (context, job) {
             .trim()
             .toLowerCase() || null
       }
-    },
-    { phase: "EvidenceDigest", note: "start" }
-  );
+    }
+  }, { phase: "EvidenceDigest", note: "start" });
+
 
   try {
     const supplierWebsiteRaw = (input.supplier_website || input.company_website || input.prospect_website || "").trim();

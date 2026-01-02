@@ -1,37 +1,40 @@
-// /api/shared/status.js 05-12-2025 v4
-// / Shared status.json updater with optional history node.
+// /api/shared/status.js 02-01-2026 v5
+// Shared status.json updater with optional history node.
 
 const { getJson, putJson } = require("../shared/storage");
 const { nowIso } = require("./utils");
 const { canonicalPrefix, computePrefixFromMessage } = require("../lib/prefix");
 
-/**
- * Normalise a prefix for status.json paths:
- *  - null/undefined → ""
- *  - strip leading slashes
- *  - ensure exactly one trailing slash when non-empty
- */
-function normalisePrefix(prefix) {
-  let raw = String(prefix || "").trim();
-  if (!raw) return "";
-  const m = raw.match(/^([a-z0-9-]+)\/(.+)$/i);
-  if (m && m[1].toLowerCase() === process.env.RESULTS_CONTAINER?.toLowerCase()) {
-    raw = m[2];   // discard container segment
-  }
+// ... existing normalisePrefix ...
 
-  const stripped = raw.replace(/^\/+/, "").replace(/\/+$/, "");
-  return stripped ? `${stripped}/` : "";
+function isNullishOrEmpty(v) {
+  if (v === null || v === undefined) return true;
+  if (typeof v === "string" && v.trim() === "") return true;
+  return false;
 }
 
-/**
- * Update status.json under a given prefix, merging in `patch`
- * and optionally appending a history node.
- *
- * @param {import("@azure/storage-blob").ContainerClient} containerClient
- * @param {string} prefix            e.g. "runs/<runId>/" (can be sloppy; normalised internally)
- * @param {object} patch             partial fields to merge into status
- * @param {object} [historyNode]     optional history entry { ... }
- */
+// Merge nested input without clobbering canonical values.
+// Rule: do not overwrite a non-empty existing value with null/empty.
+function mergeInputPreservingCanonical(curInput, patchInput) {
+  const base = (curInput && typeof curInput === "object") ? curInput : {};
+  const patch = (patchInput && typeof patchInput === "object") ? patchInput : {};
+
+  const out = { ...base };
+
+  for (const [k, v] of Object.entries(patch)) {
+    const existing = out[k];
+
+    // If patch provides null/empty, keep existing non-empty value.
+    if (isNullishOrEmpty(v) && !isNullishOrEmpty(existing)) {
+      continue;
+    }
+
+    out[k] = v;
+  }
+
+  return out;
+}
+
 async function updateStatus(containerClient, prefix, patch = {}, historyNode) {
   if (typeof prefix === "object" && !Array.isArray(prefix) && prefix !== null) {
     prefix = computePrefixFromMessage(prefix);
@@ -44,20 +47,24 @@ async function updateStatus(containerClient, prefix, patch = {}, historyNode) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       let cur = await getJson(containerClient, statusPath);
-      if (!cur || typeof cur !== "object") {
-        cur = {};
-      }
-      if (!Array.isArray(cur.history)) {
-        cur.history = [];
-      }
-      if (!cur.runId && patchObj.runId) {
-        cur.runId = patchObj.runId;
-      }
+      if (!cur || typeof cur !== "object") cur = {};
+      if (!Array.isArray(cur.history)) cur.history = [];
+      if (!cur.runId && patchObj.runId) cur.runId = patchObj.runId;
+
+      // Build next with shallow merge first
       const next = {
         ...cur,
         ...patchObj,
         history: Array.isArray(cur.history) ? cur.history.slice() : []
       };
+
+      // ✅ Critical fix: merge `input` safely (no clobbering with null/empty)
+      if ("input" in patchObj) {
+        next.input = mergeInputPreservingCanonical(cur.input, patchObj.input);
+      } else if (cur.input && typeof cur.input === "object") {
+        // Ensure input remains preserved even if patch omits it
+        next.input = cur.input;
+      }
 
       // Append history node if provided
       if (historyNode && typeof historyNode === "object") {
@@ -68,19 +75,13 @@ async function updateStatus(containerClient, prefix, patch = {}, historyNode) {
       }
 
       await putJson(containerClient, statusPath, next);
-      // ✅ success, exit retry loop
       break;
 
     } catch (err) {
-      // Last attempt → rethrow
-      if (attempt === maxAttempts - 1) {
-        throw err;
-      }
-      // Backoff a bit before retrying
+      if (attempt === maxAttempts - 1) throw err;
       await new Promise(resolve => setTimeout(resolve, 50 * (attempt + 1)));
     }
   }
 }
-module.exports = {
-  updateStatus
-};
+
+module.exports = { updateStatus };

@@ -1,6 +1,5 @@
 // /api/campaign-router/index.js
-// Gold v9.7 — canonical, idempotent, prefix-safe router
-// 29-12-2025
+// Gold v9.8 — canonical, idempotent, prefix-safe router 02-01-2026
 //
 "use strict";
 
@@ -63,36 +62,50 @@ async function persistStatus(container, path, status) {
   await putJson(container, path, status);
 }
 
+function normalizePrefix(prefix) {
+  let p = String(prefix || "").trim();
+  if (!p) return "";
+  p = p.replace(/^\/+/, "");
+  p = p.replace(/\/+$/, "");
+  return p;
+}
+
+function runIdFromPrefix(prefixNoTrailingSlash) {
+  const parts = String(prefixNoTrailingSlash || "")
+    .split("/")
+    .map(s => s.trim())
+    .filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : null;
+}
+
 // -----------------------------------------------------------------------------
 // main
 // -----------------------------------------------------------------------------
 module.exports = async function (context, queueItem) {
   const log = context.log;
   const msg = parseQueueItem(queueItem);
-
   const op = String(msg.op || "").trim();
-  let runId = (typeof msg.runId === "string" && msg.runId.trim())
-    ? msg.runId.trim()
-    : (typeof msg.run_id === "string" && msg.run_id.trim())
-      ? msg.run_id.trim()
-      : null;
-
-  if (!runId) {
-    try {
-      const parts = prefix.split("/").filter(Boolean);
-      if (parts.length) runId = parts[parts.length - 1];
-    } catch { /* noop */ }
-  }
-  if (!runId) runId = "unknown";
-  const page = msg.page || "campaign";
   const prefix = normPrefix(msg.prefix || "");
-
-  log("[router] received", { op, runId, prefix });
-
   if (!prefix) {
-    log("[router] missing prefix; aborting");
+    log("[router] missing prefix; aborting", { op });
     return;
   }
+  let runId =
+    (typeof msg.runId === "string" && msg.runId.trim())
+      ? msg.runId.trim()
+      : (typeof msg.run_id === "string" && msg.run_id.trim())
+        ? msg.run_id.trim()
+        : null;
+
+  if (!runId) {
+    const m = String(prefix).match(/\/runs\/([^/]+)\/$/);
+    if (m) runId = m[1];
+  }
+
+  if (!runId) runId = "unknown";
+  const page = msg.page || "campaign";
+
+  log("[router] received", { op, runId, prefix });
 
   const container = await getResultsContainerClient();
   const statusPath = `${prefix}status.json`;

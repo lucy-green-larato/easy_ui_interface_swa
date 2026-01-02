@@ -1,4 +1,4 @@
-// /api/campaign-start/index.js 20-12-2025 v26
+// /api/campaign-start/index.js 02-01-2026 v27
 // Classic Azure Functions (function.json + scriptFile), CommonJS.
 // POST /api/campaign-start → writes status/input, seeds csv_normalized, updates per-user recent index,
 // then enqueues router kickoff (afterstart). No other queue is enqueued here.
@@ -359,11 +359,22 @@ module.exports = async function (context, req) {
 
     // ---- runId / prefix / idempotency ----
     const clientRunKey = body.clientRunKey || readHeader(req, "x-idempotency-key") || null;
+
     const runId = clientRunKey
       ? crypto.createHash("sha1").update(String(clientRunKey)).digest("hex")
-      : (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`);
+      : (crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`);
 
-    const prefix = canonicalPrefix({ page, userId, runId, date: now });
+    // Canonical run prefix (single source of truth)
+    let prefix = canonicalPrefix({ page, userId, runId, date: now });
+
+    // Prefix normalisation (representation only; DO NOT recompute identity)
+    prefix = String(prefix || "").replace(/^\/+/, "");
+    if (prefix.startsWith(`${RESULTS_CONTAINER}/`)) {
+      prefix = prefix.slice(`${RESULTS_CONTAINER}/`.length);
+    }
+    if (!prefix.endsWith("/")) prefix += "/";
 
     // ---- Build input payload (full) ----
     const inputPayload = {
@@ -570,9 +581,6 @@ module.exports = async function (context, req) {
       context.log.warn("campaign_start_payload_slimmed", { bytes: byteLen(payload) });
     }
 
-    // (We keep this parse step because you had it; it also validates JSON)
-    const parsed = JSON.parse(payload);
-
     // ============================================================
     // Enqueue router continuation: afterstart
     // ============================================================
@@ -585,9 +593,7 @@ module.exports = async function (context, req) {
       clientRunKey: clientRunKey ?? null,
     });
 
-    pushHistory(initialStatus, "router_enqueued", "afterstart");
-    await writeJson(containerClient, `${prefix}status.json`, initialStatus);
-
+    
     // ---- Response ----
     context.res = {
       status: 202,
@@ -601,7 +607,7 @@ module.exports = async function (context, req) {
         prefix,
         statusUrl: `${containerClient.url}/${prefix}status.json`,
         inputUrl: `${containerClient.url}/${prefix}input.json`,
-        bytes: byteLen(safeStringify(parsed)),
+        bytes: byteLen(payload),
       },
     };
   } catch (e) {
