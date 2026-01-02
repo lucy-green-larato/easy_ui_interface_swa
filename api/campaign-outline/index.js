@@ -1,25 +1,12 @@
 // /api/campaign-outline/index.js
-// 02-01-2026 — Option A (content_pillars-first), hash-locked, deterministic, idempotent. V6
+// 02-01-2026 — Option A (content-pillars-v2), hash-locked, deterministic, idempotent. V7
 //
-// Doctrine:
-// - Outline MUST use content_pillars.json as the PRIMARY messaging source of truth.
-// - Outline may consult evidence.json for claim_ids only (no new facts).
-// - Outline MUST NOT re-read or reinterpret raw supplier markdown packs.
-// - Outline MUST NOT generate its own “pillars” or “facts”; it only arranges existing sources.
-// - Outline MUST refuse to run if content_pillars.json is missing or structurally invalid.
-//
-// Inputs:
-// - content_pillars.json  (canonical campaign-level messaging primitives)
-// - evidence.json         (claims with IDs; proof anchors only)
-// - csv_normalized.json   (signals only; no fact invention)
-// - input.json            (supplier identity + user notes)
-//
-// Outputs:
-// - outline.json          (claim-id and pillar-id anchored, schema constrained)
-//
-// Idempotency:
-// - If outlineCompleted, skip.
-// - Only enqueue afteroutline once.
+// Key upgrades:
+// - Requires content-pillars-v2: core_pillars + proof_enrichment
+// - Two evidence views: evidence_allowed (model-seen) and evidence_all_meta (model-hidden)
+// - Mechanical refusal on locks + provenance_validated
+// - Strict allowed claim id set from proof_enrichment (plus optional csv_claim_ids)
+// - Deterministic audit markers + debug artefact
 
 "use strict";
 
@@ -33,7 +20,6 @@ const os = require("os");
 const fs = require("fs");
 const crypto = require("crypto");
 
-// ---- ENV ----
 const ROUTER_QUEUE = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 45000);
 
@@ -48,8 +34,7 @@ async function loadHarness() {
     if (typeof generate !== "function") throw new Error("prompt-harness missing generate()");
     _harness = { generate };
     return _harness;
-  } catch (e1) {
-    // ESM fallback
+  } catch {
     const modUrl = new URL("../lib/prompt-harness.js", `file://${__dirname}/`);
     const esm = await import(modUrl.href);
     const generate = esm.generate || esm.default?.generate || esm.default;
@@ -59,14 +44,12 @@ async function loadHarness() {
   }
 }
 
-// ---- Write temporary schema file for AJV ----
 function writeTempSchema(schema) {
   const f = path.join(os.tmpdir(), `outline_schema_${Date.now()}.json`);
   fs.writeFileSync(f, JSON.stringify(schema), "utf8");
   return f;
 }
 
-// ---- Outline schema (claim_ids only; prose-free) ----
 const OUTLINE_SCHEMA = {
   $schema: "http://json-schema.org/draft-07/schema#",
   title: "campaign_outline",
@@ -215,7 +198,6 @@ const OUTLINE_SCHEMA = {
   }
 };
 
-// ---- Utility: safe truncation for prompt ----
 function safeForPrompt(v, max = 280000) {
   try {
     const s = typeof v === "string" ? v : JSON.stringify(v ?? "");
@@ -225,6 +207,18 @@ function safeForPrompt(v, max = 280000) {
   } catch {
     return "null";
   }
+}
+
+function stableString(v) {
+  return String(v ?? "").trim();
+}
+
+function isNonEmptyString(v) {
+  return typeof v === "string" && v.trim().length > 0;
+}
+
+function ensureArray(v) {
+  return Array.isArray(v) ? v : [];
 }
 
 function sha1OfJson(obj) {
@@ -240,14 +234,6 @@ function normPrefix(prefix) {
   return p;
 }
 
-function isNonEmptyString(v) {
-  return typeof v === "string" && v.trim().length > 0;
-}
-
-function ensureArray(v) {
-  return Array.isArray(v) ? v : [];
-}
-
 async function readJsonSafe(container, blobPath, fallback = null) {
   try {
     const v = await getJson(container, blobPath);
@@ -257,39 +243,79 @@ async function readJsonSafe(container, blobPath, fallback = null) {
   }
 }
 
-// Validate minimal structure of content_pillars.json
-function validateContentPillarsShape(cp) {
+// ---- content-pillars-v2 validation + extraction ----
+
+function validateContentPillarsV2(cp) {
   if (!cp || typeof cp !== "object") return { ok: false, reason: "not_object" };
-  if (!cp.schema || typeof cp.schema !== "string") return { ok: false, reason: "missing_schema" };
+  if (stableString(cp.schema) !== "content-pillars-v2") return { ok: false, reason: "wrong_schema" };
   if (!cp.meta || typeof cp.meta !== "object") return { ok: false, reason: "missing_meta" };
-  if (!cp.pillars || !Array.isArray(cp.pillars)) return { ok: false, reason: "missing_pillars_array" };
-  // Each pillar must have an id + title + source provenance
-  for (const p of cp.pillars) {
-    if (!p || typeof p !== "object") return { ok: false, reason: "pillar_not_object" };
-    if (!isNonEmptyString(p.id)) return { ok: false, reason: "pillar_missing_id" };
-    if (!isNonEmptyString(p.title)) return { ok: false, reason: "pillar_missing_title" };
-    if (!p.provenance || typeof p.provenance !== "object") return { ok: false, reason: "pillar_missing_provenance" };
+  if (cp.meta.provenance_validated !== true) return { ok: false, reason: "provenance_not_validated" };
+  if (!cp.inputs || typeof cp.inputs !== "object") return { ok: false, reason: "missing_inputs" };
+
+  if (!Array.isArray(cp.core_pillars)) return { ok: false, reason: "missing_core_pillars" };
+  for (const p of cp.core_pillars) {
+    if (!p || typeof p !== "object") return { ok: false, reason: "core_pillar_not_object" };
+    if (!isNonEmptyString(p.id)) return { ok: false, reason: "core_pillar_missing_id" };
+    if (!isNonEmptyString(p.title)) return { ok: false, reason: "core_pillar_missing_title" };
+    if (!["assertable", "framing"].includes(stableString(p.mode))) return { ok: false, reason: "core_pillar_missing_or_invalid_mode" };
+    if (!Array.isArray(p.source_refs) || !p.source_refs.length) return { ok: false, reason: "core_pillar_missing_source_refs" };
+    for (const sr of p.source_refs) {
+      if (!sr || typeof sr !== "object") return { ok: false, reason: "source_ref_not_object" };
+      if (!["markdown_pillar", "industry_pillar"].includes(stableString(sr.type))) return { ok: false, reason: "source_ref_invalid_type" };
+      if (!isNonEmptyString(sr.pillar_id)) return { ok: false, reason: "source_ref_missing_pillar_id" };
+      // supplier_slug/industry_slug may be null; ok.
+    }
+    if (!p.claims || typeof p.claims !== "object") return { ok: false, reason: "core_pillar_missing_claims" };
   }
+
+  if (!Array.isArray(cp.proof_enrichment)) return { ok: false, reason: "missing_proof_enrichment" };
+  for (const pe of cp.proof_enrichment) {
+    if (!pe || typeof pe !== "object") return { ok: false, reason: "proof_enrichment_not_object" };
+    if (!isNonEmptyString(pe.pillar_id)) return { ok: false, reason: "proof_enrichment_missing_pillar_id" };
+    if (!Array.isArray(pe.claim_refs)) return { ok: false, reason: "proof_enrichment_missing_claim_refs" };
+    for (const cr of pe.claim_refs) {
+      if (!cr || typeof cr !== "object") return { ok: false, reason: "claim_ref_not_object" };
+      if (!isNonEmptyString(cr.claim_id)) return { ok: false, reason: "claim_ref_missing_claim_id" };
+      if (!isNonEmptyString(cr.tier_group)) return { ok: false, reason: "claim_ref_missing_tier_group" };
+    }
+  }
+
   return { ok: true };
 }
 
-function flattenClaimIdsFromContentPillars(cp) {
-  const ids = new Set();
-  for (const p of ensureArray(cp?.pillars)) {
-    const ev = ensureArray(p?.evidence_claim_ids);
-    for (const id of ev) {
-      const s = String(id || "").trim();
-      if (s) ids.add(s);
+function buildAllowedClaimIdSet(cp, extraCsvClaimIds = []) {
+  const set = new Set();
+  for (const pe of ensureArray(cp?.proof_enrichment)) {
+    for (const cr of ensureArray(pe?.claim_refs)) {
+      const id = stableString(cr?.claim_id);
+      if (id) set.add(id);
     }
   }
-  return Array.from(ids);
+  for (const id of ensureArray(extraCsvClaimIds)) {
+    const s = stableString(id);
+    if (s) set.add(s);
+  }
+  return set;
+}
+
+function buildProofMap(cp) {
+  const map = {};
+  for (const pe of ensureArray(cp?.proof_enrichment)) {
+    const pid = stableString(pe?.pillar_id);
+    if (!pid) continue;
+    map[pid] = ensureArray(pe?.claim_refs).map(x => ({
+      claim_id: stableString(x?.claim_id),
+      tier_group: stableString(x?.tier_group || "other") || "other"
+    })).filter(x => x.claim_id);
+  }
+  return map;
 }
 
 function pickTop(arr, n) {
   return ensureArray(arr).slice(0, Math.max(0, n | 0));
 }
 
-// ---- MAIN FUNCTION ----
+// ---- MAIN ----
 module.exports = async function (context, queueItem) {
   const startedAt = nowIso();
   let prefix = "";
@@ -297,13 +323,10 @@ module.exports = async function (context, queueItem) {
 
   try {
     if (!queueItem) throw new Error("Queue message empty");
-
-    // Accept stringified JSON messages
     if (typeof queueItem === "string") {
       try { queueItem = JSON.parse(queueItem); }
       catch { throw new Error("Queue message must be JSON"); }
     }
-
     if (typeof queueItem !== "object") throw new Error("Queue message must be an object");
 
     const runId = queueItem.runId;
@@ -316,78 +339,74 @@ module.exports = async function (context, queueItem) {
 
     const container = await getResultsContainerClient();
 
-    // ---- IDEMPOTENCY GUARD ----
+    // ---- IDEMPOTENCY ----
     const status0 = await readJsonSafe(container, `${prefix}status.json`, null);
-
     if (status0?.markers?.outlineCompleted) {
       if (!status0?.markers?.afteroutlineSent) {
-        await enqueueTo(ROUTER_QUEUE, { op: "afteroutline", runId, prefix, page });
-        await updateStatus(container, prefix, {
-          markers: { ...(status0?.markers || {}), afteroutlineSent: true }
-        });
+        await enqueueTo(process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs", { op: "afteroutline", runId, prefix, page });
+        await updateStatus(container, prefix, { markers: { ...(status0?.markers || {}), afteroutlineSent: true } });
       }
       context.log("[outline] already completed; skipping", { runId, prefix });
       return;
     }
 
     // ---- Phase start ----
-    await updateStatus(
-      container,
-      prefix,
-      { runId, state: "Outline", updatedAt: nowIso() },
-      { phase: "Outline", note: "start" }
-    );
+    await updateStatus(container, prefix, { runId, state: "Outline", updatedAt: nowIso() }, { phase: "Outline", note: "start" });
 
-    // ---- LOAD CANONICAL INPUTS ----
+    // ---- Load canonical inputs ----
     const contentPillars = await getJson(container, `${prefix}content_pillars.json`);
-    const contentPillarsShape = validateContentPillarsShape(contentPillars);
+    const shape = validateContentPillarsV2(contentPillars);
 
-    if (!contentPillarsShape.ok) {
-      // This is doctrine-critical; outline must not run without content pillars.
+    if (!shape.ok) {
       await updateStatus(
         container,
         prefix,
         {
           state: "Failed",
-          error: {
-            code: "missing_or_invalid_content_pillars",
-            message: `content_pillars.json invalid: ${contentPillarsShape.reason}`
-          },
+          error: { code: "missing_or_invalid_content_pillars", message: `content_pillars.json invalid: ${shape.reason}` },
           failedAt: nowIso()
         },
         { phase: "Outline", note: "failed: content_pillars missing/invalid" }
       );
-      throw new Error(`Outline refused: content_pillars.json invalid (${contentPillarsShape.reason})`);
+      throw new Error(`Outline refused: content_pillars.json invalid (${shape.reason})`);
+    }
+
+    // Lock enforcement (refuse unless content pillars locked)
+    const stLock = await readJsonSafe(container, `${prefix}status.json`, {});
+    if (stLock?.markers?.contentPillarsLocked !== true) {
+      await updateStatus(
+        container,
+        prefix,
+        {
+          state: "Failed",
+          error: { code: "content_pillars_not_locked", message: "Refused: status.markers.contentPillarsLocked !== true" },
+          failedAt: nowIso()
+        },
+        { phase: "Outline", note: "failed: content pillars not locked" }
+      );
+      throw new Error("Outline refused: content_pillars not locked");
     }
 
     const evidenceJson = await getJson(container, `${prefix}evidence.json`);
     const csvNorm = await getJson(container, `${prefix}csv_normalized.json`);
     const input = await getJson(container, `${prefix}input.json`);
 
-    const evidenceClaims =
-      Array.isArray(evidenceJson?.claims)
-        ? evidenceJson.claims
-        : [];
+    const evidenceClaims = Array.isArray(evidenceJson?.claims) ? evidenceJson.claims : [];
 
-    // ---- HASH LOCKING / AUDIT ----
+    // ---- Hash locking / audit ----
     const contentPillarsSha1 = sha1OfJson(contentPillars);
     const evidenceSha1 = sha1OfJson(evidenceJson);
 
-    // If content_pillars.json already declares hashes, enforce them
-    const declaredMarkdownSha1 = contentPillars?.inputs?.markdown_pack_sha1 || null;
     const declaredEvidenceSha1 = contentPillars?.inputs?.evidence_sha1 || null;
+    const declaredMarkdownSha1 = contentPillars?.inputs?.markdown_pack_sha1 || null;
 
-    // Enforce evidence hash match if declared
     if (declaredEvidenceSha1 && String(declaredEvidenceSha1) !== evidenceSha1) {
       await updateStatus(
         container,
         prefix,
         {
           state: "Failed",
-          error: {
-            code: "hash_mismatch",
-            message: `Evidence hash mismatch: content_pillars.inputs.evidence_sha1=${declaredEvidenceSha1} but evidence.json sha1=${evidenceSha1}`
-          },
+          error: { code: "hash_mismatch", message: `Evidence hash mismatch: content_pillars.inputs.evidence_sha1=${declaredEvidenceSha1} but evidence.json sha1=${evidenceSha1}` },
           failedAt: nowIso()
         },
         { phase: "Outline", note: "failed: evidence hash mismatch" }
@@ -395,32 +414,92 @@ module.exports = async function (context, queueItem) {
       throw new Error("Outline refused: evidence.json hash mismatch vs content_pillars.json");
     }
 
-    // Persist locks for downstream stages
-    const stLock = await readJsonSafe(container, `${prefix}status.json`, {});
-    await updateStatus(
-      container,
-      prefix,
-      {
-        markers: {
-          ...(stLock?.markers || {}),
-          contentPillarsLocked: true,
-          contentPillarsSha1,
-          contentPillarsEvidenceSha1: evidenceSha1,
-          contentPillarsMarkdownSha1: declaredMarkdownSha1 || null
-        }
+    // Enforce status sha lock (detect post-lock mutation)
+    const lockedCpSha1 = stLock?.markers?.contentPillarsSha1 || null;
+    if (lockedCpSha1 && String(lockedCpSha1) !== contentPillarsSha1) {
+      await updateStatus(
+        container,
+        prefix,
+        {
+          state: "Failed",
+          error: { code: "hash_mismatch", message: `Content pillars sha mismatch: status.contentPillarsSha1=${lockedCpSha1} but content_pillars.json sha1=${contentPillarsSha1}` },
+          failedAt: nowIso()
+        },
+        { phase: "Outline", note: "failed: content pillars sha mismatch vs status lock" }
+      );
+      throw new Error("Outline refused: content_pillars.json sha mismatch vs status lock");
+    }
+
+    // ---- Allowed claim ids (proof_enrichment + optional CSV claim ids) ----
+    const csv_claim_ids = Array.isArray(csvNorm?.csv_claim_ids) ? csvNorm.csv_claim_ids : [];
+    const allowedClaimIds = buildAllowedClaimIdSet(contentPillars, csv_claim_ids);
+    const allowedClaimIdList = Array.from(allowedClaimIds).sort((a, b) => a.localeCompare(b));
+
+    // ---- Proof map (pillar_id -> claim_refs) ----
+    const proofMap = buildProofMap(contentPillars);
+
+    // ---- Evidence inventory meta (MODEL-HIDDEN; audit/debug) ----
+    const evidence_all_meta = evidenceClaims.map(x => ({
+      claim_id: String(x?.claim_id || "").trim(),
+      tier: (x?.tier ?? null),
+      tier_group: String(x?.tier_group || x?.tag || "other"),
+      title: String(x?.title || "").slice(0, 160),
+      has_summary: Boolean(x?.summary || x?.quote),
+      url: x?.url || null
+    })).filter(x => x.claim_id);
+
+    // ---- Evidence allowed (MODEL-SEEN; constrained) ----
+    const evidence_allowed = evidenceClaims
+      .filter(x => allowedClaimIds.has(String(x?.claim_id || "").trim()))
+      .map(x => ({
+        claim_id: x.claim_id,
+        title: x.title || "",
+        summary: (x.summary || x.quote || "").slice(0, 240),
+        tier: x.tier,
+        tier_group: x.tier_group
+      }))
+      .sort((a, b) => String(a.claim_id).localeCompare(String(b.claim_id)));
+
+    // ---- Hard asserts ----
+    // 1) No stray IDs in evidence_allowed
+    for (const c of evidence_allowed) {
+      if (!allowedClaimIds.has(String(c.claim_id).trim())) {
+        throw new Error(`Outline refused: stray claim_id in evidence_allowed: ${c.claim_id}`);
       }
-    );
+    }
+
+    // 2) All allowed IDs must exist in evidence.json (otherwise pillars proof points are invalid)
+    const evidenceIdSet = new Set(evidenceClaims.map(c => String(c?.claim_id || "").trim()).filter(Boolean));
+    const missingAllowed = allowedClaimIdList.filter(id => !evidenceIdSet.has(id));
+    if (missingAllowed.length) {
+      await updateStatus(
+        container,
+        prefix,
+        {
+          state: "Failed",
+          error: { code: "missing_allowed_claim_ids", message: `Allowed claim_ids missing from evidence.json: ${missingAllowed.slice(0, 12).join(", ")}` },
+          failedAt: nowIso()
+        },
+        { phase: "Outline", note: "failed: missing allowed claim ids" }
+      );
+      throw new Error(`Outline refused: allowed claim_ids missing from evidence.json (${missingAllowed.length})`);
+    }
+
+    // Persist locks for downstream stages
+    await updateStatus(container, prefix, {
+      markers: {
+        ...(stLock?.markers || {}),
+        contentPillarsLocked: true,
+        contentPillarsSha1,
+        contentPillarsEvidenceSha1: evidenceSha1,
+        contentPillarsMarkdownSha1: declaredMarkdownSha1 || null
+      }
+    });
 
     // ---- CSV signals ----
     const modeSpecific = csvNorm?.industry_mode === "specific";
-    const selectedIndustryCsv =
-      modeSpecific
-        ? (csvNorm?.selected_industry || "general").toLowerCase()
-        : "general";
-
-    const csvSignals = modeSpecific
-      ? (csvNorm?.signals || {})
-      : (csvNorm?.global_signals || {});
+    const selectedIndustryCsv = modeSpecific ? (csvNorm?.selected_industry || "general").toLowerCase() : "general";
+    const csvSignals = modeSpecific ? (csvNorm?.signals || {}) : (csvNorm?.global_signals || {});
 
     // ---- Supplier block ----
     const supplier = {
@@ -442,36 +521,17 @@ module.exports = async function (context, queueItem) {
       input?.campaign_industry ||
       (modeSpecific ? selectedIndustryCsv : "General");
 
-    // ---- Construct evidence subset for prompt (claim_id only) ----
-    const evidenceArr = evidenceClaims
-      .filter(it => it?.claim_id && (it.title || it.summary || it.quote))
-      .slice(0, 24);
-
-    // ---- Extract product anchor names from content_pillars (deterministic) ----
-    // Outline previously derived product names from site.json; Option A forbids raw source drift.
-    // We instead expose:
-    // - content_pillars.product_anchors[] if present
-    // - else: extract from pillar "product_anchor_names" (if your content_pillars schema includes it)
+    // ---- Product anchors (do NOT read markdown; deterministic from csv if present) ----
     let productAnchors = [];
-    if (Array.isArray(contentPillars?.product_anchors)) {
-      productAnchors = contentPillars.product_anchors.map(x => String(x || "").trim()).filter(Boolean).slice(0, 24);
+    if (Array.isArray(contentPillars?.inputs?.product_anchors)) {
+      productAnchors = contentPillars.inputs.product_anchors.map(x => String(x || "").trim()).filter(Boolean).slice(0, 24);
+    } else if (Array.isArray(csvNorm?.product_anchor_names)) {
+      productAnchors = csvNorm.product_anchor_names.map(x => String(x || "").trim()).filter(Boolean).slice(0, 24);
     } else {
-      // Conservative fallback: attempt to pull from pillars[].product_anchor_names
-      const out = [];
-      for (const p of ensureArray(contentPillars?.pillars)) {
-        const a = ensureArray(p?.product_anchor_names);
-        for (const v of a) {
-          const s = String(v || "").trim();
-          if (s) out.push(s);
-        }
-      }
-      productAnchors = Array.from(new Set(out)).slice(0, 24);
+      productAnchors = [];
     }
 
-    // ---- Flatten claim_ids referenced by content_pillars (for model constraint) ----
-    const claimIdsFromPillars = flattenClaimIdsFromContentPillars(contentPillars);
-
-    // ---- System + user messages ----
+    // ---- Prompt messages ----
     const salesModel = String(input?.sales_model || "").toLowerCase();
     const PERSONA =
       (salesModel === "partner")
@@ -482,10 +542,11 @@ module.exports = async function (context, queueItem) {
 ${PERSONA}
 Return STRICTLY valid JSON that conforms to the provided outline schema.
 Rules:
-- Use ONLY claim_ids that exist in evidence.json (provided).
-- Use ONLY claim_ids that are referenced by content_pillars.json OR are CSV summary / operational claims.
+- Use ONLY claim_ids provided in EVIDENCE_ALLOWED.
+- Use ONLY claim_ids from ALLOWED_CLAIM_IDS.
 - NEVER invent facts. NEVER invent new claim IDs. NEVER include prose paragraphs.
 - Do NOT interpret or re-summarise supplier markdown. content_pillars is the canonical messaging truth.
+- Framing pillars are THEMES ONLY. Do not select numeric/outcome claims unless they are explicitly present in proof enrichment.
 - If you cannot fill a field from allowed sources, return an empty array or null (do not guess).
 `.trim();
 
@@ -495,23 +556,18 @@ ${safeForPrompt({
       schema: contentPillars.schema,
       meta: contentPillars.meta,
       inputs: contentPillars.inputs || {},
-      pillars: pickTop(contentPillars.pillars, 12), // cap for prompt
+      assertion_policy: contentPillars.assertion_policy || {},
+      guardrails: contentPillars.guardrails || {},
+      core_pillars: pickTop(contentPillars.core_pillars, 12),
+      proof_enrichment: pickTop(contentPillars.proof_enrichment, 18),
       product_anchors: productAnchors
     })}
 
-ALLOWED CLAIM IDS (from content_pillars):
-${safeForPrompt(claimIdsFromPillars)}
+ALLOWED_CLAIM_IDS (from proof enrichment + CSV):
+${safeForPrompt(allowedClaimIdList)}
 
-EVIDENCE (≤24 items; claim_id + title + summary only):
-${safeForPrompt(
-      evidenceArr.map(x => ({
-        claim_id: x.claim_id,
-        title: x.title || "",
-        summary: (x.summary || x.quote || "").slice(0, 240),
-        tier: x.tier,
-        tier_group: x.tier_group
-      }))
-    )}
+EVIDENCE_ALLOWED (claim_id + title + summary only):
+${safeForPrompt(evidence_allowed)}
 
 CSV signals:
 ${safeForPrompt(csvSignals)}
@@ -523,7 +579,7 @@ Competitors:
 ${safeForPrompt(competitors)}
 `.trim();
 
-    // ---- Generate outline via harness ----
+    // ---- Generate outline ----
     const { generate } = await loadHarness();
     const schemaPath = writeTempSchema(OUTLINE_SCHEMA);
 
@@ -559,22 +615,46 @@ ${safeForPrompt(competitors)}
     if (typeof outline === "string") outline = JSON.parse(outline);
     if (!outline || typeof outline !== "object") throw new Error("Invalid outline");
 
-    // ---- Ensure essential metadata ----
+    // ---- Ensure metadata + locks ----
     outline.meta = outline.meta || {};
     outline.meta.run_id = runId;
     outline.meta.phase = "Outline";
     outline.meta.selected_industry = SELECTED_INDUSTRY;
 
-    // ---- Inject audit locks into outline.meta (immutable references) ----
     outline.meta.inputs = outline.meta.inputs || {};
     outline.meta.inputs.content_pillars_sha1 = contentPillarsSha1;
     outline.meta.inputs.evidence_sha1 = evidenceSha1;
     outline.meta.inputs.markdown_pack_sha1 = declaredMarkdownSha1 || null;
 
-    // ---- Write outline.json ----
+    // ---- Persist outline.json ----
     await putJson(container, `${prefix}outline.json`, outline);
 
-    // ---- Mark complete ----
+    // ---- Persist debug artefact (evidence_all_meta + allowed set diagnostics) ----
+    const outlineDebug = {
+      schema: "outline-debug-v1",
+      generated_at: nowIso(),
+      run_id: runId,
+      inputs: {
+        content_pillars_sha1: contentPillarsSha1,
+        evidence_sha1: evidenceSha1,
+        markdown_pack_sha1: declaredMarkdownSha1 || null
+      },
+      counts: {
+        evidence_total: evidence_all_meta.length,
+        evidence_allowed: evidence_allowed.length,
+        allowed_claim_ids: allowedClaimIdList.length
+      },
+      evidence_all_meta,
+      allowed_claim_ids: allowedClaimIdList,
+      proof_map_sample: Object.keys(proofMap).slice(0, 6).reduce((acc, k) => {
+        acc[k] = proofMap[k].slice(0, 6);
+        return acc;
+      }, {})
+    };
+
+    await putJson(container, `${prefix}outline_debug.json`, outlineDebug);
+
+    // ---- Mark complete + locks ----
     const stBeforeComplete = await readJsonSafe(container, `${prefix}status.json`, {});
     await updateStatus(
       container,
@@ -585,20 +665,26 @@ ${safeForPrompt(competitors)}
         markers: {
           ...(stBeforeComplete?.markers || {}),
           outlineCompleted: true,
-          outlineSha1: sha1OfJson(outline)
+          outlineLocked: true,
+          outlineSha1: sha1OfJson(outline),
+
+          outlineAllowedClaimIdsCount: allowedClaimIdList.length,
+          outlineEvidenceAllowedCount: evidence_allowed.length,
+          outlineEvidenceTotalCount: evidence_all_meta.length,
+          outlineEvidenceAllowedSha1: sha1OfJson(evidence_allowed),
+          outlineEvidenceAllMetaSha1: sha1OfJson(evidence_all_meta)
         }
       },
       { phase: "Outline", note: "completed" }
     );
 
-    // ---- Router event ONCE ----
+    // ---- Router once ----
     const st2 = await readJsonSafe(container, `${prefix}status.json`, {});
     if (!st2?.markers?.afteroutlineSent) {
       await enqueueTo(ROUTER_QUEUE, { op: "afteroutline", runId, prefix, page });
-      await updateStatus(container, prefix, {
-        markers: { ...(st2?.markers || {}), afteroutlineSent: true }
-      });
+      await updateStatus(container, prefix, { markers: { ...(st2?.markers || {}), afteroutlineSent: true } });
     }
+
     context.log("[outline] success", { runId, prefix, startedAt, completedAt: nowIso() });
 
   } catch (err) {
@@ -607,9 +693,7 @@ ${safeForPrompt(competitors)}
       const container = await getResultsContainerClient();
 
       if (!prefixReady) {
-        context.log.error("[outline] aborting status write — prefix not initialised", {
-          error: String(err?.message || err)
-        });
+        context.log.error("[outline] aborting status write — prefix not initialised", { error: String(err?.message || err) });
         return;
       }
 
@@ -619,7 +703,6 @@ ${safeForPrompt(competitors)}
       status.error = String(err?.message || err);
       status.failedAt = nowIso();
       await putJson(container, statusPath, status);
-
     } catch {
       /* ignore */
     }

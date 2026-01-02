@@ -1,35 +1,17 @@
 // /api/campaign-worker/index.js
-// 02-01-2026 — Strategy Engine Option A (content_pillars-first), hash-locked, deterministic. V27
+// 02-01-2026 — Strategy Engine Option A (content-pillars-v2), hash-locked, deterministic. V28
 //
-// Doctrine (Option A):
-// - Worker MUST consume content_pillars.json as the primary messaging truth source.
-// - Worker MUST NOT interpret supplier markdown packs or regenerate supplier/industry pillars.
-// - Worker MUST NOT consume insights.json for strategy construction (interpretive synthesis excluded).
-// - Worker MAY consume:
-//     - evidence.json (claim ids + proof anchors)
-//     - buyer_logic.json (deterministic derived model from evidence)
-//     - csv_normalized.json (signals only)
-//     - input.json (identity + constraints)
-// - Worker MUST be hash-locked:
-//     - content_pillars_sha1
-//     - evidence_sha1
-//   and must fail if declared hashes mismatch.
-// - Worker writes:
-//     - strategy_v2/campaign_strategy.json
-//     - strategy_v2/viability.json
-//   and updates status.json markers deterministically.
-//
-// Output discipline:
-// - Strategy text MUST be sourced from content_pillars and/or buyer_logic labels, not invented.
-// - Proof points MUST carry claim_id anchors (existing claim IDs only).
-//
-// Notes:
-// - This version preserves your queue contract: op=run_strategy, prefix required.
-// - Router notify op remains: afterworker.
+// Key upgrades:
+// - Requires content-pillars-v2 (core_pillars + proof_enrichment)
+// - Messaging primitives: core_pillars + buyer_logic labels only
+// - Evidence: proof-only (must be claim_refs from proof enrichment)
+// - Stops using evidence tag buckets for messaging drift
+// - Mechanical refusal on locks + sha mismatches + provenance_validated
+// - Writes workerLocked markers for audit
 
 "use strict";
 
-const nodeCrypto = require("crypto"); // alias to avoid TDZ/shadowing
+const nodeCrypto = require("crypto");
 
 const { enqueueTo } = require("../lib/campaign-queue");
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
@@ -84,7 +66,6 @@ async function readJsonSafe(container, path, fallback = null) {
   }
 }
 
-// Deterministic stringify (stable key ordering)
 function stableStringify(obj) {
   if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
   if (Array.isArray(obj)) return "[" + obj.map(stableStringify).join(",") + "]";
@@ -127,18 +108,6 @@ function withEvidenceTag(text, ids) {
   return `${s} [${ids[0]}]`;
 }
 
-// Evidence claims indexing (stable tag grouping)
-function indexClaimsByTag(evidence) {
-  const claims = Array.isArray(evidence?.claims) ? evidence.claims : [];
-  const out = {};
-  for (const c of claims) {
-    const tag = c.tag || c.tier_group || "other";
-    if (!out[tag]) out[tag] = [];
-    out[tag].push(c);
-  }
-  return out;
-}
-
 function bulletFromClaim(c) {
   if (!c) return "";
   const body = c.summary || c.title || "";
@@ -148,37 +117,53 @@ function bulletFromClaim(c) {
   return `${body.trim()} [${id}]`;
 }
 
-function validateContentPillarsShape(cp) {
+// ---------------------------------------------------------------
+// content-pillars-v2 validation + helpers
+// ---------------------------------------------------------------
+
+function validateContentPillarsV2(cp) {
   if (!cp || typeof cp !== "object") return { ok: false, reason: "not_object" };
-  if (!isNonEmptyString(cp.schema)) return { ok: false, reason: "missing_schema" };
+  if (!isNonEmptyString(cp.schema) || cp.schema !== "content-pillars-v2") return { ok: false, reason: "wrong_schema" };
   if (!cp.meta || typeof cp.meta !== "object") return { ok: false, reason: "missing_meta" };
-  if (!Array.isArray(cp.pillars)) return { ok: false, reason: "missing_pillars_array" };
-  for (const p of cp.pillars) {
-    if (!p || typeof p !== "object") return { ok: false, reason: "pillar_not_object" };
-    if (!isNonEmptyString(p.id)) return { ok: false, reason: "pillar_missing_id" };
-    if (!isNonEmptyString(p.title)) return { ok: false, reason: "pillar_missing_title" };
-    if (!p.provenance || typeof p.provenance !== "object") return { ok: false, reason: "pillar_missing_provenance" };
+  if (cp.meta.provenance_validated !== true) return { ok: false, reason: "provenance_not_validated" };
+  if (!cp.inputs || typeof cp.inputs !== "object") return { ok: false, reason: "missing_inputs" };
+  if (!Array.isArray(cp.core_pillars)) return { ok: false, reason: "missing_core_pillars" };
+  if (!Array.isArray(cp.proof_enrichment)) return { ok: false, reason: "missing_proof_enrichment" };
+  for (const p of cp.core_pillars) {
+    if (!p || typeof p !== "object") return { ok: false, reason: "core_pillar_not_object" };
+    if (!isNonEmptyString(p.id)) return { ok: false, reason: "core_pillar_missing_id" };
+    if (!isNonEmptyString(p.title)) return { ok: false, reason: "core_pillar_missing_title" };
+    if (!["assertable", "framing"].includes(String(p.mode || ""))) return { ok: false, reason: "core_pillar_invalid_mode" };
+    if (!Array.isArray(p.source_refs) || !p.source_refs.length) return { ok: false, reason: "core_pillar_missing_source_refs" };
   }
   return { ok: true };
 }
 
-function flattenClaimIdsFromContentPillars(cp) {
-  const ids = new Set();
-  for (const p of ensureArray(cp?.pillars)) {
-    for (const id of ensureArray(p?.evidence_claim_ids)) {
-      const s = String(id || "").trim();
-      if (s) ids.add(s);
-    }
+function buildProofMap(cp) {
+  const map = {};
+  for (const pe of ensureArray(cp?.proof_enrichment)) {
+    const pid = String(pe?.pillar_id || "").trim();
+    if (!pid) continue;
+    map[pid] = ensureArray(pe?.claim_refs).map(x => ({
+      claim_id: String(x?.claim_id || "").trim(),
+      tier_group: String(x?.tier_group || "other").trim() || "other"
+    })).filter(x => x.claim_id);
   }
-  return Array.from(ids);
+  return map;
 }
 
-function clamp(arr, n) {
-  return ensureArray(arr).slice(0, Math.max(0, n | 0));
+function buildAllowedClaimIdSetFromProofMap(proofMap) {
+  const out = new Set();
+  for (const pid of Object.keys(proofMap || {})) {
+    for (const cr of ensureArray(proofMap[pid])) {
+      if (cr && cr.claim_id) out.add(cr.claim_id);
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------
-// VIABILITY (DOCTRINE SAFE; NO INSIGHTS)
+// VIABILITY (deterministic)
 // ---------------------------------------------------------------
 
 function buildViability({ evidence, csvNormalized, contentPillars }) {
@@ -202,9 +187,8 @@ function buildViability({ evidence, csvNormalized, contentPillars }) {
     c.source_type === "supplier_profile"
   );
 
-  const cpCount = ensureArray(contentPillars?.pillars).length;
+  const cpCount = ensureArray(contentPillars?.core_pillars).length;
 
-  // Deterministic signal derivation (rule-based)
   let marketSize = "small";
   if (csvRows >= 50 && csvRows < 400) marketSize = "medium";
   if (csvRows >= 400) marketSize = "large";
@@ -256,25 +240,24 @@ function buildViability({ evidence, csvNormalized, contentPillars }) {
 }
 
 // ---------------------------------------------------------------
-// STRATEGY BUILDERS (OPTION A; NO MARKDOWN PACK, NO INSIGHTS)
+// STRATEGY BUILDERS (Option A: pillars + buyerLogic only)
 // ---------------------------------------------------------------
 
-function buildStorySpine({ evidence, buyerLogic, csvNormalized, mergedInput, contentPillars }) {
-  const byTag = indexClaimsByTag(evidence);
+function buildStorySpine({ evidence, buyerLogic, csvNormalized, mergedInput, contentPillars, proofMap }) {
+  const core = ensureArray(contentPillars?.core_pillars);
 
-  // Environment signals: strictly from Tier-1 markdown drivers/risks/persona OR buyerLogic labels.
-  // We do NOT invent; we list existing summaries with claim IDs.
+  // Environment: buyerLogic labels only (no evidence-tag drift)
   const environment = uniqNonEmpty(
     []
-      .concat((byTag.markdown_industry_drivers || []).map(bulletFromClaim))
-      .concat((byTag.markdown_industry_risks || []).map(bulletFromClaim))
-      .concat((byTag.markdown_persona || []).map(bulletFromClaim))
       .concat(ensureArray(safeGet(buyerLogic, "commercial_impacts", [])).map(ci =>
         withEvidenceTag(ci.label, safeGet(ci, "origin.related_claim_ids", []))
       ))
+      .concat(ensureArray(safeGet(buyerLogic, "market_conditions", [])).map(x =>
+        withEvidenceTag(x.label || x.text, safeGet(x, "origin.related_claim_ids", []))
+      ))
   ).slice(0, 6);
 
-  // Case for action: buyerLogic problems + urgency (anchored)
+  // Case for action: buyerLogic only
   const case_for_action = uniqNonEmpty(
     []
       .concat(ensureArray(safeGet(buyerLogic, "problems", [])).map(p =>
@@ -285,15 +268,13 @@ function buildStorySpine({ evidence, buyerLogic, csvNormalized, mergedInput, con
       ))
   ).slice(0, 8);
 
-  // How we win: content pillars titles + differentiators (anchored by evidence ids if present)
+  // How we win: core pillar titles (assertable include a single claim tag if present)
   const how_we_win = uniqNonEmpty(
-    []
-      .concat(ensureArray(contentPillars?.pillars).map(p => {
-        const ids = ensureArray(p?.evidence_claim_ids);
-        return withEvidenceTag(p.title, ids);
-      }))
-      .concat((byTag.supplier_profile || []).map(bulletFromClaim))
-      .concat((byTag.markdown_supplier || []).map(bulletFromClaim))
+    core.map(p => {
+      const proof = ensureArray(proofMap?.[p.id]);
+      const ids = proof.map(x => x.claim_id).filter(Boolean);
+      return withEvidenceTag(p.title, ids);
+    })
   ).slice(0, 8);
 
   const n = safeGet(csvNormalized, "meta.rows", 0);
@@ -342,11 +323,8 @@ function buildValueProposition({ buyerLogic, mergedInput, contentPillars }) {
     safeGet(buyerLogic, "commercial_impacts.0.label") ||
     "";
 
-  const firstPillar = ensureArray(contentPillars?.pillars)[0] || null;
-
-  const ourSolutionCore = firstPillar
-    ? firstPillar.title
-    : "";
+  const firstPillar = ensureArray(contentPillars?.core_pillars)[0] || null;
+  const ourSolutionCore = firstPillar ? firstPillar.title : "";
 
   return {
     value_proposition: {
@@ -358,39 +336,6 @@ function buildValueProposition({ buyerLogic, mergedInput, contentPillars }) {
         unlike: "unlike undifferentiated connectivity or unmanaged propositions"
       }
     }
-  };
-}
-
-function buildCompetitiveStrategy({ evidence }) {
-  const byTag = indexClaimsByTag(evidence);
-
-  const competitor_map = uniqNonEmpty(
-    (byTag.markdown_competitor || []).map(bulletFromClaim)
-  ).slice(0, 8);
-
-  const diffs = uniqNonEmpty(
-    []
-      .concat(byTag.markdown_supplier || [])
-      .concat(byTag.supplier_profile || [])
-      .map(bulletFromClaim)
-  ).slice(0, 8);
-
-  const vulnerability_map = uniqNonEmpty(
-    (evidence.claims || [])
-      .filter(c =>
-        c.tag === "risk" ||
-        c.tier_group === "markdown_industry_risks" ||
-        c.tier_group === "microclaim"
-      )
-      .map(bulletFromClaim)
-  ).slice(0, 8);
-
-  return {
-    competitor_map,
-    our_advantage: diffs.slice(0, 6),
-    angles_of_attack: competitor_map.slice(0, 6),
-    defensible_differentiators: diffs.slice(0, 6),
-    vulnerability_map
   };
 }
 
@@ -427,46 +372,59 @@ function buildGtmStrategy({ mergedInput }) {
   return { route_implications: [`ROUTE_MODEL=${route}`] };
 }
 
-function buildProofPoints({ evidence, contentPillars }) {
-  const byTag = indexClaimsByTag(evidence);
-
-  // Strongest proof sources:
-  // - content pillars with evidence ids
-  // - case studies
-  // - supplier profile
+function buildProofPoints({ evidenceClaimsById, proofMap, contentPillars }) {
+  const core = ensureArray(contentPillars?.core_pillars);
   const out = [];
 
-  for (const p of clamp(contentPillars?.pillars, 12)) {
-    const ids = ensureArray(p?.evidence_claim_ids);
-    if (!ids.length) continue;
-    out.push(withEvidenceTag(p.title, ids));
+  // Prefer pillar-linked proof (assertable pillars first)
+  const assertable = core.filter(p => p.mode === "assertable");
+  for (const p of assertable.slice(0, 12)) {
+    const refs = ensureArray(proofMap?.[p.id]);
+    if (!refs.length) continue;
+    // Use claim summary as proof bullet (deterministic lookup only)
+    const first = refs[0];
+    const claim = evidenceClaimsById[first.claim_id] || null;
+    if (claim) out.push(bulletFromClaim(claim));
+    else out.push(withEvidenceTag(p.title, [first.claim_id]));
   }
-
-  out.push(...(byTag.case_study || []).map(bulletFromClaim));
-  out.push(...(byTag.supplier_profile || []).map(bulletFromClaim));
 
   return uniqNonEmpty(out).slice(0, 12);
 }
 
-function buildRightToPlay({ evidence }) {
-  const byTag = indexClaimsByTag(evidence);
-  return uniqNonEmpty(
-    []
-      .concat(byTag.supplier_profile || [])
-      .concat(byTag.microclaim || [])
-      .map(bulletFromClaim)
-  ).slice(0, 8);
+function buildRightToPlay({ evidenceClaimsById, proofMap }) {
+  // Deterministic: use proof enrichment claim refs only (no evidence tag drift)
+  const out = [];
+  for (const pid of Object.keys(proofMap || {})) {
+    for (const cr of ensureArray(proofMap[pid])) {
+      const claim = evidenceClaimsById[cr.claim_id];
+      if (claim) out.push(bulletFromClaim(claim));
+    }
+  }
+  return uniqNonEmpty(out).slice(0, 8);
 }
 
-function buildStrategyV2({ evidence, buyerLogic, csvNormalized, mergedInput, contentPillars }) {
+function buildStrategyV2({ evidence, buyerLogic, csvNormalized, mergedInput, contentPillars, proofMap }) {
+  const evidenceClaims = Array.isArray(evidence?.claims) ? evidence.claims : [];
+  const evidenceClaimsById = {};
+  for (const c of evidenceClaims) {
+    const id = String(c?.claim_id || "").trim();
+    if (id) evidenceClaimsById[id] = c;
+  }
+
   return {
-    story_spine: buildStorySpine({ evidence, buyerLogic, csvNormalized, mergedInput, contentPillars }),
+    story_spine: buildStorySpine({ evidence, buyerLogic, csvNormalized, mergedInput, contentPillars, proofMap }),
     value_proposition: buildValueProposition({ buyerLogic, mergedInput, contentPillars }).value_proposition,
-    competitive_strategy: buildCompetitiveStrategy({ evidence }),
+    competitive_strategy: {
+      competitor_map: [],
+      our_advantage: [],
+      angles_of_attack: [],
+      defensible_differentiators: [],
+      vulnerability_map: []
+    },
     buyer_strategy: buildBuyerStrategy({ buyerLogic }),
     gtm_strategy: buildGtmStrategy({ mergedInput }),
-    proof_points: buildProofPoints({ evidence, contentPillars }),
-    right_to_play: buildRightToPlay({ evidence })
+    proof_points: buildProofPoints({ evidenceClaimsById, proofMap, contentPillars }),
+    right_to_play: buildRightToPlay({ evidenceClaimsById, proofMap })
   };
 }
 
@@ -476,11 +434,9 @@ function buildStrategyV2({ evidence, buyerLogic, csvNormalized, mergedInput, con
 
 module.exports = async function (context, queueItem) {
   const log = context.log;
-
   const msg = parseQueueItem(queueItem);
   const op = msg.op || "";
 
-  // Hard stop on wrong op, but do not crash.
   if (op !== "run_strategy") {
     log("[worker] ignoring message", op);
     return;
@@ -504,9 +460,6 @@ module.exports = async function (context, queueItem) {
   const statusPath = `${prefix}status.json`;
 
   try {
-    // -------------------------------------------------------------------------
-    // Load canonical Phase 1 artefacts
-    // -------------------------------------------------------------------------
     const evidence = await readJsonSafe(container, `${prefix}evidence.json`);
     const evidenceLog = await readJsonSafe(container, `${prefix}evidence_log.json`);
     const combinedEvidence = {
@@ -524,11 +477,9 @@ module.exports = async function (context, queueItem) {
     const csvNormalized = (await readJsonSafe(container, `${prefix}csv_normalized.json`)) || {};
     const mergedInput = (await readJsonSafe(container, `${prefix}input.json`)) || {};
 
-    // -------------------------------------------------------------------------
-    // Option A: load content_pillars.json (required)
-    // -------------------------------------------------------------------------
+    // Load and validate content-pillars-v2 (required)
     const contentPillars = await readJsonSafe(container, `${prefix}content_pillars.json`);
-    const shape = validateContentPillarsShape(contentPillars);
+    const shape = validateContentPillarsV2(contentPillars);
 
     if (!shape.ok) {
       const errMsg = `content_pillars.json invalid: ${shape.reason}`;
@@ -546,9 +497,12 @@ module.exports = async function (context, queueItem) {
       throw new Error(errMsg);
     }
 
-    // -------------------------------------------------------------------------
-    // Hash locks (deterministic audit)
-    // -------------------------------------------------------------------------
+    // Enforce status lock for content pillars
+    const stLock = (await readJsonSafe(container, statusPath)) || {};
+    if (stLock?.markers?.contentPillarsLocked !== true) {
+      throw new Error("Worker refused: contentPillarsLocked !== true");
+    }
+
     const contentPillarsSha1 = sha1OfJson(contentPillars);
     const evidenceSha1 = sha1OfJson(evidence);
 
@@ -556,26 +510,36 @@ module.exports = async function (context, queueItem) {
     const declaredMarkdownSha1 = contentPillars?.inputs?.markdown_pack_sha1 || null;
 
     if (declaredEvidenceSha1 && String(declaredEvidenceSha1) !== evidenceSha1) {
-      const errMsg =
-        `Evidence hash mismatch: content_pillars.inputs.evidence_sha1=${declaredEvidenceSha1} but evidence.json sha1=${evidenceSha1}`;
-      log("[worker] ERROR", errMsg);
-      throw new Error(errMsg);
+      throw new Error(`Evidence hash mismatch: content_pillars.inputs.evidence_sha1=${declaredEvidenceSha1} but evidence.json sha1=${evidenceSha1}`);
     }
 
-    // -------------------------------------------------------------------------
-    // Build deterministic strategy_v2 (no insights, no markdown pack)
-    // -------------------------------------------------------------------------
+    const lockedCpSha1 = stLock?.markers?.contentPillarsSha1 || null;
+    if (lockedCpSha1 && String(lockedCpSha1) !== contentPillarsSha1) {
+      throw new Error(`Worker refused: content_pillars sha mismatch vs status lock (${lockedCpSha1} != ${contentPillarsSha1})`);
+    }
+
+    const proofMap = buildProofMap(contentPillars);
+    const allowedClaimIds = buildAllowedClaimIdSetFromProofMap(proofMap);
+
+    // Validate that proof claim ids exist in evidence
+    const evidenceIdSet = new Set(ensureArray(combinedEvidence?.claims).map(c => String(c?.claim_id || "").trim()).filter(Boolean));
+    const missingProofIds = Array.from(allowedClaimIds).filter(id => !evidenceIdSet.has(id));
+    if (missingProofIds.length) {
+      throw new Error(`Worker refused: proof claim_ids missing from evidence.json (${missingProofIds.slice(0, 12).join(", ")})`);
+    }
+
+    // Build deterministic strategy
     const strategy_v2 = buildStrategyV2({
       evidence: combinedEvidence,
       buyerLogic,
       csvNormalized,
       mergedInput,
-      contentPillars
+      contentPillars,
+      proofMap
     });
 
-    // Include audit locks in the strategy wrapper (no mutation in child objects)
     const strategyBundle = {
-      schema: "campaign-strategy-v2.1",
+      schema: "campaign-strategy-v2.2",
       generated_at: new Date().toISOString(),
       run_id: runId,
       inputs: {
@@ -586,25 +550,16 @@ module.exports = async function (context, queueItem) {
       strategy_v2
     };
 
-    // Compute hash BEFORE writing (single source of truth)
     const strategyHash = sha256(stableStringify(strategyBundle));
 
-    // Viability (deterministic; no insights)
     const viability = buildViability({
       evidence: combinedEvidence,
       csvNormalized,
       contentPillars
     });
 
-    // -------------------------------------------------------------------------
-    // Persist viability.json
-    // -------------------------------------------------------------------------
-    const viabilityPath = `${prefix}strategy_v2/viability.json`;
-    await putJson(container, viabilityPath, viability);
+    await putJson(container, `${prefix}strategy_v2/viability.json`, viability);
 
-    // -------------------------------------------------------------------------
-    // Read status once, update markers deterministically, write once
-    // -------------------------------------------------------------------------
     const st0 =
       (await readJsonSafe(container, statusPath)) ||
       { runId, markers: {}, history: [] };
@@ -613,10 +568,8 @@ module.exports = async function (context, queueItem) {
     if (!Array.isArray(st0.history)) st0.history = [];
     if (!Array.isArray(st0.errors)) st0.errors = [];
 
-    // Mark viability completed
     st0.markers.viabilityCompleted = true;
 
-    // Strategy changed flag
     const prevHash = st0.markers.strategyHash || null;
     const changed = !prevHash || prevHash !== strategyHash;
 
@@ -624,38 +577,35 @@ module.exports = async function (context, queueItem) {
     st0.markers.strategyChanged = changed;
     st0.markers.strategyCompleted = true;
 
-    // Store locks in status (enforced downstream)
+    // Locks for audit
     st0.markers.contentPillarsSha1 = contentPillarsSha1;
     st0.markers.contentPillarsEvidenceSha1 = evidenceSha1;
     st0.markers.contentPillarsMarkdownSha1 = declaredMarkdownSha1 || null;
     st0.markers.contentPillarsLocked = true;
 
+    st0.markers.workerLocked = true;
+    st0.markers.workerSha1 = sha1OfJson(strategyBundle);
+
+    st0.markers.workerProofClaimsAllowedCount = allowedClaimIds.size;
+    st0.markers.workerCorePillarsCount = ensureArray(contentPillars.core_pillars).length;
+    st0.markers.workerFramingPillarsCount = ensureArray(contentPillars.core_pillars).filter(p => p.mode === "framing").length;
+    st0.markers.workerAssertablePillarsCount = ensureArray(contentPillars.core_pillars).filter(p => p.mode === "assertable").length;
+
     st0.state = "strategy_ready";
 
-    // Deterministic audit history
     st0.history.push({
       at: new Date().toISOString(),
       phase: "viability_verdict",
       note: viability?.verdict?.viable ? "viable" : "not_viable"
     });
 
-    // -------------------------------------------------------------------------
-    // Persist strategy
-    // -------------------------------------------------------------------------
     const outPath = `${prefix}strategy_v2/campaign_strategy.json`;
     await putJson(container, outPath, strategyBundle);
 
-    st0.history.push({
-      at: new Date().toISOString(),
-      phase: "strategy_written",
-      note: outPath
-    });
+    st0.history.push({ at: new Date().toISOString(), phase: "strategy_written", note: outPath });
 
     await putJson(container, statusPath, st0);
 
-    // -------------------------------------------------------------------------
-    // Notify router
-    // -------------------------------------------------------------------------
     await enqueueTo(ROUTER_QUEUE, {
       op: "afterworker",
       runId,
@@ -667,7 +617,6 @@ module.exports = async function (context, queueItem) {
     log("[worker] completed", { runId, outPath, strategyChanged: changed });
 
   } catch (err) {
-    // Never deadlock: persist error into status
     try {
       const stE = (await readJsonSafe(container, statusPath)) || { runId, markers: {}, history: [] };
       stE.markers = (stE.markers && typeof stE.markers === "object") ? stE.markers : {};
