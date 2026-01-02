@@ -109,6 +109,12 @@ function findDisallowedIds(allIds, allowedSet) {
   return Array.from(new Set(bad)).sort();
 }
 
+function stripSha1Prefix(fp) {
+  const s = String(fp || "").trim();
+  if (!s) return "";
+  return s.startsWith("sha1:") ? s.slice("sha1:".length) : s;
+}
+
 // ---- Outline schema (claim_ids only; prose-free) ----
 const OUTLINE_SCHEMA = {
   $schema: "http://json-schema.org/draft-07/schema#",
@@ -509,7 +515,7 @@ module.exports = async function (context, queueItem) {
       }
 
       const claim = evidenceById.get(id);
-      const actual = semanticClaimFingerprint(claim);
+      const actual = stripSha1Prefix(semanticClaimFingerprint(claim));
 
       if (expected !== actual) {
         mismatches.push({ claim_id: id, expected, actual });

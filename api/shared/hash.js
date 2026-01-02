@@ -7,6 +7,9 @@
 // Doctrine:
 // - Evidence may evolve (superset/additive), but semantic meaning of existing claim_ids must not change.
 // - We fingerprint semantic fields to detect drift even when claim_id exists.
+//
+// Option 1 doctrine:
+// - semanticClaimFingerprint returns RAW HEX (no "sha1:" prefix)
 
 "use strict";
 
@@ -107,8 +110,8 @@ function semanticClaimCanonical(claim) {
 
 function semanticClaimFingerprint(claim) {
   const canon = semanticClaimCanonical(claim);
-  // If claim_id is missing, fingerprint still works but is less useful.
-  return "sha1:" + sha1OfJson(canon);
+  // RAW HEX (Option 1)
+  return sha1OfJson(canon);
 }
 
 module.exports = {

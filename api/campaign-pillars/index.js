@@ -1,5 +1,6 @@
 // /api/campaign-pillars/index.js
-// 02-01-2026 — Campaign Pillars Doctrine (Option A) — content-pillars-v3
+// 02-01-2026 — Campaign Pillars Doctrine (Option A) — content-pillars-v2
+//
 // Produces:
 //   {prefix}content_pillars.json
 // Schema:
@@ -11,7 +12,16 @@
 //   - strict typed provenance (source_refs) validated against markdown_pack registry
 //   - strict typed claim refs validated against evidence.json
 //   - no LLM; no fact invention
-//   - idempotent and router-safe
+//   - deterministic and idempotent
+//   - router-safe (afterpillars enqueued once)
+//
+// IMPORTANT DOCTRINE CHANGE (Option 1):
+//   - required_claim_fingerprints are stored as RAW HEX (no "sha1:" prefix)
+//   - Outline MUST compare against raw hex too (patch required in outline)
+
+// -----------------------------------------------------------------------------
+// Dependencies
+// -----------------------------------------------------------------------------
 
 "use strict";
 
@@ -21,6 +31,9 @@ const { enqueueTo } = require("../lib/campaign-queue");
 const { nowIso } = require("../shared/utils");
 const { updateStatus } = require("../shared/status");
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
+
+// Shared hashing (single source of truth)
+const { sha1OfJson, semanticClaimFingerprint } = require("../shared/hash");
 
 const ROUTER_QUEUE_NAME = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
 const RESULTS_CONTAINER =
@@ -35,7 +48,11 @@ const RESULTS_CONTAINER =
 function parseQueueItem(queueItem) {
   if (!queueItem) return {};
   if (typeof queueItem === "string") {
-    try { return JSON.parse(queueItem); } catch { return {}; }
+    try {
+      return JSON.parse(queueItem);
+    } catch {
+      return {};
+    }
   }
   return (queueItem && typeof queueItem === "object") ? queueItem : {};
 }
@@ -70,55 +87,6 @@ function uniqNonEmpty(arr) {
   return out;
 }
 
-function stableStringify(obj) {
-  if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
-  if (Array.isArray(obj)) return "[" + obj.map(stableStringify).join(",") + "]";
-  const keys = Object.keys(obj).sort();
-  return "{" + keys.map(k => JSON.stringify(k) + ":" + stableStringify(obj[k])).join(",") + "}";
-}
-
-function sha1OfJson(obj) {
-  return crypto.createHash("sha1").update(stableStringify(obj ?? null)).digest("hex");
-}
-// Evidence claim fingerprinting (doctrine: claim bodies are immutable by claim_id)
-// This is used for monotonic/additive evidence enforcement (optional but strongly recommended).
-function fingerprintEvidenceClaim(claim) {
-  if (!claim || typeof claim !== "object") return null;
-
-  const body = {
-    claim_id: stableString(claim.claim_id || claim.id || ""),
-    title: stableString(claim.title || "").slice(0, 400),
-    url: stableString(claim.url || ""),
-    source_type: stableString(claim.source_type || ""),
-    // Summary/quote are the semantic payload; cap to keep stable even if long
-    summary: stableString(claim.summary || "").slice(0, 1200),
-    quote: stableString(claim.quote || "").slice(0, 1200),
-    tier: (typeof claim.tier === "number") ? claim.tier : stableString(claim.tier || ""),
-    tier_group: stableString(claim.tier_group || claim.tag || "other") || "other"
-  };
-
-  // Use stableStringify so re-ordering doesn't change fingerprint.
-  return sha1OfString(stableStringify(body));
-}
-
-function buildRequiredClaimFingerprints(requiredClaimIds, evidenceClaims) {
-  const idSet = new Set((requiredClaimIds || []).map(stableString).filter(Boolean));
-
-  const map = {};
-  for (const c of safeArray(evidenceClaims)) {
-    const id = stableString(c?.claim_id || c?.id);
-    if (!id || !idSet.has(id)) continue;
-
-    const fp = fingerprintEvidenceClaim(c);
-    if (fp) map[id] = fp;
-  }
-
-  // Ensure deterministic key ordering in JSON
-  const ordered = {};
-  Object.keys(map).sort().forEach((k) => { ordered[k] = map[k]; });
-  return ordered;
-}
-
 function sha1OfString(s) {
   return crypto.createHash("sha1").update(String(s ?? "")).digest("hex");
 }
@@ -145,6 +113,40 @@ function overlapScore(a, b) {
 }
 
 // -----------------------------------------------------------------------------
+// Fingerprint normalisation (Option 1 = RAW HEX, no "sha1:" prefix)
+// -----------------------------------------------------------------------------
+
+function stripSha1Prefix(fp) {
+  const s = stableString(fp);
+  if (!s) return "";
+  return s.startsWith("sha1:") ? s.slice("sha1:".length) : s;
+}
+
+function fingerprintEvidenceClaimRawHex(claim) {
+  // semanticClaimFingerprint returns "sha1:<hex>" — we store raw hex only
+  const fp = semanticClaimFingerprint(claim);
+  return stripSha1Prefix(fp);
+}
+
+function buildRequiredClaimFingerprints(requiredClaimIds, evidenceClaims) {
+  const idSet = new Set((requiredClaimIds || []).map(stableString).filter(Boolean));
+
+  const map = {};
+  for (const c of safeArray(evidenceClaims)) {
+    const id = stableString(c?.claim_id || c?.id);
+    if (!id || !idSet.has(id)) continue;
+
+    const fpHex = fingerprintEvidenceClaimRawHex(c);
+    if (fpHex) map[id] = fpHex;
+  }
+
+  // Ensure deterministic key ordering in JSON
+  const ordered = {};
+  Object.keys(map).sort().forEach((k) => { ordered[k] = map[k]; });
+  return ordered;
+}
+
+// -----------------------------------------------------------------------------
 // Markdown pack registry (mechanically enforceable provenance)
 // -----------------------------------------------------------------------------
 
@@ -165,7 +167,7 @@ function buildMarkdownPillarRegistry(markdownPack) {
     if (base) return base;
 
     // Deterministic derived id: MPL-<sha1(type|path|content)>
-    const contentSig = stableStringify({
+    const contentSig = JSON.stringify({
       title: stableString(obj?.title || obj?.label || obj?.name || ""),
       text: stableString(obj?.text || obj?.summary || obj?.description || obj?.bullet || ""),
       tags: safeArray(obj?.tags).map(stableString).filter(Boolean)
@@ -222,7 +224,7 @@ function buildMarkdownPillarRegistry(markdownPack) {
         continue;
       }
 
-      const sha1 = sha1OfString(stableStringify(n));
+      const sha1 = sha1OfString(JSON.stringify(n));
 
       registry[pillar_id] = {
         pillar_id,
@@ -231,13 +233,12 @@ function buildMarkdownPillarRegistry(markdownPack) {
         industry_slug,
         path: `${path}[${i}]`,
         title: n.title,
-        sha1,
-        // Note: we do not persist full raw markdown here; content_pillars will carry only refs.
+        sha1
       };
     }
   }
 
-  // IMPORTANT: These are the known keys in your current markdown_pack artefacts.
+  // Known keys in markdown_pack artefacts
   addAll("markdown_pillar", "supplier_capabilities", markdownPack?.supplier_capabilities);
   addAll("markdown_pillar", "supplier_strengths", markdownPack?.supplier_strengths);
   addAll("markdown_pillar", "supplier_differentiators", markdownPack?.supplier_differentiators);
@@ -246,7 +247,7 @@ function buildMarkdownPillarRegistry(markdownPack) {
   addAll("industry_pillar", "industry_risks", markdownPack?.industry_risks);
   addAll("industry_pillar", "persona_pressures", markdownPack?.persona_pressures);
 
-  // Optional seeds (these may already be synthesised earlier)
+  // Optional seeds
   addAll("content_seed", "content_pillars", markdownPack?.content_pillars);
 
   const registrySha1 = sha1OfJson(registry);
@@ -331,6 +332,7 @@ function buildContentPillarsV2({
   framingMode = true
 }) {
   const claimIndex = buildClaimIndex(evidenceClaims);
+
   const nextId = (() => {
     const seed = sha1OfString(String(prefix || "")).slice(0, 8);
     let i = 0;
@@ -348,7 +350,6 @@ function buildContentPillarsV2({
     framing_prohibited_patterns: ["\\d", "%", "£", "customer", "achieved", "reduced by", "increased by"]
   };
 
-  // Choose seeds first (best pre-synthesised)
   const seeds = takeRegistryByType(markdownRegistry, "content_seed", 10);
   const supplier = takeRegistryByType(markdownRegistry, "markdown_pillar", 24);
   const industry = takeRegistryByType(markdownRegistry, "industry_pillar", 24);
@@ -407,7 +408,6 @@ function buildContentPillarsV2({
     const has = proof && Array.isArray(proof.claim_refs) && proof.claim_refs.length > 0;
     if (has) return { corePillar, proof };
 
-    // Strict default: fail upstream rather than silently downgrading.
     const err = new Error(`assertable_pillar_missing_claim_refs:${corePillar.id}`);
     err.code = "assertable_pillar_missing_claim_refs";
     err.pillar_id = corePillar.id;
@@ -425,10 +425,7 @@ function buildContentPillarsV2({
     const pillarText = `${s.title} | ${s.path}`;
     const claim_refs = bestClaimRefsForText(claimIndex, pillarText, 8);
 
-    // Mode decision:
-    // - If claims exist => assertable
-    // - Else => framing (allowed)
-    const mode = claim_refs.length ? "assertable" : "framing";
+    const mode = claim_refs.length ? "assertable" : (framingMode ? "framing" : "assertable");
 
     const core = mkCorePillar({
       title,
@@ -456,7 +453,6 @@ function buildContentPillarsV2({
     const title = sp.title;
     if (dedupeTitle(title)) continue;
 
-    // Find best industry match by token overlap (deterministic)
     const spTok = setFromTokens(`${sp.title} ${sp.path}`);
     let best = null;
     let bestScore = 0;
@@ -472,12 +468,16 @@ function buildContentPillarsV2({
     const pillarText = `${sp.title} | ${sp.path} | ${best ? `${best.title} | ${best.path}` : ""}`;
     const claim_refs = bestClaimRefsForText(claimIndex, pillarText, 8);
 
-    const mode = claim_refs.length ? "assertable" : "framing";
+    const mode = claim_refs.length ? "assertable" : (framingMode ? "framing" : "assertable");
+
+    const refs = [];
+    if (sp?.pillar_id && markdownRegistry[sp.pillar_id]) refs.push(mkSourceRef(markdownRegistry[sp.pillar_id]));
+    if (best?.pillar_id && markdownRegistry[best.pillar_id]) refs.push(mkSourceRef(markdownRegistry[best.pillar_id]));
 
     const core = mkCorePillar({
       title: combinedTitle,
       mode,
-      source_refs: uniqNonEmpty([sp.pillar_id, best?.pillar_id].filter(Boolean)).map(pid => mkSourceRef(markdownRegistry[pid])),
+      source_refs: refs,
       claims: {
         value_prop: sp.title,
         why_it_matters: best ? best.title : "",
@@ -498,7 +498,7 @@ function buildContentPillarsV2({
 
   // ---------------------------------------------------------------------------
   // Canonical required claim set (doctrine: pillars are the ONLY authority)
-  // required_claim_ids is the one and only allow-list downstream (outline + writer).
+  // required_claim_ids is the ONE AND ONLY allow-list downstream (outline + writer).
   // ---------------------------------------------------------------------------
   const required_claim_ids = uniqNonEmpty(
     proof_enrichment.flatMap((pe) =>
@@ -506,14 +506,29 @@ function buildContentPillarsV2({
     )
   ).sort((a, b) => a.localeCompare(b));
 
-  // Fingerprints for immutability enforcement (doctrine: claims immutable by claim_id)
+  if (!required_claim_ids.length) {
+    const err = new Error("pillars_required_claim_ids_empty: no claim_refs found in proof_enrichment");
+    err.code = "pillars_required_claim_ids_empty";
+    throw err;
+  }
+
+  // Fingerprints for immutability enforcement (RAW HEX, Option 1)
   const required_claim_fingerprints = buildRequiredClaimFingerprints(
     required_claim_ids,
     evidenceClaims
   );
 
-  // Operational IDs (metadata-only, never claim IDs, never allowed citations)
-  // These are for audit/UI only. Downstream must NOT treat these as citations.
+  // Hard assert: fingerprints must exist for every required_claim_id (contract)
+  const missingFps = required_claim_ids.filter((id) => !required_claim_fingerprints[id]);
+  if (missingFps.length) {
+    const err = new Error(
+      `pillars_missing_required_claim_fingerprints: ${missingFps.length} required claim_ids had no fingerprint`
+    );
+    err.code = "pillars_missing_required_claim_fingerprints";
+    err.detail = missingFps.slice(0, 50);
+    throw err;
+  }
+
   const operational_ids_meta_only = {
     ROUTE_MODEL: null,
     TAM_BUCKET: null,
@@ -534,8 +549,8 @@ function buildContentPillarsV2({
         run_id: runId,
         phase: "PillarsSynth",
         created_at: nowIso(),
-        version: "02-01-2026 v3",
-        generator: "campaign-pillars/index.js v3",
+        version: "02-01-2026 v3 (raw-hex fingerprints)",
+        generator: "campaign-pillars/index.js",
         provenance_validated: true,
         markdown_registry_sha1: markdownRegistrySha1
       },
@@ -544,8 +559,11 @@ function buildContentPillarsV2({
         markdown_pack_sha1: markdownPackSha1,
         evidence_path: "evidence.json",
         evidence_sha1: evidenceSha1,
+
+        // Downstream allow-list + immutability contract
         required_claim_ids,
-        required_claim_fingerprints,
+        required_claim_fingerprints, // RAW HEX (Option 1)
+
         operational_ids_meta_only,
         markdown_files: safeArray(
           markdownPackSha1
@@ -566,7 +584,7 @@ function buildContentPillarsV2({
 }
 
 // -----------------------------------------------------------------------------
-// Main
+// Main Azure Function
 // -----------------------------------------------------------------------------
 
 module.exports = async function (context, queueItem) {
@@ -579,8 +597,9 @@ module.exports = async function (context, queueItem) {
     return;
   }
 
-  let runId =
-    (stableString(msg.runId) || stableString(msg.run_id) || "") ||
+  const runId =
+    stableString(msg.runId) ||
+    stableString(msg.run_id) ||
     (prefix.split("/").filter(Boolean).pop() || "unknown");
 
   const page = msg.page || "campaign";
@@ -591,14 +610,23 @@ module.exports = async function (context, queueItem) {
   const statusPath = `${prefix}status.json`;
 
   // Load status
-  let status = (await getJson(container, statusPath)) || {};
+  let status = null;
+  try { status = await getJson(container, statusPath); } catch { status = null; }
   if (!status || typeof status !== "object") status = {};
   status.markers = (status.markers && typeof status.markers === "object") ? status.markers : {};
 
-  // If already completed, do nothing
+  // Idempotency: if already completed AND content_pillars exists, skip
   if (status.markers.pillarsSynthCompleted === true) {
-    log("[pillars] already completed; skipping", { runId, prefix });
-    return;
+    try {
+      const existing = await getJson(container, `${prefix}content_pillars.json`);
+      if (existing && typeof existing === "object" && stableString(existing.schema) === "content-pillars-v2") {
+        log("[pillars] already completed; skipping", { runId, prefix });
+        return;
+      }
+    } catch {
+      // If marker says complete but file missing, rebuild.
+      log.warn("[pillars] completed marker present but content_pillars missing; rebuilding", { runId, prefix });
+    }
   }
 
   // Load markdown pack
@@ -663,48 +691,6 @@ module.exports = async function (context, queueItem) {
   const markdownPackSha1 = sha1OfJson(markdownPack);
   const evidenceSha1 = sha1OfJson(evidenceBundle);
 
-  // Idempotency check: if existing v2 matches input hashes, skip rewrite
-  let existing = null;
-  try { existing = await getJson(container, `${prefix}content_pillars.json`); } catch { existing = null; }
-
-  if (existing && typeof existing === "object") {
-    const schemaOk = stableString(existing?.schema) === "content-pillars-v2";
-    const inSha = existing?.inputs || {};
-    if (
-      schemaOk &&
-      stableString(inSha.markdown_pack_sha1) === markdownPackSha1
-    ) {
-
-      const contentPillarsSha1 = sha1OfJson(existing);
-
-      status.markers.pillarsSynthCompleted = true;
-      status.markers.contentPillarsSha1 = contentPillarsSha1;
-      status.markers.markdownPackSha1 = markdownPackSha1;
-      status.markers.evidenceSha1 = evidenceSha1;
-      status.markers.contentPillarsLocked = true;
-      const reqIds = existing?.inputs?.required_claim_ids;
-      const reqFps = existing?.inputs?.required_claim_fingerprints;
-      status.markers.contentPillarsRequiredClaimIdsCount =
-        Array.isArray(reqIds) ? reqIds.length : null;
-
-      status.markers.contentPillarsRequiredClaimFingerprintsCount =
-        (reqFps && typeof reqFps === "object") ? Object.keys(reqFps).length : null;
-      status.updatedAt = nowIso();
-
-      if (!Array.isArray(status.history)) status.history = [];
-      status.history.push({
-        at: nowIso(),
-        phase: "pillars_idempotent_skip",
-        note: "content_pillars.json already matches markdown_pack_sha1 (v2); evidence_sha1 is audit-only"
-      });
-
-      await putJson(container, statusPath, status);
-
-      log("[pillars] content_pillars.json already matches; completed", { runId, prefix, sha1: contentPillarsSha1 });
-      return;
-    }
-  }
-
   // Phase start marker
   await updateStatus(
     container,
@@ -724,11 +710,10 @@ module.exports = async function (context, queueItem) {
   // Build markdown registry (mechanical provenance check)
   const { registry, registrySha1, errors: registryErrors } = buildMarkdownPillarRegistry(markdownPack);
   if (registryErrors.length) {
-    // Not fatal unless duplicates are severe; record warning for audit.
-    log("[pillars] markdown registry warnings", registryErrors.slice(0, 6));
+    log.warn("[pillars] markdown registry warnings", registryErrors.slice(0, 10));
   }
 
-  // Build content-pillars-v2
+  // Build content-pillars-v2 (raw-hex fingerprints)
   let built;
   try {
     built = buildContentPillarsV2({
@@ -744,14 +729,13 @@ module.exports = async function (context, queueItem) {
       framingMode: true
     });
   } catch (e) {
-    // Hard fail: assertable pillars must have proof refs
     const code = e && e.code ? e.code : "pillars_build_failed";
     await updateStatus(
       container,
       prefix,
       {
         state: "Failed",
-        error: { code, message: String(e?.message || e) },
+        error: { code, message: String(e?.message || e), detail: e?.detail || null },
         failedAt: nowIso()
       },
       { phase: "PillarsSynth", note: `failed: ${code}` }
@@ -766,21 +750,29 @@ module.exports = async function (context, queueItem) {
   await putJson(container, `${prefix}content_pillars.json`, contentPack);
 
   // Update status markers
-  const cur = (await getJson(container, statusPath)) || {};
+  let cur = null;
+  try { cur = await getJson(container, statusPath); } catch { cur = null; }
+  if (!cur || typeof cur !== "object") cur = {};
   cur.markers = (cur.markers && typeof cur.markers === "object") ? cur.markers : {};
   if (!Array.isArray(cur.history)) cur.history = [];
+
+  const reqIds = contentPack?.inputs?.required_claim_ids;
+  const reqFps = contentPack?.inputs?.required_claim_fingerprints;
 
   cur.markers.pillarsSynthCompleted = true;
   cur.markers.contentPillarsSha1 = contentPillarsSha1;
   cur.markers.markdownPackSha1 = markdownPackSha1;
   cur.markers.evidenceSha1 = evidenceSha1;
   cur.markers.contentPillarsLocked = true;
-  const reqIds = contentPack?.inputs?.required_claim_ids;
-  const reqFps = contentPack?.inputs?.required_claim_fingerprints;
+
   cur.markers.contentPillarsRequiredClaimIdsCount =
     Array.isArray(reqIds) ? reqIds.length : null;
+
   cur.markers.contentPillarsRequiredClaimFingerprintsCount =
     (reqFps && typeof reqFps === "object") ? Object.keys(reqFps).length : null;
+
+  // Critical: record declared evidence sha at pillars time (audit/trace)
+  cur.markers.contentPillarsDeclaredEvidenceSha1 = evidenceSha1;
 
   cur.markers.contentPillarsTotal = built.stats.total;
   cur.markers.contentPillarsAssertableCount = built.stats.assertable;
@@ -811,6 +803,8 @@ module.exports = async function (context, queueItem) {
     core_pillars: built.stats.total,
     assertable: built.stats.assertable,
     framing: built.stats.framing,
+    required_claim_ids: Array.isArray(reqIds) ? reqIds.length : null,
+    required_claim_fingerprints: (reqFps && typeof reqFps === "object") ? Object.keys(reqFps).length : null,
     sha1: contentPillarsSha1
   });
 };
