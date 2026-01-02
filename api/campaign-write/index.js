@@ -1104,9 +1104,12 @@ module.exports = async function (context, queueItem) {
     const baseInput = await readJsonIfExists(container, `${prefix}input.json`);
     const outline = await readJsonIfExists(container, `${prefix}outline.json`);
 
-    const outlineAvailable = !!(outline && typeof outline === "object");
+    const outlineAvailable = outline !== null && typeof outline === "object";
+
     if (!outlineAvailable) {
-      log.warn("[*] Writer: outline.json missing or invalid – proceeding with strategy_v2-only intelligence");
+      log.warn(
+        "[*] Writer: outline.json missing or invalid – proceeding with strategy_v2-only intelligence"
+      );
     }
 
     await updateStatus(container, prefix, "writer_working", "writer inputs loaded", {
