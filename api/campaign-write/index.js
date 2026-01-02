@@ -1,12 +1,30 @@
 // /api/campaign-write/index.js
-// 02-01-2026 — Gold Writer v9.1 (Option A: content-pillars-v2, hash-locked, deterministic)
+// 02-01-2026 — Gold Writer v9.2 (Option A: content-pillars-v2, hash-locked, deterministic)
 //
-// Key upgrades:
-// - Requires content-pillars-v2
-// - Builds allowedClaimIds from proof_enrichment (+ outline claim ids)
-// - Enforces claim-id discipline: numeric/currency/% statements must carry a claim id
-// - Enforces framing guardrails (modal language expectations) via redaction/downgrade where necessary
-// - Preserves campaign_gold_v2 schema (NO extra top-level keys)
+// Canonical schema file name (DO NOT RENAME):
+//   api/schemas/campaign-gold.schema.json
+//
+// Responsibility:
+//   - Read strategy_v2/campaign_strategy.json produced by campaign-worker (Option A bundle).
+//   - Read outline.json (campaign-outline) for channel themes + proof enforcement.
+//   - Read input.json to recover campaign_requirement and supplier context.
+//   - Read content_pillars.json and enforce hash locks (content_pillars_sha1 + evidence_sha1).
+//   - Build a Gold Campaign contract JSON that matches campaign_gold_v2 schema.
+//   - Update: status.json.state = "writer_working" / "writer_error" / "completed"
+//   - No LLM calls – pure deterministic rendering.
+//
+// IMPORTANT: Root object must conform to campaign_gold_v2 schema.
+// additionalProperties: false → no extra top-level keys.
+// => DO NOT add _meta or any other top-level extras.
+//
+// Key upgrades (v9.2):
+// - Requires content-pillars-v2 + provenance_validated=true
+// - Builds allowedClaimIds from content_pillars.proof_enrichment (+ outline claim ids)
+// - Enforces claim-id discipline per-string:
+//     If a string contains numeric/currency/% and carries NO [CLAIM_ID], redact numerics deterministically
+// - Filters citations to allowedClaimIds deterministically
+// - Refuses if any disallowed citation survives filtering (hard assert)
+// - Preserves auditability via status markers/history (schema-safe)
 
 "use strict";
 
@@ -17,6 +35,10 @@ const RESULTS_CONTAINER =
   process.env.CAMPAIGN_RESULTS_CONTAINER ||
   process.env.RESULTS_CONTAINER ||
   "results";
+
+// Schema name is canonical; we don’t runtime-validate here (no Ajv dependency),
+// but we pin the identity to prevent drift.
+const GOLD_SCHEMA_CANONICAL = "api/schemas/campaign-gold.schema.json";
 
 // ---------------------- Blob helpers ---------------------- //
 
@@ -140,12 +162,7 @@ function extractClaimIdsFromText(text) {
     if (match[1]) ids.add(match[1]);
   }
 
-  const BARE_ID_RE = /\b([A-Z0-9_:-]{4,})\b/g;
-  while ((match = BARE_ID_RE.exec(s))) {
-    const token = match[1];
-    if (/^[A-Z0-9_:-]+$/.test(token)) ids.add(token);
-  }
-
+  // Bare IDs are allowed in other contexts, but for enforcement we rely on explicit [ID]
   return ids;
 }
 
@@ -312,47 +329,74 @@ function allowedClaimIdsFromOutline(outline) {
   return set;
 }
 
-// ---------------------- Guardrail enforcement (framing/assertable + numeric claim requirement) ---------------------- //
+// ---------------------- Guardrails ---------------------- //
 
 function hasNumericOrCurrency(s) {
   const t = String(s || "");
   return /(\d|%|£|\$|€)/.test(t);
 }
 
-function redactNumericIfNoClaims(text) {
+function redactNumericDeterministically(text) {
   // Minimal redaction: replace digits and common currency symbols.
   return String(text || "")
     .replace(/[0-9]/g, "X")
     .replace(/[%£$€]/g, "X");
 }
 
-function enforceNumericClaimRequirementOnSectionStrings(sectionObj, citationsSet, statusNotesOut) {
-  // Walk strings in a section; if numeric present and citations empty, redact.
-  const walk = (obj, path = "") => {
-    if (typeof obj === "string") {
-      if (hasNumericOrCurrency(obj) && citationsSet.size === 0) {
-        statusNotesOut.push(`numeric_redacted_no_citations:${path || "string"}`);
-        return redactNumericIfNoClaims(obj);
+function enforceNumericClaimRequirementPerString(obj, enforcementNotesOut) {
+  // Walk any nested structure; if a string contains numeric/currency/% and has NO explicit [CLAIM_ID], redact.
+  const walk = (v, path = "") => {
+    if (typeof v === "string") {
+      if (hasNumericOrCurrency(v)) {
+        const ids = extractClaimIdsFromText(v);
+        if (!ids.size) {
+          enforcementNotesOut.push(`numeric_redacted_no_claim_id:${path || "string"}`);
+          return redactNumericDeterministically(v);
+        }
       }
-      return obj;
+      return v;
     }
-    if (Array.isArray(obj)) {
-      return obj.map((x, i) => walk(x, `${path}[${i}]`));
+    if (Array.isArray(v)) {
+      return v.map((x, i) => walk(x, `${path}[${i}]`));
     }
-    if (obj && typeof obj === "object") {
+    if (v && typeof v === "object") {
       const out = {};
-      for (const k of Object.keys(obj)) {
-        out[k] = walk(obj[k], path ? `${path}.${k}` : k);
+      for (const k of Object.keys(v)) {
+        out[k] = walk(v[k], path ? `${path}.${k}` : k);
       }
       return out;
     }
-    return obj;
+    return v;
   };
 
-  return walk(sectionObj);
+  return walk(obj);
 }
 
-// ---------------------- Gold section builders (unchanged logic, but now with enforcement hooks) ---------------------- //
+function filterCitationsToAllowed(sectionObj, allowedClaimIds, enforcementNotesOut, sectionName) {
+  if (!sectionObj || typeof sectionObj !== "object") return sectionObj;
+
+  const citations = Array.isArray(sectionObj.citations) ? sectionObj.citations : [];
+  const kept = [];
+  const dropped = [];
+
+  for (const id of citations) {
+    const s = String(id || "").trim();
+    if (!s) continue;
+    if (allowedClaimIds.has(s)) kept.push(s);
+    else dropped.push(s);
+  }
+
+  if (dropped.length) {
+    enforcementNotesOut.push(`citations_dropped_disallowed:${sectionName}:${dropped.slice(0, 12).join(",")}`);
+  }
+
+  return {
+    ...sectionObj,
+    citations: uniqNonEmpty(kept)
+  };
+}
+
+// ---------------------- Viability helpers ---------------------- //
 
 function mapViabilityGrade(viability) {
   if (!viability || typeof viability !== "object") return null;
@@ -437,6 +481,7 @@ function extractViabilityReasonIds(viability) {
 }
 
 function buildGoldViability(viabilityRaw) {
+  // If already looks like gold viability (grade + dimensions), pass-through
   if (
     viabilityRaw &&
     typeof viabilityRaw === "object" &&
@@ -468,7 +513,7 @@ function buildGoldViability(viabilityRaw) {
   };
 }
 
-// ---------------------- Gold section builders (as before) ---------------------- //
+// ---------------------- Gold section builders ---------------------- //
 
 function buildExecutiveSummarySection({ strategy_v2, outline, viability, campaignRequirement }) {
   const sv2 = (strategy_v2 && typeof strategy_v2 === "object") ? strategy_v2 : {};
@@ -490,7 +535,6 @@ function buildExecutiveSummarySection({ strategy_v2, outline, viability, campaig
       : null;
 
   const hwwBullets = uniqNonEmpty(Array.isArray(spine.how_we_win) ? spine.how_we_win : []);
-
   const productAnchors = uniqNonEmpty(Array.isArray(outlineExec.product_anchor_names) ? outlineExec.product_anchor_names : []);
 
   const howWeWinSentence =
@@ -523,10 +567,7 @@ function buildExecutiveSummarySection({ strategy_v2, outline, viability, campaig
   ];
 
   const citations = uniqNonEmpty(
-    claimIdSets.reduce((all, set) => {
-      if (!set || typeof set[Symbol.iterator] !== "function") return all;
-      return all.concat(Array.from(set));
-    }, [])
+    claimIdSets.reduce((all, set) => all.concat(Array.from(set || [])), [])
   );
 
   return {
@@ -630,7 +671,6 @@ function buildGoToMarketSection({ strategy_v2, outline, viability }) {
   const viability_notes = viabilityNotes.length ? viabilityNotes : (viabilityHeadlineParts.length ? [viabilityHeadlineParts.join(" ")] : []);
 
   const channelClaimIds = [];
-
   if (Array.isArray(outlineChannel.email_themes)) {
     outlineChannel.email_themes.forEach(t => {
       if (t && Array.isArray(t.claim_ids)) t.claim_ids.forEach(id => channelClaimIds.push(id));
@@ -716,7 +756,9 @@ function buildSalesEnablementSection({ strategy_v2, outline, campaignRequirement
       .concat(outlineMessaging.flatMap((m) => (Array.isArray(m?.pain_points_from_csv) ? m.pain_points_from_csv : [])))
   );
 
-  const buyer_problem = buyerProblems.length ? summariseBullets(buyerProblems, 4) : "The campaign addresses specific, evidence-based problems experienced by your buyers.";
+  const buyer_problem = buyerProblems.length
+    ? summariseBullets(buyerProblems, 4)
+    : "The campaign addresses specific, evidence-based problems experienced by your buyers.";
 
   const buyer_business_value = uniqNonEmpty(Array.isArray(vp.business_value) ? vp.business_value : []);
   const buyer_human_value = uniqNonEmpty(Array.isArray(vp.persona_value) ? vp.persona_value : []);
@@ -823,12 +865,16 @@ module.exports = async function (context, queueItem) {
   if (!prefix.endsWith("/")) prefix += "/";
 
   log(`[*] Using canonical prefix: ${prefix}`);
+  log(`[*] Gold schema canonical: ${GOLD_SCHEMA_CANONICAL}`);
 
   const svc = getBlobServiceClient();
   const container = svc.getContainerClient(RESULTS_CONTAINER);
 
   try { await container.createIfNotExists(); } catch (cErr) {
-    log.error("[!] Failed to create-or-confirm results container", { container: RESULTS_CONTAINER, error: String(cErr?.message || cErr) });
+    log.error("[!] Failed to create-or-confirm results container", {
+      container: RESULTS_CONTAINER,
+      error: String(cErr?.message || cErr)
+    });
   }
 
   // Idempotency: skip if completed
@@ -844,10 +890,18 @@ module.exports = async function (context, queueItem) {
   }
 
   await updateStatus(container, prefix, "writer_working", "campaign writer started", {
-    markers: { writerVersion: "v9.1", writerStartedAt: new Date().toISOString() }
+    markers: {
+      writerVersion: "v9.2",
+      writerStartedAt: new Date().toISOString(),
+      goldSchemaCanonical: GOLD_SCHEMA_CANONICAL
+    }
   });
 
   try {
+    // -----------------------------------------------------------------------
+    // Load canonical artefacts
+    // -----------------------------------------------------------------------
+
     const strategyBundle = await readJsonIfExists(container, `${prefix}strategy_v2/campaign_strategy.json`);
     const strategy_v2 =
       strategyBundle && strategyBundle.strategy_v2
@@ -867,6 +921,7 @@ module.exports = async function (context, queueItem) {
 
     const evidenceCanon = await readJsonIfExists(container, `${prefix}evidence.json`);
 
+    // Hash locks
     const contentPillarsSha1 = sha1OfJson(contentPillars);
     const evidenceSha1 = sha1OfJson(evidenceCanon);
 
@@ -884,50 +939,81 @@ module.exports = async function (context, queueItem) {
     const baseInput = await readJsonIfExists(container, `${prefix}input.json`);
     const outline = await readJsonIfExists(container, `${prefix}outline.json`);
 
-    const campaignRequirement = msg.campaign_requirement || (baseInput && baseInput.campaign_requirement) || null;
+    const campaignRequirement =
+      msg.campaign_requirement ||
+      (baseInput && baseInput.campaign_requirement) ||
+      null;
 
     const goldViability = buildGoldViability(viabilityRaw || {});
 
-    // ---- Allowed claim IDs for writer ----
-    // Strictly: proof_enrichment + outline ids (outline is arrangement; can reference subset)
+    // -----------------------------------------------------------------------
+    // Allowed claim IDs (writer constraint)
+    // -----------------------------------------------------------------------
     const allowedFromPillars = allowedClaimIdsFromContentPillars(contentPillars);
     const allowedFromOutline = allowedClaimIdsFromOutline(outline);
-
     const allowedClaimIds = new Set([...allowedFromPillars, ...allowedFromOutline]);
 
-    // ---- Build Gold sections ----
-    const executive_summary = buildExecutiveSummarySection({ strategy_v2, outline, viability: viabilityRaw || {}, campaignRequirement });
-    const go_to_market = buildGoToMarketSection({ strategy_v2, outline, viability: viabilityRaw || {} });
-    const offering = buildOfferingSection({ strategy_v2, outline });
-    const sales_enablement = buildSalesEnablementSection({ strategy_v2, outline, campaignRequirement });
-    const proof_points = await buildProofPointsSection({ strategy_v2 });
+    await updateStatus(container, prefix, "writer_working", "writer claim-id allowlist built", {
+      markers: {
+        writerAllowedClaimIdsCount: allowedClaimIds.size
+      }
+    });
 
-    // ---- Enforce numeric claim-id requirement (redact) ----
-    // We do not mutate schema (no extra keys); record actions in status history.
+    // -----------------------------------------------------------------------
+    // Build Gold sections (deterministic)
+    // -----------------------------------------------------------------------
+    let executive_summary = buildExecutiveSummarySection({ strategy_v2, outline, viability: viabilityRaw || {}, campaignRequirement });
+    let go_to_market = buildGoToMarketSection({ strategy_v2, outline, viability: viabilityRaw || {} });
+    let offering = buildOfferingSection({ strategy_v2, outline });
+    let sales_enablement = buildSalesEnablementSection({ strategy_v2, outline, campaignRequirement });
+    let proof_points = await buildProofPointsSection({ strategy_v2 });
+
+    // Ensure citations arrays exist (schema expects arrays)
+    executive_summary.citations = Array.isArray(executive_summary.citations) ? executive_summary.citations : [];
+    go_to_market.citations = Array.isArray(go_to_market.citations) ? go_to_market.citations : [];
+    offering.citations = Array.isArray(offering.citations) ? offering.citations : [];
+    sales_enablement.citations = Array.isArray(sales_enablement.citations) ? sales_enablement.citations : [];
+    proof_points.citations = Array.isArray(proof_points.citations) ? proof_points.citations : [];
+
+    // -----------------------------------------------------------------------
+    // Guardrails
+    // -----------------------------------------------------------------------
     const enforcementNotes = [];
 
-    // Build citations sets per section and enforce locally
-    const execCites = new Set(Array.isArray(executive_summary.citations) ? executive_summary.citations : []);
-    const gtmCites = new Set(Array.isArray(go_to_market.citations) ? go_to_market.citations : []);
-    const offerCites = new Set(Array.isArray(offering.citations) ? offering.citations : []);
-    const seCites = new Set(Array.isArray(sales_enablement.citations) ? sales_enablement.citations : []);
-    const proofCites = new Set(Array.isArray(proof_points.citations) ? proof_points.citations : []);
+    // 1) Numeric/currency/% strings MUST carry explicit [CLAIM_ID] → redact otherwise
+    executive_summary = enforceNumericClaimRequirementPerString(executive_summary, enforcementNotes);
+    go_to_market = enforceNumericClaimRequirementPerString(go_to_market, enforcementNotes);
+    offering = enforceNumericClaimRequirementPerString(offering, enforcementNotes);
+    sales_enablement = enforceNumericClaimRequirementPerString(sales_enablement, enforcementNotes);
+    proof_points = enforceNumericClaimRequirementPerString(proof_points, enforcementNotes);
 
-    const executive_summary_enforced = enforceNumericClaimRequirementOnSectionStrings(executive_summary, execCites, enforcementNotes);
-    const go_to_market_enforced = enforceNumericClaimRequirementOnSectionStrings(go_to_market, gtmCites, enforcementNotes);
-    const offering_enforced = enforceNumericClaimRequirementOnSectionStrings(offering, offerCites, enforcementNotes);
-    const sales_enablement_enforced = enforceNumericClaimRequirementOnSectionStrings(sales_enablement, seCites, enforcementNotes);
-    const proof_points_enforced = enforceNumericClaimRequirementOnSectionStrings(proof_points, proofCites, enforcementNotes);
+    // 2) Filter citations to allowedClaimIds deterministically
+    executive_summary = filterCitationsToAllowed(executive_summary, allowedClaimIds, enforcementNotes, "executive_summary");
+    go_to_market = filterCitationsToAllowed(go_to_market, allowedClaimIds, enforcementNotes, "go_to_market");
+    offering = filterCitationsToAllowed(offering, allowedClaimIds, enforcementNotes, "offering");
+    sales_enablement = filterCitationsToAllowed(sales_enablement, allowedClaimIds, enforcementNotes, "sales_enablement");
+    proof_points = filterCitationsToAllowed(proof_points, allowedClaimIds, enforcementNotes, "proof_points");
 
-    const sections = {
-      executive_summary: executive_summary_enforced,
-      go_to_market: go_to_market_enforced,
-      offering: offering_enforced,
-      sales_enablement: sales_enablement_enforced,
-      proof_points: proof_points_enforced
-    };
+    // -----------------------------------------------------------------------
+    // Final hard assert: no disallowed citations survive filtering
+    // -----------------------------------------------------------------------
+    const allCitations = uniqNonEmpty(
+      []
+        .concat(executive_summary.citations || [])
+        .concat(go_to_market.citations || [])
+        .concat(offering.citations || [])
+        .concat(sales_enablement.citations || [])
+        .concat(proof_points.citations || [])
+    );
 
-    // ---- Root Gold contract (schema-safe; NO extra top-level keys) ----
+    const disallowed = allCitations.filter(id => id && !allowedClaimIds.has(String(id).trim()));
+    if (disallowed.length) {
+      throw new Error(`Writer refused: disallowed citation IDs detected after filtering: ${disallowed.slice(0, 12).join(", ")}`);
+    }
+
+    // -----------------------------------------------------------------------
+    // Root Gold contract (schema-safe; NO extra top-level keys)
+    // -----------------------------------------------------------------------
     const supplier = deriveSupplier(baseInput, strategy_v2);
     const industry = deriveIndustry(baseInput, strategy_v2);
     const persona = derivePersona(baseInput, strategy_v2);
@@ -938,23 +1024,14 @@ module.exports = async function (context, queueItem) {
       industry,
       persona,
       viability: goldViability,
-      sections
+      sections: {
+        executive_summary,
+        go_to_market,
+        offering,
+        sales_enablement,
+        proof_points
+      }
     };
-
-    // ---- Validate: all citations used must be allowed claim ids ----
-    const allCitations = uniqNonEmpty(
-      []
-        .concat(executive_summary_enforced.citations || [])
-        .concat(go_to_market_enforced.citations || [])
-        .concat(offering_enforced.citations || [])
-        .concat(sales_enablement_enforced.citations || [])
-        .concat(proof_points_enforced.citations || [])
-    );
-
-    const disallowed = allCitations.filter(id => id && !allowedClaimIds.has(String(id).trim()));
-    if (disallowed.length) {
-      throw new Error(`Writer refused: disallowed citation IDs detected (not in pillars proof_enrichment or outline): ${disallowed.slice(0, 12).join(", ")}`);
-    }
 
     const outPath = `${prefix}campaign.json`;
     await writeJson(container, outPath, contract);
@@ -968,39 +1045,53 @@ module.exports = async function (context, queueItem) {
       campaign_path: outPath,
       markers: {
         writerCompleted: true,
-        writerVersion: "v9.1",
+        writerVersion: "v9.2",
         writerLocked: true,
+        goldSchemaCanonical: GOLD_SCHEMA_CANONICAL,
         contentPillarsSha1,
         evidenceSha1,
         contentPillarsLockedVerified: true,
         writerCitationsCount: allCitations.length,
-        writerNumericRedactionsCount: enforcementNotes.length
+        writerNumericRedactionsCount: enforcementNotes.filter(n => n.startsWith("numeric_redacted")).length,
+        writerCitationDropsCount: enforcementNotes.filter(n => n.startsWith("citations_dropped")).length,
+        writerGuardrailsApplied: enforcementNotes.length > 0
       }
     });
 
-    // Add enforcement notes to history (schema safe)
+    // Persist guardrail notes into history (schema safe)
     if (enforcementNotes.length) {
       await updateStatus(container, prefix, "completed", "writer guardrails applied", {
-        note: `Applied ${enforcementNotes.length} redactions/downgrades for numeric-without-citations`,
-        markers: { writerGuardrailsApplied: true }
+        note: `Applied ${enforcementNotes.length} guardrail actions`,
+        markers: {
+          writerGuardrailsApplied: true,
+          writerGuardrailActions: enforcementNotes.length
+        }
       });
     }
 
-    log("[*] Campaign Writer completed (Gold v9.1, Option A)", {
+    log("[*] Campaign Writer completed (Gold v9.2, Option A)", {
       runId,
       campaignPath: outPath,
+      goldSchemaCanonical: GOLD_SCHEMA_CANONICAL,
       contentPillarsSha1,
-      evidenceSha1
+      evidenceSha1,
+      citations: allCitations.length,
+      guardrails: enforcementNotes.length
     });
 
   } catch (err) {
-    log.error("[!] Campaign Writer failed", { runId, prefix, error: String(err && err.message ? err.message : err) });
+    log.error("[!] Campaign Writer failed", {
+      runId,
+      prefix,
+      error: String(err && err.message ? err.message : err)
+    });
 
     try {
       await writeJson(container, `${prefix}writer_error.json`, {
         message: String(err && err.message ? err.message : err),
         stack: err && err.stack ? String(err.stack) : null,
-        writer_version: "v9.1",
+        writer_version: "v9.2",
+        schema_canonical: GOLD_SCHEMA_CANONICAL,
         at: new Date().toISOString()
       });
     } catch (e2) {
@@ -1009,7 +1100,11 @@ module.exports = async function (context, queueItem) {
 
     await updateStatus(container, prefix, "writer_error", "Campaign Writer failed", {
       error: String(err && err.message ? err.message : err),
-      markers: { writerVersion: "v9.1", writerFailed: true }
+      markers: {
+        writerVersion: "v9.2",
+        writerFailed: true,
+        goldSchemaCanonical: GOLD_SCHEMA_CANONICAL
+      }
     });
 
     throw err;

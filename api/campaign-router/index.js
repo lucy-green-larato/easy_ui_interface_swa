@@ -90,7 +90,8 @@ module.exports = async function (context, queueItem) {
         : null;
 
   if (!runId) {
-    const m = String(prefix).match(/\/runs\/([^/]+)\/$/);
+    // prefix is normally "runs/<runId>/"
+    const m = String(prefix).match(/^runs\/([^/]+)\/$/) || String(prefix).match(/runs\/([^/]+)\//);
     if (m) runId = m[1];
   }
 
