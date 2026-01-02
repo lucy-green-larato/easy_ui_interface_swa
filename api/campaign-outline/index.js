@@ -1,5 +1,5 @@
 // /api/campaign-outline/index.js
-// 02-01-2026 — Option A (content_pillars-first), hash-locked, deterministic, idempotent. V8
+// 02-01-2026 — Option A (content_pillars-first), hash-locked (audit), deterministic, idempotent. V8.1
 //
 // Doctrine:
 // - Outline MUST use content_pillars.json as the PRIMARY messaging source of truth.
@@ -13,18 +13,21 @@
 // - Outline MUST NOT hard-fail on evidence SHA mismatch vs content_pillars.inputs.evidence_sha1.
 // - Instead, Outline MUST enforce that evidence.json is a SUPERSET containing ALL claim IDs
 //   required by content_pillars.json.
-// - For debugging + UI inspection, we maintain:
-//     ✅ evidence_allowed (model-visible, constrained to allowed claim_ids)
-//     ✅ evidence_all_meta (model-hidden, full evidence inventory in metadata form)
+//
+// Debugging + UI inspection (schema-safe):
+// - ✅ evidence_allowed is provided to the model (claim_id-scoped)
+// - ✅ evidence_all_meta is persisted as a separate blob: evidence_all_meta.json
+// - ✅ status markers contain counts + hashes (never bloating outline.json)
 //
 // Inputs:
-// - content_pillars.json  (canonical campaign-level messaging primitives)
-// - evidence.json         (claims with IDs; proof anchors only; may evolve)
-// - csv_normalized.json   (signals only; no fact invention)
-// - input.json            (supplier identity + user notes)
+// - content_pillars.json
+// - evidence.json
+// - csv_normalized.json
+// - input.json
 //
 // Outputs:
-// - outline.json          (claim-id and pillar-id anchored, schema constrained)
+// - outline.json
+// - evidence_all_meta.json   (schema-safe, model-hidden debug inventory)
 //
 // Idempotency:
 // - If outlineCompleted, skip.
@@ -224,7 +227,25 @@ const OUTLINE_SCHEMA = {
   }
 };
 
-// ---- Utility: safe truncation for prompt ----
+// ---------------------- Deterministic hash helpers (aligned to writer) ---------------------- //
+
+function stableStringify(obj) {
+  if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
+  if (Array.isArray(obj)) return "[" + obj.map(stableStringify).join(",") + "]";
+  const keys = Object.keys(obj).sort();
+  return "{" + keys.map(k => JSON.stringify(k) + ":" + stableStringify(obj[k])).join(",") + "}";
+}
+
+function sha1(s) {
+  return crypto.createHash("sha1").update(String(s)).digest("hex");
+}
+
+function sha1OfJson(obj) {
+  return sha1(stableStringify(obj ?? null));
+}
+
+// ---------------------- Small helpers ---------------------- //
+
 function safeForPrompt(v, max = 280000) {
   try {
     const s = typeof v === "string" ? v : JSON.stringify(v ?? "");
@@ -234,11 +255,6 @@ function safeForPrompt(v, max = 280000) {
   } catch {
     return "null";
   }
-}
-
-function sha1OfJson(obj) {
-  const s = JSON.stringify(obj ?? null);
-  return crypto.createHash("sha1").update(s).digest("hex");
 }
 
 function normPrefix(prefix) {
@@ -266,19 +282,29 @@ async function readJsonSafe(container, blobPath, fallback = null) {
   }
 }
 
-// Validate minimal structure of content_pillars.json (Option A v1/v2 compatible)
+// ---------------------- content_pillars validation ---------------------- //
+
+// Strictly validate structure and v2 doctrine constraints.
 function validateContentPillarsShape(cp) {
   if (!cp || typeof cp !== "object") return { ok: false, reason: "not_object" };
   if (!cp.schema || typeof cp.schema !== "string") return { ok: false, reason: "missing_schema" };
   if (!cp.meta || typeof cp.meta !== "object") return { ok: false, reason: "missing_meta" };
 
-  // Support both:
-  //  - cp.pillars (legacy v1)
-  //  - cp.core_pillars (v2)
+  // v2 doctrine enforcement
+  if (String(cp.schema) === "content-pillars-v2") {
+    if (cp.meta.provenance_validated !== true) return { ok: false, reason: "provenance_not_validated" };
+    if (!Array.isArray(cp.core_pillars)) return { ok: false, reason: "missing_core_pillars" };
+    if (!Array.isArray(cp.proof_enrichment)) return { ok: false, reason: "missing_proof_enrichment" };
+  } else {
+    // legacy v1 support (pillars)
+    if (!Array.isArray(cp.pillars)) return { ok: false, reason: "missing_pillars_array" };
+  }
+
+  // Validate pillars entries (both v1/v2)
   const pillars =
     Array.isArray(cp.pillars) ? cp.pillars :
-      Array.isArray(cp.core_pillars) ? cp.core_pillars :
-        null;
+    Array.isArray(cp.core_pillars) ? cp.core_pillars :
+    null;
 
   if (!pillars) return { ok: false, reason: "missing_pillars_array" };
 
@@ -286,7 +312,6 @@ function validateContentPillarsShape(cp) {
     if (!p || typeof p !== "object") return { ok: false, reason: "pillar_not_object" };
     if (!isNonEmptyString(p.id)) return { ok: false, reason: "pillar_missing_id" };
     if (!isNonEmptyString(p.title)) return { ok: false, reason: "pillar_missing_title" };
-    // v1 uses provenance; v2 uses source_refs; accept either but require one.
     const hasProv = p.provenance && typeof p.provenance === "object";
     const hasSourceRefs = Array.isArray(p.source_refs);
     if (!hasProv && !hasSourceRefs) return { ok: false, reason: "pillar_missing_provenance_or_source_refs" };
@@ -312,12 +337,10 @@ function flattenClaimIdsFromContentPillars(cp) {
   // v2: proof_enrichment[].claim_refs[] or proof_enrichment[].claim_ids (if present)
   if (Array.isArray(cp?.proof_enrichment)) {
     for (const pe of cp.proof_enrichment) {
-      // claim_refs objects
       for (const cr of ensureArray(pe?.claim_refs)) {
         const s = String(cr?.claim_id || "").trim();
         if (s) ids.add(s);
       }
-      // optional direct strings
       for (const id of ensureArray(pe?.claim_ids)) {
         const s = String(id || "").trim();
         if (s) ids.add(s);
@@ -345,8 +368,6 @@ function buildEvidenceAllMeta(evidenceClaims, cap = 500) {
       title: (c.title || "").toString().slice(0, 200)
     });
   }
-
-  // Deterministic ordering
   out.sort((a, b) => a.claim_id.localeCompare(b.claim_id));
   return out;
 }
@@ -361,7 +382,6 @@ function buildEvidenceAllowedForModel(evidenceClaims, allowedClaimIdSet, cap = 4
     if (!claim_id) continue;
     if (!allowedClaimIdSet.has(claim_id)) continue;
 
-    // model-safe shape (no large quotes)
     out.push({
       claim_id,
       title: (c.title || "").toString().slice(0, 240),
@@ -373,7 +393,6 @@ function buildEvidenceAllowedForModel(evidenceClaims, allowedClaimIdSet, cap = 4
     if (out.length >= cap) break;
   }
 
-  // Deterministic order (by claim_id)
   out.sort((a, b) => a.claim_id.localeCompare(b.claim_id));
   return out;
 }
@@ -382,7 +401,8 @@ function pickTop(arr, n) {
   return ensureArray(arr).slice(0, Math.max(0, n | 0));
 }
 
-// ---- MAIN FUNCTION ----
+// ---------------------- MAIN FUNCTION ---------------------- //
+
 module.exports = async function (context, queueItem) {
   const startedAt = nowIso();
   let prefix = "";
@@ -391,7 +411,6 @@ module.exports = async function (context, queueItem) {
   try {
     if (!queueItem) throw new Error("Queue message empty");
 
-    // Accept stringified JSON messages
     if (typeof queueItem === "string") {
       try { queueItem = JSON.parse(queueItem); }
       catch { throw new Error("Queue message must be JSON"); }
@@ -436,7 +455,6 @@ module.exports = async function (context, queueItem) {
     const contentPillarsShape = validateContentPillarsShape(contentPillars);
 
     if (!contentPillarsShape.ok) {
-      // Doctrine-critical; outline must not run without content pillars.
       await updateStatus(
         container,
         prefix,
@@ -457,26 +475,20 @@ module.exports = async function (context, queueItem) {
     const csvNorm = await getJson(container, `${prefix}csv_normalized.json`);
     const input = await getJson(container, `${prefix}input.json`);
 
-    const evidenceClaims =
-      Array.isArray(evidenceJson?.claims)
-        ? evidenceJson.claims
-        : [];
+    const evidenceClaims = Array.isArray(evidenceJson?.claims) ? evidenceJson.claims : [];
 
-    // ---- HASH LOCKING / AUDIT ----
-    // NOTE: evidence.json may evolve after pillars. We record SHA for audit but do NOT fail on mismatch.
+    // ---- HASH LOCKING / AUDIT (non-fatal on mismatch) ----
     const contentPillarsSha1 = sha1OfJson(contentPillars);
     const evidenceSha1 = sha1OfJson(evidenceJson);
 
     const declaredMarkdownSha1 = contentPillars?.inputs?.markdown_pack_sha1 || null;
     const declaredEvidenceSha1 = contentPillars?.inputs?.evidence_sha1 || null; // audit only
 
-    // ---- Allowed claim IDs ----
-    // Model can ONLY use claim IDs referenced by content_pillars (plus any CSV-only IDs if you later add them).
+    // ---- Allowed claim IDs (pillars referenced IDs ONLY) ----
     const claimIdsFromPillars = flattenClaimIdsFromContentPillars(contentPillars);
     const allowedClaimIdSet = new Set(claimIdsFromPillars);
 
-    // ---- SUPERSET ENFORCEMENT (mechanical provenance) ----
-    // Ensure all claim IDs referenced by content_pillars exist in evidence.json.
+    // ---- SUPERSET ENFORCEMENT ----
     const evidenceIdSet = new Set();
     for (const c of evidenceClaims) {
       const id = String(c?.claim_id || c?.id || "").trim();
@@ -508,8 +520,7 @@ module.exports = async function (context, queueItem) {
       );
     }
 
-    // ---- Optional guardrail: assertable pillars must have claims ----
-    // If using v1 pillars with assertable=true but zero evidence_claim_ids, fail (doctrine violation).
+    // ---- Optional guardrail: v1 assertable pillars must have claims ----
     if (Array.isArray(contentPillars?.pillars)) {
       const bad = [];
       for (const p of contentPillars.pillars) {
@@ -538,7 +549,7 @@ module.exports = async function (context, queueItem) {
       }
     }
 
-    // Persist locks for downstream stages (audit; evidence can evolve)
+    // Persist locks into status markers (audit only)
     const stLock = await readJsonSafe(container, `${prefix}status.json`, {});
     await updateStatus(
       container,
@@ -548,13 +559,13 @@ module.exports = async function (context, queueItem) {
           ...(stLock?.markers || {}),
           contentPillarsLocked: true,
           contentPillarsSha1,
-          contentPillarsEvidenceSha1: evidenceSha1,
+          outlineEvidenceSha1AtRun: evidenceSha1,
+          contentPillarsDeclaredEvidenceSha1: declaredEvidenceSha1 || null,
           contentPillarsMarkdownSha1: declaredMarkdownSha1 || null,
-
-          // Audit-only: what pillars were generated against (may differ later)
-          contentPillarsDeclaredEvidenceSha1: declaredEvidenceSha1 || null
+          outlineAllowedClaimIdsCount: claimIdsFromPillars.length
         }
-      }
+      },
+      { phase: "Outline", note: "locks recorded (audit)" }
     );
 
     // ---- CSV signals ----
@@ -564,9 +575,7 @@ module.exports = async function (context, queueItem) {
         ? (csvNorm?.selected_industry || "general").toLowerCase()
         : "general";
 
-    const csvSignals = modeSpecific
-      ? (csvNorm?.signals || {})
-      : (csvNorm?.global_signals || {});
+    const csvSignals = modeSpecific ? (csvNorm?.signals || {}) : (csvNorm?.global_signals || {});
 
     // ---- Supplier block ----
     const supplier = {
@@ -588,17 +597,16 @@ module.exports = async function (context, queueItem) {
       input?.campaign_industry ||
       (modeSpecific ? selectedIndustryCsv : "General");
 
-    // ---- Extract product anchor names from content_pillars (deterministic) ----
+    // ---- Product anchors ----
     let productAnchors = [];
     if (Array.isArray(contentPillars?.product_anchors)) {
       productAnchors = contentPillars.product_anchors.map(x => String(x || "").trim()).filter(Boolean).slice(0, 24);
     } else {
-      // Conservative fallback: attempt to pull from pillars[].product_anchor_names
       const out = [];
       const pillars =
         Array.isArray(contentPillars?.pillars) ? contentPillars.pillars :
-          Array.isArray(contentPillars?.core_pillars) ? contentPillars.core_pillars :
-            [];
+        Array.isArray(contentPillars?.core_pillars) ? contentPillars.core_pillars :
+        [];
       for (const p of ensureArray(pillars)) {
         const a = ensureArray(p?.product_anchor_names);
         for (const v of a) {
@@ -610,10 +618,9 @@ module.exports = async function (context, queueItem) {
     }
 
     // ---- Evidence arrays ----
-    // evidence_allowed: model-visible evidence limited to allowed claim IDs
     const evidence_allowed = buildEvidenceAllowedForModel(evidenceClaims, allowedClaimIdSet, 48);
 
-    // Hard assert: evidence_allowed must contain only allowed IDs (mechanical safety)
+    // Hard assert: evidence_allowed must contain only allowed IDs
     for (const e of evidence_allowed) {
       const cid = String(e?.claim_id || "").trim();
       if (cid && !allowedClaimIdSet.has(cid)) {
@@ -634,8 +641,37 @@ module.exports = async function (context, queueItem) {
       }
     }
 
-    // evidence_all_meta: model-hidden inventory for UI/debugging/audit
+    // evidence_all_meta: model-hidden inventory (persist separately)
     const evidence_all_meta = buildEvidenceAllMeta(evidenceClaims, 2000);
+    await putJson(container, `${prefix}evidence_all_meta.json`, {
+      meta: {
+        run_id: runId,
+        phase: "Outline",
+        generated_at: nowIso(),
+        content_pillars_sha1: contentPillarsSha1,
+        evidence_sha1: evidenceSha1,
+        declared_evidence_sha1: declaredEvidenceSha1 || null,
+        allowed_claim_ids_count: claimIdsFromPillars.length,
+        evidence_all_count: evidence_all_meta.length
+      },
+      claims: evidence_all_meta
+    });
+
+    // Record evidence inventory markers
+    const stDbg = await readJsonSafe(container, `${prefix}status.json`, {});
+    await updateStatus(
+      container,
+      prefix,
+      {
+        markers: {
+          ...(stDbg?.markers || {}),
+          outlineEvidenceAllowedCount: evidence_allowed.length,
+          outlineEvidenceAllCount: evidence_all_meta.length,
+          outlineEvidenceAllMetaPath: "evidence_all_meta.json"
+        }
+      },
+      { phase: "Outline", note: `evidence_allowed=${evidence_allowed.length}; evidence_all_meta=${evidence_all_meta.length}` }
+    );
 
     // ---- System + user messages ----
     const salesModel = String(input?.sales_model || "").toLowerCase();
@@ -665,8 +701,8 @@ ${safeForPrompt({
       inputs: contentPillars.inputs || {},
       pillars: pickTop(
         Array.isArray(contentPillars.pillars) ? contentPillars.pillars :
-          Array.isArray(contentPillars.core_pillars) ? contentPillars.core_pillars :
-            [],
+        Array.isArray(contentPillars.core_pillars) ? contentPillars.core_pillars :
+        [],
         12
       ),
       product_anchors: productAnchors
@@ -724,53 +760,14 @@ ${safeForPrompt(competitors)}
     if (typeof outline === "string") outline = JSON.parse(outline);
     if (!outline || typeof outline !== "object") throw new Error("Invalid outline");
 
-    // ---- Ensure essential metadata ----
+    // ---- Ensure essential metadata (schema-safe; meta.additionalProperties=false) ----
     outline.meta = outline.meta || {};
     outline.meta.run_id = runId;
     outline.meta.phase = "Outline";
     outline.meta.selected_industry = SELECTED_INDUSTRY;
 
-    // ---- Inject audit locks into outline.meta (immutable references) ----
-    outline.meta.inputs = outline.meta.inputs || {};
-    outline.meta.inputs.content_pillars_sha1 = contentPillarsSha1;
-    outline.meta.inputs.evidence_sha1 = evidenceSha1;
-    outline.meta.inputs.markdown_pack_sha1 = declaredMarkdownSha1 || null;
-
-    // ---- Debug/Audit block (schema-safe: still within meta.inputs or meta.debug) ----
-    // This does NOT impact outline schema because OUTLINE_SCHEMA currently disallows additionalProperties in meta.
-    // Therefore, we MUST NOT add new keys under meta that the schema does not allow.
-    //
-    // We instead persist evidence_all_meta into status markers/history only, NOT into outline.json.
-    //
-    // If you later want to include debug blocks in outline.json, you must update OUTLINE_SCHEMA meta properties.
-
     // ---- Write outline.json ----
     await putJson(container, `${prefix}outline.json`, outline);
-
-    // ---- Persist debug inventory into status (model-hidden but inspectable) ----
-    const stDbg = await readJsonSafe(container, `${prefix}status.json`, {});
-    const dbgCountAllowed = evidence_allowed.length;
-    const dbgCountAll = evidence_all_meta.length;
-
-    await updateStatus(
-      container,
-      prefix,
-      {
-        markers: {
-          ...(stDbg?.markers || {}),
-          outlineLocked: true,
-          outlineContentPillarsSha1: contentPillarsSha1,
-          outlineEvidenceSha1: evidenceSha1,
-          outlineDeclaredEvidenceSha1: declaredEvidenceSha1 || null,
-          outlineEvidenceAllowedCount: dbgCountAllowed,
-          outlineEvidenceAllCount: dbgCountAll
-        }
-      },
-      {
-        phase: "Outline",
-        note: `evidence_allowed=${dbgCountAllowed}; evidence_all_meta=${dbgCountAll}`
-      }
-    );
 
     // ---- Mark complete ----
     const stBeforeComplete = await readJsonSafe(container, `${prefix}status.json`, {});
@@ -782,8 +779,12 @@ ${safeForPrompt(competitors)}
         updatedAt: nowIso(),
         markers: {
           ...(stBeforeComplete?.markers || {}),
+          outlineLocked: true,
           outlineCompleted: true,
-          outlineSha1: sha1OfJson(outline)
+          outlineSha1: sha1OfJson(outline),
+          outlineContentPillarsSha1: contentPillarsSha1,
+          outlineEvidenceSha1: evidenceSha1,
+          outlineDeclaredEvidenceSha1: declaredEvidenceSha1 || null
         }
       },
       { phase: "Outline", note: "completed" }
@@ -823,11 +824,19 @@ ${safeForPrompt(competitors)}
       }
 
       const statusPath = `${prefix}status.json`;
-      const status = (await getJson(container, statusPath)) || {};
+      const status = (await readJsonSafe(container, statusPath, {})) || {};
       status.state = "Failed";
       status.error = String(err?.message || err);
       status.failedAt = nowIso();
       await putJson(container, statusPath, status);
+
+      // optional: persist outline_error.json for quick inspection
+      await putJson(container, `${prefix}outline_error.json`, {
+        message: String(err?.message || err),
+        at: nowIso(),
+        phase: "Outline",
+        version: "v8.1"
+      });
 
     } catch {
       /* ignore */
