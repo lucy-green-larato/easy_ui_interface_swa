@@ -1,5 +1,5 @@
 // /api/campaign-router/index.js
-// Gold v9.8 — canonical, idempotent, prefix-safe router 02-01-2026
+// Gold v9.9 — canonical, idempotent, prefix-safe router 02-01-2026
 //
 "use strict";
 
@@ -62,14 +62,6 @@ async function persistStatus(container, path, status) {
   await putJson(container, path, status);
 }
 
-function normalizePrefix(prefix) {
-  let p = String(prefix || "").trim();
-  if (!p) return "";
-  p = p.replace(/^\/+/, "");
-  p = p.replace(/\/+$/, "");
-  return p;
-}
-
 function runIdFromPrefix(prefixNoTrailingSlash) {
   const parts = String(prefixNoTrailingSlash || "")
     .split("/")
@@ -98,8 +90,13 @@ module.exports = async function (context, queueItem) {
         : null;
 
   if (!runId) {
-    const m = String(prefix).match(/\/runs\/([^/]+)\/$/);
-    if (m) runId = m[1];
+    try {
+      // prefix is already normalised and guaranteed to end with "/"
+      const prefixNoSlash = prefix.replace(/\/$/, "");
+      runId = runIdFromPrefix(prefixNoSlash);
+    } catch {
+      runId = null;
+    }
   }
 
   if (!runId) runId = "unknown";
