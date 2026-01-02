@@ -1,5 +1,5 @@
 // /api/campaign-write/index.js
-// 02-01-2026 — Gold Writer v9.2 (Schema-correct, content-pillars-v2, hash-locked, deterministic)
+// 02-01-2026 — Gold Writer v9.3 (Schema-correct, content-pillars-v2, hash-locked, deterministic)
 //
 // Responsibility:
 //   - Read strategy_v2/campaign_strategy.json produced by campaign-worker.
@@ -151,26 +151,28 @@ function uniqNonEmpty(arr) {
   return out;
 }
 
-const CLAIM_ID_RE = /\[([A-Z0-9_:-]{4,})\]/g;
+// ---------------------- Claim ID extraction (STRICT) ---------------------- //
+// Doctrine: citations must be explicit claim ids in brackets: [CLAIM_ID]
+// We DO NOT allow bare tokens (BYOD, SD-WAN, ROUTE_MODEL etc.) to be treated as claim IDs.
+
+const CLAIM_ID_RE = /\[(CLM_[A-Z0-9_-]{3,})\]/g;
 
 function extractClaimIdsFromText(text) {
   const ids = new Set();
   if (!text) return ids;
-  const s = String(text);
 
+  const s = String(text);
   let match;
+
   while ((match = CLAIM_ID_RE.exec(s))) {
     if (match[1]) ids.add(match[1]);
   }
 
-  // Bare IDs (conservative)
-  const BARE_ID_RE = /\b([A-Z0-9_:-]{4,})\b/g;
-  while ((match = BARE_ID_RE.exec(s))) {
-    const token = match[1];
-    if (/^[A-Z0-9_:-]+$/.test(token)) ids.add(token);
-  }
-
   return ids;
+}
+
+function isValidClaimId(id) {
+  return /^CLM_[A-Z0-9_-]{3,}$/.test(String(id || "").trim());
 }
 
 function extractClaimIdsFromArray(arr) {
@@ -180,6 +182,7 @@ function extractClaimIdsFromArray(arr) {
   });
   return ids;
 }
+
 
 function summariseBullets(bullets, max = 4) {
   const list = uniqNonEmpty(bullets).slice(0, max);
@@ -277,10 +280,10 @@ function deriveIndustry(baseInput, strategy_v2) {
 function derivePersona(baseInput, strategy_v2) {
   const salesModel = String(
     baseInput?.sales_model ||
-      baseInput?.salesModel ||
-      baseInput?.call_type ||
-      strategy_v2?.gtm_strategy?.route_model ||
-      ""
+    baseInput?.salesModel ||
+    baseInput?.call_type ||
+    strategy_v2?.gtm_strategy?.route_model ||
+    ""
   )
     .trim()
     .toLowerCase();
@@ -315,11 +318,11 @@ function allowedClaimIdsFromContentPillars(cp) {
   for (const pe of Array.isArray(cp?.proof_enrichment) ? cp.proof_enrichment : []) {
     for (const cr of Array.isArray(pe?.claim_refs) ? pe.claim_refs : []) {
       const id = String(cr?.claim_id || "").trim();
-      if (id) set.add(id);
+      if (id && isValidClaimId(id)) set.add(id);
     }
     for (const id of Array.isArray(pe?.claim_ids) ? pe.claim_ids : []) {
       const s = String(id || "").trim();
-      if (s) set.add(s);
+      if (s && isValidClaimId(s)) set.add(s);
     }
   }
   return set;
@@ -331,7 +334,7 @@ function allowedClaimIdsFromOutline(outline) {
   const sec = outline.sections || {};
   const push = (id) => {
     const s = String(id || "").trim();
-    if (s) set.add(s);
+    if (s && isValidClaimId(s)) set.add(s);
   };
 
   (Array.isArray(sec?.exec?.why_now_ids) ? sec.exec.why_now_ids : []).forEach(push);
@@ -567,9 +570,9 @@ function buildExecutiveSummarySection({ strategy_v2, outline, viability, campaig
   const problemSentence =
     (caseBullets.length || problemBullets.length)
       ? `They face the following pressures and business problems: ${summariseBullets(
-          uniqNonEmpty(caseBullets.concat(problemBullets)),
-          6
-        )}.`
+        uniqNonEmpty(caseBullets.concat(problemBullets)),
+        6
+      )}.`
       : null;
 
   const hwwBullets = uniqNonEmpty(Array.isArray(spine.how_we_win) ? spine.how_we_win : []);
@@ -581,9 +584,9 @@ function buildExecutiveSummarySection({ strategy_v2, outline, viability, campaig
   const howWeWinSentence =
     (hwwBullets.length || productAnchors.length)
       ? `This campaign is designed to help you win by ${summariseBullets(
-          uniqNonEmpty(hwwBullets.concat(productAnchors)),
-          6
-        )}.`
+        uniqNonEmpty(hwwBullets.concat(productAnchors)),
+        6
+      )}.`
       : null;
 
   const aimNorm = normaliseCampaignRequirement(campaignRequirement);
@@ -692,15 +695,15 @@ function buildGoToMarketSection({ strategy_v2, outline, viability }) {
   const emailThemes =
     Array.isArray(outlineChannel.email_themes)
       ? outlineChannel.email_themes
-          .map((t) => (t && typeof t === "object" ? t.theme : null))
-          .filter(Boolean)
+        .map((t) => (t && typeof t === "object" ? t.theme : null))
+        .filter(Boolean)
       : [];
 
   const linkedinThemes =
     Array.isArray(outlineChannel.linkedin_themes)
       ? outlineChannel.linkedin_themes
-          .map((t) => (t && typeof t === "object" ? t.theme : null))
-          .filter(Boolean)
+        .map((t) => (t && typeof t === "object" ? t.theme : null))
+        .filter(Boolean)
       : [];
 
   const marketing_actions = [];
@@ -735,9 +738,9 @@ function buildGoToMarketSection({ strategy_v2, outline, viability }) {
     (gtm.pipeline_model && typeof gtm.pipeline_model === "object")
       ? gtm.pipeline_model
       : {
-          tiers: ["PIPELINE_TIER_MODEL=3", "PIPELINE_TIER_CRITERIA=urgency_and_fit"],
-          motions: []
-        };
+        tiers: ["PIPELINE_TIER_MODEL=3", "PIPELINE_TIER_CRITERIA=urgency_and_fit"],
+        motions: []
+      };
 
   const viabilityNotes = collectViabilityMessages(viability);
   const viabilityReasonsIds = extractViabilityReasonIds(viability);
@@ -925,11 +928,11 @@ function buildSalesEnablementSection({ strategy_v2, outline, campaignRequirement
     Array.isArray(se.discovery_questions)
       ? se.discovery_questions
       : [
-          "What is currently making this problem a priority for you now?",
-          "How are you addressing this today, and what is not working as well as you need?",
-          "Who else is involved in making this decision and what do they care about most?",
-          "If we were successful together, what would good look like in 12–18 months?"
-        ]
+        "What is currently making this problem a priority for you now?",
+        "How are you addressing this today, and what is not working as well as you need?",
+        "Who else is involved in making this decision and what do they care about most?",
+        "If we were successful together, what would good look like in 12–18 months?"
+      ]
   );
 
   const qualification_criteria = uniqNonEmpty(
@@ -938,22 +941,22 @@ function buildSalesEnablementSection({ strategy_v2, outline, campaignRequirement
       : Array.isArray(buyerStrategy.qualification_criteria)
         ? buyerStrategy.qualification_criteria
         : [
-            "There is a clearly acknowledged problem or opportunity linked to our value story.",
-            "Budget or investment appetite exists within a realistic timeframe.",
-            "Key stakeholders are identified and engaged.",
-            "There is a defined next step that aligns to the campaign call to action."
-          ]
+          "There is a clearly acknowledged problem or opportunity linked to our value story.",
+          "Budget or investment appetite exists within a realistic timeframe.",
+          "Key stakeholders are identified and engaged.",
+          "There is a defined next step that aligns to the campaign call to action."
+        ]
   );
 
   const objection_handling = uniqNonEmpty(
     Array.isArray(se.objection_handling)
       ? se.objection_handling
       : [
-          "We already have a supplier for this type of service.",
-          "This is not a priority for us right now.",
-          "We do not have budget allocated at the moment.",
-          "We have tried something similar before and it did not work."
-        ]
+        "We already have a supplier for this type of service.",
+        "This is not a priority for us right now.",
+        "We do not have budget allocated at the moment.",
+        "We have tried something similar before and it did not work."
+      ]
   );
 
   const battlecard =
@@ -1073,8 +1076,9 @@ module.exports = async function (context, queueItem) {
 
   await updateStatus(container, prefix, "writer_working", "campaign writer started", {
     markers: {
-      writerVersion: "v9.2",
-      writerStartedAt: new Date().toISOString()
+      writerVersion: "v9.3",
+      writerStartedAt: new Date().toISOString(),
+      writerOutlineAvailable: outlineAvailable
     }
   });
 
@@ -1100,9 +1104,16 @@ module.exports = async function (context, queueItem) {
     const baseInput = await readJsonIfExists(container, `${prefix}input.json`);
     const outline = await readJsonIfExists(container, `${prefix}outline.json`);
 
-    if (!outline || typeof outline !== "object") {
+    const outlineAvailable = !!(outline && typeof outline === "object");
+    if (!outlineAvailable) {
       log.warn("[*] Writer: outline.json missing or invalid – proceeding with strategy_v2-only intelligence");
     }
+
+    await updateStatus(container, prefix, "writer_working", "writer inputs loaded", {
+      markers: {
+        writerOutlineAvailable: outlineAvailable
+      }
+    });
 
     const contentPillars = await readJsonIfExists(container, `${prefix}content_pillars.json`);
     const cpShape = validateContentPillarsV2(contentPillars);
@@ -1139,9 +1150,25 @@ module.exports = async function (context, queueItem) {
     // -----------------------------------------------------------------------
     // Build allowed claim IDs
     // -----------------------------------------------------------------------
-    const allowedFromPillars = allowedClaimIdsFromContentPillars(contentPillars);
-    const allowedFromOutline = allowedClaimIdsFromOutline(outline);
-    const allowedClaimIds = new Set([...allowedFromPillars, ...allowedFromOutline]);
+    const requiredClaimIds = Array.isArray(contentPillars?.inputs?.required_claim_ids)
+      ? contentPillars.inputs.required_claim_ids.map((x) => String(x || "").trim()).filter(Boolean)
+      : [];
+
+    if (!requiredClaimIds.length) {
+      throw new Error("Writer refused: content_pillars.inputs.required_claim_ids missing/empty");
+    }
+
+    const allowedClaimIds = new Set(requiredClaimIds);
+
+    // Outline cannot expand allowed ids — guardrail only
+    const outlineIds = allowedClaimIdsFromOutline(outline);
+    const outlineDisallowed = [...outlineIds].filter(id => !allowedClaimIds.has(id));
+
+    if (outlineDisallowed.length) {
+      throw new Error(
+        `Writer refused: outline referenced claim_ids not present in content_pillars.inputs.required_claim_ids allowed set: ${outlineDisallowed.slice(0, 12).join(", ")}`
+      );
+    }
 
     if (allowedClaimIds.size === 0) {
       // This should never happen with valid content-pillars-v2
@@ -1240,7 +1267,7 @@ module.exports = async function (context, queueItem) {
     const disallowed = allCitations.filter((id) => id && !allowedClaimIds.has(String(id).trim()));
     if (disallowed.length) {
       throw new Error(
-        `Writer refused: disallowed citation IDs detected (not in pillars proof_enrichment or outline): ${disallowed
+        `Writer refused: disallowed citation IDs detected (not in content_pillars.inputs.required_claim_ids): ${disallowed
           .slice(0, 12)
           .join(", ")}`
       );
@@ -1269,7 +1296,7 @@ module.exports = async function (context, queueItem) {
       viability: goldViability,
       sections,
       _meta: {
-        version: "v9.2",
+        version: "v9.3",
         strategy_engine: "campaign-write",
         generated_at: new Date().toISOString()
       }
@@ -1293,7 +1320,7 @@ module.exports = async function (context, queueItem) {
       campaign_path: outPath,
       markers: {
         writerCompleted: true,
-        writerVersion: "v9.2",
+        writerVersion: "v9.3",
         writerLocked: true,
         contentPillarsSha1,
         evidenceSha1,
@@ -1314,7 +1341,7 @@ module.exports = async function (context, queueItem) {
       });
     }
 
-    log("[*] Campaign Writer completed (Gold v9.2)", {
+    log("[*] Campaign Writer completed (Gold v9.3)", {
       runId,
       campaignPath: outPath,
       contentPillarsSha1,
@@ -1333,7 +1360,7 @@ module.exports = async function (context, queueItem) {
       await writeJson(container, `${prefix}writer_error.json`, {
         message: String(err && err.message ? err.message : err),
         stack: err && err.stack ? String(err.stack) : null,
-        writer_version: "v9.2",
+        writer_version: "v9.3",
         at: new Date().toISOString()
       });
     } catch (e2) {
@@ -1342,7 +1369,7 @@ module.exports = async function (context, queueItem) {
 
     await updateStatus(container, prefix, "writer_error", "Campaign Writer failed", {
       error: String(err && err.message ? err.message : err),
-      markers: { writerVersion: "v9.2", writerFailed: true }
+      markers: { writerVersion: "v9.3", writerFailed: true }
     });
 
     throw err;

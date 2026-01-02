@@ -1,37 +1,23 @@
 // /api/campaign-outline/index.js
-// 02-01-2026 — Option A (content_pillars-first), hash-locked (audit), deterministic, idempotent. V8.1
+// 02-01-2026 — Option A (content_pillars-first), deterministic, idempotent. V9
 //
-// Doctrine:
+// Doctrine (updated):
 // - Outline MUST use content_pillars.json as the PRIMARY messaging source of truth.
 // - Outline may consult evidence.json for claim_ids only (no new facts).
-// - Outline MUST NOT re-read or reinterpret raw supplier markdown packs.
-// - Outline MUST NOT generate its own “pillars” or “facts”; it only arranges existing sources.
-// - Outline MUST refuse to run if content_pillars.json is missing or structurally invalid.
+// - Evidence may evolve after pillars, BUT must be monotonic/additive and immutable-by-claim_id.
+// - Outline MUST NOT SHA-gate on evidence drift.
+// - Outline MUST claim-gate:
+//     (a) evidence.json MUST contain ALL required_claim_ids declared by content_pillars.inputs
+//     (b) those required claims MUST match semantic fingerprints captured at pillars time
 //
-// Refinement (Auditability + Volatile Evidence):
-// - evidence.json is allowed to evolve after pillars (e.g. competitor enrichment).
-// - Outline MUST NOT hard-fail on evidence SHA mismatch vs content_pillars.inputs.evidence_sha1.
-// - Instead, Outline MUST enforce that evidence.json is a SUPERSET containing ALL claim IDs
-//   required by content_pillars.json.
-//
-// Debugging + UI inspection (schema-safe):
-// - ✅ evidence_allowed is provided to the model (claim_id-scoped)
-// - ✅ evidence_all_meta is persisted as a separate blob: evidence_all_meta.json
-// - ✅ status markers contain counts + hashes (never bloating outline.json)
-//
-// Inputs:
-// - content_pillars.json
-// - evidence.json
-// - csv_normalized.json
-// - input.json
+// Implementation:
+// - content_pillars.inputs.required_claim_ids (mandatory)
+// - content_pillars.inputs.required_claim_fingerprints (mandatory; claim_id -> sha1:...)
+// - evidenceAllowedForModel: filtered subset of evidence claims restricted to allowed claim_ids
 //
 // Outputs:
-// - outline.json
-// - evidence_all_meta.json   (schema-safe, model-hidden debug inventory)
-//
-// Idempotency:
-// - If outlineCompleted, skip.
-// - Only enqueue afteroutline once.
+// - outline.json (claim-id only outline, schema constrained)
+// - status.json updated with audit markers, counts, and failures
 
 "use strict";
 
@@ -43,7 +29,9 @@ const { nowIso } = require("../shared/utils");
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
-const crypto = require("crypto");
+
+// Deterministic hashing helpers (shared across pipeline)
+const { sha1OfJson, semanticClaimFingerprint } = require("../shared/hash");
 
 // ---- ENV ----
 const ROUTER_QUEUE = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
@@ -61,7 +49,6 @@ async function loadHarness() {
     _harness = { generate };
     return _harness;
   } catch (e1) {
-    // ESM fallback
     const modUrl = new URL("../lib/prompt-harness.js", `file://${__dirname}/`);
     const esm = await import(modUrl.href);
     const generate = esm.generate || esm.default?.generate || esm.default;
@@ -76,6 +63,50 @@ function writeTempSchema(schema) {
   const f = path.join(os.tmpdir(), `outline_schema_${Date.now()}.json`);
   fs.writeFileSync(f, JSON.stringify(schema), "utf8");
   return f;
+}
+
+function collectAllIdsFromOutline(outline) {
+  const ids = [];
+  if (!outline || typeof outline !== "object") return ids;
+  const sec = outline.sections || {};
+
+  const pushArr = (arr) => {
+    if (!Array.isArray(arr)) return;
+    for (const x of arr) {
+      const s = String(x || "").trim();
+      if (s) ids.push(s);
+    }
+  };
+
+  pushArr(sec?.exec?.why_now_ids);
+  pushArr(sec?.positioning?.differentiator_ids);
+  pushArr(sec?.risks?.claim_ids);
+  pushArr(sec?.compliance?.checklist_ids);
+  pushArr(sec?.offer?.proof_ids);
+  pushArr(sec?.offer?.outcome_ids);
+
+  if (Array.isArray(sec?.messaging)) {
+    for (const m of sec.messaging) pushArr(m?.claim_ids);
+  }
+
+  if (Array.isArray(sec?.channel?.email_themes)) {
+    for (const t of sec.channel.email_themes) pushArr(t?.claim_ids);
+  }
+
+  if (Array.isArray(sec?.channel?.linkedin_themes)) {
+    for (const t of sec.channel.linkedin_themes) pushArr(t?.claim_ids);
+  }
+
+  return ids;
+}
+
+function findDisallowedIds(allIds, allowedSet) {
+  const bad = [];
+  for (const id of allIds) {
+    if (!allowedSet.has(id)) bad.push(id);
+  }
+  // return deterministically de-duped list
+  return Array.from(new Set(bad)).sort();
 }
 
 // ---- Outline schema (claim_ids only; prose-free) ----
@@ -227,25 +258,7 @@ const OUTLINE_SCHEMA = {
   }
 };
 
-// ---------------------- Deterministic hash helpers (aligned to writer) ---------------------- //
-
-function stableStringify(obj) {
-  if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
-  if (Array.isArray(obj)) return "[" + obj.map(stableStringify).join(",") + "]";
-  const keys = Object.keys(obj).sort();
-  return "{" + keys.map(k => JSON.stringify(k) + ":" + stableStringify(obj[k])).join(",") + "}";
-}
-
-function sha1(s) {
-  return crypto.createHash("sha1").update(String(s)).digest("hex");
-}
-
-function sha1OfJson(obj) {
-  return sha1(stableStringify(obj ?? null));
-}
-
-// ---------------------- Small helpers ---------------------- //
-
+// ---- Utility: safe truncation for prompt ----
 function safeForPrompt(v, max = 280000) {
   try {
     const s = typeof v === "string" ? v : JSON.stringify(v ?? "");
@@ -282,73 +295,19 @@ async function readJsonSafe(container, blobPath, fallback = null) {
   }
 }
 
-// ---------------------- content_pillars validation ---------------------- //
-
-// Strictly validate structure and v2 doctrine constraints.
-function validateContentPillarsShape(cp) {
+// Validate minimal structure of content_pillars.json
+function validateContentPillarsV2(cp) {
   if (!cp || typeof cp !== "object") return { ok: false, reason: "not_object" };
-  if (!cp.schema || typeof cp.schema !== "string") return { ok: false, reason: "missing_schema" };
+  if (String(cp.schema || "") !== "content-pillars-v2") return { ok: false, reason: "wrong_schema" };
   if (!cp.meta || typeof cp.meta !== "object") return { ok: false, reason: "missing_meta" };
-
-  // v2 doctrine enforcement
-  if (String(cp.schema) === "content-pillars-v2") {
-    if (cp.meta.provenance_validated !== true) return { ok: false, reason: "provenance_not_validated" };
-    if (!Array.isArray(cp.core_pillars)) return { ok: false, reason: "missing_core_pillars" };
-    if (!Array.isArray(cp.proof_enrichment)) return { ok: false, reason: "missing_proof_enrichment" };
-  } else {
-    // legacy v1 support (pillars)
-    if (!Array.isArray(cp.pillars)) return { ok: false, reason: "missing_pillars_array" };
+  if (!isNonEmptyString(cp.meta.run_id || cp.meta.runId)) return { ok: false, reason: "meta_missing_run_id" };
+  if (!Array.isArray(cp.core_pillars)) return { ok: false, reason: "missing_core_pillars" };
+  if (!cp.inputs || typeof cp.inputs !== "object") return { ok: false, reason: "missing_inputs" };
+  if (!Array.isArray(cp.inputs.required_claim_ids)) return { ok: false, reason: "missing_required_claim_ids" };
+  if (!cp.inputs.required_claim_fingerprints || typeof cp.inputs.required_claim_fingerprints !== "object") {
+    return { ok: false, reason: "missing_required_claim_fingerprints" };
   }
-
-  // Validate pillars entries (both v1/v2)
-  const pillars =
-    Array.isArray(cp.pillars) ? cp.pillars :
-    Array.isArray(cp.core_pillars) ? cp.core_pillars :
-    null;
-
-  if (!pillars) return { ok: false, reason: "missing_pillars_array" };
-
-  for (const p of pillars) {
-    if (!p || typeof p !== "object") return { ok: false, reason: "pillar_not_object" };
-    if (!isNonEmptyString(p.id)) return { ok: false, reason: "pillar_missing_id" };
-    if (!isNonEmptyString(p.title)) return { ok: false, reason: "pillar_missing_title" };
-    const hasProv = p.provenance && typeof p.provenance === "object";
-    const hasSourceRefs = Array.isArray(p.source_refs);
-    if (!hasProv && !hasSourceRefs) return { ok: false, reason: "pillar_missing_provenance_or_source_refs" };
-  }
-
   return { ok: true };
-}
-
-// Extract allowed claim IDs referenced by content_pillars (Option A constraint)
-function flattenClaimIdsFromContentPillars(cp) {
-  const ids = new Set();
-
-  // v1: pillars[].evidence_claim_ids
-  if (Array.isArray(cp?.pillars)) {
-    for (const p of cp.pillars) {
-      for (const id of ensureArray(p?.evidence_claim_ids)) {
-        const s = String(id || "").trim();
-        if (s) ids.add(s);
-      }
-    }
-  }
-
-  // v2: proof_enrichment[].claim_refs[] or proof_enrichment[].claim_ids (if present)
-  if (Array.isArray(cp?.proof_enrichment)) {
-    for (const pe of cp.proof_enrichment) {
-      for (const cr of ensureArray(pe?.claim_refs)) {
-        const s = String(cr?.claim_id || "").trim();
-        if (s) ids.add(s);
-      }
-      for (const id of ensureArray(pe?.claim_ids)) {
-        const s = String(id || "").trim();
-        if (s) ids.add(s);
-      }
-    }
-  }
-
-  return Array.from(ids);
 }
 
 // Build a stable evidence inventory for debug/UI inspection (model-hidden)
@@ -368,6 +327,7 @@ function buildEvidenceAllMeta(evidenceClaims, cap = 500) {
       title: (c.title || "").toString().slice(0, 200)
     });
   }
+
   out.sort((a, b) => a.claim_id.localeCompare(b.claim_id));
   return out;
 }
@@ -401,8 +361,7 @@ function pickTop(arr, n) {
   return ensureArray(arr).slice(0, Math.max(0, n | 0));
 }
 
-// ---------------------- MAIN FUNCTION ---------------------- //
-
+// ---- MAIN FUNCTION ----
 module.exports = async function (context, queueItem) {
   const startedAt = nowIso();
   let prefix = "";
@@ -412,8 +371,11 @@ module.exports = async function (context, queueItem) {
     if (!queueItem) throw new Error("Queue message empty");
 
     if (typeof queueItem === "string") {
-      try { queueItem = JSON.parse(queueItem); }
-      catch { throw new Error("Queue message must be JSON"); }
+      try {
+        queueItem = JSON.parse(queueItem);
+      } catch {
+        throw new Error("Queue message must be JSON");
+      }
     }
 
     if (typeof queueItem !== "object") throw new Error("Queue message must be an object");
@@ -452,9 +414,9 @@ module.exports = async function (context, queueItem) {
 
     // ---- LOAD CANONICAL INPUTS ----
     const contentPillars = await getJson(container, `${prefix}content_pillars.json`);
-    const contentPillarsShape = validateContentPillarsShape(contentPillars);
+    const cpShape = validateContentPillarsV2(contentPillars);
 
-    if (!contentPillarsShape.ok) {
+    if (!cpShape.ok) {
       await updateStatus(
         container,
         prefix,
@@ -462,13 +424,13 @@ module.exports = async function (context, queueItem) {
           state: "Failed",
           error: {
             code: "missing_or_invalid_content_pillars",
-            message: `content_pillars.json invalid: ${contentPillarsShape.reason}`
+            message: `content_pillars.json invalid: ${cpShape.reason}`
           },
           failedAt: nowIso()
         },
         { phase: "Outline", note: "failed: content_pillars missing/invalid" }
       );
-      throw new Error(`Outline refused: content_pillars.json invalid (${contentPillarsShape.reason})`);
+      throw new Error(`Outline refused: content_pillars.json invalid (${cpShape.reason})`);
     }
 
     const evidenceJson = await getJson(container, `${prefix}evidence.json`);
@@ -477,30 +439,16 @@ module.exports = async function (context, queueItem) {
 
     const evidenceClaims = Array.isArray(evidenceJson?.claims) ? evidenceJson.claims : [];
 
-    // ---- HASH LOCKING / AUDIT (non-fatal on mismatch) ----
+    // ---- FORensics SHA (audit only) ----
     const contentPillarsSha1 = sha1OfJson(contentPillars);
     const evidenceSha1 = sha1OfJson(evidenceJson);
 
-    const declaredMarkdownSha1 = contentPillars?.inputs?.markdown_pack_sha1 || null;
-    const declaredEvidenceSha1 = contentPillars?.inputs?.evidence_sha1 || null; // audit only
+    // ---- REQUIRED CLAIMS (doctrine: claim-gate, not sha-gate) ----
+    const requiredClaimIds = ensureArray(contentPillars?.inputs?.required_claim_ids).map((x) => String(x || "").trim()).filter(Boolean);
+    const requiredFingerprints = contentPillars?.inputs?.required_claim_fingerprints || {};
 
-    // ---- Allowed claim IDs (pillars referenced IDs ONLY) ----
-    const claimIdsFromPillars = flattenClaimIdsFromContentPillars(contentPillars);
-    const allowedClaimIdSet = new Set(claimIdsFromPillars);
-
-    // ---- SUPERSET ENFORCEMENT ----
-    const evidenceIdSet = new Set();
-    for (const c of evidenceClaims) {
-      const id = String(c?.claim_id || c?.id || "").trim();
-      if (id) evidenceIdSet.add(id);
-    }
-
-    const missingRequiredClaimIds = [];
-    for (const id of claimIdsFromPillars) {
-      if (!evidenceIdSet.has(id)) missingRequiredClaimIds.push(id);
-    }
-
-    if (missingRequiredClaimIds.length) {
+    // Hard fail if requiredClaimIds missing
+    if (!requiredClaimIds.length) {
       await updateStatus(
         container,
         prefix,
@@ -508,65 +456,107 @@ module.exports = async function (context, queueItem) {
           state: "Failed",
           error: {
             code: "missing_required_claim_ids",
-            message: `evidence.json is missing ${missingRequiredClaimIds.length} claim_ids required by content_pillars`,
-            detail: missingRequiredClaimIds.slice(0, 25)
+            message: "content_pillars.inputs.required_claim_ids missing or empty"
+          },
+          failedAt: nowIso()
+        },
+        { phase: "Outline", note: "failed: required_claim_ids empty" }
+      );
+      throw new Error("Outline refused: content_pillars.inputs.required_claim_ids missing/empty");
+    }
+
+    // Build evidence lookup by claim_id
+    const evidenceById = new Map();
+    for (const c of evidenceClaims) {
+      const id = String(c?.claim_id || c?.id || "").trim();
+      if (!id) continue;
+      // If duplicates occur, keep first occurrence for determinism
+      if (!evidenceById.has(id)) evidenceById.set(id, c);
+    }
+
+    // A) Presence check
+    const missing = [];
+    for (const id of requiredClaimIds) {
+      if (!evidenceById.has(id)) missing.push(id);
+    }
+
+    if (missing.length) {
+      await updateStatus(
+        container,
+        prefix,
+        {
+          state: "Failed",
+          error: {
+            code: "evidence_missing_required_claim_ids",
+            message: `evidence.json missing ${missing.length} required claim_ids from content_pillars`,
+            detail: missing.slice(0, 50)
           },
           failedAt: nowIso()
         },
         { phase: "Outline", note: "failed: evidence missing required claim_ids" }
       );
-      throw new Error(
-        `Outline refused: evidence.json missing required claim_ids (${missingRequiredClaimIds.length})`
-      );
+      throw new Error(`Outline refused: evidence.json missing required claim_ids (${missing.length})`);
     }
 
-    // ---- Optional guardrail: v1 assertable pillars must have claims ----
-    if (Array.isArray(contentPillars?.pillars)) {
-      const bad = [];
-      for (const p of contentPillars.pillars) {
-        if (!p || typeof p !== "object") continue;
-        if (p.assertable === true) {
-          const ids = ensureArray(p.evidence_claim_ids);
-          if (!ids.length) bad.push(p.id || "(unknown)");
-        }
+    // B) Immutability check (fingerprint match)
+    const mismatches = [];
+    for (const id of requiredClaimIds) {
+      const expected = String(requiredFingerprints?.[id] || "").trim();
+      if (!expected) {
+        // Doctrine: required fingerprints must exist; missing fingerprint is a contract violation
+        mismatches.push({ claim_id: id, expected: "(missing)", actual: "(n/a)" });
+        continue;
       }
-      if (bad.length) {
-        await updateStatus(
-          container,
-          prefix,
-          {
-            state: "Failed",
-            error: {
-              code: "assertable_pillar_missing_claims",
-              message: `content_pillars has assertable pillars without evidence_claim_ids (${bad.length})`,
-              detail: bad.slice(0, 25)
-            },
-            failedAt: nowIso()
+
+      const claim = evidenceById.get(id);
+      const actual = semanticClaimFingerprint(claim);
+
+      if (expected !== actual) {
+        mismatches.push({ claim_id: id, expected, actual });
+      }
+    }
+
+    if (mismatches.length) {
+      await updateStatus(
+        container,
+        prefix,
+        {
+          state: "Failed",
+          error: {
+            code: "evidence_required_claim_fingerprint_mismatch",
+            message: `evidence.json contains required claim_ids but ${mismatches.length} required claims drifted semantically (fingerprint mismatch)`,
+            detail: mismatches.slice(0, 25)
           },
-          { phase: "Outline", note: "failed: assertable pillars missing claim ids" }
-        );
-        throw new Error(`Outline refused: assertable pillars missing claim IDs (${bad.length})`);
-      }
+          failedAt: nowIso()
+        },
+        { phase: "Outline", note: "failed: evidence fingerprint mismatch" }
+      );
+      throw new Error(`Outline refused: evidence.json required-claim fingerprint mismatch (${mismatches.length})`);
     }
 
-    // Persist locks into status markers (audit only)
+    // ---- Allowed claim IDs for outline model ----
+    // Doctrine:
+    // - Outline can only select from required_claim_ids (and optionally operational_claim_ids if you add them later)
+    // - Outline MUST NOT expand allowed IDs beyond this set
+    const operationalClaimIds = ensureArray(contentPillars?.inputs?.operational_claim_ids)
+      .map((x) => String(x || "").trim())
+      .filter(Boolean);
+    const allowedClaimIdSet = new Set(requiredClaimIds);
+
+
+    // ---- Persist audit markers (forensics, not gating) ----
     const stLock = await readJsonSafe(container, `${prefix}status.json`, {});
-    await updateStatus(
-      container,
-      prefix,
-      {
-        markers: {
-          ...(stLock?.markers || {}),
-          contentPillarsLocked: true,
-          contentPillarsSha1,
-          outlineEvidenceSha1AtRun: evidenceSha1,
-          contentPillarsDeclaredEvidenceSha1: declaredEvidenceSha1 || null,
-          contentPillarsMarkdownSha1: declaredMarkdownSha1 || null,
-          outlineAllowedClaimIdsCount: claimIdsFromPillars.length
-        }
-      },
-      { phase: "Outline", note: "locks recorded (audit)" }
-    );
+    await updateStatus(container, prefix, {
+      markers: {
+        ...(stLock?.markers || {}),
+        contentPillarsSha1,
+        evidenceSha1AtOutline: evidenceSha1,
+        outlineAllowedClaimIdsCount: allowedClaimIdSet.size,
+        outlineRequiredClaimIdsCount: requiredClaimIds.length,
+        outlineOperationalClaimIdsCount: operationalClaimIds.length,
+        outlineRequiredClaimFingerprintMismatchCount: 0
+      }
+    });
 
     // ---- CSV signals ----
     const modeSpecific = csvNorm?.industry_mode === "specific";
@@ -575,7 +565,9 @@ module.exports = async function (context, queueItem) {
         ? (csvNorm?.selected_industry || "general").toLowerCase()
         : "general";
 
-    const csvSignals = modeSpecific ? (csvNorm?.signals || {}) : (csvNorm?.global_signals || {});
+    const csvSignals = modeSpecific
+      ? (csvNorm?.signals || {})
+      : (csvNorm?.global_signals || {});
 
     // ---- Supplier block ----
     const supplier = {
@@ -597,28 +589,14 @@ module.exports = async function (context, queueItem) {
       input?.campaign_industry ||
       (modeSpecific ? selectedIndustryCsv : "General");
 
-    // ---- Product anchors ----
-    let productAnchors = [];
-    if (Array.isArray(contentPillars?.product_anchors)) {
-      productAnchors = contentPillars.product_anchors.map(x => String(x || "").trim()).filter(Boolean).slice(0, 24);
-    } else {
-      const out = [];
-      const pillars =
-        Array.isArray(contentPillars?.pillars) ? contentPillars.pillars :
-        Array.isArray(contentPillars?.core_pillars) ? contentPillars.core_pillars :
-        [];
-      for (const p of ensureArray(pillars)) {
-        const a = ensureArray(p?.product_anchor_names);
-        for (const v of a) {
-          const s = String(v || "").trim();
-          if (s) out.push(s);
-        }
-      }
-      productAnchors = Array.from(new Set(out)).slice(0, 24);
-    }
+    // ---- Product anchor names from content_pillars (deterministic) ----
+    const productAnchors = Array.isArray(contentPillars?.product_anchors)
+      ? contentPillars.product_anchors.map((x) => String(x || "").trim()).filter(Boolean).slice(0, 24)
+      : [];
 
     // ---- Evidence arrays ----
     const evidence_allowed = buildEvidenceAllowedForModel(evidenceClaims, allowedClaimIdSet, 48);
+    const evidence_all_meta = buildEvidenceAllMeta(evidenceClaims, 2000);
 
     // Hard assert: evidence_allowed must contain only allowed IDs
     for (const e of evidence_allowed) {
@@ -641,39 +619,7 @@ module.exports = async function (context, queueItem) {
       }
     }
 
-    // evidence_all_meta: model-hidden inventory (persist separately)
-    const evidence_all_meta = buildEvidenceAllMeta(evidenceClaims, 2000);
-    await putJson(container, `${prefix}evidence_all_meta.json`, {
-      meta: {
-        run_id: runId,
-        phase: "Outline",
-        generated_at: nowIso(),
-        content_pillars_sha1: contentPillarsSha1,
-        evidence_sha1: evidenceSha1,
-        declared_evidence_sha1: declaredEvidenceSha1 || null,
-        allowed_claim_ids_count: claimIdsFromPillars.length,
-        evidence_all_count: evidence_all_meta.length
-      },
-      claims: evidence_all_meta
-    });
-
-    // Record evidence inventory markers
-    const stDbg = await readJsonSafe(container, `${prefix}status.json`, {});
-    await updateStatus(
-      container,
-      prefix,
-      {
-        markers: {
-          ...(stDbg?.markers || {}),
-          outlineEvidenceAllowedCount: evidence_allowed.length,
-          outlineEvidenceAllCount: evidence_all_meta.length,
-          outlineEvidenceAllMetaPath: "evidence_all_meta.json"
-        }
-      },
-      { phase: "Outline", note: `evidence_allowed=${evidence_allowed.length}; evidence_all_meta=${evidence_all_meta.length}` }
-    );
-
-    // ---- System + user messages ----
+    // ---- Prompt messages ----
     const salesModel = String(input?.sales_model || "").toLowerCase();
     const PERSONA =
       (salesModel === "partner")
@@ -698,18 +644,16 @@ CANONICAL CONTENT PILLARS (primary messaging truth):
 ${safeForPrompt({
       schema: contentPillars.schema,
       meta: contentPillars.meta,
-      inputs: contentPillars.inputs || {},
-      pillars: pickTop(
-        Array.isArray(contentPillars.pillars) ? contentPillars.pillars :
-        Array.isArray(contentPillars.core_pillars) ? contentPillars.core_pillars :
-        [],
-        12
-      ),
+      inputs: {
+        required_claim_ids: requiredClaimIds,
+        markdown_pack_sha1: contentPillars?.inputs?.markdown_pack_sha1 || null
+      },
+      core_pillars: pickTop(contentPillars.core_pillars || [], 12),
       product_anchors: productAnchors
     })}
 
-ALLOWED CLAIM IDS:
-${safeForPrompt(claimIdsFromPillars)}
+ALLOWED CLAIM IDS (model may ONLY use these):
+${safeForPrompt(Array.from(allowedClaimIdSet))}
 
 EVIDENCE_ALLOWED (model may ONLY use these claim_ids):
 ${safeForPrompt(evidence_allowed)}
@@ -760,14 +704,62 @@ ${safeForPrompt(competitors)}
     if (typeof outline === "string") outline = JSON.parse(outline);
     if (!outline || typeof outline !== "object") throw new Error("Invalid outline");
 
-    // ---- Ensure essential metadata (schema-safe; meta.additionalProperties=false) ----
+    // ---- Ensure essential metadata (schema-safe) ----
     outline.meta = outline.meta || {};
     outline.meta.run_id = runId;
     outline.meta.phase = "Outline";
     outline.meta.selected_industry = SELECTED_INDUSTRY;
 
+    // ---- HARD GUARDRAIL: Outline must not emit disallowed IDs ----
+    const allOutlineIds = collectAllIdsFromOutline(outline);
+    const disallowedOutlineIds = findDisallowedIds(allOutlineIds, allowedClaimIdSet);
+
+    if (disallowedOutlineIds.length) {
+      await updateStatus(
+        container,
+        prefix,
+        {
+          state: "Failed",
+          error: {
+            code: "outline_emitted_disallowed_ids",
+            message: `Outline emitted ${disallowedOutlineIds.length} IDs not in required_claim_ids`,
+            detail: disallowedOutlineIds.slice(0, 50)
+          },
+          failedAt: nowIso()
+        },
+        { phase: "Outline", note: "failed: outline emitted disallowed IDs" }
+      );
+      throw new Error(
+        `Outline refused: emitted disallowed IDs (${disallowedOutlineIds.slice(0, 12).join(", ")})`
+      );
+    }
+
     // ---- Write outline.json ----
     await putJson(container, `${prefix}outline.json`, outline);
+
+    // ---- Persist debug inventory into status (model-hidden but inspectable) ----
+    const stDbg = await readJsonSafe(container, `${prefix}status.json`, {});
+    const dbgCountAllowed = evidence_allowed.length;
+    const dbgCountAll = evidence_all_meta.length;
+
+    await updateStatus(
+      container,
+      prefix,
+      {
+        markers: {
+          ...(stDbg?.markers || {}),
+          outlineLocked: true,
+          outlineContentPillarsSha1: contentPillarsSha1,
+          outlineEvidenceSha1: evidenceSha1,
+          outlineEvidenceAllowedCount: dbgCountAllowed,
+          outlineEvidenceAllCount: dbgCountAll
+        }
+      },
+      {
+        phase: "Outline",
+        note: `evidence_allowed=${dbgCountAllowed}; evidence_all_meta=${dbgCountAll}`
+      }
+    );
 
     // ---- Mark complete ----
     const stBeforeComplete = await readJsonSafe(container, `${prefix}status.json`, {});
@@ -779,12 +771,8 @@ ${safeForPrompt(competitors)}
         updatedAt: nowIso(),
         markers: {
           ...(stBeforeComplete?.markers || {}),
-          outlineLocked: true,
           outlineCompleted: true,
-          outlineSha1: sha1OfJson(outline),
-          outlineContentPillarsSha1: contentPillarsSha1,
-          outlineEvidenceSha1: evidenceSha1,
-          outlineDeclaredEvidenceSha1: declaredEvidenceSha1 || null
+          outlineSha1: sha1OfJson(outline)
         }
       },
       { phase: "Outline", note: "completed" }
@@ -806,7 +794,8 @@ ${safeForPrompt(competitors)}
       completedAt: nowIso(),
       contentPillarsSha1,
       evidenceSha1,
-      declaredEvidenceSha1: declaredEvidenceSha1 || null,
+      requiredClaimIds: requiredClaimIds.length,
+      operationalClaimIds: operationalClaimIds.length,
       evidence_allowed: evidence_allowed.length,
       evidence_all_meta: evidence_all_meta.length
     });
@@ -829,14 +818,6 @@ ${safeForPrompt(competitors)}
       status.error = String(err?.message || err);
       status.failedAt = nowIso();
       await putJson(container, statusPath, status);
-
-      // optional: persist outline_error.json for quick inspection
-      await putJson(container, `${prefix}outline_error.json`, {
-        message: String(err?.message || err),
-        at: nowIso(),
-        phase: "Outline",
-        version: "v8.1"
-      });
 
     } catch {
       /* ignore */

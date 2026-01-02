@@ -80,6 +80,44 @@ function stableStringify(obj) {
 function sha1OfJson(obj) {
   return crypto.createHash("sha1").update(stableStringify(obj ?? null)).digest("hex");
 }
+// Evidence claim fingerprinting (doctrine: claim bodies are immutable by claim_id)
+// This is used for monotonic/additive evidence enforcement (optional but strongly recommended).
+function fingerprintEvidenceClaim(claim) {
+  if (!claim || typeof claim !== "object") return null;
+
+  const body = {
+    claim_id: stableString(claim.claim_id || claim.id || ""),
+    title: stableString(claim.title || "").slice(0, 400),
+    url: stableString(claim.url || ""),
+    source_type: stableString(claim.source_type || ""),
+    // Summary/quote are the semantic payload; cap to keep stable even if long
+    summary: stableString(claim.summary || "").slice(0, 1200),
+    quote: stableString(claim.quote || "").slice(0, 1200),
+    tier: (typeof claim.tier === "number") ? claim.tier : stableString(claim.tier || ""),
+    tier_group: stableString(claim.tier_group || claim.tag || "other") || "other"
+  };
+
+  // Use stableStringify so re-ordering doesn't change fingerprint.
+  return sha1OfString(stableStringify(body));
+}
+
+function buildRequiredClaimFingerprints(requiredClaimIds, evidenceClaims) {
+  const idSet = new Set((requiredClaimIds || []).map(stableString).filter(Boolean));
+
+  const map = {};
+  for (const c of safeArray(evidenceClaims)) {
+    const id = stableString(c?.claim_id || c?.id);
+    if (!id || !idSet.has(id)) continue;
+
+    const fp = fingerprintEvidenceClaim(c);
+    if (fp) map[id] = fp;
+  }
+
+  // Ensure deterministic key ordering in JSON
+  const ordered = {};
+  Object.keys(map).sort().forEach((k) => { ordered[k] = map[k]; });
+  return ordered;
+}
 
 function sha1OfString(s) {
   return crypto.createHash("sha1").update(String(s ?? "")).digest("hex");
@@ -458,6 +496,30 @@ function buildContentPillarsV2({
   core_pillars.sort((a, b) => a.id.localeCompare(b.id));
   proof_enrichment.sort((a, b) => a.pillar_id.localeCompare(b.pillar_id));
 
+  // ---------------------------------------------------------------------------
+  // Canonical required claim set (doctrine: pillars are the ONLY authority)
+  // required_claim_ids is the one and only allow-list downstream (outline + writer).
+  // ---------------------------------------------------------------------------
+  const required_claim_ids = uniqNonEmpty(
+    proof_enrichment.flatMap((pe) =>
+      safeArray(pe?.claim_refs).map((cr) => stableString(cr?.claim_id)).filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b));
+
+  // Fingerprints for immutability enforcement (doctrine: claims immutable by claim_id)
+  const required_claim_fingerprints = buildRequiredClaimFingerprints(
+    required_claim_ids,
+    evidenceClaims
+  );
+
+  // Operational IDs (metadata-only, never claim IDs, never allowed citations)
+  // These are for audit/UI only. Downstream must NOT treat these as citations.
+  const operational_ids_meta_only = {
+    ROUTE_MODEL: null,
+    TAM_BUCKET: null,
+    COHORT_SIZE: null
+  };
+
   const stats = {
     total: core_pillars.length,
     assertable: core_pillars.filter(p => p.mode === "assertable").length,
@@ -470,7 +532,8 @@ function buildContentPillarsV2({
       schema: "content-pillars-v2",
       meta: {
         run_id: runId,
-        generated_at: nowIso(),
+        phase: "PillarsSynth",
+        created_at: nowIso(),
         version: "02-01-2026 v3",
         generator: "campaign-pillars/index.js v3",
         provenance_validated: true,
@@ -481,7 +544,14 @@ function buildContentPillarsV2({
         markdown_pack_sha1: markdownPackSha1,
         evidence_path: "evidence.json",
         evidence_sha1: evidenceSha1,
-        markdown_files: safeArray(markdownPackSha1 ? [{ path: "evidence_v2/markdown_pack.json", sha1: markdownPackSha1 }] : []),
+        required_claim_ids,
+        required_claim_fingerprints,
+        operational_ids_meta_only,
+        markdown_files: safeArray(
+          markdownPackSha1
+            ? [{ path: "evidence_v2/markdown_pack.json", sha1: markdownPackSha1 }]
+            : []
+        ),
         supplier_slugs: safeArray(supplierSlugs),
         industry_slugs: safeArray(industrySlugs)
       },
@@ -602,9 +672,9 @@ module.exports = async function (context, queueItem) {
     const inSha = existing?.inputs || {};
     if (
       schemaOk &&
-      stableString(inSha.markdown_pack_sha1) === markdownPackSha1 &&
-      stableString(inSha.evidence_sha1) === evidenceSha1
+      stableString(inSha.markdown_pack_sha1) === markdownPackSha1
     ) {
+
       const contentPillarsSha1 = sha1OfJson(existing);
 
       status.markers.pillarsSynthCompleted = true;
@@ -612,13 +682,20 @@ module.exports = async function (context, queueItem) {
       status.markers.markdownPackSha1 = markdownPackSha1;
       status.markers.evidenceSha1 = evidenceSha1;
       status.markers.contentPillarsLocked = true;
+      const reqIds = existing?.inputs?.required_claim_ids;
+      const reqFps = existing?.inputs?.required_claim_fingerprints;
+      status.markers.contentPillarsRequiredClaimIdsCount =
+        Array.isArray(reqIds) ? reqIds.length : null;
+
+      status.markers.contentPillarsRequiredClaimFingerprintsCount =
+        (reqFps && typeof reqFps === "object") ? Object.keys(reqFps).length : null;
       status.updatedAt = nowIso();
 
       if (!Array.isArray(status.history)) status.history = [];
       status.history.push({
         at: nowIso(),
         phase: "pillars_idempotent_skip",
-        note: "content_pillars.json already matches input hashes (v2)"
+        note: "content_pillars.json already matches markdown_pack_sha1 (v2); evidence_sha1 is audit-only"
       });
 
       await putJson(container, statusPath, status);
@@ -698,6 +775,12 @@ module.exports = async function (context, queueItem) {
   cur.markers.markdownPackSha1 = markdownPackSha1;
   cur.markers.evidenceSha1 = evidenceSha1;
   cur.markers.contentPillarsLocked = true;
+  const reqIds = contentPack?.inputs?.required_claim_ids;
+  const reqFps = contentPack?.inputs?.required_claim_fingerprints;
+  cur.markers.contentPillarsRequiredClaimIdsCount =
+    Array.isArray(reqIds) ? reqIds.length : null;
+  cur.markers.contentPillarsRequiredClaimFingerprintsCount =
+    (reqFps && typeof reqFps === "object") ? Object.keys(reqFps).length : null;
 
   cur.markers.contentPillarsTotal = built.stats.total;
   cur.markers.contentPillarsAssertableCount = built.stats.assertable;
