@@ -1014,6 +1014,7 @@ async function buildProofPointsSection({ strategy_v2 }) {
 
 module.exports = async function (context, queueItem) {
   const log = context.log;
+  let outlineAvailable = false;
 
   // Normalise queueItem (string → object)
   let msg = queueItem;
@@ -1104,7 +1105,7 @@ module.exports = async function (context, queueItem) {
     const baseInput = await readJsonIfExists(container, `${prefix}input.json`);
     const outline = await readJsonIfExists(container, `${prefix}outline.json`);
 
-    const outlineAvailable = outline !== null && typeof outline === "object";
+    outlineAvailable = outline !== null && typeof outline === "object"; // ✅ assign, don’t redeclare
 
     if (!outlineAvailable) {
       log.warn(
