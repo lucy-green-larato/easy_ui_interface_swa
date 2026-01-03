@@ -1,12 +1,4 @@
-// /api/shared/siteCrawl.js 17-11-2025 v3
-//
-// Responsibilities:
-//  - Resilient HTTP GET wrapper
-//  - Minimal site "crawl" (homepage-only graph for now)
-//  - Link extraction helpers
-//  - Case study discovery (HTML + PDF)
-//  - Product / claim extraction from HTML
-//
+// /api/shared/siteCrawl.js 03-01-2026 v8
 // No Azure SDK usage here. Pure JS + built-in fetch.
 //
 // Exports:
@@ -163,95 +155,116 @@ function collectCaseStudyLinks(pages, allLinks, rootHost) {
   const rootUrl = rootHost ? `https://${rootHost}` : null;
 
   // ---------------------------------------------------------------------------
-  // Deterministic "known entrypoints"
-  // These massively improve recall when:
-  //  - homepage HTML is truncated
-  //  - links are JS-rendered
-  //  - nav links are not in the first 120k of HTML
+  // Deterministic "hub" fallback:
+  // Even if homepage doesn’t link to them (or snippet truncation misses them),
+  // we still attempt the canonical case study hubs on the SAME host.
+  // This fixes the common real-world gap: /case-studies exists but is not linked
+  // in the captured homepage HTML, or link extraction misses it.
   // ---------------------------------------------------------------------------
   if (rootUrl) {
-    const known = [
-      `${rootUrl}/case-studies`,
-      `${rootUrl}/case-studies/`,
-      `${rootUrl}/case-study`,
-      `${rootUrl}/case-study/`,
-      `${rootUrl}/customers`,
-      `${rootUrl}/customers/`,
-      `${rootUrl}/customer-stories`,
-      `${rootUrl}/customer-stories/`,
-      `${rootUrl}/success-stories`,
-      `${rootUrl}/success-stories/`,
-      `${rootUrl}/stories`,
-      `${rootUrl}/stories/`,
-      `${rootUrl}/resources/case-studies`,
-      `${rootUrl}/resources/case-studies/`
+    const hubPaths = [
+      "/case-studies",
+      "/case-studies/",
+      "/case-study",
+      "/case-study/",
+      "/customer-stories",
+      "/customer-stories/",
+      "/customers",
+      "/customers/",
+      "/success-stories",
+      "/success-stories/",
+      "/stories",
+      "/stories/"
     ];
 
-    for (const k of known) candidates.add(toHttps(k));
+    for (const p of hubPaths) {
+      const u = toHttps(`${rootUrl}${p}`);
+      candidates.add(u);
+    }
   }
 
   // ---------------------------------------------------------------------------
-  // Pull candidates from crawled pages (including non-homepage pages if available)
+  // Evidence from pages: URL itself + links extracted from page snippets.
   // ---------------------------------------------------------------------------
   for (const p of pagesArr) {
     if (!p || !p.url) continue;
 
     const pageUrl = toHttps(p.url);
-    if (pageUrl && (!rootUrl || sameHost(pageUrl, rootUrl))) {
-      // Page itself may be a case study landing page
-      if (isCaseStudyUrl(pageUrl)) candidates.add(pageUrl);
 
-      // Links inside page snippet
-      const pageLinks = extractLinks(p.snippet || "", pageUrl);
-      for (const l of pageLinks) {
-        const u = toHttps(l);
-        if (!u) continue;
-        if ((!rootUrl || sameHost(u, rootUrl)) && isCaseStudyUrl(u)) {
-          candidates.add(u);
-        }
+    // If the page itself looks like a case study page, include it.
+    if (isCaseStudyUrl(pageUrl)) {
+      if (!rootUrl || sameHost(pageUrl, rootUrl)) {
+        candidates.add(pageUrl);
+      }
+    }
+
+    // Extract candidate links from snippet HTML
+    const pageLinks = extractLinks(p.snippet || "", p.url);
+    for (const l of pageLinks) {
+      const url = toHttps(l);
+      if (!url) continue;
+
+      // Same-host only
+      if (rootUrl && !sameHost(url, rootUrl)) continue;
+
+      // Heuristic-based inclusion
+      if (isCaseStudyUrl(url)) {
+        candidates.add(url);
       }
     }
   }
 
   // ---------------------------------------------------------------------------
-  // Pull candidates from the global link set (usually from homepage extraction)
+  // Evidence from global link set (already extracted by crawlSiteGraph).
   // ---------------------------------------------------------------------------
   for (const l of linksArr) {
     const url = toHttps(l);
     if (!url) continue;
-    if ((!rootUrl || sameHost(url, rootUrl)) && isCaseStudyUrl(url)) {
+
+    // Same-host only
+    if (rootUrl && !sameHost(url, rootUrl)) continue;
+
+    if (isCaseStudyUrl(url)) {
       candidates.add(url);
     }
   }
 
   // ---------------------------------------------------------------------------
   // Deterministic ordering:
-  //  - prefer likely case-study hubs first (case-studies > customers > stories > pdf)
-  //  - then stable lexicographic ordering
-  // This improves hit-rate under MAX_CASESTUDIES caps.
+  // 1) Prefer "hub" URLs (case-studies etc.) before specific PDFs / deep pages.
+  // 2) Then stable lexicographic ordering.
+  // This improves hit-rate because hubs tend to be HTML index pages that link to
+  // multiple case studies and are more likely to return 200.
   // ---------------------------------------------------------------------------
-  const score = (u) => {
+  const preferRank = (u) => {
     const low = String(u || "").toLowerCase();
+
+    // Most valuable: explicit hubs
     if (low.includes("/case-studies")) return 0;
-    if (low.includes("/case-study")) return 1;
-    if (low.includes("/customers")) return 2;
-    if (low.includes("/customer-stories")) return 3;
-    if (low.includes("/success-stories")) return 4;
-    if (low.includes("/stories")) return 5;
-    if (low.endsWith(".pdf")) return 9;
-    return 50;
+    if (low.includes("/customer-stories")) return 1;
+    if (low.includes("/success-stories")) return 2;
+    if (low.includes("/customers")) return 3;
+    if (low.includes("/stories")) return 4;
+
+    // PDFs are often behind blockers or need extraction, so deprioritise
+    if (low.endsWith(".pdf")) return 20;
+
+    // Everything else
+    return 10;
   };
 
-  return Array.from(candidates)
+  const ordered = Array.from(candidates)
     .filter(Boolean)
-    .filter((u) => (!rootUrl || sameHost(u, rootUrl)))
+    .map(toHttps)
+    .filter(Boolean)
     .sort((a, b) => {
-      const sa = score(a);
-      const sb = score(b);
-      if (sa !== sb) return sa - sb;
-      return a.localeCompare(b);
-    })
-    .slice(0, MAX_CASESTUDIES);
+      const ra = preferRank(a);
+      const rb = preferRank(b);
+      if (ra !== rb) return ra - rb;
+      return String(a).localeCompare(String(b));
+    });
+
+  return ordered.slice(0, MAX_CASESTUDIES);
 }
 
 // Fetch a small summary for each candidate case-study URL
