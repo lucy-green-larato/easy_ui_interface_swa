@@ -30,6 +30,41 @@ function stripMarkdown(s) {
     .trim();
 }
 
+function splitTitleAndSummary(text) {
+  const s = String(text || "").trim();
+  if (!s) return { title: "", summary: "" };
+
+  // If "Key: Value" style, split into title + summary
+  const m = s.match(/^([^:]{2,80}):\s*(.+)$/);
+  if (m) {
+    return {
+      title: m[1].trim(),
+      summary: m[2].trim()
+    };
+  }
+
+  // Otherwise treat whole thing as title (no summary)
+  return { title: s, summary: "" };
+}
+
+function isStubTitle(title) {
+  const t = String(title || "").trim().toLowerCase();
+  if (!t) return true;
+  // Titles that are too generic / label-like
+  return (
+    t.length <= 3 ||
+    t === "integration" ||
+    t === "security" ||
+    t === "management" ||
+    t === "services" ||
+    t === "solutions" ||
+    t === "capabilities" ||
+    t === "overview" ||
+    t === "positioning sentence" ||
+    t === "evidence"
+  );
+}
+
 async function writeBlobText(container, name, text) {
   const body = String(text || "");
   const blob = container.getBlockBlobClient(name);
@@ -791,21 +826,99 @@ module.exports = async function (context, msg) {
 
     log("[markdown_pack] competitor ingestion summary", summary);
   }
+
+  // ---------------------------------------------------------------------------
+  // 4b) Derived supplier strengths (deterministic projection)
+  // - If supplier_strengths is sparse, promote certain differentiator lines
+  //   that are clearly outcome/impact language into supplier_strengths
+  // - NO new facts; only re-classification
+  // ---------------------------------------------------------------------------
+  (function deriveStrengthsFromDifferentiators() {
+    const strengths = pack.supplier_strengths || [];
+    const diffs = pack.supplier_differentiators || [];
+
+    // Only do this if strengths is low (avoid duplication inflation)
+    if (strengths.length >= 10) return;
+    if (!diffs.length) return;
+
+    const existing = new Set(strengths.map(x => x.sha1).filter(Boolean));
+
+    // Promote only clearly outcome-framed lines
+    const promote = diffs.filter(it => {
+      const t = String(it.text || "").toLowerCase();
+      return (
+        t.includes("why it matters") ||
+        t.includes("evidence") ||
+        t.includes("impact") ||
+        t.includes("reduces") ||
+        t.includes("improves") ||
+        t.includes("enables") ||
+        t.includes("faster") ||
+        t.includes("resilience") ||
+        t.includes("uptime")
+      );
+    });
+
+    for (const it of promote) {
+      if (!it || !it.sha1) continue;
+      if (existing.has(it.sha1)) continue;
+      existing.add(it.sha1);
+
+      strengths.push({
+        ...it,
+        bucket: "supplier_strengths"
+      });
+
+      // Cap to avoid ballooning
+      if (strengths.length >= 20) break;
+    }
+
+    pack.supplier_strengths = strengths;
+  })();
+
   // ---------------------------------------------------------------------------
   // Canonical pillar views (deterministic projection)
   // These are derived ONLY from the items already in buckets.
   // ---------------------------------------------------------------------------
 
+  function dedupePillars(pillars) {
+    const out = [];
+    const seen = new Set();
+
+    for (const p of pillars || []) {
+      const key = String(p?.title || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      if (!key) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      out.push(p);
+    }
+    return out;
+  }
+
   function toPillarItem(it, kind) {
     if (!it || typeof it !== "object") return null;
-    const title = String(it.text || "").trim();
-    if (!title) return null;
+
+    const raw = String(it.text || "").trim();
+    if (!raw) return null;
+
+    const { title, summary } = splitTitleAndSummary(raw);
+
+    // If the title is stubby and we have no summary, keep full raw text as title.
+    // This prevents creating meaningless "Integration" pillars.
+    const finalTitle = (isStubTitle(title) && !summary) ? raw : (title || raw);
+    const finalSummary = summary || "";
 
     return {
       id: String(it.id || ""),
       kind, // supplier | industry | competitor
-      title,
-      summary: "", // intentionally blank; no new facts
+      title: finalTitle,
+      summary: finalSummary, // ✅ deterministic; not invented
       tags: [],
       source: {
         source_file: it.source_file || null,
@@ -823,10 +936,11 @@ module.exports = async function (context, msg) {
     .concat(pack.supplier_strengths || [])
     .concat(pack.supplier_capabilities || []);
 
-  pack.markdown_pillars = supplierCandidates
-    .map(it => toPillarItem(it, "supplier"))
-    .filter(Boolean)
-    .slice(0, 80);
+  pack.markdown_pillars = dedupePillars(
+    supplierCandidates
+      .map(it => toPillarItem(it, "supplier"))
+      .filter(Boolean)
+  ).slice(0, 80);
 
   // Industry pillars: content_pillars + drivers + risks + persona pressures
   const industryCandidates = []
@@ -835,16 +949,17 @@ module.exports = async function (context, msg) {
     .concat(pack.industry_risks || [])
     .concat(pack.persona_pressures || []);
 
-  pack.industry_pillars = industryCandidates
-    .map(it => toPillarItem(it, "industry"))
-    .filter(Boolean)
-    .slice(0, 120);
+  pack.industry_pillars = dedupePillars(
+    industryCandidates
+      .map(it => toPillarItem(it, "industry"))
+      .filter(Boolean)
+  ).slice(0, 120);
 
-  // Competitor pillars: competitor_profiles only
-  pack.competitor_pillars = (pack.competitor_profiles || [])
-    .map(it => toPillarItem(it, "competitor"))
-    .filter(Boolean)
-    .slice(0, 120);
+  pack.competitor_pillars = dedupePillars(
+    (pack.competitor_profiles || [])
+      .map(it => toPillarItem(it, "competitor"))
+      .filter(Boolean)
+  ).slice(0, 120);
 
   // ---------------------------------------------------------------------------
   // Deterministic ordering + stats
@@ -863,6 +978,20 @@ module.exports = async function (context, msg) {
   }
 
   pack.stats.total_items = bucketKeys.reduce((sum, k) => sum + (pack[k].length || 0), 0);
+  // ---------------------------------------------------------------------------
+  // Pillar dedupe + stable order (must happen BEFORE hashing)
+  // ---------------------------------------------------------------------------
+  pack.markdown_pillars = stableSortBy(dedupePillars(pack.markdown_pillars || []), p =>
+    String(p?.title || "").toLowerCase()
+  );
+
+  pack.industry_pillars = stableSortBy(dedupePillars(pack.industry_pillars || []), p =>
+    String(p?.title || "").toLowerCase()
+  );
+
+  pack.competitor_pillars = stableSortBy(dedupePillars(pack.competitor_pillars || []), p =>
+    String(p?.title || "").toLowerCase()
+  );
 
   // ---------------------------------------------------------------------------
   // Write markdown_pack.json (exactly one artefact)
@@ -928,7 +1057,7 @@ module.exports = async function (context, msg) {
       markdownPackSha1Locked: true,
       markdownPackPath: "evidence_v2/markdown_pack.json",
       markdownPackTotal: pack.stats.total_items
-    }, "markdown_pack: skip (sha1 match)");
+    }, "markdown_pack: completed");
   }
 
   // ---------------------------------------------------------------------------
