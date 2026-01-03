@@ -1,13 +1,6 @@
 // /api/campaign-linkedin/index.js
 // LinkedIn Activation (Option B) — downstream-only, bounded to validated artefacts
-// 19-12-2025 v1.2 — diagnostics hardened (empty-but-valid is explainable)
-//
-// Trigger: run_linkedin (enqueued only after afterwrite)
-// Reads:  strategy_v2/campaign_strategy.json, campaign.json
-// Writes: linkedin.json AND evidence_v2/linkedin.json (same payload for backward compatibility)
-//
-// Node 20 / Azure Functions v4 / CommonJS
-
+// 03-01-2026 v1.3 
 "use strict";
 
 const { getResultsContainerClient, getJson, putJson } = require("../shared/storage");
@@ -258,14 +251,9 @@ function buildPrompts({ runId, activationInputs }) {
   return { system, user };
 }
 
-/**
- * Writes the same payload to:
- * - `${prefix}linkedin.json` (backward compatible path)
- * - `${prefix}evidence_v2/linkedin.json` (canonical evidence artefact path per Objective A)
- */
 async function writeLinkedInArtefacts(container, prefix, payload) {
-  const p1 = `${prefix}linkedin.json`;
-  const p2 = `${prefix}evidence_v2/linkedin.json`;
+  const p1 = `${prefix}activation/linkedin.json`; // canonical activation output
+  const p2 = `${prefix}linkedin.json`;            // backward compatible alias
   await putJson(container, p1, payload);
   await putJson(container, p2, payload);
   return { p1, p2 };

@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 03-01-2026 — v69
+// /api/campaign-evidence/index.js 03-01-2026 — v70
 // -----------------------------------------------------------------------------
 // PHASE BOUNDARY NOTE
 //
@@ -212,11 +212,20 @@ function validateLinkedInUrl(url) {
     return { valid: false, reason: "invalid_url" };
   }
 }
+function forbidActivationPath(relPath) {
+  const p = String(relPath || "");
+  if (/\/?evidence_v2\/linkedin\.json$/i.test(p)) {
+    throw new Error(
+      "Doctrine violation: EvidenceDigest must not write activation artefacts to evidence_v2/linkedin.json (Option A)."
+    );
+  }
+  return relPath;
+}
 
 module.exports = async function (context, job) {
   context.log("EVIDENCE_DEBUG_Q_CAMPAIGN_EVIDENCE", process.env.Q_CAMPAIGN_EVIDENCE);
   context.log("EVIDENCE_DEBUG_AzureWebJobsStorage_set", !!process.env.AzureWebJobsStorage);
-  context.log("[campaign-evidence] v69 starting", {
+  context.log("[campaign-evidence] v70 starting", {
     hasJob: !!job,
     type: typeof job
   });
@@ -1602,26 +1611,63 @@ module.exports = async function (context, job) {
 
         let key = "";
 
-        // 1) Markdown bullets — strongest key
+        // 1) Markdown bullets — strongest, stable key
         if (ev.markdown_id) {
-          key = `md:${ev.markdown_id}`;
+          key = `md:${String(ev.markdown_id).trim()}`;
         }
 
-        // 2) Explicit claim id
-        else if (ev.claim_id) {
-          key = `cid:${ev.claim_id}`;
-        }
-
-        // 3) URL + title (normalised)
+        // 2) Tier-group specific stable keys (prevents claim_id collisions)
         else {
+          const tg = String(ev.tier_group || "").trim().toLowerCase();
+          const st = String(ev.source_type || "").trim().toLowerCase();
           const url = String(ev.url || "").trim().toLowerCase();
           const title = String(ev.title || "").trim().toLowerCase();
-          if (url || title) {
-            key = `u:${url}||t:${title}`;
+
+          // LinkedIn: key must be url-based, never claim_id-based
+          if (tg === "linkedin" || st === "linkedin") {
+            if (url) key = `li:${url}`;
+            else if (title) key = `li:title:${title}`;
+          }
+
+          // CSV summary: enforce singleton by tier_group
+          else if (tg === "csv_summary") {
+            key = `csv_summary:singleton`;
+          }
+
+          // Case study: stable url key
+          else if (tg === "case_study") {
+            if (url) key = `cs:${url}`;
+            else if (title) key = `cs:title:${title}`;
+          }
+
+          // Coverage summary: singleton
+          else if (tg === "coverage_summary") {
+            key = `coverage_summary:singleton`;
+          }
+
+          // Microclaims: url+title stabilises better than claim_id
+          else if (tg === "microclaim") {
+            if (url || title) key = `micro:u:${url}||t:${title}`;
+          }
+
+          // Default: url+title (safe deterministic fallback)
+          else {
+            if (url || title) {
+              key = `u:${url}||t:${title}`;
+            }
           }
         }
 
-        // 4) Final fallback (should be rare)
+        // 3) Claim id ONLY if it is clearly non-renumbered and globally unique
+        //    (Avoid CLM-xxx which will collide during later renumbering)
+        if (!key) {
+          const cid = String(ev.claim_id || "").trim();
+          if (cid && !/^CLM-\d{3}$/i.test(cid)) {
+            key = `cid:${cid}`;
+          }
+        }
+
+        // 4) Final fallback — deterministic but should be rare
         if (!key) {
           key = `fallback:${JSON.stringify(ev)}`;
         }
@@ -1902,99 +1948,93 @@ module.exports = async function (context, job) {
         String(e?.message || e)
       );
     }
-
-    const status =
-      (await getJson(container, `${prefix}status.json`)) || {};
-
     // ------------------------------------------------------------
-    // LinkedIn activation (DOWNSTREAM ONLY — gated on strategy change)
+    // Option A doctrine guard: EvidenceDigest MUST NOT produce activation artefacts.
+    // LinkedIn activation is produced only by /api/campaign-linkedin (downstream).
     // ------------------------------------------------------------
+    let statusObj = null;
+    try {
+      const statusPath = `${prefix}status.json`;
+      statusObj =
+        (await getJson(container, statusPath)) || { runId, history: [], markers: {} };
 
-    const status0 =
-      (await getJson(container, `${prefix}status.json`)) || {};
-
-    const strategyChanged = !!status0?.markers?.strategyChanged;
-
-    if (!strategyChanged) {
-      context.log("[evidence] strategy unchanged — linkedin.json skipped");
-    } else {
-      const strategy =
-        (await getJson(container, `${prefix}strategy_v2/campaign_strategy.json`)) ||
-        (await getJson(container, `${prefix}strategy_v2.json`)) ||
-        null;
-
-      if (strategy && typeof strategy === "object") {
-        const linkedin = {
-          schema: "linkedin-activation-v1",
-          generated_at: new Date().toISOString(),
-          derived_from: {
-            strategy_v2: true,
-            proof_points: true
-          },
-          rules: {
-            no_new_claims: true,
-            no_new_evidence: true,
-            activation_only: true
-          },
-          hooks: []
-        };
-
-        if (
-          Array.isArray(strategy?.buyer_strategy?.problems) &&
-          strategy.buyer_strategy.problems.length > 0
-        ) {
-          const problem = String(strategy.buyer_strategy.problems[0]).trim();
-
-          linkedin.hooks.push({
-            id: `li_${runId.slice(0, 8)}_001`,
-            pillar: "Buyer pressure",
-            audience: "Decision-makers",
-            post: `Many teams struggle with ${problem}. Most don’t talk about it openly.`,
-            cta: "Worth unpacking?"
-          });
-        }
-
-        await putJson(
-          container,
-          `${prefix}evidence_v2/linkedin.json`,
-          linkedin
-        );
-
-        // 🔒 clear the flag after successful generation
-        status0.markers = {
-          ...(status0.markers || {}),
-          strategyChanged: false
-        };
-
-        await putJson(container, `${prefix}status.json`, status0);
-      } else {
-        context.log.warn("[evidence] strategy missing — linkedin.json skipped");
+      if (!statusObj || typeof statusObj !== "object") {
+        statusObj = { runId, history: [], markers: {} };
       }
-    }
+      if (!statusObj.markers || typeof statusObj.markers !== "object") {
+        statusObj.markers = {};
+      }
 
+      let changed = false;
+
+      // If an upstream component incorrectly sets strategyChanged expecting EvidenceDigest to act,
+      // record explicit marker so this never "skips silently".
+      if (statusObj.markers.strategyChanged) {
+        if (!statusObj.markers.linkedinActivationDeferred) {
+          statusObj.markers.linkedinActivationDeferred = true;
+          statusObj.markers.linkedinActivationDeferredReason =
+            "EvidenceDigest does not generate activation artefacts (Option A). campaign-linkedin handles LinkedIn after afterwrite.";
+          changed = true;
+        }
+      }
+
+      // Persist immediately if we changed anything (prevents losing the marker on later failure)
+      if (changed) {
+        await putJson(container, statusPath, statusObj);
+      }
+    } catch {
+      statusObj = null; // non-fatal
+    }
     // Hand off to router exactly once → afterevidence
     try {
-      const st0 = (await getJson(container, `${prefix}status.json`)) || { runId, history: [], markers: {} };
-      const already = !!st0?.markers?.afterevidenceSent;
+      const statusPath = `${prefix}status.json`;
+
+      // Reuse cached statusObj if available; otherwise load once.
+      const st0 =
+        (statusObj && typeof statusObj === "object")
+          ? statusObj
+          : ((await getJson(container, statusPath)) || { runId, history: [], markers: {} });
+
+      if (!st0 || typeof st0 !== "object") throw new Error("EvidenceDigest: status.json unreadable");
+      if (!st0.markers || typeof st0.markers !== "object") st0.markers = {};
+
+      const already = !!st0.markers.afterevidenceSent;
+
       if (!already) {
         const evidenceOk = await getJson(container, `${prefix}evidence.json`);
         if (!evidenceOk) {
           throw new Error("EvidenceDigest: evidence.json missing; refusing to enqueue afterevidence");
         }
+
         await enqueueTo(ROUTER_QUEUE_NAME, { op: "afterevidence", runId, page: "campaign", prefix });
-        st0.markers = { ...(st0.markers || {}), afterevidenceSent: true };
-        await putJson(container, `${prefix}status.json`, st0);
+
+        st0.markers.afterevidenceSent = true;
+
+        // Keep statusObj in sync so we can write once later.
+        statusObj = st0;
+
+        await putJson(container, statusPath, st0);
       }
     } catch (e) {
       context.log.warn("[evidence] afterevidence enqueue failed", String(e?.message || e));
     }
-
     // Finalise phase
     try {
       const statusPath = `${prefix}status.json`;
-      const cur = (await getJson(container, statusPath)) || { runId, history: [], markers: {} };
-      cur.markers = cur.markers || {};
+
+      const cur =
+        (statusObj && typeof statusObj === "object")
+          ? statusObj
+          : ((await getJson(container, statusPath)) || { runId, history: [], markers: {} });
+
+      if (!cur || typeof cur !== "object") throw new Error("EvidenceDigest: status.json unreadable");
+      if (!cur.markers || typeof cur.markers !== "object") cur.markers = {};
+
       cur.markers.evidenceDigestCompleted = true;
+
+      // Preserve any markers set earlier (including linkedinActivationDeferred)
+      statusObj = cur;
+
       await putJson(container, statusPath, cur);
     } catch { /* non-fatal */ }
 
