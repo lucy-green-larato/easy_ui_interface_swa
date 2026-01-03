@@ -1,17 +1,6 @@
 // /api/campaign-markdown-pack/index.js
 // Deterministic Markdown Pack Builder (Model A)
-// 30-12-2025 v2.3
-//
-// Fixes in this version:
-// 1) Industry sources ingested once: packs/industry/sources.md
-// 2) Industry pack ingested once: packs/industry/<industry_slug>.md
-// 3) Supplier markdown loaded from canonical flat path: packs/suppliers/<supplier_slug>.md (with fallback)
-// 4) Supplier markdown mapped into Tier-2 arrays: supplier_capabilities / strengths / differentiators
-// 5) Supplier markdown ALSO written to results as canonical profile.md for EvidenceDigest compatibility:
-//      <prefix>/packs/<supplier_slug>/profile.md
-// 6) Competitor markdown forced to competitor_profiles by scope
-// 7) parseMarkdown correctly updates bucket on heading changes, across all scopes
-//
+// 03-01-2026 v2.4
 // Deterministic. No AI. No scoring. No business interpretation.
 
 "use strict";
@@ -44,7 +33,9 @@ function stripMarkdown(s) {
 async function writeBlobText(container, name, text) {
   const body = String(text || "");
   const blob = container.getBlockBlobClient(name);
-  await blob.upload(body, Buffer.byteLength(body));
+  await blob.upload(body, Buffer.byteLength(body), {
+    blobHTTPHeaders: { blobContentType: "text/markdown; charset=utf-8" }
+  });
 }
 
 // ------------------------------------------------------------
@@ -124,6 +115,94 @@ async function readBlobText(container, name) {
   const dl = await blob.download();
   return streamToString(dl.readableStreamBody);
 }
+// ------------------------------------------------------------
+// Deterministic JSON + status helpers (for idempotency + locks)
+// ------------------------------------------------------------
+function sha1Json(obj) {
+  const s = JSON.stringify(obj ?? null);
+  return crypto.createHash("sha1").update(String(s)).digest("hex");
+}
+
+function canonicalizeForHash(pack) {
+  // IMPORTANT: Never include pack.sha1 in the hash
+  // and never include any volatile fields you don’t want to break determinism.
+  // If you keep generated_at, it will change the hash if you rebuild the pack.
+  // So we MUST exclude it (and any other time-based fields).
+  const { sha1, generated_at, ...rest } = pack || {};
+  return rest;
+}
+
+function sha1OfPack(pack) {
+  return sha1Json(canonicalizeForHash(pack));
+}
+
+function stableSortBy(arr, fn) {
+  if (!Array.isArray(arr)) return [];
+  return [...arr].sort((a, b) => {
+    const ka = String(fn(a) ?? "");
+    const kb = String(fn(b) ?? "");
+    return ka.localeCompare(kb) || String(a?.id || "").localeCompare(String(b?.id || ""));
+  });
+}
+
+async function readJsonIfExists(container, blobPath) {
+  try {
+    const blob = container.getBlobClient(blobPath);
+    const ok = await blob.exists();
+    if (!ok) return null;
+    const dl = await blob.download();
+    const text = await streamToString(dl.readableStreamBody);
+    if (!text) return null;
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+async function writeJson(container, blobPath, obj) {
+  const block = container.getBlockBlobClient(blobPath);
+  const json = JSON.stringify(obj, null, 2);
+  const data = Buffer.from(json, "utf8");
+  await block.uploadData(data, {
+    blobHTTPHeaders: { blobContentType: "application/json" }
+  });
+}
+
+function ensureStatusShape(st) {
+  const s = (st && typeof st === "object") ? st : {};
+  if (!Array.isArray(s.history)) s.history = [];
+  if (!s.markers || typeof s.markers !== "object") s.markers = {};
+  return s;
+}
+
+async function writeStatusMarker(resultsContainer, basePrefix, patch, note = "") {
+  const statusPath = `${basePrefix}status.json`;
+
+  // Read once (best-effort)
+  const cur1 = ensureStatusShape(await readJsonIfExists(resultsContainer, statusPath));
+
+  // Apply patch
+  const next1 = {
+    ...cur1,
+    markers: { ...(cur1.markers || {}), ...(patch || {}) }
+  };
+  if (note) {
+    next1.history.push({ at: nowISO(), phase: "markdown_pack", note });
+  }
+
+  // Re-read just before write (best-effort merge to reduce race loss)
+  const cur2 = ensureStatusShape(await readJsonIfExists(resultsContainer, statusPath));
+  const merged = {
+    ...cur2,
+    markers: { ...(cur2.markers || {}), ...(next1.markers || {}) },
+    history: Array.isArray(cur2.history) ? cur2.history : []
+  };
+
+  if (note) merged.history.push({ at: nowISO(), phase: "markdown_pack", note });
+
+  await writeJson(resultsContainer, statusPath, merged);
+  return merged;
+}
 
 // ------------------------------------------------------------
 // Markdown parser (deterministic; bullets only)
@@ -150,8 +229,8 @@ function parseMarkdown({ text, source_file, scope }) {
     if (!line) continue;
 
     // Headings (## / ### only)
-    if (/^#{2,3}\s+/.test(line)) {
-      currentHeading = line.replace(/^#{2,3}\s+/, "").trim();
+    if (/^#{1,3}\s+/.test(line)) {
+      currentHeading = line.replace(/^#{1,3}\s+/, "").trim();
       currentBucket = scopeBucket(scope, currentHeading); // ✅ Correct for all scopes
       continue;
     }
@@ -173,8 +252,7 @@ function parseMarkdown({ text, source_file, scope }) {
         source_file,
         source_heading: currentHeading,
         line_no: i + 1,
-        sha1: hash,
-        created_at: nowISO()
+        sha1: hash
       });
     }
   }
@@ -213,8 +291,7 @@ function parseSupplierTemplateMarkdown({ text, source_file }) {
       source_file,
       source_heading: heading,
       line_no: lineNo,
-      sha1: hash,
-      created_at: nowISO()
+      sha1: hash
     });
   }
 
@@ -404,11 +481,36 @@ module.exports = async function (context, msg) {
   const pack = {
     schema: "markdown-pack-v2",
     generated_at: nowISO(),
+    runId,
+    prefix: base,
+
     source: {
       industry_slug: industry_slug || null,
       supplier_slug: supplier_slug || null,
       competitor_slugs: Array.isArray(competitor_slugs) ? competitor_slugs : []
     },
+
+    // audit + debug
+    meta: {
+      version: "2026-01-03-v2.4",
+      builder: "campaign-markdown-pack",
+      deterministic: true
+    },
+
+    warnings: [],
+    stats: {
+      dropped_items: 0,
+      dropped_buckets: {},
+      total_items: 0,
+      by_bucket: {}
+    },
+
+    // ✅ Canonical “pillar views” for downstream synthesis compatibility
+    // These are NOT new facts; they are a deterministic projection of existing buckets.
+    // campaign-pillars can safely read these as primary inputs.
+    markdown_pillars: [],   // supplier themes (capabilities / strengths / differentiators)
+    industry_pillars: [],   // industry themes (drivers / risks / persona pressures / content pillars)
+    competitor_pillars: [], // competitor profiles condensed into pillar items
 
     // Tier 1 (strategic external truth)
     industry_drivers: [],
@@ -430,6 +532,8 @@ module.exports = async function (context, msg) {
     supplier_other: []
   };
 
+  // Global dedupe across ALL ingestions (industry + supplier + competitor)
+  const seenGlobal = new Set();
   function pushItems(items) {
     if (!Array.isArray(items)) return;
 
@@ -437,7 +541,27 @@ module.exports = async function (context, msg) {
       const bucket = String(it?.bucket || "").trim();
       if (!bucket) continue;
 
+      // Global dedupe by sha1 (preferred) else by stable composite key
+      const key =
+        String(it?.sha1 || "") ||
+        sha1(`${it?.source_file || ""}|${it?.source_heading || ""}|${it?.text || ""}`);
+
+      if (seenGlobal.has(key)) continue;
+      seenGlobal.add(key);
+
       if (!pack[bucket]) {
+        const b = bucket || "UNKNOWN";
+        pack.stats.dropped_items += 1;
+        pack.stats.dropped_buckets[b] = (pack.stats.dropped_buckets[b] || 0) + 1;
+
+        pack.warnings.push({
+          at: nowISO(),
+          type: "dropped_item_unknown_bucket",
+          bucket,
+          source_file: it?.source_file || null,
+          source_heading: it?.source_heading || null
+        });
+
         log.warn("[markdown_pack] unknown bucket; item dropped", {
           bucket,
           source_file: it?.source_file,
@@ -579,17 +703,33 @@ module.exports = async function (context, msg) {
   // 4) Competitor markdown
   // NOTE: competitors live in packs/supplier/ for repo simplicity (as you had)
   // Scope competitor forces everything into competitor_profiles
+  // Deterministic: stable slug order + dedupe
   // ---------------------------------------------------------------------------
   if (Array.isArray(competitor_slugs) && competitor_slugs.length) {
-    for (const slugRaw of competitor_slugs) {
-      const slug = String(slugRaw || "").trim().toLowerCase();
-      if (!slug) continue;
+    // Normalise + dedupe + stable sort
+    const competitorSlugsStable = Array.from(
+      new Set(
+        competitor_slugs
+          .map((s) => String(s || "").trim().toLowerCase())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
 
+    const summary = {
+      requested: competitor_slugs.length,
+      unique: competitorSlugsStable.length,
+      ingested: 0,
+      missing: 0,
+      failed: 0
+    };
+
+    for (const slug of competitorSlugsStable) {
       try {
         const competitorPath = `packs/supplier/${slug}.md`;
         const competitorTxt = await readBlobText(input, competitorPath);
 
         if (!competitorTxt) {
+          summary.missing += 1;
           log("[markdown_pack] competitor profile not found (expected possible)", {
             slug,
             path: competitorPath
@@ -604,49 +744,173 @@ module.exports = async function (context, msg) {
         });
 
         pushItems(competitorItems);
+        summary.ingested += 1;
 
         log("[markdown_pack] ingested competitor profile", {
           slug,
           path: competitorPath,
-          count: competitorItems.length
+          count: Array.isArray(competitorItems) ? competitorItems.length : 0
         });
       } catch (e) {
+        summary.failed += 1;
         log.warn("[markdown_pack] competitor ingestion failed (non-fatal)", {
           slug,
           err: String(e?.message || e)
         });
       }
     }
+
+    log("[markdown_pack] competitor ingestion summary", summary);
   }
+  // ---------------------------------------------------------------------------
+  // Canonical pillar views (deterministic projection)
+  // These are derived ONLY from the items already in buckets.
+  // ---------------------------------------------------------------------------
+
+  function toPillarItem(it, kind) {
+    if (!it || typeof it !== "object") return null;
+    const title = String(it.text || "").trim();
+    if (!title) return null;
+
+    return {
+      id: String(it.id || ""),
+      kind, // supplier | industry | competitor
+      title,
+      summary: "", // intentionally blank; no new facts
+      tags: [],
+      source: {
+        source_file: it.source_file || null,
+        source_heading: it.source_heading || null,
+        bucket: it.bucket || null,
+        sha1: it.sha1 || null,
+        line_no: it.line_no || null
+      }
+    };
+  }
+
+  // Supplier pillars: prefer differentiators + strengths + capabilities (in that order)
+  const supplierCandidates = []
+    .concat(pack.supplier_differentiators || [])
+    .concat(pack.supplier_strengths || [])
+    .concat(pack.supplier_capabilities || []);
+
+  pack.markdown_pillars = supplierCandidates
+    .map(it => toPillarItem(it, "supplier"))
+    .filter(Boolean)
+    .slice(0, 80);
+
+  // Industry pillars: content_pillars + drivers + risks + persona pressures
+  const industryCandidates = []
+    .concat(pack.content_pillars || [])
+    .concat(pack.industry_drivers || [])
+    .concat(pack.industry_risks || [])
+    .concat(pack.persona_pressures || []);
+
+  pack.industry_pillars = industryCandidates
+    .map(it => toPillarItem(it, "industry"))
+    .filter(Boolean)
+    .slice(0, 120);
+
+  // Competitor pillars: competitor_profiles only
+  pack.competitor_pillars = (pack.competitor_profiles || [])
+    .map(it => toPillarItem(it, "competitor"))
+    .filter(Boolean)
+    .slice(0, 120);
+
+  // ---------------------------------------------------------------------------
+  // Deterministic ordering + stats
+  // ---------------------------------------------------------------------------
+  const bucketKeys = Object.keys(pack).filter((k) => Array.isArray(pack[k]));
+
+  for (const k of bucketKeys) {
+    // stable order: by source_file, then line_no, then sha1
+    pack[k] = stableSortBy(pack[k], (it) => {
+      const sf = String(it?.source_file || "");
+      const ln = String(it?.line_no || "").padStart(6, "0");
+      const sh = String(it?.sha1 || "");
+      return `${sf}::${ln}::${sh}`;
+    });
+    pack.stats.by_bucket[k] = pack[k].length;
+  }
+
+  pack.stats.total_items = bucketKeys.reduce((sum, k) => sum + (pack[k].length || 0), 0);
 
   // ---------------------------------------------------------------------------
   // Write markdown_pack.json (exactly one artefact)
   // ---------------------------------------------------------------------------
   const outPath = `${base}evidence_v2/markdown_pack.json`;
-  const outBlob = results.getBlockBlobClient(outPath);
-  const payload = JSON.stringify(pack, null, 2);
 
-  await outBlob.upload(payload, Buffer.byteLength(payload));
+  // Compute SHA1 of the final pack (after deterministic ordering)
+  // NOTE: this excludes generated_at + sha1 itself (canonicalizeForHash)
+  const markdownPackSha1 = sha1OfPack(pack);
 
-  log("[markdown_pack] written", {
-    runId,
-    path: outPath,
-    counts: Object.fromEntries(
-      Object.entries(pack)
-        .filter(([, v]) => Array.isArray(v))
-        .map(([k, v]) => [k, v.length])
-    )
-  });
+  // Embed the hash INTO the pack for downstream audit + idempotency checks
+  pack.sha1 = markdownPackSha1;
+
+
+  // Idempotency: if existing artefact has same SHA1, skip rewrite and only ensure markers
+  const existingPack = await readJsonIfExists(results, outPath);
+  const existingSha1 =
+    (existingPack && typeof existingPack?.sha1 === "string")
+      ? existingPack.sha1
+      : (existingPack ? sha1OfPack(existingPack) : null);
+
+  if (existingSha1 && existingSha1 === markdownPackSha1) {
+    log("[markdown_pack] existing markdown_pack.json matches sha1; skipping rewrite", {
+      runId,
+      path: outPath,
+      sha1: markdownPackSha1
+    });
+
+    await writeStatusMarker(results, base, {
+      markdownPackCompleted: true,
+      markdownPackSha1,
+      markdownPackSha1Locked: true,     // optional but useful
+      markdownPackEnqueued: true,        // if router expects it
+      markdownPackPath: "evidence_v2/markdown_pack.json",
+      markdownPackTotal: pack.stats.total_items
+    }, "markdown_pack: skip (sha1 match)");
+
+  } else {
+    const outBlob = results.getBlockBlobClient(outPath);
+    const payload = JSON.stringify(pack, null, 2);
+    await outBlob.upload(payload, Buffer.byteLength(payload), {
+      blobHTTPHeaders: { blobContentType: "application/json" }
+    });
+
+    log("[markdown_pack] written", {
+      runId,
+      path: outPath,
+      sha1: markdownPackSha1,
+      counts: pack.stats.by_bucket
+    });
+
+    await writeStatusMarker(results, base, {
+      markdownPackCompleted: true,
+      markdownPackSha1: markdownPackSha1,
+      markdownPackPath: "evidence_v2/markdown_pack.json",
+      markdownPackTotal: pack.stats.total_items
+    }, "markdown_pack: completed");
+  }
 
   // ---------------------------------------------------------------------------
   // Hand off to router → aftermarkdown
   // ---------------------------------------------------------------------------
-  await enqueueTo(process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs", {
+  // ---------------------------------------------------------------------------
+  // Hand off to router → aftermarkdown
+  // ---------------------------------------------------------------------------
+  const routerQueue = process.env.Q_CAMPAIGN_ROUTER || "campaign-router-jobs";
+
+  await enqueueTo(routerQueue, {
     op: "aftermarkdown",
     runId,
     page,
     prefix: base
   });
 
-  log("[markdown_pack] aftermarkdown enqueued", { runId, prefix: base });
+  log("[markdown_pack] aftermarkdown enqueued", {
+    runId,
+    queue: routerQueue,
+    prefix: base
+  });
 };
