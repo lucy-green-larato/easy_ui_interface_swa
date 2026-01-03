@@ -1,6 +1,6 @@
 // /api/campaign-markdown-pack/index.js
 // Deterministic Markdown Pack Builder (Model A)
-// 03-01-2026 v2.4
+// 03-01-2026 v2.5
 // Deterministic. No AI. No scoring. No business interpretation.
 
 "use strict";
@@ -124,12 +124,41 @@ function sha1Json(obj) {
 }
 
 function canonicalizeForHash(pack) {
-  // IMPORTANT: Never include pack.sha1 in the hash
-  // and never include any volatile fields you don’t want to break determinism.
-  // If you keep generated_at, it will change the hash if you rebuild the pack.
-  // So we MUST exclude it (and any other time-based fields).
-  const { sha1, generated_at, ...rest } = pack || {};
-  return rest;
+  // IMPORTANT:
+  // - Never include pack.sha1 in the hash
+  // - Exclude volatile fields that can change across rebuilds even when content is identical
+  // - Exclude deployment/version metadata that would cause hash churn
+
+  if (!pack || typeof pack !== "object") return {};
+
+  // Shallow clone
+  const out = { ...pack };
+
+  // Remove volatile / run-specific fields
+  delete out.sha1;
+  delete out.generated_at;
+  delete out.runId;
+  delete out.prefix;
+
+  // Meta can contain deployment-specific version strings
+  if (out.meta && typeof out.meta === "object") {
+    const m = { ...out.meta };
+    delete m.version;     // changes every deploy
+    delete m.builder;     // optional; keep if you want
+    out.meta = m;
+  }
+
+  // Warnings may include timestamps; strip them deterministically
+  if (Array.isArray(out.warnings)) {
+    out.warnings = out.warnings.map(w => {
+      if (!w || typeof w !== "object") return w;
+      const ww = { ...w };
+      delete ww.at; // remove volatile timestamp
+      return ww;
+    });
+  }
+
+  return out;
 }
 
 function sha1OfPack(pack) {
@@ -229,9 +258,10 @@ function parseMarkdown({ text, source_file, scope }) {
     if (!line) continue;
 
     // Headings (## / ### only)
-    if (/^#{1,3}\s+/.test(line)) {
-      currentHeading = line.replace(/^#{1,3}\s+/, "").trim();
-      currentBucket = scopeBucket(scope, currentHeading); // ✅ Correct for all scopes
+    // DO NOT treat "# " as a section heading (it’s usually the document title)
+    if (/^#{2,3}\s+/.test(line)) {
+      currentHeading = line.replace(/^#{2,3}\s+/, "").trim();
+      currentBucket = scopeBucket(scope, currentHeading);
       continue;
     }
 
@@ -492,7 +522,7 @@ module.exports = async function (context, msg) {
 
     // audit + debug
     meta: {
-      version: "2026-01-03-v2.4",
+      version: "2026-01-03-v2.5",
       builder: "campaign-markdown-pack",
       deterministic: true
     },
@@ -555,7 +585,6 @@ module.exports = async function (context, msg) {
         pack.stats.dropped_buckets[b] = (pack.stats.dropped_buckets[b] || 0) + 1;
 
         pack.warnings.push({
-          at: nowISO(),
           type: "dropped_item_unknown_bucket",
           bucket,
           source_file: it?.source_file || null,
@@ -855,7 +884,16 @@ module.exports = async function (context, msg) {
       ? existingPack.sha1
       : (existingPack ? sha1OfPack(existingPack) : null);
 
-  if (existingSha1 && existingSha1 === markdownPackSha1) {
+  const existingHasEmbeddedSha1 =
+    existingPack && typeof existingPack === "object" && typeof existingPack.sha1 === "string";
+
+  const existingEmbeddedSha1Matches =
+    existingHasEmbeddedSha1 && existingPack.sha1 === markdownPackSha1;
+
+  // Only skip rewrite if:
+  // - hash matches AND
+  // - the stored pack already contains the embedded sha1 we now require
+  if (existingSha1 && existingSha1 === markdownPackSha1 && existingEmbeddedSha1Matches) {
     log("[markdown_pack] existing markdown_pack.json matches sha1; skipping rewrite", {
       runId,
       path: outPath,
@@ -865,8 +903,7 @@ module.exports = async function (context, msg) {
     await writeStatusMarker(results, base, {
       markdownPackCompleted: true,
       markdownPackSha1,
-      markdownPackSha1Locked: true,     // optional but useful
-      markdownPackEnqueued: true,        // if router expects it
+      markdownPackSha1Locked: true,
       markdownPackPath: "evidence_v2/markdown_pack.json",
       markdownPackTotal: pack.stats.total_items
     }, "markdown_pack: skip (sha1 match)");
@@ -887,10 +924,11 @@ module.exports = async function (context, msg) {
 
     await writeStatusMarker(results, base, {
       markdownPackCompleted: true,
-      markdownPackSha1: markdownPackSha1,
+      markdownPackSha1,
+      markdownPackSha1Locked: true,
       markdownPackPath: "evidence_v2/markdown_pack.json",
       markdownPackTotal: pack.stats.total_items
-    }, "markdown_pack: completed");
+    }, "markdown_pack: skip (sha1 match)");
   }
 
   // ---------------------------------------------------------------------------
