@@ -1824,6 +1824,7 @@ module.exports = async function (context, job) {
 
     function orderAndCapDoctrine(list, cap) {
       const arr = Array.isArray(list) ? list.slice() : [];
+
       arr.sort((a, b) => {
         const ra = groupRank(a);
         const rb = groupRank(b);
@@ -1835,8 +1836,25 @@ module.exports = async function (context, job) {
         return ka.localeCompare(kb);
       });
 
-      const C = Number.isFinite(cap) ? cap : 24;
-      return arr.length > C ? arr.slice(0, C) : arr;
+      // Cap must never drop Tier-0.
+      let C = Number.isFinite(cap) ? cap : 24;
+      if (C < 1) C = 1;
+
+      if (arr.length <= C) return arr;
+
+      // If Tier-0 is first (it should be), slice is enough.
+      // But be defensive: explicitly preserve Tier-0 singleton if present.
+      const sliced = arr.slice(0, C);
+
+      const hasTier0 = sliced.some(x => x?.tier_group === "csv_summary" || x?.tier === 0);
+      if (hasTier0) return sliced;
+
+      const tier0 = arr.find(x => x?.tier_group === "csv_summary" || x?.tier === 0);
+      if (!tier0) return sliced; // should be impossible in doctrine-clean runs
+
+      // Replace the last element with Tier-0 to guarantee integrity.
+      sliced[sliced.length - 1] = tier0;
+      return sliced;
     }
 
     // Apply doctrine ordering once, then cap.
@@ -1989,14 +2007,28 @@ module.exports = async function (context, job) {
     try {
       const statusPath = `${prefix}status.json`;
 
-      // Reuse cached statusObj if available; otherwise load once.
-      const st0 =
+      // Prefer cached statusObj; otherwise load once
+      let st0 =
         (statusObj && typeof statusObj === "object")
           ? statusObj
-          : ((await getJson(container, statusPath)) || { runId, history: [], markers: {} });
+          : (await getJson(container, statusPath));
 
-      if (!st0 || typeof st0 !== "object") throw new Error("EvidenceDigest: status.json unreadable");
-      if (!st0.markers || typeof st0.markers !== "object") st0.markers = {};
+      let dirty = false;
+
+      if (!st0 || typeof st0 !== "object") {
+        st0 = { runId, history: [], markers: {} };
+        dirty = true;
+      }
+
+      if (!Array.isArray(st0.history)) {
+        st0.history = [];
+        dirty = true;
+      }
+
+      if (!st0.markers || typeof st0.markers !== "object") {
+        st0.markers = {};
+        dirty = true;
+      }
 
       const already = !!st0.markers.afterevidenceSent;
 
@@ -2009,15 +2041,24 @@ module.exports = async function (context, job) {
         await enqueueTo(ROUTER_QUEUE_NAME, { op: "afterevidence", runId, page: "campaign", prefix });
 
         st0.markers.afterevidenceSent = true;
+        st0.markers.afterevidenceEnqueuedAt = nowIso();
+        dirty = true;
 
-        // Keep statusObj in sync so we can write once later.
+        // Keep cached object in sync for later blocks
         statusObj = st0;
+      } else {
+        // Keep cached object in sync even if already sent
+        statusObj = st0;
+      }
 
+      // Only write if we actually changed something
+      if (dirty) {
         await putJson(container, statusPath, st0);
       }
     } catch (e) {
-      context.log.warn("[evidence] afterevidence enqueue failed", String(e?.message || e));
+      context.log?.warn?.("[evidence] afterevidence enqueue failed", String(e?.message || e));
     }
+
     // Finalise phase
     try {
       const statusPath = `${prefix}status.json`;
