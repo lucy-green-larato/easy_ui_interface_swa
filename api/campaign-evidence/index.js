@@ -1,4 +1,4 @@
-// /api/campaign-evidence/index.js 02-01-2026 — v68
+// /api/campaign-evidence/index.js 03-01-2026 — v69
 // -----------------------------------------------------------------------------
 // PHASE BOUNDARY NOTE
 //
@@ -101,8 +101,20 @@ if (!Number.isFinite(RESERVED_TIER2_ITEMS) || RESERVED_TIER2_ITEMS < 0) RESERVED
 // Reserved Tier-2 can never exceed total cap
 if (RESERVED_TIER2_ITEMS > MAX_EVIDENCE_ITEMS) RESERVED_TIER2_ITEMS = MAX_EVIDENCE_ITEMS;
 
-// Tier-1 cap ensures Tier-2 always has room
-const MAX_TIER1_ITEMS = Math.max(0, MAX_EVIDENCE_ITEMS - RESERVED_TIER2_ITEMS);
+// Tier-1 cap ensures Tier-2 always has room AND preserves late-tier slots.
+// Late tiers (Tier 4–7) are required for doctrine completeness (coverage_summary, case_study, microclaim, linkedin).
+let RESERVED_LATE_TIER_ITEMS = parseInt(process.env.RESERVED_LATE_TIER_ITEMS || "6", 10);
+if (!Number.isFinite(RESERVED_LATE_TIER_ITEMS) || RESERVED_LATE_TIER_ITEMS < 0) RESERVED_LATE_TIER_ITEMS = 6;
+
+// Late-tier reserve must not exceed remaining capacity after Tier-2 reserve.
+const maxLate = Math.max(0, MAX_EVIDENCE_ITEMS - RESERVED_TIER2_ITEMS);
+if (RESERVED_LATE_TIER_ITEMS > maxLate) RESERVED_LATE_TIER_ITEMS = maxLate;
+
+// Tier-1 cap ensures Tier-2 always has room and late tiers have deterministic space.
+const MAX_TIER1_ITEMS = Math.max(
+  0,
+  MAX_EVIDENCE_ITEMS - RESERVED_TIER2_ITEMS - RESERVED_LATE_TIER_ITEMS
+);
 
 // Tier-2 internal caps (prevent Tier-2 from flooding the whole pack)
 let TIER2_MARKDOWN_MAX = parseInt(process.env.TIER2_MARKDOWN_MAX || "8", 10);
@@ -204,7 +216,7 @@ function validateLinkedInUrl(url) {
 module.exports = async function (context, job) {
   context.log("EVIDENCE_DEBUG_Q_CAMPAIGN_EVIDENCE", process.env.Q_CAMPAIGN_EVIDENCE);
   context.log("EVIDENCE_DEBUG_AzureWebJobsStorage_set", !!process.env.AzureWebJobsStorage);
-  context.log("[campaign-evidence] v67 starting", {
+  context.log("[campaign-evidence] v69 starting", {
     hasJob: !!job,
     type: typeof job
   });

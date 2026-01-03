@@ -27,16 +27,16 @@
 const RAW_FETCH_TIMEOUT_MS = Number(process.env.HTTP_FETCH_TIMEOUT_MS);
 const FETCH_TIMEOUT_MS =
   Number.isFinite(RAW_FETCH_TIMEOUT_MS) &&
-  RAW_FETCH_TIMEOUT_MS >= 1000 &&
-  RAW_FETCH_TIMEOUT_MS <= 60000
+    RAW_FETCH_TIMEOUT_MS >= 1000 &&
+    RAW_FETCH_TIMEOUT_MS <= 60000
     ? RAW_FETCH_TIMEOUT_MS
     : 8000;
 
 const RAW_MAX_CASESTUDIES = Number(process.env.MAX_CASESTUDIES);
 const MAX_CASESTUDIES =
   Number.isFinite(RAW_MAX_CASESTUDIES) &&
-  RAW_MAX_CASESTUDIES >= 1 &&
-  RAW_MAX_CASESTUDIES <= 32
+    RAW_MAX_CASESTUDIES >= 1 &&
+    RAW_MAX_CASESTUDIES <= 32
     ? RAW_MAX_CASESTUDIES
     : 8;
 
@@ -137,17 +137,22 @@ function sameHost(a, b) {
 
 function isCaseStudyUrl(u) {
   const low = String(u || "").toLowerCase();
-  return (
-    low.includes("case-study") ||
-    low.includes("case-studies") ||
-    low.includes("/customers/") ||
-    low.includes("/customer/") ||
-    low.includes("/success/") ||
-    low.includes("/stories/") ||
-    low.endsWith(".pdf") ||
-    /\b(success|story|customer|deployment|implementation|results|case)\b/.test(low)
-  );
+
+  // Strong path-based signals (high precision)
+  if (low.includes("/case-studies")) return true;
+  if (low.includes("/case-study")) return true;
+  if (low.includes("/customers/")) return true;
+  if (low.includes("/customer/")) return true;
+  if (low.includes("/success-stories")) return true;
+  if (low.includes("/success-story")) return true;
+  if (low.includes("/stories/")) return true;
+
+  // PDFs are still candidates, but not everything with "results" etc.
+  if (low.endsWith(".pdf")) return true;
+
+  return false;
 }
+
 
 // Collect candidate case-study URLs from pages + global link set
 function collectCaseStudyLinks(pages, allLinks, rootHost) {
@@ -157,19 +162,60 @@ function collectCaseStudyLinks(pages, allLinks, rootHost) {
 
   const rootUrl = rootHost ? `https://${rootHost}` : null;
 
+  // ---------------------------------------------------------------------------
+  // Deterministic "known entrypoints"
+  // These massively improve recall when:
+  //  - homepage HTML is truncated
+  //  - links are JS-rendered
+  //  - nav links are not in the first 120k of HTML
+  // ---------------------------------------------------------------------------
+  if (rootUrl) {
+    const known = [
+      `${rootUrl}/case-studies`,
+      `${rootUrl}/case-studies/`,
+      `${rootUrl}/case-study`,
+      `${rootUrl}/case-study/`,
+      `${rootUrl}/customers`,
+      `${rootUrl}/customers/`,
+      `${rootUrl}/customer-stories`,
+      `${rootUrl}/customer-stories/`,
+      `${rootUrl}/success-stories`,
+      `${rootUrl}/success-stories/`,
+      `${rootUrl}/stories`,
+      `${rootUrl}/stories/`,
+      `${rootUrl}/resources/case-studies`,
+      `${rootUrl}/resources/case-studies/`
+    ];
+
+    for (const k of known) candidates.add(toHttps(k));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pull candidates from crawled pages (including non-homepage pages if available)
+  // ---------------------------------------------------------------------------
   for (const p of pagesArr) {
     if (!p || !p.url) continue;
 
-    if (isCaseStudyUrl(p.url)) candidates.add(toHttps(p.url));
+    const pageUrl = toHttps(p.url);
+    if (pageUrl && (!rootUrl || sameHost(pageUrl, rootUrl))) {
+      // Page itself may be a case study landing page
+      if (isCaseStudyUrl(pageUrl)) candidates.add(pageUrl);
 
-    const pageLinks = extractLinks(p.snippet || "", p.url);
-    for (const l of pageLinks) {
-      if ((!rootUrl || sameHost(l, rootUrl)) && isCaseStudyUrl(l)) {
-        candidates.add(toHttps(l));
+      // Links inside page snippet
+      const pageLinks = extractLinks(p.snippet || "", pageUrl);
+      for (const l of pageLinks) {
+        const u = toHttps(l);
+        if (!u) continue;
+        if ((!rootUrl || sameHost(u, rootUrl)) && isCaseStudyUrl(u)) {
+          candidates.add(u);
+        }
       }
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Pull candidates from the global link set (usually from homepage extraction)
+  // ---------------------------------------------------------------------------
   for (const l of linksArr) {
     const url = toHttps(l);
     if (!url) continue;
@@ -178,7 +224,34 @@ function collectCaseStudyLinks(pages, allLinks, rootHost) {
     }
   }
 
-  return Array.from(candidates).slice(0, MAX_CASESTUDIES);
+  // ---------------------------------------------------------------------------
+  // Deterministic ordering:
+  //  - prefer likely case-study hubs first (case-studies > customers > stories > pdf)
+  //  - then stable lexicographic ordering
+  // This improves hit-rate under MAX_CASESTUDIES caps.
+  // ---------------------------------------------------------------------------
+  const score = (u) => {
+    const low = String(u || "").toLowerCase();
+    if (low.includes("/case-studies")) return 0;
+    if (low.includes("/case-study")) return 1;
+    if (low.includes("/customers")) return 2;
+    if (low.includes("/customer-stories")) return 3;
+    if (low.includes("/success-stories")) return 4;
+    if (low.includes("/stories")) return 5;
+    if (low.endsWith(".pdf")) return 9;
+    return 50;
+  };
+
+  return Array.from(candidates)
+    .filter(Boolean)
+    .filter((u) => (!rootUrl || sameHost(u, rootUrl)))
+    .sort((a, b) => {
+      const sa = score(a);
+      const sb = score(b);
+      if (sa !== sb) return sa - sb;
+      return a.localeCompare(b);
+    })
+    .slice(0, MAX_CASESTUDIES);
 }
 
 // Fetch a small summary for each candidate case-study URL
@@ -187,6 +260,9 @@ async function fetchCaseStudySummaries(urls) {
   const list = Array.isArray(urls)
     ? urls.slice(0, MAX_CASESTUDIES)
     : [];
+
+  // deterministic failure capture (for auditability)
+  const failures = [];
 
   for (const raw of list) {
     const url = toHttps(raw);
@@ -206,13 +282,28 @@ async function fetchCaseStudySummaries(urls) {
     }
 
     const res = await httpGet(url);
-    if (!res.ok) continue;
+
+    if (!res.ok) {
+      // DO NOT skip silently: capture the failure deterministically
+      failures.push({
+        url,
+        host: hostnameOf(url),
+        fetchedAt: nowIso(),
+        type: "fetch_error",
+        title: "Case study fetch failed",
+        status: Number(res.status || 0),
+        ok: false,
+        quote: String(res.text || "").slice(0, 240) // keep short; deterministic
+      });
+      continue;
+    }
 
     const html = String(res.text || "").slice(0, 120_000);
     const titleMatch = html.match(/<title[^>]*>([^<]{3,200})<\/title>/i);
     const title = titleMatch
       ? titleMatch[1].trim()
       : (url.split("/").slice(-1)[0] || "Case study");
+
     const bodySnippet = html.replace(/\s+/g, " ").slice(0, 500);
 
     out.push({
@@ -225,6 +316,14 @@ async function fetchCaseStudySummaries(urls) {
     });
   }
 
+  // If we found at least one case study, return only successes (no noise).
+  if (out.length > 0) return out;
+
+  // If we found none, return the failures so downstream can see WHY.
+  // This is the "not skip silently" guarantee.
+  if (failures.length > 0) return failures;
+
+  // If we had no candidates, we genuinely have nothing to report.
   return out;
 }
 
@@ -297,29 +396,108 @@ function extractProductsFromSite(html) {
 // maxPages is accepted for future compatibility but not used yet.
 
 async function crawlSiteGraph(rootUrl, maxPages = 1, timeoutMs = FETCH_TIMEOUT_MS) {
-  const url = toHttps(rootUrl);
-  if (!url) return { pages: [], links: [] };
+  const root = toHttps(rootUrl);
+  if (!root) return { pages: [], links: [] };
 
-  const res = await httpGet(url, timeoutMs);
-  if (!res.ok) {
-    return { pages: [], links: [] };
+  const rootHost = hostnameOf(root);
+  if (!rootHost) return { pages: [], links: [] };
+
+  // Deterministic queue
+  const queue = [root];
+  const visited = new Set();
+  const pages = [];
+  const allLinks = new Set();
+
+  // Helper: only crawl same-host https pages, no fragments, no mailto/tel
+  const normaliseInternal = (u) => {
+    try {
+      const url = new URL(toHttps(u));
+      if (url.protocol !== "https:") return null;
+      if (hostnameOf(url.toString()) !== rootHost) return null;
+      if (/^(mailto:|tel:)/i.test(url.toString())) return null;
+      url.hash = "";
+      return url.toString();
+    } catch {
+      return null;
+    }
+  };
+
+  // Deterministic priority score: crawl likely “case study / customer / resource” pages first
+  const priority = (u) => {
+    const low = String(u).toLowerCase();
+    if (low.includes("/case-studies")) return 0;
+    if (low.includes("/case-study")) return 1;
+    if (low.includes("/customers")) return 2;
+    if (low.includes("/customer")) return 3;
+    if (low.includes("/success")) return 4;
+    if (low.includes("/stories")) return 5;
+    if (low.includes("/resources")) return 6;
+    if (low.includes("/insights")) return 7;
+    if (low.includes("/blog")) return 8;
+    return 50;
+  };
+
+  // Always enforce at least 1 page (homepage)
+  const CAP = Math.max(1, Math.min(Number(maxPages) || 1, 12));
+
+  while (queue.length && pages.length < CAP) {
+    const url = queue.shift();
+    const norm = normaliseInternal(url);
+    if (!norm) continue;
+    if (visited.has(norm)) continue;
+    visited.add(norm);
+
+    const res = await httpGet(norm, timeoutMs);
+    if (!res.ok) continue;
+
+    const html = String(res.text || "").slice(0, 120_000);
+
+    const titleMatch = html.match(/<title[^>]*>([^<]{3,200})<\/title>/i);
+    const title = titleMatch ? titleMatch[1].trim() : norm;
+
+    const links = extractLinks(html, norm);
+
+    // Collect global link set
+    for (const l of links) {
+      const internal = normaliseInternal(l);
+      if (internal) allLinks.add(internal);
+    }
+
+    pages.push({
+      url: norm,
+      title,
+      snippet: html,
+      host: rootHost
+    });
+
+    // After fetching homepage, seed queue with high-value internal pages
+    // Deterministic: stable sort by priority then lexicographic.
+    if (pages.length === 1) {
+      const seed = Array.from(allLinks)
+        .filter((u) => {
+          const low = u.toLowerCase();
+          // Avoid wasting crawl budget on obvious low-value pages
+          if (/\/(privacy|terms|cookie|login|sign-in|sign_in|wp-admin)\b/i.test(low)) return false;
+          return true;
+        })
+        .sort((a, b) => {
+          const pa = priority(a);
+          const pb = priority(b);
+          if (pa !== pb) return pa - pb;
+          return a.localeCompare(b);
+        });
+
+      // Add top candidates to queue up to CAP
+      for (const u of seed) {
+        if (queue.length + pages.length >= CAP) break;
+        if (!visited.has(u)) queue.push(u);
+      }
+    }
   }
 
-  const html = String(res.text || "").slice(0, 120_000);
-  const titleMatch = html.match(/<title[^>]*>([^<]{3,200})<\/title>/i);
-  const title = titleMatch ? titleMatch[1].trim() : url;
-  const links = extractLinks(html, url);
-
   return {
-    pages: [
-      {
-        url,
-        title,
-        snippet: html,
-        host: hostnameOf(url)
-      }
-    ],
-    links
+    pages,
+    links: Array.from(allLinks)
   };
 }
 
